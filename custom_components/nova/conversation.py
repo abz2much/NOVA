@@ -1,12 +1,20 @@
-"""Nova conversation agent — provider-agnostic via LLMProvider interface."""
+"""Nova's conversation entity: one turn in, one reply out.
+
+A turn passes, in order: the runtime check, the Chat tab owner check, Nova
+Voice ID, the multi wake dedup, the optional presence gate and the relevance
+gate. Only then does it touch memory, and only then is it answered: a held
+request's yes, a proactive offer's answer, a voice phrase, the local engine
+and, last, the agent. The reply is spoken on the room's paired speaker when
+there is one, and the mic may reopen for a follow up."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
 import time
 import weakref
-from typing import Literal
+from typing import Literal, Optional
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation import ConversationEntityFeature
@@ -16,8 +24,9 @@ from homeassistant.helpers import intent, llm
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import paths
+from .audio_routing import reply_targets
 from .const import (
-    ALL_SPEAKERS_VALUE,
     CONF_BROADCAST_SPEAKERS,
     CONF_CAST_SPEAKERS,
     CONF_DIRECTIVE,
@@ -38,26 +47,24 @@ from .const import (
     NOVA_PERSONA,
     get_directive,
 )
-from .audio_routing import reply_targets
 from .database import save_message
-from .llm_provider import (
-    resolve_provider_credential,
-    resolve_provider_endpoint,
-)
+from .llm_provider import resolve_provider_credential, resolve_provider_endpoint
 from .locale_format import format_date
 from .presence import presence_context_string
 from .runtime import get_runtime, runtime_config_snapshot
 from .speech_text import speech_text
-from .tts_helper import resolve_tts_entity, async_announce
-from . import paths
-from typing import Optional
+from .tts_helper import async_announce, resolve_tts_entity
 
+_LOGGER = logging.getLogger(__name__)
 
-# ── Multi-wake dedup ────────────────────────────────────────────────────────
-# When multiple satellites hear "Hey Nova" simultaneously, HA fires
-# separate pipelines for each. This dedup ensures only the FIRST pipeline
-# actually processes the request and routes audio. Subsequent duplicates
-# within the window get a silent cached response (no duplicate TTS).
+try:   # faces seen recently, for the prompt; optional
+    from .recognition import recognition_context_string
+except ImportError:
+    recognition_context_string = None
+
+MAX_HISTORY = 20    # turns kept per conversation for the agent
+MAX_ITERS = 8       # the agent's tool loop limit
+PERSONA_FILE: Optional[str] = None   # a test override; None means paths.py decides
 
 # Added to the agent's prompt for a turn from a voice satellite (8.34.0).
 VOICE_REPLY_RULE = (
@@ -66,143 +73,155 @@ VOICE_REPLY_RULE = (
     "matching, prompts or anything else about how you work."
 )
 
-_DEDUP_WINDOW = 4.0  # seconds — covers STT variance between satellites
+_FALLBACKS = [
+    "Technical difficulties, {honorific}. Even I have them occasionally. Please try again.",
+    "I appear to be having connectivity issues, {honorific}. Bear with me.",
+    "Something is interfering with my systems, {honorific}. One moment.",
+]
+
+_UNREACHABLE = ("unavailable", "unknown")
+_SATELLITE = "assist_satellite."
+
+
+# ── Several satellites hearing one request ──────────────────────────────────
+# Each satellite that hears a wake word runs its own pipeline. The first one
+# to arrive claims the words; any other device sending the same words within
+# the window gets the winner's reply back as text and nothing is spoken twice.
+
+_DEDUP_WINDOW = 4.0   # seconds; transcripts from two rooms land this close
+# normalised words -> (claimed at, the winner's reply or None, the winner's device)
 _dedup_cache: dict[str, tuple[float, str | None, str | None]] = {}
-# key = normalized text, value = (timestamp, response_text_or_None, winning_device_id)
 
 
 def _dedup_key(text: str) -> str:
-    """Normalize text for dedup comparison."""
+    """The words compared across satellites: lower case, no end punctuation."""
     return text.lower().strip().rstrip(".,!?")
 
 
 def _check_and_claim_dedup(text: str, device_id: str | None) -> tuple[bool, str | None]:
-    """
-    Check if this is a duplicate wake-up AND claim the slot if not.
-
-    Returns (is_duplicate, cached_response_or_None).
-    If is_duplicate is True, caller should return a silent response without
-    processing or routing audio again.
-    """
-    key = _dedup_key(text)
+    """(True, the winner's reply so far) when another device already claimed
+    these words within the window; otherwise this device claims them and
+    gets (False, None). Claims older than twice the window are swept."""
     now = time.time()
-
-    # Clean old entries
-    stale = [k for k, (ts, _, _) in _dedup_cache.items() if now - ts > _DEDUP_WINDOW * 2]
-    for k in stale:
-        _dedup_cache.pop(k, None)
-
-    if key in _dedup_cache:
-        ts, cached_resp, winning_device = _dedup_cache[key]
-        if now - ts < _DEDUP_WINDOW and device_id != winning_device:
-            # Another device already claimed this text
-            return True, cached_resp
-
-    # Claim the slot — first pipeline to arrive wins
+    for key in [k for k, row in _dedup_cache.items() if now - row[0] > 2 * _DEDUP_WINDOW]:
+        del _dedup_cache[key]
+    key = _dedup_key(text)
+    claim = _dedup_cache.get(key)
+    if claim is not None:
+        claimed_at, reply, owner = claim
+        if owner != device_id and now - claimed_at < _DEDUP_WINDOW:
+            return True, reply
     _dedup_cache[key] = (now, None, device_id)
     return False, None
 
 
 def _record_dedup_response(text: str, response: str) -> None:
-    """Update the cached response after processing completes."""
+    """Attach the winner's finished reply to its claim, if it still has one."""
     key = _dedup_key(text)
-    if key in _dedup_cache:
-        ts, _, device_id = _dedup_cache[key]
-        _dedup_cache[key] = (ts, response, device_id)
+    claim = _dedup_cache.get(key)
+    if claim is not None:
+        _dedup_cache[key] = (claim[0], response, claim[2])
 
-try:
-    from .recognition import recognition_context_string
-    _RECOGNITION_CTX = True
-except ImportError:
-    _RECOGNITION_CTX = False
 
-_LOGGER = logging.getLogger(__name__)
+# ── Persona file ────────────────────────────────────────────────────────────
+# An optional nova_persona.txt replaces the built in character. It is read in
+# the executor, at most every _PERSONA_MTIME_TTL seconds, and kept here.
 
-MAX_HISTORY  = 20   # messages kept in per-conversation context window
-MAX_ITERS    = 8    # max agentic tool-call iterations per request
-PERSONA_FILE: Optional[str] = None  # override; None resolves via paths.py
+_persona_cache: dict = {"mtime": 0.0, "text": None, "checked": 0.0}
+_PERSONA_MTIME_TTL = 30.0
 
 
 def _persona_file() -> str:
     return PERSONA_FILE or paths.config_path("nova_persona.txt")
 
-# Module-level persona cache. Loaded lazily via executor to avoid blocking
-# the event loop with file I/O on every conversation turn. Invalidated
-# automatically when the file's mtime changes.
-_persona_cache: dict = {"mtime": 0.0, "text": None, "checked": 0.0}
-_PERSONA_MTIME_TTL = 30.0  # re-stat at most every 30s
+
+def _sync_load_persona() -> tuple[float, str | None]:
+    """(mtime, trimmed text or None); (0.0, None) when there is no file.
+    Blocking, so only ever run in the executor."""
+    path = _persona_file()
+    try:
+        if not os.path.exists(path):
+            return 0.0, None
+        stamp = os.path.getmtime(path)
+        with open(path) as handle:
+            body = handle.read().strip()
+    except OSError:
+        return 0.0, None
+    return stamp, body or None
 
 
+async def _ensure_persona_loaded(hass: HomeAssistant) -> None:
+    """Refresh the cached persona when the file changed. A filled cache is
+    only rechecked once its TTL has passed."""
+    now = time.time()
+    cached = _persona_cache
+    if cached["text"] is not None and now - cached["checked"] < _PERSONA_MTIME_TTL:
+        return
+    cached["checked"] = now
+    stamp, body = await hass.async_add_executor_job(_sync_load_persona)
+    if cached["text"] is None or stamp != cached["mtime"]:
+        cached.update(mtime=stamp, text=body)
+
+
+# ── Relevance gate vocabulary ───────────────────────────────────────────────
 # Verbs that make an imperative on their own ("turn off the lights").
-_COMMAND_VERBS = {
-    "turn", "set", "lock", "unlock", "dim", "brighten",
-    "arm", "disarm", "activate", "pause", "mute", "unmute",
-    "increase", "decrease", "switch", "enable", "disable", "resume",
-    "lower", "raise", "toggle", "snooze", "remind", "ignore", "announce",
-}
-# Verbs that are just as common in ordinary speech ("give the line", "stop
-# it", "make a wish"). They count as a command only when followed by "me",
-# "us", "it", "my", "a timer" and the like, or a home keyword (8.39.1).
-_WEAK_VERBS = {
-    "open", "close", "shut", "run", "play", "stop", "start", "cancel",
-    "tell", "show", "give", "list", "check", "read", "make", "put", "add",
-}
-_WEAK_VERB_OBJECTS = {"me", "us", "my", "our", "it", "everything", "all"}
-# What "read the ...", "play the ..." and the like name when they are a request.
-_WEAK_VERB_TARGETS = {
-    "news", "post", "mail", "messages", "briefing", "headlines", "list",
-    "agenda", "schedule", "radio", "podcast", "playlist", "song",
-}
-_QUESTION_STARTS = {
-    "what", "what's", "whats", "when", "when's", "where", "where's", "who",
-    "who's", "why", "how", "how's", "is", "are", "can", "could", "would",
-    "should", "do", "does", "did", "will", "whose", "which",
-}
-# Device/control nouns that signal a genuine home command. Deliberately EXCLUDES
-# bare room names (basement, kitchen…) — those appear in ambient speech too, and
-# a real room command almost always also carries a device or action word.
-_DOMAIN_KEYWORDS = {
-    "light", "lights", "lamp", "lamps", "door", "doors", "lock", "locks",
-    "window", "windows", "thermostat", "temperature", "heat", "heating",
-    "cooling", "alarm", "scene", "fan", "blinds", "shades", "cover", "curtains",
-    "volume", "plug", "outlet", "sensor", "camera", "cameras", "climate",
-    "brightness", "weather", "forecast", "sump", "dehumidifier", "washer",
-    "dryer", "dishwasher", "heater", "boiler", "radiator", "tv", "music",
-    "timer", "timers", "reminder", "reminders", "calendar", "garage", "gate",
-    "doorbell", "energy", "electricity", "solar", "battery", "bin", "bins",
-    "humidity", "aircon", "ac", "vacuum", "kettle", "oven", "socket",
-    "radio", "podcast", "playlist", "spotify", "shopping",
-}
-# Words that make a question about the home ("is anyone home?", "what's on
-# today?"). Only questions use these: in a statement they are too common.
-_QUESTION_TOPICS = {
-    "home", "house", "anyone", "anybody", "everyone", "everybody", "today",
-    "tonight", "tomorrow", "time", "date", "day", "news", "phone", "car",
-    "rain", "raining", "cold", "hot", "warm", "outside", "inside", "upstairs",
-    "downstairs", "wifi", "password", "code",
-}
-# Whole phrases people say to a voice assistant without a command word
-# ("good night", "I'm cold"). Matched at the start of the utterance.
-_HOME_PHRASES = re.compile(
-    r"^(?:good (?:morning|night|evening|afternoon)|goodnight|night night|"
-    r"(?:i'?m|i am|we'?re|we are) (?:going to bed|off to bed|heading (?:out|off|to bed)|"
-    r"leaving|going out|off out|home|back|up|awake|cold|freezing|hot|too hot|"
-    r"too cold|warm|too warm)|"
-    r"going to bed|off to bed|(?:it'?s|it is)(?: \w+){1,3} in here|"
-    r"thank you|thanks|cheers|hello|hi|hey|never mind|nevermind)\b")
-_FILLER = {
-    # Pure discourse markers / sentence fragments that are NEVER a valid
-    # standalone instruction or answer. Deliberately EXCLUDES greetings (hi,
-    # hello), affirmatives/negatives (yes, no, sure, okay) and acknowledgments
-    # (thanks) — those are real inputs (greeting handler, yes/no answers) and
-    # must pass the gate.
-    "so", "um", "uh", "hmm", "oh", "mean", "like", "know", "and", "but",
-    "wait", "well", "anyway", "actually", "i", "me", "you", "we", "they",
-    "it", "that", "this", "there", "here",
-}
-# Longest utterance with no signal at all that still passes: short answers
-# ("the kitchen one", "twenty minutes") are real; longer ones are almost
-# always someone else talking (8.39.1).
+_COMMAND_VERBS = frozenset("""
+    turn set lock unlock dim brighten arm disarm activate pause mute unmute
+    increase decrease switch enable disable resume lower raise toggle snooze
+    remind ignore announce
+""".split())
+# Verbs as common in ordinary speech as in requests ("give the line", "stop
+# it", "make a wish"): a request only with an object such as "me" or "it", a
+# known target ("the news") or a home keyword (8.39.1).
+_WEAK_VERBS = frozenset("""
+    open close shut run play stop start cancel tell show give list check read
+    make put add
+""".split())
+_WEAK_VERB_OBJECTS = frozenset("me us my our it everything all".split())
+_WEAK_VERB_TARGETS = frozenset("""
+    news post mail messages briefing headlines list agenda schedule radio
+    podcast playlist song
+""".split())
+_QUESTION_STARTS = frozenset("""
+    what what's whats when when's where where's who who's why how how's is are
+    can could would should do does did will whose which
+""".split())
+# Device and control nouns. Room names are left out on purpose: they turn up
+# in ambient speech, and a real room command nearly always names a device too.
+_DOMAIN_KEYWORDS = frozenset("""
+    light lights lamp lamps door doors lock locks window windows thermostat
+    temperature heat heating cooling alarm scene fan blinds shades cover
+    curtains volume plug outlet sensor camera cameras climate brightness
+    weather forecast sump dehumidifier washer dryer dishwasher heater boiler
+    radiator tv music timer timers reminder reminders calendar garage gate
+    doorbell energy electricity solar battery bin bins humidity aircon ac
+    vacuum kettle oven socket radio podcast playlist spotify shopping
+""".split())
+# Words that make a question about the home ("is anyone home?"). Questions
+# only: in a statement they are far too common.
+_QUESTION_TOPICS = frozenset("""
+    home house anyone anybody everyone everybody today tonight tomorrow time
+    date day news phone car rain raining cold hot warm outside inside upstairs
+    downstairs wifi password code
+""".split())
+# Things people say to a voice assistant with no command word in them
+# ("good night", "I'm cold"), matched at the start.
+_HOW_I_AM = ("going to bed|off to bed|heading (?:out|off|to bed)|leaving|going out|"
+             "off out|home|back|up|awake|cold|freezing|hot|too hot|too cold|warm|too warm")
+_HOME_PHRASES = re.compile("^(?:" + "|".join((
+    "good (?:morning|night|evening|afternoon)", "goodnight", "night night",
+    "(?:i'?m|i am|we'?re|we are) (?:" + _HOW_I_AM + ")",
+    "going to bed", "off to bed", r"(?:it'?s|it is)(?: \w+){1,3} in here",
+    "thank you", "thanks", "cheers", "hello", "hi", "hey", "never mind", "nevermind",
+)) + r")\b")
+# Discourse markers that are never an instruction or an answer by themselves.
+# Greetings, yes, no and thanks are real answers, so they are not here.
+_FILLER = frozenset("""
+    so um uh hmm oh mean like know and but wait well anyway actually i me you
+    we they it that this there here
+""".split())
+# The most words an utterance with no signal at all may have and still pass:
+# "the kitchen one" is an answer, a longer one is usually someone else (8.39.1).
 _NO_SIGNAL_MAX_WORDS = 3
 
 
@@ -228,147 +247,107 @@ def _turn_user_id(user_input) -> str | None:
     return getattr(getattr(user_input, "context", None), "user_id", None)
 
 
-_AGENTS: "weakref.WeakSet" = weakref.WeakSet()   # the live NovaAgent instances
+_AGENTS: "weakref.WeakSet" = weakref.WeakSet()   # every live NovaAgent
 
 
 def clear_chat_thread(conversation_id: str) -> None:
-    """Forget one Chat tab thread in memory (NEW CHAT). The rows in
-    conversations.db are deleted by the caller."""
+    """NEW CHAT: every live agent forgets this Chat tab thread. The caller
+    deletes its rows from conversations.db."""
     for agent in list(_AGENTS):
-        agent._histories.pop(conversation_id, None)
-        agent._last_seen.pop(conversation_id, None)
+        for store in (agent._histories, agent._last_seen):
+            store.pop(conversation_id, None)
 
 
 def _is_addressed_to_nova(text: str, voice: bool = True) -> bool:
-    """
-    Relevance gate: does this utterance look like it's actually addressed to
-    Nova (a command or question), versus ambient speech a satellite happened
-    to transcribe — TV dialogue, background conversation, sentence fragments?
+    """Whether these words are meant for Nova rather than ambient speech a
+    satellite picked up (a TV, people talking, a fragment).
 
-    Passes: the name "Nova"; a command verb ("turn", "set", "lock"...); a
-    common verb with an object that makes it a request ("tell me", "play
-    music", "stop the timer"); any home keyword (lights, heating, timer...);
-    a question that is short or about the home; a home phrase ("good night",
-    "I'm cold"); or up to three words with no signal at all, so a short
-    answer to Nova's own question still gets through, unless it is pure
-    filler. On a voice satellite everything else is ignored (8.39.1): before,
-    any longer sentence with no signal passed, and that let TV dialogue in.
-    Typed turns and other callers with no satellite (voice=False) can't hear
-    a TV, so a longer sentence still passes there unless it reads as
-    rambling narrative. Returns True = process, False = ignore.
-    """
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    words = [w.strip(".,!?;:\"…") for w in t.split()]
-    words = [w for w in words if w]
+    Yes for: the name "Nova"; a home keyword; a command verb first; a weak
+    verb first with an object or a known target, or as a two word request
+    ("play radio"); a question that is short, asks for something or is about
+    the home; a home phrase. Words with none of these pass only when they are
+    a short answer (three words at most) that is not pure filler. A typed turn
+    (voice=False) cannot hear a TV, so a longer sentence still passes there
+    unless it reads as several sentences of narrative (8.39.1)."""
+    lowered = (text or "").strip().lower()
+    words = [w for w in (raw.strip(".,!?;:\"…") for raw in lowered.split()) if w]
     if not words:
         return False
+    if "nova" in words or not _DOMAIN_KEYWORDS.isdisjoint(words):
+        return True
     phrase = " ".join(words)
-
-    if "nova" in words:
-        return True
-    if any(w in _DOMAIN_KEYWORDS for w in words):
-        return True
-    first = words[0]
-    if first == "please" and len(words) > 1:
-        first = words[1]
+    if words[0] == "please" and len(words) > 1:
         words = words[1:]
-    if first in _COMMAND_VERBS:
+    head, rest = words[0], words[1:]
+    if head in _COMMAND_VERBS:
         return True
-    if first in _WEAK_VERBS:
-        rest = words[1:]
-        if not rest:
-            return True                      # "stop", "cancel"
-        if rest[0] in _WEAK_VERB_OBJECTS:
-            return True                      # "tell me", "stop it"
-        if any(w in _WEAK_VERB_TARGETS for w in rest[:3]):
-            return True                      # "read the news", "play the radio"
-        # "give the line" is not a request; "play radio" is.
+    if head in _WEAK_VERBS:
+        if not rest or rest[0] in _WEAK_VERB_OBJECTS:
+            return True                       # "stop", "tell me"
+        if not _WEAK_VERB_TARGETS.isdisjoint(rest[:3]):
+            return True                       # "read the news"
         return len(words) == 2 and rest[0] not in ("the", "a", "an", "that", "this")
-    if first in _QUESTION_STARTS:
-        # "can you tell me...", "could you turn...": a request asked politely.
-        asks = any(w in _COMMAND_VERBS for w in words[1:]) or any(
-            w in _WEAK_VERBS and nxt in _WEAK_VERB_OBJECTS
-            for w, nxt in zip(words[1:], words[2:]))
-        return (not voice or len(words) <= 4 or asks
-                or any(w in _QUESTION_TOPICS for w in words))
+    if head in _QUESTION_STARTS:
+        if not voice or len(words) <= 4:
+            return True
+        polite_request = not _COMMAND_VERBS.isdisjoint(rest) or any(
+            verb in _WEAK_VERBS and obj in _WEAK_VERB_OBJECTS
+            for verb, obj in zip(rest, rest[1:]))
+        return polite_request or not _QUESTION_TOPICS.isdisjoint(words)
     if _HOME_PHRASES.match(phrase):
         return True
-
-    # No signal at all: never pure filler, and on a satellite only a short
-    # answer passes.
-    if len(words) <= 3 and all(w.strip("'") in _FILLER for w in words):
+    if len(words) <= 3:
+        return not all(w.strip("'") in _FILLER for w in words)
+    if len(words) <= _NO_SIGNAL_MAX_WORDS:
+        return True
+    if voice:
         return False
-    if len(words) > _NO_SIGNAL_MAX_WORDS:
-        if voice:
-            return False
-        sentence_breaks = t.count(".") + t.count("?") + t.count("!")
-        return not (sentence_breaks >= 2 and len(words) >= 8)
-    return True
+    stops = sum(lowered.count(mark) for mark in ".?!")
+    return stops < 2 or len(words) < 8
 
 
 def _matches_voice_phrase(text: str) -> bool:
-    """Whether these words match one of the user's voice phrases. Pure and
-    cheap, on a copy of the saved phrases. Never raises."""
+    """Whether these words match one of the user's voice phrases. Reads a
+    copy of the saved phrases and never raises."""
     try:
         import copy
         from . import nova_config, voice_phrases
-        cfg = copy.deepcopy(nova_config.get(voice_phrases.CONFIG_KEY))
-        return voice_phrases.match(text, cfg) is not None
+        saved = copy.deepcopy(nova_config.get(voice_phrases.CONFIG_KEY))
+        return voice_phrases.match(text, saved) is not None
     except Exception:  # pylint: disable=broad-except
         return False
 
 
 def _is_connectivity_failure(text: str) -> bool:
-    """
-    Detect the sentinel strings run_agent returns when ALL providers fail.
-
-    run_agent never raises on network failure — it returns an apologetic
-    string. We match on the stable phrase fragments so a real LLM answer
-    that happens to mention connectivity isn't misclassified (those sentinels
-    always pair 'reasoning systems' with a connectivity phrase).
-    """
+    """Whether the agent's reply is its own "can't reach my reasoning
+    systems" sentence (it returns that rather than raising). An empty reply
+    counts too. A real answer that merely mentions connectivity does not."""
     if not text:
         return True
-    t = text.lower()
-    return "reasoning systems" in t and (
-        "connecting to" in t or "connectivity issues" in t
-    )
+    lowered = text.lower()
+    if "reasoning systems" not in lowered:
+        return False
+    return any(marker in lowered for marker in ("connecting to", "connectivity issues"))
 
 
-def _sync_load_persona() -> tuple[float, str | None]:
-    """Synchronous persona file read. Must be called from an executor thread."""
+def _ha_kwargs(cls, **kwargs):
+    """Only the keyword arguments cls accepts. Home Assistant's LLM classes
+    changed fields between versions (2026.8 moved the context into LLMContext
+    and dropped user_prompt), so Nova passes the overlap (v7.21.1). When the
+    signature can't be read everything is passed. Never raises."""
     try:
-        if os.path.exists(_persona_file()):
-            mtime = os.path.getmtime(_persona_file())
-            with open(_persona_file()) as f:
-                text = f.read().strip() or None
-            return mtime, text
-    except OSError:
-        pass
-    return 0.0, None
+        import inspect
+        accepted = set(inspect.signature(cls).parameters)
+    except Exception:
+        return kwargs
+    return {name: value for name, value in kwargs.items() if name in accepted}
 
 
-async def _ensure_persona_loaded(hass: HomeAssistant) -> None:
-    """Check & refresh the persona cache if needed. Called from async context."""
-    import time as _time
-    now = _time.time()
-    # Rate-limit mtime checks so we don't stat every turn
-    if (now - _persona_cache["checked"]) < _PERSONA_MTIME_TTL and _persona_cache["text"] is not None:
-        return
-    _persona_cache["checked"] = now
-    mtime, text = await hass.async_add_executor_job(_sync_load_persona)
-    if mtime != _persona_cache["mtime"] or _persona_cache["text"] is None:
-        _persona_cache["mtime"] = mtime
-        _persona_cache["text"] = text
-
-
-_FALLBACKS = [
-    "Technical difficulties, {honorific}. Even I have them occasionally. Please try again.",
-    "I appear to be having connectivity issues, {honorific}. Bear with me.",
-    "Something is interfering with my systems, {honorific}. One moment.",
-]
+def _silent(user_input, conversation_id, speech: str = ""):
+    """A finished turn that says ``speech`` (nothing by default)."""
+    ir = intent.IntentResponse(language=user_input.language)
+    ir.async_set_speech(speech)
+    return conversation.ConversationResult(response=ir, conversation_id=conversation_id)
 
 
 async def async_setup_entry(
@@ -382,100 +361,78 @@ async def async_setup_entry(
 
 
 class NovaAgent(conversation.ConversationEntity):
-    """
-    Nova conversation agent — Groq-powered, HA home control.
-    ConversationEntityFeature.CONTROL enables home device control.
-    """
+    """Nova as a Home Assistant conversation agent that may control the home."""
 
     _attr_has_entity_name = True
     _attr_name = None
     _attr_supported_features = ConversationEntityFeature.CONTROL
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        # The entry's NovaRuntime owns the LLM client. A loaded entry without
-        # one is broken, so construction fails here (NovaRuntimeUnavailable)
-        # rather than building a second provider from stored config.
+        # The entry's NovaRuntime owns the LLM client: an entry without one
+        # is broken, so this raises NovaRuntimeUnavailable before anything else.
         runtime = get_runtime(entry)
-        self.hass  = hass
+        self.hass = hass
         self.entry = entry
+        self._client = runtime.client
+        self._histories: dict[str, list[dict]] = {}
+        self._last_seen: dict[str, float] = {}   # cid -> its last turn, for the reseed gap
+        self._fallback_idx = 0
         self._attr_unique_id = entry.entry_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name="Nova",
-            manufacturer="Nova",
-            model="Nova AI Assistant",
-            sw_version="4.0.0",
-        )
-        self._histories: dict[str, list[dict]] = {}
-        self._last_seen: dict[str, float] = {}   # cid -> epoch seconds of its last turn, for gap-based reseed
-        self._fallback_idx = 0
+            identifiers={(DOMAIN, entry.entry_id)}, name="Nova", manufacturer="Nova",
+            model="Nova AI Assistant", sw_version="4.0.0")
+        _LOGGER.info("Nova agent initialised — provider=%s, model=%s",
+                     getattr(self._client, "name", "unknown"), self._model())
 
-        # The shared LLM client setup built for this entry (same object as
-        # entry.runtime_data.client), so conversation honours the chosen
-        # backend (Groq/OpenAI/Anthropic/Ollama/custom) with no code here.
-        self._client = runtime.client
-        _LOGGER.info(
-            "Nova agent initialised — provider=%s, model=%s",
-            getattr(self._client, "name", "unknown"),
-            self._model(),
-        )
-
-    # ── Config helpers ────────────────────────────────────────────────────────
+    # ── Settings ─────────────────────────────────────────────────────────────
 
     def _runtime_config(self) -> dict:
-        """The panel's live runtime_config: NovaRuntime's own dict, read on
-        every call and never copied, so in-place panel writes apply to the
-        next turn. Raises NovaRuntimeUnavailable when the entry has no
-        runtime. Never falls back to another store."""
+        """The panel's live runtime_config, NovaRuntime's own dict, never a
+        copy, so a panel change applies to the next turn. Raises
+        NovaRuntimeUnavailable when the entry has no runtime."""
         return get_runtime(self.entry).runtime_config
 
-    def _in_quiet_hours(self) -> bool:
-        """Whether it is within the configured quiet hours now. False on error."""
-        try:
-            from . import sleep_detection
-            return sleep_detection._in_quiet_hours(
-                self._opt("observer_quiet_start", "22:00") or "22:00",
-                self._opt("observer_quiet_end", "07:00") or "07:00")
-        except Exception:
-            return False
-
     def _opt(self, key: str, default=None):
-        """Config read with the canonical precedence: runtime_config →
-        config.json → options → data → default.
-
-        A set (not None/"") runtime value wins, as in nova_config.runtime_get.
-        Otherwise runtime_get resolves the rest; hass=None skips its runtime
-        lookup, so config.json/options/data/default behave exactly as before."""
+        """A setting: a set (not None or "") runtime value first, then
+        nova_config.runtime_get's own order (config.json, options, data,
+        default). hass=None keeps runtime_get from looking at the runtime
+        a second time."""
         rc = self._runtime_config()
-        if key in rc and rc[key] not in (None, ""):
-            return rc[key]
+        live = rc.get(key)
+        if key in rc and live not in (None, ""):
+            return live
         from . import nova_config
         return nova_config.runtime_get(None, self.entry, key, default)
 
     def _rt_opt(self, key: str, default=None):
-        """
-        Runtime-aware read, same precedence as _opt: panel runtime_config →
-        config.json → options → data → default. The panel writes model/provider
-        changes to runtime_config, so those take effect on the next request
-        without a restart (run_agent re-resolves provider/model per call).
-        """
+        """The same read as _opt, named for the provider and model reads the
+        agent re-resolves each turn."""
         return self._opt(key, default)
 
+    def _in_quiet_hours(self) -> bool:
+        """Whether now is inside the observer's quiet hours. False on error."""
+        try:
+            from . import sleep_detection
+            start = self._opt("observer_quiet_start", "22:00") or "22:00"
+            end = self._opt("observer_quiet_end", "07:00") or "07:00"
+            return sleep_detection._in_quiet_hours(start, end)
+        except Exception:
+            return False
+
     def _speaker_hint(self, turn_voice, voice_ident) -> str:
-        """The AI's speaker hint, only when voice decides who is speaking."""
-        if voice_ident is None or turn_voice is None:
+        """The agent's hint about who is speaking, only when voice decided it.
+        The name is given only when the turn's identity is the same person as
+        the voice (8.39.0); otherwise the hint says Nova is not sure."""
+        if turn_voice is None or voice_ident is None:
             return ""
         try:
             from . import identity, presence, voice_id
-            first = None
-            agrees = False
+            first, agrees = None, False
             if turn_voice.person:
-                name = presence.person_name(self.hass, turn_voice.person) or ""
-                first = name.split()[0] if name.split() else None
-                # 8.39.0: the name only when the turn's final identity is
-                # the same person as the voice; otherwise "not sure".
-                agrees = bool(name) and voice_ident.known and \
-                    identity.normalize(voice_ident.person) == identity.normalize(name)
+                full = presence.person_name(self.hass, turn_voice.person) or ""
+                first = next(iter(full.split()), None)
+                agrees = bool(full) and voice_ident.known and (
+                    identity.normalize(voice_ident.person) == identity.normalize(full))
             return voice_id.speaker_hint(turn_voice, first, identity_agrees=agrees)
         except Exception:
             return ""
@@ -489,252 +446,200 @@ class NovaAgent(conversation.ConversationEntity):
             return False
 
     def _satellite_pairings(self) -> dict | None:
-        """The panel's satellite → speaker pairings from the live
-        runtime_config (a dict, or its JSON string). Returns a non-empty dict,
-        or None when unset, empty, malformed or not a mapping. Not cached."""
+        """The panel's satellite to speaker pairings (a dict or its JSON
+        text) as a non empty dict, or None when unset, empty, unreadable or
+        not a mapping. Read fresh each call."""
         raw = self._runtime_config().get("satellite_pairings")
         if not raw:
             return None
-        try:
+        if isinstance(raw, str):
             import json as _json
-            parsed = _json.loads(raw) if isinstance(raw, str) else raw
-        except Exception:
-            return None
-        if isinstance(parsed, dict) and parsed:
-            return parsed
-        return None
+            try:
+                raw = _json.loads(raw)
+            except Exception:
+                return None
+        return raw if isinstance(raw, dict) and raw else None
 
     def _model(self) -> str:
         return self._opt(CONF_MODEL, DEFAULT_MODEL)
 
-    def _honorific(self) -> str:
-        return self._opt(CONF_HONORIFIC, DEFAULT_HONORIFIC)
-
-    def _use_hass_api(self) -> bool:
-        return bool(self._opt(CONF_USE_HASS_API, True))
-
     def _speakers(self, device_id: str | None = None) -> list[str]:
-        """
-        Choose which speakers to broadcast a DIRECT REPLY to.
-
-        Uses the three-tier audio architecture (audio_routing.reply_targets):
-          - voice_satellites are excluded from speaking
-          - reply_speakers used for direct conversation
-          - room-aware: speak to kitchen puck → reply via kitchen Google
-          - falls back to broadcast_speakers if no reply_speakers configured
-          - falls back to legacy cast_speakers for backward compatibility
-          - satellite_pairings from panel Settings override area registry
-        """
-        sat_pairings = self._satellite_pairings()
-
+        """The speakers a direct reply may play on (audio_routing.reply_targets):
+        never a voice satellite; the reply speakers, room aware and following
+        the panel's pairings; else the broadcast speakers; else the old Cast
+        list."""
+        def listed(key):
+            return self._opt(key, []) or []
         return reply_targets(
             self.hass,
             device_id=device_id,
-            voice_satellites=self._opt(CONF_VOICE_SATELLITES, []) or [],
-            reply_speakers=self._opt(CONF_REPLY_SPEAKERS, []) or [],
-            broadcast_speakers=self._opt(CONF_BROADCAST_SPEAKERS, []) or [],
-            legacy_cast_speakers=self._opt(CONF_CAST_SPEAKERS, []) or [],
+            voice_satellites=listed(CONF_VOICE_SATELLITES),
+            reply_speakers=listed(CONF_REPLY_SPEAKERS),
+            broadcast_speakers=listed(CONF_BROADCAST_SPEAKERS),
+            legacy_cast_speakers=listed(CONF_CAST_SPEAKERS),
             room_routing=bool(self._opt(CONF_ROOM_ROUTING, DEFAULT_ROOM_ROUTING)),
-            satellite_pairings=sat_pairings,
+            satellite_pairings=self._satellite_pairings(),
         )
 
     def _tts_entity(self) -> str | None:
         return resolve_tts_entity(self.hass, self._opt(CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE))
 
+    def _honorific(self) -> str:
+        """How Nova addresses people ("sir" and the like)."""
+        return self._opt(CONF_HONORIFIC, DEFAULT_HONORIFIC)
 
-    # ── Supported languages ───────────────────────────────────────────────────
+    def _use_hass_api(self) -> bool:
+        """Whether the agent gets Home Assistant's Assist tools."""
+        return bool(self._opt(CONF_USE_HASS_API, True))
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
         return "*"
 
-    # ── Persona ───────────────────────────────────────────────────────────────
+    # ── The prompt ───────────────────────────────────────────────────────────
 
     def _directive(self) -> str:
-        """Return the active prime directive text."""
-        preset = self._opt(CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET)
-        custom = self._opt(CONF_DIRECTIVE, "")
-        return get_directive(preset, custom)
+        """The prime directive in force: a preset, or the user's own text."""
+        return get_directive(self._opt(CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET),
+                             self._opt(CONF_DIRECTIVE, ""))
 
-    def _persona(self) -> str:
-        """Build the full system prompt.
-
-        Order matters: prime directive FIRST (unrelenting core purpose),
-        then character/style, then live context. The directive appears
-        at the top of every single LLM call.
-        """
-        base = NOVA_PERSONA
-        cached = _persona_cache.get("text")
-        if cached:
-            base = cached
-
-        # Prime directive always comes first
-        directive = self._directive()
-        base = f"{directive}\n\n---\n\n{base}"
-
-        # Inject live context — time, presence, weather summary
-        ctx_parts = [_current_time_context(self.hass)]
-
-        # Temperature unit, so freeform mentions (not just quoted sensor values)
-        # follow the household's Home Assistant unit system rather than defaulting
-        # to Fahrenheit.
+    def _live_context(self) -> list[str]:
+        """The prompt's live lines: time, temperature unit, presence, faces
+        seen, the first weather entity and the home state summary. A source
+        that fails is left out."""
+        hass = self.hass
+        lines = [_current_time_context(hass)]
         try:
-            _tu = self.hass.config.units.temperature_unit
-            if _tu:
-                ctx_parts.append(
-                    f"This household uses {_tu} for temperature; always express "
-                    f"temperatures in {_tu}."
-                )
+            unit = hass.config.units.temperature_unit
         except Exception:
-            pass
-
+            unit = None
+        if unit:
+            # Freeform mentions follow the house's unit, not just sensor values.
+            lines.append(f"This household uses {unit} for temperature; always express "
+                         f"temperatures in {unit}.")
         try:
-            presence = presence_context_string(self.hass)
-            if presence:
-                ctx_parts.append(f"Presence: {presence}")
+            who = presence_context_string(hass)
+            if who:
+                lines.append(f"Presence: {who}")
         except Exception as exc:
             _LOGGER.debug("Nova: presence context error: %s", exc)
-
-        # Recent face recognitions
-        if _RECOGNITION_CTX:
+        if recognition_context_string is not None:
             try:
-                faces = recognition_context_string(self.hass)
+                faces = recognition_context_string(hass)
                 if faces:
-                    ctx_parts.append(faces)
+                    lines.append(faces)
             except Exception as exc:
                 _LOGGER.debug("Nova: recognition context error: %s", exc)
-
-        # Weather summary
         try:
-            for state in self.hass.states.async_all("weather"):
-                temp = state.attributes.get("temperature")
-                unit = state.attributes.get("temperature_unit", "°")
-                ctx_parts.append(f"Weather: {state.state}, {temp}{unit}.")
-                break
+            weather = next(iter(hass.states.async_all("weather")), None)
+            if weather is not None:
+                attrs = weather.attributes
+                lines.append(f"Weather: {weather.state}, {attrs.get('temperature')}"
+                             f"{attrs.get('temperature_unit', '°')}.")
         except Exception:
             pass
-
-        # v5.6.0: Full home state awareness (HGA-inspired)
         try:
             from .home_state import get_home_summary
-            home_summary = get_home_summary(self.hass)
-            if home_summary:
-                ctx_parts.append(f"\n## Home state snapshot\n{home_summary}")
+            summary = get_home_summary(hass)
+            if summary:
+                lines.append(f"\n## Home state snapshot\n{summary}")
         except Exception as exc:
             _LOGGER.debug("Nova: home state summary error: %s", exc)
+        return lines
 
-        context_block = "\n\n## Current context (live data)\n" + "\n".join(ctx_parts)
+    def _persona(self) -> str:
+        """The system prompt: the prime directive first, then the character
+        (the persona file's text when there is one), then the live context."""
         from .directive_helper import fill_honorific
-        return fill_honorific(base + context_block, self._honorific())
+        character = _persona_cache.get("text") or NOVA_PERSONA
+        prompt = (f"{self._directive()}\n\n---\n\n{character}"
+                  "\n\n## Current context (live data)\n" + "\n".join(self._live_context()))
+        return fill_honorific(prompt, self._honorific())
 
-    # ── Conversation history ──────────────────────────────────────────────────
+    # ── History ──────────────────────────────────────────────────────────────
 
     def _history(self, cid: str) -> list[dict]:
-        h = self._histories.setdefault(cid, [])
-        if len(h) > MAX_HISTORY:
-            self._histories[cid] = h[-MAX_HISTORY:]
-        return self._histories[cid]
+        """This conversation's turns, trimmed to the last MAX_HISTORY."""
+        turns = self._histories.setdefault(cid, [])
+        if len(turns) > MAX_HISTORY:
+            turns = self._histories[cid] = turns[-MAX_HISTORY:]
+        return turns
 
     async def _maybe_seed_history(self, cid: str, history: list,
                                    subject: str | None = None) -> None:
-        """Seed this conversation with recent cross-session history — on its
-        first-ever turn, and again any time it resumes after being idle past
-        the configured window (default 48h) — so Nova keeps catching up
-        instead of only ever catching up once (fixed 11 Sept 2026; see
-        memory_thread.should_reseed). A reseed REPLACES this thread's window
-        with the fresh pull rather than prepending onto it, so a thread that
-        keeps resuming after gaps can't accumulate duplicate history.
-
-        Scoped to this conversation's own history (v7.87.0, backlog #1) — the
-        reseed used to pull globally across every device/conversation in the
-        house, so one household member's exchange could leak into another's
-        session on reseed.
-
-        `subject` (Phase 2) — person-scoped fallback, used by
-        memory_thread.load_recent only when this conversation_id's own
-        history comes up empty and `subject` is a confidently resolved
-        person (never for an unresolved identity or "primary" — see the
-        identity-resolution block in _handle_message_impl)."""
+        """Catch this conversation up on its own recent past: on its first
+        turn and whenever it resumes after the configured gap (default 48h),
+        decided by memory_thread.should_reseed (11 Sept 2026). The pull
+        replaces the window rather than adding to it, so repeated gaps never
+        pile up copies. It reads this conversation's history only (v7.87.0),
+        and falls back to the person's own history only when ``subject`` is a
+        confidently resolved person, never "primary"."""
         from . import memory_thread
         enabled, hours, limit = memory_thread.config()
         now = time.time()
         last_seen = self._last_seen.get(cid)
         self._last_seen[cid] = now
-        if not enabled or not memory_thread.should_reseed(last_seen, now, hours):
+        if not (enabled and memory_thread.should_reseed(last_seen, now, hours)):
             return
         seeded = await memory_thread.load_recent(
             self.hass, hours, limit, device_id=cid, subject=subject)
         if seeded:
-            # Wrapped as one 'system' note, not raw turns — see
-            # memory_thread.format_seed_message for why: raw turns read as
-            # live to the model, which made Nova fixate on stale, completed
-            # exchanges (e.g. re-litigating a light that was turned off days
-            # ago) instead of treating them as background.
+            # One background note, not raw turns: raw turns read as live and
+            # had Nova re-arguing exchanges finished days ago.
             history[:] = [memory_thread.format_seed_message(seeded)]
 
-    # ── HA LLM tool integration ───────────────────────────────────────────────
+    # ── Home Assistant's tools ───────────────────────────────────────────────
 
     async def _get_hass_api(self, user_input: conversation.ConversationInput):
+        """Home Assistant's Assist tools for this turn, or None (chat only)."""
         try:
-            ctx = llm.LLMContext(**_ha_kwargs(
+            fields = _ha_kwargs(
                 llm.LLMContext,
-                platform=DOMAIN,
-                context=user_input.context,
-                user_prompt=user_input.text,
-                language=user_input.language,
-                assistant=conversation.HOME_ASSISTANT_AGENT,
+                platform=DOMAIN, context=user_input.context, user_prompt=user_input.text,
+                language=user_input.language, assistant=conversation.HOME_ASSISTANT_AGENT,
                 device_id=user_input.device_id,
-            ))
-            api = await llm.async_get_api(self.hass, "assist", ctx)
-            _LOGGER.debug("Nova: %d HA tools available", len(api.tools))
-            return api
+            )
+            api = await llm.async_get_api(self.hass, "assist", llm.LLMContext(**fields))
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.debug("Nova: HA Assist API unavailable (%s) — chat-only mode", exc)
             return None
+        _LOGGER.debug("Nova: %d HA tools available", len(api.tools))
+        return api
 
-    # ── Main entry point ──────────────────────────────────────────────────────
+    # ── A turn ───────────────────────────────────────────────────────────────
 
     async def _async_handle_message(
         self,
         user_input: conversation.ConversationInput,
         chat_log=None,
     ) -> conversation.ConversationResult:
-        # HA's ConversationEntity.async_process is @final and sets up the chat
-        # session/log before calling this method — so Nova must implement only
-        # _async_handle_message and must NOT override async_process (a prior shim
-        # did, which bypassed that setup on current HA). Wrap the body so an
-        # unexpected error becomes a spoken + logged message with a real trace,
-        # instead of HA's opaque "Unexpected error during intent recognition"
-        # that leaves nothing in Nova's own diagnostics.
+        """Home Assistant's own async_process (final) sets up the chat log and
+        calls this, so Nova must not override async_process. Any error in the
+        turn is logged with its trace and answered, rather than surfacing as
+        Home Assistant's bare "Unexpected error during intent recognition"."""
         try:
-            # A Chat tab turn (8.31.0) runs with the gate told so: unlock, open,
-            # disarm and standing down then need a phone tap, as for voice.
             from . import policy, voice_learn
             voice_learn.reset()
-            with policy.chat_turn(
-                    getattr(user_input, "conversation_id", None), _turn_user_id(user_input)):
+            # A Chat tab turn tells the gate so (8.31.0): unlocking, opening,
+            # disarming and standing down then need a phone tap, as for voice.
+            chat_id = getattr(user_input, "conversation_id", None)
+            with policy.chat_turn(chat_id, _turn_user_id(user_input)):
                 result = await self._handle_message_impl(user_input, chat_log)
-            # 8.38.0: the reply is built. Only now may this turn's voice sample
-            # be learned, in the background, so the reply is never delayed.
+            # The reply exists, so the voice sample may now be learned in the
+            # background without delaying it (8.38.0).
             voice_learn.schedule(self.hass, self.entry)
             return result
         except Exception:
-            import traceback as _tb
-            last = _tb.format_exc().strip().splitlines()[-1][:200]
+            import traceback
+            final_line = traceback.format_exc().strip().splitlines()[-1][:200]
             try:
                 from .websocket import nova_log
-                nova_log("ERROR", f"conversation handler crashed: {last}")
+                nova_log("ERROR", f"conversation handler crashed: {final_line}")
             except Exception:
                 pass
             _LOGGER.exception("Nova conversation handler crashed")
-            ir = intent.IntentResponse(language=user_input.language)
-            ir.async_set_speech(
-                "I ran into an internal error handling that request.")
-            return conversation.ConversationResult(
-                response=ir,
-                conversation_id=getattr(user_input, "conversation_id", None)
-                or "default",
-            )
+            return _silent(user_input, getattr(user_input, "conversation_id", None) or "default",
+                           "I ran into an internal error handling that request.")
 
     async def _handle_message_impl(
         self,
@@ -742,56 +647,43 @@ class NovaAgent(conversation.ConversationEntity):
         chat_log=None,
     ) -> conversation.ConversationResult:
         from .websocket import nova_log
-        device_id = getattr(user_input, 'device_id', None)
+        device_id = getattr(user_input, "device_id", None)
         nova_log("CONV", f"ENTRY text='{user_input.text[:60]}' device={device_id}")
-        # Never the user's words in the Home Assistant log: the length is
-        # enough to diagnose routing.
-        _LOGGER.debug(
-            "Nova async_process ENTRY: %d chars, device_id='%s'",
-            len(user_input.text or ""), device_id,
-        )
-        # A loaded entry that lost its NovaRuntime must fail this turn before
-        # the local engine, the provider, any tool or TTS routing runs. The
-        # wrapper in _async_handle_message logs it and speaks its error reply.
+        # Only the length goes to Home Assistant's log, never the words.
+        _LOGGER.debug("Nova async_process ENTRY: %d chars, device_id='%s'",
+                      len(user_input.text or ""), device_id)
+        # An entry that lost its runtime fails here, before any engine, tool
+        # or speaker is touched; the wrapper above answers the error.
         get_runtime(self.entry)
 
-        # A Chat tab turn (8.31.0): its conversation id is nova_chat_<user id>.
-        # It skips the relevance gate and the dedup, and is never spoken. Only
-        # that user may use the thread, so Assist cannot read or write it by
-        # sending the same id from another account.
+        # A Chat tab thread (8.31.0) is nova_chat_<user id>. It skips the
+        # relevance gate and the dedup, is never spoken, and belongs to that
+        # user alone: another account sending the same id is refused.
         from . import policy
         turn_user = _turn_user_id(user_input)
         is_chat = str(user_input.conversation_id or "").startswith(policy.CHAT_ID_PREFIX)
-        if is_chat and (not turn_user
-                        or user_input.conversation_id != policy.chat_conversation_id(turn_user)):
-            nova_log("CONV", "chat thread refused: not this user's conversation")
-            ir = intent.IntentResponse(language=user_input.language)
-            ir.async_set_speech("That chat thread belongs to someone else.")
-            return conversation.ConversationResult(
-                response=ir, conversation_id=user_input.conversation_id)
+        if is_chat:
+            owner_id = policy.chat_conversation_id(turn_user) if turn_user else None
+            if user_input.conversation_id != owner_id:
+                nova_log("CONV", "chat thread refused: not this user's conversation")
+                return _silent(user_input, user_input.conversation_id,
+                               "That chat thread belongs to someone else.")
 
-        # Transcribed voice text arriving here means STT just worked (HA's
-        # pipeline transcribed speech and routed it to us). Record it as a real
-        # STT success so the health panel reflects reality, not a synthetic poke
-        # (v6.70.3). Only voice-originated turns count — device_id present.
-        if device_id and (user_input.text or "").strip():
+        voiced = bool(device_id and (user_input.text or "").strip())
+        if voiced:
+            # Transcribed words reaching Nova prove STT works (v6.70.3).
             try:
                 from .diagnostics.service_health import record_usage
                 record_usage("stt", True)
             except Exception:
                 pass
 
-        # ── Nova Voice ID (8.36.0, 8.37.0) ───────────────────────────────
-        # This request's voice result, read once (the STT entity set it in
-        # this same pipeline task), kept on the turn and logged.
-        # A turn from the satellite a voice recording is armed on belongs to
-        # that recording: it is answered here and never reaches dedup,
-        # phrases, the local engine or the AI.
-        # 8.37.0: with "Use voice to tell who is speaking" on, identity is
-        # resolved here, once, with the result (voice_ident), and reused
-        # below; the VOICE line shows the outcome. With the switch off,
-        # voice_ident stays None and the turn is exactly as in 8.36.0.
-        # Phrases and dedup still see only the words.
+        # ── Nova Voice ID (8.36.0, 8.37.0) ──────────────────────────────────
+        # The voice result the STT entity left for this pipeline, read once.
+        # A satellite with a voice recording armed answers the recording and
+        # stops. With "use voice to tell who is speaking" on, identity is
+        # resolved here once (voice_ident) and reused below; otherwise
+        # voice_ident stays None. Phrases and dedup only ever see the words.
         turn_voice = None
         voice_ident = None
         if device_id and not is_chat:
@@ -799,8 +691,7 @@ class NovaAgent(conversation.ConversationEntity):
             try:
                 from . import voice_id as _voice_id
                 turn_voice = _voice_id.take_turn_voice()
-                # One VOICE line per voice turn; none on an install that
-                # doesn't use Nova Voice ID (no result and no app set).
+                # One VOICE line per voice turn, none where Voice ID is unused.
                 if turn_voice is not None or self._voice_id_set():
                     voice_line = _voice_id.log_line(turn_voice, device_id)
             except Exception as exc:
@@ -808,7 +699,8 @@ class NovaAgent(conversation.ConversationEntity):
             from . import voice_enrol
             enrol_reply = await voice_enrol.async_handle_turn(
                 self.hass, self.entry, device_id, turn_voice)
-            if enrol_reply is None and turn_voice is not None:
+            recording = enrol_reply is not None
+            if not recording and turn_voice is not None:
                 try:
                     from . import identity as _identity
                     if _identity.voice_identity_enabled():
@@ -817,108 +709,67 @@ class NovaAgent(conversation.ConversationEntity):
                         if voice_line is not None:
                             voice_line += (f" → {voice_ident.person} ({voice_ident.method}, "
                                            f"{voice_ident.confidence:.2f})")
-                        # 8.38.0: a candidate for learning, decided after the
-                        # reply (voice_learn.py). Nothing here waits on it.
+                        # Whether to learn this sample is decided after the
+                        # reply (voice_learn.py, 8.38.0).
                         from . import voice_learn as _voice_learn
                         _voice_learn.offer(device_id, turn_voice, voice_ident)
                 except Exception as exc:
                     _LOGGER.debug("Voice identity resolve: %s", exc)
                     voice_ident = None
             if voice_line is not None:
-                nova_log("VOICE", voice_line + (" recording" if enrol_reply is not None else ""))
-            if enrol_reply is not None:
-                ir = intent.IntentResponse(language=user_input.language)
-                ir.async_set_speech(enrol_reply)
-                return conversation.ConversationResult(
-                    response=ir, conversation_id=user_input.conversation_id)
+                nova_log("VOICE", voice_line + (" recording" if recording else ""))
+            if recording:
+                return _silent(user_input, user_input.conversation_id, enrol_reply)
 
-        # ── v5.7.01: Multi-wake dedup ────────────────────────────────────
-        # If another satellite already processed this exact text within
-        # the dedup window, return the cached response WITHOUT routing
-        # audio again. This prevents 3 speakers all talking at once.
+        # ── Several satellites, one request (v5.7.01) ───────────────────────
         is_dup, cached = False, None
-        if not is_chat:   # a Chat turn is never a duplicate, and claims no slot
+        if not is_chat:   # Chat turns are never duplicates and claim nothing
             is_dup, cached = _check_and_claim_dedup(user_input.text, device_id)
         if is_dup:
-            _LOGGER.warning(
-                "Nova dedup: suppressing duplicate from device=%s "
-                "(already handled)", device_id,
-            )
+            _LOGGER.warning("Nova dedup: suppressing duplicate from device=%s "
+                            "(already handled)", device_id)
             nova_log("DEDUP", f"suppressed duplicate from {device_id}")
-            ir = intent.IntentResponse(language=user_input.language)
-            # Return empty speech so HA pipeline completes silently
-            ir.async_set_speech(cached or "")
-            return conversation.ConversationResult(
-                response=ir,
-                conversation_id=user_input.conversation_id or device_id or "default",
-            )
+            return _silent(user_input, user_input.conversation_id or device_id or "default",
+                           cached or "")
 
-        # ── v5.7.01: Presence gate — only the occupied room responds ─────
-        # Uses mmWave / occupancy sensors to determine if anyone is in the
-        # satellite's area. If the area is NOT occupied, suppress this
-        # pipeline so only the satellite in the user's actual room answers.
-        # v6.36.0: OFF by default. It silences the satellite you're speaking
-        # to whenever that room's presence sensor hasn't registered you yet (or
-        # is flaky), which reads as "voice stopped working". The multi-wake
-        # dedup above already stops several satellites answering at once, so the
-        # gate is opt-in for homes with reliable per-room presence.
+        # ── Presence gate (v5.7.01, off by default since v6.36.0) ───────────
+        # Only a satellite in an occupied room answers. Opt in: a slow or
+        # flaky room sensor silences the satellite being spoken to, and the
+        # dedup already stops several rooms answering. When no room at all
+        # reads occupied the sensors are taken to be down and the gate stands
+        # aside.
         if device_id and self._opt("presence_gate", False):
             try:
-                from .audio_routing import entity_area, is_area_occupied
-                from homeassistant.helpers import (
-                    device_registry as _dr,
-                    entity_registry as _er,
-                )
-                dev_reg = _dr.async_get(self.hass)
-                dev = dev_reg.async_get(device_id)
-                sat_area = dev.area_id if dev else None
-
-                if sat_area and not is_area_occupied(self.hass, sat_area):
-                    # Double check: are ANY areas occupied? If no sensors
-                    # report occupancy anywhere, skip the gate entirely
-                    # (sensors might be offline / not configured).
-                    from .audio_routing import currently_occupied_areas
+                from homeassistant.helpers import device_registry as _dr
+                from .audio_routing import currently_occupied_areas, is_area_occupied
+                satellite = _dr.async_get(self.hass).async_get(device_id)
+                room = satellite.area_id if satellite else None
+                if room and not is_area_occupied(self.hass, room):
                     occupied = currently_occupied_areas(self.hass)
-                    if occupied:
-                        _LOGGER.warning(
-                            "Nova presence gate: suppressing pipeline from "
-                            "device=%s area='%s' (not occupied, occupied=%s)",
-                            device_id, sat_area, occupied,
-                        )
-                        nova_log(
-                            "GATE",
-                            f"suppressed {sat_area} (not occupied, "
-                            f"occupied={occupied})",
-                        )
-                        ir = intent.IntentResponse(language=user_input.language)
-                        ir.async_set_speech("")
-                        return conversation.ConversationResult(
-                            response=ir,
-                            conversation_id=(
-                                user_input.conversation_id
-                                or device_id or "default"
-                            ),
-                        )
+                    if not occupied:
+                        _LOGGER.debug("Nova presence gate: no occupied areas detected "
+                                      "anywhere — skipping gate (sensors may be offline)")
                     else:
-                        _LOGGER.debug(
-                            "Nova presence gate: no occupied areas "
-                            "detected anywhere — skipping gate (sensors "
-                            "may be offline)"
-                        )
+                        _LOGGER.warning("Nova presence gate: suppressing pipeline from "
+                                        "device=%s area='%s' (not occupied, occupied=%s)",
+                                        device_id, room, occupied)
+                        nova_log("GATE", f"suppressed {room} (not occupied, "
+                                         f"occupied={occupied})")
+                        return _silent(user_input,
+                                       user_input.conversation_id or device_id or "default")
             except Exception as exc:
                 _LOGGER.debug("Presence gate check failed (non-fatal): %s", exc)
 
         cid       = user_input.conversation_id or user_input.device_id or "default"
         honorific = self._honorific()
-        # Warm persona cache (reads file in executor) before sync _persona()
-        await _ensure_persona_loaded(self.hass)
+        await _ensure_persona_loaded(self.hass)   # the file read, off the loop
         persona   = self._persona()
 
-        # Reject irrelevant speech before it can mutate conversation memory
-        # (history, DB, semantic recall, knowledge injection). Pending-offer
-        # state is captured once here and reused by the offer handler below.
-        # Only a voice turn in a room where the offer was spoken, within a
-        # minute of it, can answer it (8.39.1). Chat and other rooms never do.
+        # ── Relevance, decided before anything is remembered ────────────────
+        # Ambient speech must not reach history, the database, semantic
+        # recall or the knowledge block. A pending offer is read once here and
+        # reused by the offer handling below; only a voice turn in the room
+        # where it was spoken, within a minute, can answer it (8.39.1).
         try:
             from . import cognitive_core
             pending_offer = (cognitive_core.pending_offer_for(self.hass, device_id)
@@ -926,14 +777,11 @@ class NovaAgent(conversation.ConversationEntity):
         except Exception:
             cognitive_core = None
             pending_offer = None
-        # Only a plain yes or no to that offer gets past the relevance gate:
-        # any other speech in the room still has to be addressed to Nova.
+        # A plain yes or no to that offer passes; anything else said in the
+        # room must still be addressed to Nova. Chat turns always are, and so
+        # is a configured voice phrase such as "im cold" (8.32.0).
         offer_answer = _offer_answer(user_input.text) if pending_offer else None
         gate_enabled = self._opt("relevance_gate", True)
-        # A Chat tab turn is always addressed to Nova, which also keeps the later
-        # routing gate from dropping it.
-        # A configured voice phrase is addressed to Nova too, so "im cold" is
-        # never dropped as ambient speech (8.32.0).
         is_addressed = (is_chat
                         or _is_addressed_to_nova(user_input.text, voice=bool(device_id))
                         or _matches_voice_phrase(user_input.text))
@@ -944,120 +792,81 @@ class NovaAgent(conversation.ConversationEntity):
             _LOGGER.info("Nova relevance gate: ignored ambient input (%d chars)",
                          len(user_input.text.strip()))
             ir = intent.IntentResponse(language=user_input.language)
-            ir.async_set_speech("")  # silence — do not respond to ambient speech
+            ir.async_set_speech("")
             return conversation.ConversationResult(response=ir, conversation_id=cid)
 
-        # Phase 2: resolve identity exactly once for this turn, fail-open.
-        # `episodic_subject` is the safe-person predicate: a confidently
-        # resolved named person gets a real subject string (person-scoped
-        # episodic fallback allowed); an unresolved identity gets None
-        # (never the shared "primary" bucket — that string is only ever
-        # produced by identity.subject_for()'s fallback branch, which is
-        # never called here). Reused below by transcript seeding, semantic
-        # storage/retrieval, knowledge injection, and command-log
-        # attribution — identity.resolve() is never called again this turn.
+        # ── Who is speaking, once per turn (Phase 2) ────────────────────────
+        # episodic_subject is set only for a confidently named person, so an
+        # unresolved speaker never falls back to the shared "primary" bucket.
+        # Seeding, semantic memory, knowledge and the command log all reuse
+        # this; when it fails they behave as with nobody resolved.
         identity_module = None
         ident = None
         episodic_subject = None
         try:
             from . import identity as identity_module
-            # 8.37.0: already resolved with the voice result at the VOICE
-            # line (switch on); otherwise resolved here exactly as before.
-            # Either way, once per turn.
             if voice_ident is not None:
                 ident = voice_ident
             else:
                 ident = identity_module.resolve(
-                    self.hass,
-                    device_id=getattr(user_input, "device_id", None),
-                    # Chat: the logged in user alone decides who this is. No
-                    # match leaves the person unknown, so household facts only.
-                    user_id=turn_user if is_chat else None,
-                )
-            if ident.known:
-                episodic_subject = identity_module.normalize(ident.person)
+                    self.hass, device_id=device_id,
+                    # Chat: only the signed in user decides who this is.
+                    user_id=turn_user if is_chat else None)
+            episodic_subject = identity_module.normalize(ident.person) if ident.known else None
         except Exception as exc:
             _LOGGER.debug("Identity resolve: %s", exc)
-            # ident/episodic_subject stay None — conversation-id-scoped
-            # storage/retrieval below continue unaffected; person-scoped
-            # fallback simply doesn't fire (same as a genuinely unresolved
-            # identity); knowledge injection and command logging degrade to
-            # their existing no-identity behavior, defined at their own
-            # call sites below.
 
-        # 8.34.0: a turn on a satellite Nova reopened itself arrives with a
-        # new conversation id (start_conversation always makes one). Within 60
-        # seconds, from the same device only, it continues the conversation
-        # that asked: copy that history across once, and mark the new id seen
-        # so the cross-session reseed below can't replace it.
+        # A satellite Nova reopened itself starts a new conversation id. Within
+        # a minute and on the same device it carries on the conversation that
+        # asked (8.34.0): its history is copied once and marked seen, so the
+        # reseed below can't replace it.
         if device_id and not is_chat and cid not in self._histories:
             try:
                 from . import continued_conversation as _cc_carry
-                prev = _cc_carry.take_reopened(device_id)
-                if prev and prev != cid and self._histories.get(prev):
-                    self._histories[cid] = list(self._histories[prev])
+                asked_in = _cc_carry.take_reopened(device_id)
+                if asked_in and asked_in != cid and self._histories.get(asked_in):
                     self._last_seen[cid] = time.time()
+                    self._histories[cid] = list(self._histories[asked_in])
             except Exception as exc:
                 _LOGGER.debug("Reopened conversation carry-over skipped: %s", exc)
 
         history   = self._history(cid)
         await self._maybe_seed_history(cid, history, subject=episodic_subject)
-
         history.append({"role": "user", "content": user_input.text})
-        # Phase 2: capture the inserted row id as the stable exchange link —
-        # save_message() now returns lastrowid (or None on its existing
-        # fail-open write failure). turn_id is only ever created from a real
-        # id, never the string "None".
+        # The saved row's id links both halves of the exchange; a failed save
+        # (None) gives no turn id rather than the text "None".
         user_row_id = await self.hass.async_add_executor_job(
             save_message, "user", user_input.text, cid, episodic_subject)
         turn_id = str(user_row_id) if user_row_id is not None else None
 
-        # v5.6.1 / Phase 2: retrieve previous semantic context BEFORE storing
-        # this turn's own message — storing first let the current message
-        # become its own top search result. Retrieval and storage are
-        # separate fail-open blocks: a retrieval failure must not prevent
-        # this message from being stored for future recall, and a storage
-        # failure must not discard context already retrieved and already
-        # folded into `persona` below.
+        # Recall first, then store, so this message is never its own best
+        # match. Each is fail open on its own.
         mem_context = ""
         try:
             from .memory import get_conversation_context
             mem_context = await self.hass.async_add_executor_job(
-                get_conversation_context, user_input.text, 3, cid, episodic_subject,
-            )
+                get_conversation_context, user_input.text, 3, cid, episodic_subject)
         except Exception as exc:
             _LOGGER.debug("Memory retrieve: %s", exc)
         if mem_context:
             persona = persona + "\n\n" + mem_context
-
         try:
             from .memory import store_memory
             await self.hass.async_add_executor_job(
                 lambda: store_memory(user_input.text, role="user",
-                    device_id=user_input.device_id or "", conversation_id=cid,
-                    subject=episodic_subject, turn_id=turn_id)
-            )
+                                     conversation_id=cid, device_id=user_input.device_id or "",
+                                     turn_id=turn_id, subject=episodic_subject))
         except Exception as exc:
             _LOGGER.debug("Memory store: %s", exc)
 
-        # v6.25.0: Inject curated knowledge — durable facts/preferences Nova
-        # knows (distinct from the transcript recall above), scored against the
-        # current message so the most relevant facts lead.
-        # v6.29.0: scope to *this* person + household so one resident's private
-        # facts don't leak into another's context.
-        # Phase 2: reuses `ident` captured above — no second
-        # identity.resolve() call. When ident is None (import/resolve failed
-        # earlier), this reproduces the pre-Phase-2 failure behavior exactly:
-        # knowledge injection (person AND household) is skipped entirely for
-        # the turn, not partially degraded to household-only.
+        # Known facts for this person and the household (v6.25.0, v6.29.0),
+        # by meaning when semantic search is on, else by keyword. With no
+        # identity at all the whole block is skipped for the turn.
         kn_block = None
         if ident is not None:
             try:
-                from . import knowledge
+                from . import fact_recall, knowledge
                 subjects = [identity_module.subject_for(ident), "household"]
-                # Meaning based recall when semantic search is on; None means
-                # off, paused or nothing found, so keyword recall runs as before.
-                from . import fact_recall
                 kn_block = await fact_recall.semantic_prompt_block(
                     self.hass, user_input.text, subjects=subjects)
                 if kn_block is None:
@@ -1065,57 +874,38 @@ class NovaAgent(conversation.ConversationEntity):
                         lambda: knowledge.prompt_block(user_input.text, subjects=subjects))
             except Exception as exc:
                 _LOGGER.debug("Knowledge inject: %s", exc)
-        if kn_block:
-            persona = persona + "\n\n" + kn_block
-
-        # Confirmed relations (8.7.13): links between things a person approved,
-        # the 12 most relevant to this message, fenced like the facts above.
-        # Household wide, so not scoped to who is speaking. A pending relation
-        # is never read here (knowledge.confirmed_relations).
+        extras = [kn_block]
+        # Confirmed relations only, household wide (8.7.13).
         try:
             from . import knowledge as _knowledge
-            rel_block = await self.hass.async_add_executor_job(
-                lambda: _knowledge.relations_prompt_block(user_input.text))
-            if rel_block:
-                persona = persona + "\n\n" + rel_block
+            extras.append(await self.hass.async_add_executor_job(
+                lambda: _knowledge.relations_prompt_block(user_input.text)))
         except Exception as exc:
             _LOGGER.debug("Relations inject: %s", exc)
-
-        # Voice phrases the AI may pick by meaning (8.32.0): only those the
-        # user allowed, never a shell command, at most 50. Names and phrases
-        # sit inside a prompt fence; the phrase ids stay outside it.
+        # Voice phrases the agent may choose by meaning (8.32.0).
         try:
             from . import voice_phrase_runner as _vpr
-            vp_block = _vpr.prompt_block()
-            if vp_block:
-                persona = persona + "\n\n" + vp_block
+            extras.append(_vpr.prompt_block())
         except Exception as exc:
             _LOGGER.debug("Voice phrases inject: %s", exc)
-
-        # 8.34.0: a reply on a voice satellite is spoken, so keep it short and
-        # free of internals. Format rules ("Spoken replies") are in the main
-        # prompt for every turn; this length rule is for voice turns only.
+        # A satellite's reply is spoken, so it is kept short (8.34.0).
         if device_id and not is_chat:
             try:
                 from .voice_confirm import is_voice_satellite_device
                 if is_voice_satellite_device(self.hass, device_id):
-                    persona = persona + "\n\n" + VOICE_REPLY_RULE
+                    extras.append(VOICE_REPLY_RULE)
             except Exception as exc:
                 _LOGGER.debug("Voice reply rule skipped: %s", exc)
+        for block in extras:
+            if block:
+                persona += "\n\n" + block
 
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
+        addr = f", {honorific}" if honorific else ""   # "" when nobody is addressed
 
-        cast_routed = False  # tracks whether Cast speaker is handling TTS
-        reopen_speaker: str | None = None   # separate speaker the reply played on
-        reopen_device: str | None = None    # the wake/voice satellite's device_id
-
-        # 8.33.0: the answer to a request held for a spoken yes on THIS
-        # satellite (pending_confirm.py). Checked before the proactive offer
-        # below: that offer is global and takes any "yes", so it must not
-        # swallow the answer. Only a voice turn from the same device reads or
-        # clears the item; Chat, the panel and other satellites never touch
-        # it. A clear yes runs the held request now; the reply then goes
-        # through the normal reply routing below.
+        # ── A held request's yes (8.33.0) ───────────────────────────────────
+        # Only a voice turn from the satellite that holds the request reads
+        # it. Checked before the offer below, which would take any "yes".
         confirm_result = None
         if device_id and not is_chat:
             try:
@@ -1127,462 +917,300 @@ class NovaAgent(conversation.ConversationEntity):
                 _LOGGER.debug("Pending confirmation answer skipped: %s", exc)
             if confirm_result is not None:
                 from . import voice_learn as _voice_learn
-                _voice_learn.block("confirmation answer")   # never learned (8.38.0)
+                _voice_learn.block("confirmation answer")
 
-        # v5.9.07: Proactive offer yes/no — resolved before main pipeline.
-        # honorific may be "" once nobody specific is home to address (see
-        # honorific.py) — addr collapses the trailing ", {honorific}" to
-        # nothing rather than leaving a dangling comma.
-        addr = f", {honorific}" if honorific else ""
+        # ── A proactive offer's answer (v5.9.07) ────────────────────────────
+        # The offer read before the relevance decision; any reply that is not
+        # a plain yes or no declines it.
         offer_reply = None
         try:
-            # Reuses the SAME pending_offer object captured before the
-            # relevance decision above — no second get_pending_offer() read.
-            # Left untouched when this turn answered a held request (8.33.0).
             if pending_offer and confirm_result is None:
                 offer_id = pending_offer.get("offer_id")
+                who_answered = f"by {turn_user or 'unknown'} on {device_id}"
                 if offer_answer == "yes":
-                    res = await cognitive_core.accept_pending_offer(offer_id)
-                    if res.get("ok"):
+                    outcome = await cognitive_core.accept_pending_offer(offer_id)
+                    if outcome.get("ok"):
                         offer_reply = f"Done{addr}."
-                    elif res.get("reason") == "offer replaced":
+                    elif outcome.get("reason") == "offer replaced":
                         offer_reply = f"That offer has passed{addr}, so I've left it."
                     else:
                         offer_reply = f"I wasn't able to complete that{addr}."
-                    nova_log("OFFER", f"accepted {offer_id} by {turn_user or 'unknown'} "
-                                      f"on {device_id}: {offer_reply[:60]}")
-                elif offer_answer == "no":
-                    cognitive_core.decline_pending_offer(offer_id)
-                    offer_reply = f"Understood{addr}. I'll leave it."
-                    nova_log("OFFER", f"declined {offer_id} by {turn_user or 'unknown'} "
-                                      f"on {device_id}")
+                    nova_log("OFFER", f"accepted {offer_id} {who_answered}: {offer_reply[:60]}")
                 else:
                     cognitive_core.decline_pending_offer(offer_id)
+                    if offer_answer == "no":
+                        offer_reply = f"Understood{addr}. I'll leave it."
+                        nova_log("OFFER", f"declined {offer_id} {who_answered}")
         except Exception as exc:
             _LOGGER.debug("Offer handling skipped: %s", exc)
 
         if offer_reply is not None:
             from . import voice_learn as _voice_learn
-            _voice_learn.block("offer answer")   # a short yes/no: never learned (8.38.0)
-            # Short-circuit: deliver the offer response directly.
-            offer_reply = offer_reply.replace("{honorific}", honorific)
+            _voice_learn.block("offer answer")
             ir = intent.IntentResponse(language=user_input.language)
-            ir.async_set_speech(offer_reply)
+            ir.async_set_speech(offer_reply.replace("{honorific}", honorific))
             return conversation.ConversationResult(response=ir, conversation_id=cid)
 
-        # v5.9.16: Relevance gate. Satellites without strict wake-word gating
-        # pick up TV/background speech, which the pipeline transcribes and sends
-        # here as if it were a command. Drop input that clearly isn't addressed
-        # to Nova (filler, fragments, rambling dialogue) BEFORE it reaches the
-        # local engine or the agent — staying silent rather than acting on, or
-        # chattering back at, ambient noise. Toggle off via `relevance_gate`.
-        # v7.105.0: reachable only when a pending offer made the turn relevant
-        # for persistence above but this reply didn't parse as accept/decline
-        # and isn't addressed to Nova either — still don't route it. Reuses
-        # the values computed above so this and the persistence gate above
-        # can never disagree.
+        # The routing gate (v5.9.16, v7.105.0): reached only when an offer
+        # made the turn relevant for memory but the words were neither its
+        # answer nor addressed to Nova. Same values as the decision above.
         if gate_enabled and not is_addressed:
             nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
             _LOGGER.info("Nova relevance gate: ignored ambient input (%d chars)",
                          len(user_input.text.strip()))
-            ir = intent.IntentResponse(language=user_input.language)
-            ir.async_set_speech("")  # silence — do not respond to ambient speech
-            return conversation.ConversationResult(response=ir, conversation_id=cid)
+            return _silent(user_input, cid)
 
-        # 8.38.0: past dedup, the presence gate and both relevance gates, so
-        # Nova answers this turn. Only now may its voice sample be learned;
-        # every earlier return leaves the candidate unanswered.
+        # Every early return is behind us: Nova answers, so the voice sample
+        # may be learned (8.38.0).
         from . import voice_learn as _voice_learn
         _voice_learn.mark_answered()
 
+        cast_routed = False                  # a paired speaker is saying the reply
+        reopen_speaker: str | None = None    # that speaker
+        reopen_device: str | None = None     # the satellite that heard the turn
         try:
-            # v5.7.00: Local engine is PRIMARY. Complexity scoring decides
-            # whether to escalate to LLM. Handles 95%+ of requests at zero
-            # API cost. Only genuinely complex/creative/analytical requests
-            # fall through to the LLM agent (Groq/Gemini).
+            # The user's voice phrases come first (8.32.0), then the local
+            # engine (v5.7.00), and the agent only for what neither handles.
+            # A held request's yes is the reply itself.
             from .local_engine import try_local, score_complexity
             from . import voice_phrase_runner
-            # The user's own voice phrases come before Nova's built in local
-            # commands (8.32.0). A phrase that needs confirming skips the
-            # local engine and goes to the agent with a hint to ask.
             if confirm_result is not None:
-                # This turn answered a held request (8.33.0): that is the reply.
                 phrase = voice_phrase_runner.PhraseStep(confirm_result, None)
             else:
                 phrase = await voice_phrase_runner.try_phrase(
                     self.hass, user_input.text, honorific=honorific,
                     device_id=device_id, user_id=turn_user)
             local_result = phrase.result
+            # A phrase that needs confirming skips the local engine and asks
+            # the agent to confirm instead.
             if local_result is None and not phrase.defer_hint:
                 local_result = await try_local(
                     self.hass, user_input.text, honorific, device_id=device_id)
             if phrase.defer_hint:
                 persona = persona + "\n\n" + phrase.defer_hint
 
+            handled_locally = bool(local_result and local_result.handled)
             if local_result and local_result.handled:
                 response_text = local_result.text
                 _LOGGER.info("Nova local: %s", response_text[:100])
                 nova_log("LOCAL", f"handled: {response_text[:80]}")
             else:
-                complexity = score_complexity(user_input.text)
-                # v5.9.06: Connectivity-aware escalation. If the circuit breaker
-                # is OPEN (LLM known-unreachable), skip the doomed network call
-                # entirely and attempt an offline salvage pass instead.
                 from . import connectivity
+                complexity = score_complexity(user_input.text)
                 if not connectivity.allow_request():
+                    # The breaker is open (v5.9.06): don't call a provider known
+                    # to be down; answer what can be answered offline.
                     nova_log("OFFLINE", f"LLM down — local salvage: {user_input.text[:60]}")
-                    salvage = await try_local(
-                        self.hass, user_input.text, honorific, force=True,
-                        device_id=device_id,
-                    )
+                    salvage = await try_local(self.hass, user_input.text, honorific,
+                                              force=True, device_id=device_id)
                     if salvage and salvage.handled:
                         response_text = salvage.text
                         _LOGGER.info("Nova offline-salvage: %s", response_text[:100])
                     else:
                         response_text = (
-                            f"I'm offline at the moment{addr}, so I can't "
-                            f"handle that request — it needs my reasoning systems. "
-                            f"I can still control your devices, report status, and "
-                            f"run scenes. I'll be back to full capability once "
-                            f"connectivity returns."
-                        )
+                            f"I'm offline at the moment{addr}, so I can't handle that "
+                            "request — it needs my reasoning systems. I can still "
+                            "control your devices, report status, and run scenes. "
+                            "I'll be back to full capability once connectivity returns.")
                 else:
-                    nova_log("AGENT", f"LLM needed (complexity={complexity}): {user_input.text[:60]}")
-                    # Complex request — use LLM agent (Groq/Gemini fallback)
+                    nova_log("AGENT", f"LLM needed (complexity={complexity}): "
+                                      f"{user_input.text[:60]}")
                     from .agent import run_agent
                     from . import nova_config as _jc
                     provider_name = self._rt_opt("llm_provider", "groq")
                     model_val = self._rt_opt(CONF_MODEL, DEFAULT_MODEL)
-
-                    # The reasoning-tier fallback needs the FULL config, not
-                    # entry.data|options — those are empty on panel-configured
-                    # installs, which left the fallback unable to resolve a
-                    # provider and forced the "offline" message even when a
-                    # working tier was configured. Use the single source of
-                    # truth (nova_config) plus the live panel runtime_config
-                    # (non-empty values win), read from NovaRuntime this turn.
-                    # The executor gets a fresh snapshot, never the live
-                    # loop-owned dict.
+                    # The reasoning fallback needs the whole config: entry data
+                    # and options are empty on a panel set up install. The
+                    # executor gets a snapshot of the live runtime values,
+                    # never the loop's own dict.
                     eff_config = await self.hass.async_add_executor_job(
                         _jc.effective_config_with_runtime, self.entry,
-                        runtime_config_snapshot(self.entry, strict=True),
-                    )
-
-                    api_key_val = resolve_provider_credential(
-                        eff_config, provider_name)
-                    base_url_val = resolve_provider_endpoint(
-                        eff_config, provider_name)
-
+                        runtime_config_snapshot(self.entry, strict=True))
+                    credential = resolve_provider_credential(eff_config, provider_name)
+                    endpoint = resolve_provider_endpoint(eff_config, provider_name)
                     try:
                         response_text = await run_agent(
                             self.hass,
                             messages=history,
                             persona=persona,
-                            # 8.37.0, switch on only: the fenced speaker hint
-                            # for the situation block, and the turn's identity
-                            # for tools that file facts (remember).
+                            # 8.37.0, with voice identity on: who is speaking,
+                            # for the situation block and for remembered facts.
                             speaker_hint=self._speaker_hint(turn_voice, voice_ident),
                             identification=voice_ident,
                             provider_name=provider_name,
-                            api_key=api_key_val,
+                            api_key=credential,
                             model=model_val,
-                            base_url=base_url_val,
+                            base_url=endpoint,
                             hass_api=hass_api,
                             user_input=user_input,
                             temperature=0.7,
                             config=eff_config,
                         )
-                        # Agent returns a connectivity sentinel string on total
-                        # failure; treat that as a breaker failure + salvage.
-                        if _is_connectivity_failure(response_text):
+                        if not _is_connectivity_failure(response_text):
+                            connectivity.record_success()
+                        else:
+                            # The agent's own offline sentence: a failure, and
+                            # the local engine gets a try before it is spoken.
                             connectivity.record_failure()
-                            salvage = await try_local(
-                                self.hass, user_input.text, honorific, force=True,
-                                device_id=device_id,
-                            )
+                            salvage = await try_local(self.hass, user_input.text, honorific,
+                                                      force=True, device_id=device_id)
                             if salvage and salvage.handled:
                                 response_text = salvage.text
-                        else:
-                            connectivity.record_success()
                     except Exception as agent_exc:  # pylint: disable=broad-except
                         _LOGGER.warning("Agent call raised: %s", agent_exc)
                         connectivity.record_failure()
-                        salvage = await try_local(
-                            self.hass, user_input.text, honorific, force=True,
-                            device_id=device_id,
-                        )
-                        if salvage and salvage.handled:
-                            response_text = salvage.text
-                        else:
-                            response_text = (
-                                f"I've lost connection to my reasoning systems"
-                                f"{addr}. I can still control devices and "
-                                f"report status while I reconnect."
-                            )
+                        salvage = await try_local(self.hass, user_input.text, honorific,
+                                                  force=True, device_id=device_id)
+                        response_text = salvage.text if salvage and salvage.handled else (
+                            f"I've lost connection to my reasoning systems{addr}. I can "
+                            "still control devices and report status while I reconnect.")
             from .directive_helper import fill_honorific
             response_text = speech_text(fill_honorific(response_text, honorific))
-
-            # v5.7.01: Record the winning response so duplicate pipelines
-            # arriving slightly later will get caught by dedup
+            # Late duplicates from other satellites get this reply (v5.7.01).
             _record_dedup_response(user_input.text, response_text)
 
-            # v5.8.03: Log command for cognitive core pattern learning
-            # v6.29.0: attribute to the resolved person so per-person command
-            # patterns are real (falls back to "unknown" when not confident).
+            # The command log for pattern learning (v5.8.03), under the person
+            # resolved above (v6.29.0), "unknown" otherwise.
             try:
                 from . import cognitive_core, voice_recognition
-                handler = "local" if local_result and local_result.handled else "agent"
-                dev = getattr(user_input, "device_id", None)
-                # Phase 2: reuse the identity captured once at the top of the
-                # turn — no second identity.resolve() call. Falls back to
-                # the same "unknown" value a fresh unresolved identity
-                # (or a failed import/resolve) would have produced.
                 if ident is not None:
                     who = ident.person
-                elif identity_module is not None:
-                    who = identity_module.UNKNOWN
                 else:
-                    who = "unknown"
-                cognitive_core.log_command(
-                    text=user_input.text,
-                    handled_by=handler,
-                    person=who,
-                )
-                # Voice learns over time: if we know who this is from other
-                # signals but the voice service doesn't yet, flag an enrollment
-                # opportunity so the pending sample can be labelled automatically.
-                # Never for a Nova Voice ID turn (8.37.0): its learning comes
-                # in a later phase, not from the legacy sensor's event.
+                    who = identity_module.UNKNOWN if identity_module is not None else "unknown"
+                cognitive_core.log_command(text=user_input.text, person=who,
+                                           handled_by="local" if handled_locally else "agent")
+                # The legacy voice sensor may label its pending sample when
+                # other signals know the speaker. Never on a Voice ID turn.
                 if turn_voice is None:
-                    voice_recognition.maybe_fire_enrollment(self.hass, dev)
+                    voice_recognition.maybe_fire_enrollment(self.hass, device_id)
             except Exception:
                 pass
 
-            # v5.7.03: Route reply to paired Cast speaker. The satellite
-            # handles wake/STT, Nova routes TTS output to the real
-            # speaker in the room (Google Home, Nest Audio, etc.) for
-            # better audio quality. Satellite pairings from the panel
-            # Settings determine which speaker each satellite uses.
+            # ── The reply on the room's speaker (v5.7.03) ───────────────────
             try:
-                device_id_route = getattr(user_input, 'device_id', None)
-                if device_id_route and not is_chat:
+                if device_id and not is_chat:
                     from .audio_routing import reply_target
-                    sat_pairings = self._satellite_pairings()
-
-                    speaker = reply_target(
-                        self.hass,
-                        device_id=device_id_route,
-                        satellite_pairings=sat_pairings,
-                    )
-                    # A mic-only satellite (e.g. Waveshare with the DAC off), or
-                    # one whose room has no real speaker, resolves to itself and
-                    # can't play the reply. Fall back to the configured
-                    # reply/broadcast speakers — the same ones proactive audio
-                    # (the briefing) already uses successfully — so the reply is
-                    # heard instead of lost.
-                    if not speaker or speaker.startswith("assist_satellite."):
-                        for cand in self._speakers(device_id_route):
-                            if cand.startswith("assist_satellite."):
-                                continue
-                            st = self.hass.states.get(cand)
-                            if st is not None and st.state not in ("unavailable", "unknown"):
-                                _LOGGER.info(
-                                    "Nova reply: satellite can't speak, using "
-                                    "configured reply speaker %s", cand)
-                                speaker = cand
+                    speaker = reply_target(self.hass, device_id=device_id,
+                                           satellite_pairings=self._satellite_pairings())
+                    if not speaker or speaker.startswith(_SATELLITE):
+                        # A satellite that can't play audio, or a room with no
+                        # speaker: use the first configured reply speaker that
+                        # is up, as proactive audio does.
+                        for candidate in self._speakers(device_id):
+                            state = (None if candidate.startswith(_SATELLITE)
+                                     else self.hass.states.get(candidate))
+                            if state is not None and state.state not in _UNREACHABLE:
+                                _LOGGER.info("Nova reply: satellite can't speak, using "
+                                             "configured reply speaker %s", candidate)
+                                speaker = candidate
                                 break
-                    if speaker and not speaker.startswith("assist_satellite."):
-                        tts_ent = resolve_tts_entity(
-                            self.hass, self._opt("tts_engine", "auto"),
-                        )
-                        sp = self.hass.states.get(speaker)
-                        sp_reachable = sp is not None and sp.state not in (
-                            "unavailable", "unknown")
-                        if tts_ent and sp_reachable:
-                            _LOGGER.info(
-                                "Nova reply → Cast: tts=%s speaker=%s",
-                                tts_ent, speaker,
-                            )
-                            # Fire-and-forget to the paired speaker, then silence
-                            # the satellite. This is the delivery that worked.
-                            # v7.50–v7.51 changed this to await + poll the speaker
-                            # for a 'playing' state + fall back to broadcast; that
-                            # misfired on idle Cast speakers that play fine but don't
-                            # report 'playing' during a short announce, breaking the
-                            # working case. Reverted to the original behavior.
-                            #
-                            # Spoken History (v7.104.0): when this reply is itself
-                            # the deterministic "repeat that" command's answer
-                            # (local_result.repeat_of_id set — see local_engine.py),
-                            # tag it "repeat" with a reference to the original
-                            # instead of "reply", so it's recorded as a repeat.
-                            # This is the ONLY place a voice-triggered repeat is
-                            # ever recorded — only here does Nova get a confirmed
-                            # delivery result; an ordinary reply that instead plays
-                            # through the pipeline's own TTS on the satellite
-                            # (the non-Cast-routed branch below) is never recorded,
-                            # because Nova cannot observe whether that TTS ran.
-                            repeat_of_id = (
-                                local_result.repeat_of_id
-                                if local_result and getattr(local_result, "repeat_of_id", None)
-                                else None
-                            )
-                            self.hass.async_create_task(
-                                async_announce(
-                                    self.hass, response_text,
-                                    tts_ent, [speaker],
-                                    context="repeat" if repeat_of_id else "reply",
-                                    repeat_of_id=repeat_of_id,
-                                )
-                            )
-                            cast_routed = True
-                            reopen_speaker = speaker
-                            reopen_device = device_id_route
-                            try:
-                                nova_log("REPLY", f"→ Cast {speaker} via {tts_ent}")
-                            except Exception:
-                                pass
-                        elif not sp_reachable:
-                            # The reply speaker is offline — do NOT silence the
-                            # satellite, or the reply is lost entirely. Let the
-                            # satellite speak instead.
-                            _LOGGER.warning(
-                                "Nova reply: Cast speaker %s is unavailable — "
-                                "the satellite will speak the reply instead", speaker)
-                            try:
-                                nova_log("REPLY", f"speaker {speaker} unavailable "
-                                           "— satellite will speak")
-                            except Exception:
-                                pass
-                        else:
-                            _LOGGER.warning("Nova reply: no TTS entity found")
-                            try:
-                                nova_log("REPLY", "no TTS entity — satellite will speak")
-                            except Exception:
-                                pass
-                    else:
-                        _LOGGER.info(
-                            "Nova reply: no Cast pairing for device=%s, "
-                            "pipeline speaker fallback",
-                            device_id_route,
-                        )
+                    if not speaker or speaker.startswith(_SATELLITE):
+                        _LOGGER.info("Nova reply: no Cast pairing for device=%s, "
+                                     "pipeline speaker fallback", device_id)
                         try:
-                            nova_log("REPLY", f"no Cast pairing for device="
-                                       f"{device_id_route} — satellite plays "
-                                       f"(resolved={speaker})")
+                            nova_log("REPLY", f"no Cast pairing for device={device_id} "
+                                              f"— satellite plays (resolved={speaker})")
+                        except Exception:
+                            pass
+                    else:
+                        tts_ent = resolve_tts_entity(self.hass, self._opt("tts_engine", "auto"))
+                        found = self.hass.states.get(speaker)
+                        reachable = found is not None and found.state not in _UNREACHABLE
+                        if not reachable:
+                            # Silencing the satellite now would lose the reply.
+                            _LOGGER.warning("Nova reply: Cast speaker %s is unavailable — "
+                                            "the satellite will speak the reply instead",
+                                            speaker)
+                            log_line = f"speaker {speaker} unavailable — satellite will speak"
+                        elif not tts_ent:
+                            _LOGGER.warning("Nova reply: no TTS entity found")
+                            log_line = "no TTS entity — satellite will speak"
+                        else:
+                            _LOGGER.info("Nova reply → Cast: tts=%s speaker=%s",
+                                         tts_ent, speaker)
+                            # Fire and forget, then the satellite stays quiet.
+                            # Waiting for a "playing" state (v7.50, v7.51) broke
+                            # idle Cast speakers that never report it.
+                            # Spoken History (v7.104.0): only this path knows
+                            # the reply was delivered, so only here is a
+                            # "repeat that" answer recorded, as a repeat of the
+                            # original rather than a new reply.
+                            repeat_of_id = (local_result.repeat_of_id if local_result
+                                            and getattr(local_result, "repeat_of_id", None)
+                                            else None)
+                            self.hass.async_create_task(async_announce(
+                                self.hass, response_text, tts_ent, [speaker],
+                                context="repeat" if repeat_of_id else "reply",
+                                repeat_of_id=repeat_of_id))
+                            cast_routed = True
+                            reopen_speaker, reopen_device = speaker, device_id
+                            log_line = f"→ Cast {speaker} via {tts_ent}"
+                        try:
+                            nova_log("REPLY", log_line)
                         except Exception:
                             pass
             except Exception as exc:
                 _LOGGER.warning("Reply routing error: %s", exc)
 
-            # Now safe to do blocking DB operations
             history.append({"role": "assistant", "content": response_text})
-            try:
-                # Phase 2: same episodic_subject captured at the top of the
-                # turn, so subject-scoped transcript fallback (memory_thread)
-                # can find both halves of a past exchange, not just the
-                # user's side. This row keeps its own independent primary
-                # key — it is never itself a turn_id, only ever tagged with
-                # the triggering user row's turn_id in semantic memory below.
-                await self.hass.async_add_executor_job(
-                    save_message, "assistant", response_text, cid, episodic_subject,
-                )
-            except Exception:
-                pass
+            # The same subject as the user's row, so both halves can be found
+            # again; this row is never a turn id itself.
+            with contextlib.suppress(Exception):
+                await self.hass.async_add_executor_job(save_message, "assistant",
+                                                       response_text, cid, episodic_subject)
             _LOGGER.debug("Nova → %s", response_text[:120])
-
-            # Store assistant response in long-term memory. Phase 2: threads
-            # the SAME turn_id/episodic_subject captured for this turn's user
-            # message, so the two halves pair on retrieval. If this turn
-            # never reached this point (offer short-circuit, an exception
-            # above), this block simply never runs — the user's row/semantic
-            # record stay a legitimately unpaired turn, and a later,
-            # unrelated assistant reply carries its OWN fresh turn_id, so it
-            # can never accidentally pair with this one.
-            try:
-                from .memory import store_memory
+            # The reply's semantic record carries the user message's turn id,
+            # pairing the two. A turn that ended early leaves its user half
+            # unpaired, and a later reply always has its own id.
+            try:   # store_memory was imported for the user's half above
                 await self.hass.async_add_executor_job(
                     lambda: store_memory(response_text, role="assistant",
-                        device_id=user_input.device_id or "", conversation_id=cid,
-                        subject=episodic_subject, turn_id=turn_id)
-                )
+                                         subject=episodic_subject, turn_id=turn_id,
+                                         device_id=user_input.device_id or "",
+                                         conversation_id=cid))
             except Exception:
                 pass
 
         except Exception as exc:  # pylint: disable=broad-except
-            _LOGGER.error(
-                "Nova API error (%s): %s | model=%s",
-                type(exc).__name__, exc, self._model(),
-            )
+            _LOGGER.error("Nova API error (%s): %s | model=%s",
+                          type(exc).__name__, exc, self._model())
             from .directive_helper import fill_honorific
-            response_text = fill_honorific(
-                _FALLBACKS[self._fallback_idx % len(_FALLBACKS)], honorific
-            )
+            canned = _FALLBACKS[self._fallback_idx % len(_FALLBACKS)]
             self._fallback_idx += 1
+            response_text = fill_honorific(canned, honorific)
             if history and history[-1]["role"] == "user":
                 history.pop()
 
-        ir = intent.IntentResponse(language=user_input.language)
-        # When Cast routing succeeded, suppress the pipeline's TTS to the
-        # satellite speaker — only the Cast device should talk. If Cast
-        # routing failed or wasn't attempted, let the pipeline play through
-        # the satellite as fallback.
-        if cast_routed:
-            ir.async_set_speech("")  # silence satellite — Cast has it
-        else:
-            ir.async_set_speech(response_text)  # fallback: satellite speaks
-        result = conversation.ConversationResult(response=ir, conversation_id=cid)
-        # v6.88.0: keep listening for a follow-up when Nova invited one, so
-        # natural turn-taking works without a new wake word. Set defensively —
-        # older HA cores may not carry the field.
+        # A paired speaker has the reply, so the satellite says nothing;
+        # otherwise the pipeline speaks it on the satellite.
+        result = _silent(user_input, cid, "" if cast_routed else response_text)
+
+        # Keep listening when Nova invited a follow up (v6.88.0).
         try:
             from . import continued_conversation as _cc
             from . import pending_confirm as _pc
-            # 8.33.0: a request held for a spoken yes on this satellite always
-            # keeps the mic open for the answer, on this same satellite (never
-            # handed to another room), whatever continued conversation says.
-            # The reopen runs after this turn's pipeline has finished, so it
-            # never cancels the user's own request.
+            # A held request always reopens this same satellite for its yes
+            # or no (8.33.0), after this pipeline has finished.
             held = bool(device_id and not is_chat and _pc.get(device_id))
-            # Quiet hours (8.39.1): the mic only reopens for a held request's
-            # yes or no, never just because the reply invited a follow-up, so
-            # a TV or a conversation in the room can't be picked up at night.
+            # In quiet hours only a held request reopens the mic (8.39.1).
             follow_up = (not is_chat and _cc.enabled() and _cc.should_continue(response_text)
                          and not self._in_quiet_hours())
             if not is_chat and (held or follow_up):
                 sat_ent = (_cc.satellite_for_device(self.hass, reopen_device)
                            if reopen_device else None)
-                if (cast_routed and reopen_speaker and sat_ent
-                        and (held or _cc.speaker_reopen_enabled())):
-                    # The reply is playing on a SEPARATE speaker, not the mic-only
-                    # satellite. HA's continue_conversation would reopen the mic
-                    # based on the satellite's own (instant) playback — before the
-                    # speaker finishes — so the mic would capture Nova's own
-                    # reply. Instead Nova watches the speaker and reopens the mic
-                    # only once it goes idle.
-                    if _cc.schedule_reopen(
-                            self.hass, sat_ent, reopen_speaker, response_text,
-                            follow=not held):
-                        # The answer arrives under a new conversation id;
-                        # remember which one it belongs to (8.34.0).
-                        _cc.remember_reopen(reopen_device, cid)
-                else:
-                    # Satellite plays the reply itself (or no separate speaker) —
-                    # HA's built-in reopen timing is correct here.
+                watch_speaker = (cast_routed and reopen_speaker and sat_ent
+                                 and (held or _cc.speaker_reopen_enabled()))
+                if not watch_speaker:
+                    # The satellite plays the reply, so Home Assistant's own
+                    # reopen timing is right.
                     result.continue_conversation = True
+                elif _cc.schedule_reopen(self.hass, sat_ent, reopen_speaker, response_text,
+                                         follow=not held):
+                    # Home Assistant would reopen as soon as the satellite's
+                    # own (instant) playback ended and hear Nova's reply on
+                    # the speaker, so the mic opens once the speaker is idle.
+                    # The answer arrives under a new id (8.34.0).
+                    _cc.remember_reopen(reopen_device, cid)
         except Exception:
             pass
         return result
-
-
-def _ha_kwargs(cls, **kwargs):
-    """Keep only the kwargs that cls's constructor accepts. Home Assistant's LLM
-    API changed fields across versions — 2026.8 moved the context out of
-    ToolInput into LLMContext and dropped user_prompt — so we pass the
-    intersection and stay compatible with old and new HA (v7.21.1). Never raises."""
-    try:
-        import inspect
-        allowed = inspect.signature(cls).parameters
-        return {k: v for k, v in kwargs.items() if k in allowed}
-    except Exception:
-        return kwargs
