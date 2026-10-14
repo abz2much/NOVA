@@ -1,36 +1,23 @@
+"""The Local Mind: Nova's offline judgment for one household event.
+
+Used when the provider is unreachable (breaker open, or a failed call with
+nothing cached), and the one voice every locally composed announcement goes
+through. The decision itself is the pure
+``cognitive.evaluators.evaluate_local_mind``; this module is the façade that
+gathers its inputs and voices its result:
+
+1. self-awareness: per-entity flap memory (3 or more events in 5 minutes);
+2. historical grounding: how often this entity reached this state near this
+   hour in patterns.db, graded novel / unusual_hour / occasional / common /
+   routine;
+3. case memory: the reasoning cache's tally of past provider verdicts for
+   similar events;
+4. decision counters for the panel;
+5. the composer and its state phrasing.
+
+The history query is synchronous sqlite and runs in the executor. assess()
+never raises.
 """
-Nova Local Mind — the offline reasoning brain.
-
-When the cloud is unreachable (connectivity breaker open, or a cloud call
-fails with nothing cached), decisions used to fall to a two-line urgency
-switch. This module replaces that with an engine that approximates the
-*procedure* a frontier model follows when judging a household event:
-
-  1. Self-awareness        — am I repeating myself? Is this sensor flapping?
-  2. Historical grounding  — patterns.db: how often does THIS entity reach
-                             THIS state at THIS hour? (novel / unusual-hour /
-                             occasional / routine)
-  3. Case-based memory     — reasoning_cache: what did the cloud decide for
-                             materially similar events in the past?
-  4. Situational judgment  — urgency × novelty × presence × security posture,
-                             with escalation when entry points open while the
-                             house is empty
-  5. Persona verbalization — Nova-voiced phrasing with context clauses and
-                             deterministic variation, never robotic repeats
-
-Every decision carries a reason chain, so the Logs tab shows *why* the local
-mind spoke or stayed silent — the same transparency the cloud path has.
-
-Honest scope: this replicates the decision procedure and, for the event
-taxonomy a household actually produces, lands where the cloud would land the
-great majority of the time. It does not replicate open-ended understanding of
-genuinely novel situations — that remains the cloud's job, and soon the GPU
-server's. The decision procedure itself is the pure
-cognitive.evaluators.evaluate_local_mind; this module keeps the history
-lookup, flap memory, counters and voice (sqlite3 + stdlib, plus Nova's own
-cognitive package).
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -39,145 +26,151 @@ import sqlite3
 import time
 from collections import deque
 from typing import Optional
+
 from . import paths
 from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+# Tests point this at another database; None means Nova's patterns.db.
+DB_PATH: Optional[str] = None
 
-# History lookups are cached briefly so a chatty entity doesn't hammer sqlite.
-_HIST_TTL = 600.0          # seconds
+# History caches, on the monotonic clock.
+_HIST_TTL = 600.0
 _DAYS_TTL = 3600.0
 _hist_cache: dict[tuple, tuple[float, dict]] = {}
-_days_cache: tuple[float, float] = (0.0, 0.0)   # (expires, days)
+_days_cache: tuple[float, float] = (0.0, 0.0)
 
-# Flap detection: recent event timestamps per entity.
-_FLAP_WINDOW = 300.0       # seconds
-_FLAP_COUNT = 3            # events within window → flapping
+# Flap memory: entity -> recent event stamps.
+_FLAP_WINDOW = 300.0
+_FLAP_COUNT = 3
 _recent_events: dict[str, deque] = {}
 
-# Local-mind decision counters (surfaced via stats()).
 _stats = {"decisions": 0, "spoke": 0, "silent": 0}
 
+_OPENING_CLASSES = ("door", "window", "garage_door", "opening")
+_MOTION_CLASSES = ("motion", "occupancy", "presence")
 
-# ── 2. Historical grounding ──────────────────────────────────────────────────
+# What a safety-type sensor is doing when it turns on.
+_SAFETY_PHRASES = {dc: "is detecting " + what for dc, what in (
+    ("smoke", "smoke"), ("carbon_monoxide", "carbon monoxide"), ("gas", "gas"),
+    ("moisture", "water"), ("heat", "excessive heat"), ("vibration", "vibration"),
+    ("sound", "sound"))}
+_SAFETY_PHRASES.update(tamper="has been tampered with",
+                       problem="is reporting a problem", safety="has raised an alert")
+
+_STATE_PHRASES = {
+    "on": "is on",
+    "off": "is off",
+    "open": "is open",
+    "closed": "is closed",
+    "opening": "is opening",
+    "closing": "is closing",
+    "unlocked": "is unlocked",
+    "locked": "is locked",
+    "detected": "has detected activity",
+    "home": "has arrived home",
+    "not_home": "has left",
+    "unavailable": "has gone unresponsive",
+    "unknown": "is in an unknown state",
+}
+
+_NOVEL_CLAUSES = [
+    "the first time I've observed this",
+    "I haven't seen this before",
+    "a first in my records",
+]
+
+
+# ── History grounding ──────────────────────────────────────────────────────
 
 def _connect() -> Optional[sqlite3.Connection]:
     try:
-        conn = _store.connect(DB_PATH or paths.patterns_db(), timeout=2.0, mkdir=False,
-                              busy_timeout_ms=None)
-        return conn
+        return _store.connect(DB_PATH or paths.patterns_db(), timeout=2.0,
+                              mkdir=False, busy_timeout_ms=None)
     except Exception:
         return None
 
 
 def _data_days() -> float:
-    """How many days of state history exist (cached ~1h)."""
+    """How many days of history patterns.db holds (cached for an hour)."""
     global _days_cache
-    now = time.monotonic()
-    if _days_cache[0] > now:
-        return _days_cache[1]
-    days = 0.0
+    expires, cached = _days_cache
+    clock = time.monotonic()
+    if clock < expires:
+        return cached
+    span = 0.0
     conn = _connect()
-    if conn:
+    if conn is not None:
         try:
             row = conn.execute(
-                "SELECT (julianday(MAX(timestamp)) - julianday(MIN(timestamp))) AS d "
-                "FROM state_changes"
-            ).fetchone()
-            if row and row["d"]:
-                days = float(row["d"])
+                "SELECT julianday(MAX(timestamp)) - julianday(MIN(timestamp)) "
+                "FROM state_changes").fetchone()
+            span = float(row[0] or 0.0) if row else 0.0
         except Exception:
-            days = 0.0
+            span = 0.0
         finally:
             conn.close()
-    _days_cache = (now + _DAYS_TTL, days)
-    return days
+    _days_cache = (clock + _DAYS_TTL, span)
+    return span
 
 
 def history_profile(entity_id: str, new_state: str, hour: int) -> dict:
-    """
-    Ground an event in observed history. Synchronous (call in executor).
-
-    Returns {"days": float, "at_hour": int, "total": int, "grade": str}
-    where grade ∈ unknown | novel | unusual_hour | occasional | common | routine.
-    """
+    """Grade how familiar this entity reaching this state near this hour is."""
     key = (entity_id, str(new_state), int(hour))
     now = time.monotonic()
     hit = _hist_cache.get(key)
-    if hit and hit[0] > now:
+    if hit is not None and hit[0] > now:
         return hit[1]
 
     days = _data_days()
-    out = {"days": round(days, 1), "at_hour": 0, "total": 0, "grade": "unknown"}
-    if days >= 3:
-        conn = _connect()
-        if conn:
-            try:
-                hours = ((hour - 1) % 24, hour % 24, (hour + 1) % 24)
-                row = conn.execute(
-                    "SELECT "
-                    " SUM(CASE WHEN hour IN (?,?,?) THEN 1 ELSE 0 END) AS at_hour,"
-                    " COUNT(*) AS total "
-                    "FROM state_changes WHERE entity_id = ? AND new_state = ?",
-                    (*hours, entity_id, str(new_state)),
-                ).fetchone()
-                if row:
-                    out["at_hour"] = int(row["at_hour"] or 0)
-                    out["total"] = int(row["total"] or 0)
-                rate = out["at_hour"] / days
-                if out["total"] == 0:
-                    out["grade"] = "novel"
-                elif out["at_hour"] == 0:
-                    out["grade"] = "unusual_hour"
-                elif rate >= 0.5:
-                    out["grade"] = "routine"
-                elif rate >= 0.15:
-                    out["grade"] = "common"
-                else:
-                    out["grade"] = "occasional"
-            except Exception as exc:
-                _LOGGER.debug("local_mind history query: %s", exc)
-            finally:
-                conn.close()
+    profile = {"days": round(days, 1), "at_hour": 0, "total": 0, "grade": "unknown"}
+    conn = _connect() if days >= 3 else None
+    if conn is not None:
+        try:
+            h = int(hour)
+            row = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN hour IN (?, ?, ?) THEN 1 ELSE 0 END) "
+                "FROM state_changes WHERE entity_id = ? AND new_state = ?",
+                ((h - 1) % 24, h % 24, (h + 1) % 24, entity_id, str(new_state)),
+            ).fetchone()
+            total = int(row[0] or 0)
+            profile["total"] = total
+            at_hour = int(row[1] or 0)
+            profile["at_hour"] = at_hour
+            rate = at_hour / days
+            if total == 0:
+                profile["grade"] = "novel"
+            elif at_hour == 0:
+                profile["grade"] = "unusual_hour"
+            elif rate >= 0.5:
+                profile["grade"] = "routine"
+            elif rate >= 0.15:
+                profile["grade"] = "common"
+            else:
+                profile["grade"] = "occasional"
+        except Exception as exc:
+            _LOGGER.debug("Local Mind history query failed for %s: %s", entity_id, exc)
+        finally:
+            conn.close()
 
-    _hist_cache[key] = (now + _HIST_TTL, out)
+    _hist_cache[key] = (now + _HIST_TTL, profile)
     if len(_hist_cache) > 800:
-        for k in list(_hist_cache)[:200]:
-            _hist_cache.pop(k, None)
-    return out
+        for old in list(_hist_cache)[:200]:
+            del _hist_cache[old]
+    return profile
 
 
-# ── 1. Self-awareness ────────────────────────────────────────────────────────
+# ── Flap memory, duplicates, case prior ────────────────────────────────────
 
 def _note_event(entity_id: str) -> bool:
-    """Record this event; return True if the entity is flapping."""
-    dq = _recent_events.setdefault(entity_id, deque(maxlen=8))
+    """Record an event; True when this entity is flapping."""
+    stamps = _recent_events.get(entity_id)
+    if stamps is None:
+        stamps = _recent_events[entity_id] = deque(maxlen=8)
     now = time.monotonic()
-    dq.append(now)
-    recent = [t for t in dq if now - t <= _FLAP_WINDOW]
-    return len(recent) >= _FLAP_COUNT
-
-
-# The pure checks live in cognitive.evaluators; these names stay for callers.
-def _is_duplicate(friendly_name: str, entity_id: str,
-                  recent_announcements: list[str]) -> bool:
-    """Have we already told the user about this device very recently?"""
-    return _ev().is_duplicate(friendly_name, entity_id, recent_announcements)
-
-
-# ── 4. Situational judgment ──────────────────────────────────────────────────
-
-
-def _case_prior(domain: str, device_class: str, category: str,
-                anyone_home: bool) -> tuple[int, int]:
-    """Case-based memory: tally past provider decisions for similar events."""
-    try:
-        from . import reasoning_cache
-        return reasoning_cache.similar(domain, device_class, category, anyone_home)
-    except Exception:
-        return (0, 0)
+    stamps.append(now)
+    return sum(1 for t in stamps if now - t <= _FLAP_WINDOW) >= _FLAP_COUNT
 
 
 def _ev():
@@ -185,180 +178,156 @@ def _ev():
     return evaluators
 
 
-# ── 5. Persona verbalization ─────────────────────────────────────────────────
-
-_STATE_PHRASES = {
-    "on": "is on", "off": "is off", "open": "is open", "closed": "is closed",
-    "opening": "is opening", "closing": "is closing", "unlocked": "is unlocked",
-    "locked": "is locked", "detected": "has detected activity",
-    "home": "has arrived home", "not_home": "has left",
-    "unavailable": "has gone unresponsive", "unknown": "is in an unknown state",
-}
+def _is_duplicate(friendly_name, entity_id, recent_announcements) -> bool:
+    return _ev().is_duplicate(friendly_name, entity_id, recent_announcements)
 
 
-def _state_phrase(to_state: str, device_class: str = "", entity_id: str = "") -> str:
+def _case_prior(domain, device_class, category, anyone_home) -> tuple[int, int]:
+    try:
+        from . import reasoning_cache
+        return reasoning_cache.similar(domain, device_class, category, anyone_home)
+    except Exception:
+        return (0, 0)
+
+
+# ── Voice ──────────────────────────────────────────────────────────────────
+
+def _state_phrase(to_state, device_class="", entity_id="") -> str:
+    """How a new state reads after the device's name."""
     s = str(to_state or "").strip().lower()
-    # Binary sensors report on/off even for doors and motion — phrase them the
-    # way a person would.
     dc = (device_class or "").lower()
     eid = (entity_id or "").lower()
-    opening_like = dc in ("door", "window", "garage_door", "opening") or any(
-        k in eid for k in ("door", "window", "garage", "gate"))
-    motion_like = dc in ("motion", "occupancy", "presence") or "motion" in eid or "occupancy" in eid
-    safety_on = {
-        "smoke": "is detecting smoke",
-        "carbon_monoxide": "is detecting carbon monoxide",
-        "gas": "is detecting gas",
-        "moisture": "is detecting water",
-        "heat": "is detecting excessive heat",
-        "tamper": "has been tampered with",
-        "vibration": "is detecting vibration",
-        "sound": "is detecting sound",
-        "problem": "is reporting a problem",
-        "safety": "has raised an alert",
-    }
-    leak_like = dc in ("moisture",) or any(k in eid for k in ("leak", "flood", "water_"))
+    opening = dc in _OPENING_CLASSES or any(k in eid for k in ("door", "window", "garage", "gate"))
+    motion = dc in _MOTION_CLASSES or "motion" in eid or "occupancy" in eid
+    leak = dc == "moisture" or any(k in eid for k in ("leak", "flood", "water_"))
+
     if s == "on":
-        if dc in safety_on:
-            return safety_on[dc]
-        if leak_like:
+        if dc in _SAFETY_PHRASES:
+            return _SAFETY_PHRASES[dc]
+        if leak:
             return "is detecting water"
-        if opening_like:
+        if opening:
             return "is open"
-        if motion_like:
+        if motion:
             return "has detected motion"
     elif s == "off":
-        if dc in safety_on or leak_like:
+        if dc in _SAFETY_PHRASES or leak:
             return "has cleared"
-        if opening_like:
+        if opening:
             return "is closed"
-        if motion_like:
+        if motion:
             return "has gone quiet"
-    # Numeric readings: batteries get percentage phrasing, sensors get "reads".
+
     try:
-        v = float(s)
+        num = float(s)
         if dc == "battery" or "battery" in eid:
-            return f"battery is at {int(v) if v == int(v) else v}%"
+            whole = int(num)
+            return f"battery is at {whole if num == whole else num}%"
         if eid.startswith("sensor."):
             return f"reads {to_state}"
     except (TypeError, ValueError):
         pass
-    return _STATE_PHRASES.get(s, f"is now {to_state}" if to_state else "needs attention")
+
+    if s in _STATE_PHRASES:
+        return _STATE_PHRASES[s]
+    return f"is now {to_state}" if to_state else "needs attention"
 
 
 def _pick(variants: list[str], entity_id: str, hour: int) -> str:
-    h = int(hashlib.md5(f"{entity_id}|{hour}".encode()).hexdigest()[:6], 16)
-    return variants[h % len(variants)]
+    """A stable choice per entity and hour."""
+    digest = hashlib.md5(f"{entity_id}|{hour}".encode()).hexdigest()
+    return variants[int(digest[:6], 16) % len(variants)]
 
 
-def _compose(honorific: str, friendly_name: str, entity_id: str, to_state: str,
-             hour: int, *, novelty: str, away: bool, escalated: bool,
-             device_class: str = "", urgency: str = "") -> str:
-    name = friendly_name or (entity_id.split(".", 1)[-1].replace("_", " ").title()
-                             if entity_id else "A device")
+def _compose(honorific, friendly_name, entity_id, to_state, hour, *, novelty, away,
+             escalated, device_class="", urgency="") -> str:
+    """One spoken sentence: opener, device and state, then any context."""
+    if friendly_name:
+        name = friendly_name
+    elif entity_id:
+        name = entity_id.split(".", 1)[-1].replace("_", " ").title()
+    else:
+        name = "A device"
     core = f"{name} {_state_phrase(to_state, device_class, entity_id)}"
+
     clauses = []
     if away:
         clauses.append("while no one is home")
     if novelty == "novel":
-        clauses.append(_pick(["the first time I've observed this",
-                              "I haven't seen this before",
-                              "a first in my records"], entity_id, hour))
+        clauses.append(_pick(_NOVEL_CLAUSES, entity_id, hour))
     elif novelty == "unusual_hour":
-        if 0 <= hour <= 5:
-            clauses.append("which is unusual at this hour of the night")
-        else:
-            clauses.append("which is out of pattern for this time of day")
-    tail = (" — " + ", ".join(clauses)) if clauses else ""
-    # The opener carries Nova's personality and varies every time (anti-repeat),
-    # matched to register — plain and unembellished when the matter is grave. The
-    # factual body above stays stable; only the voice around it varies.
+        clauses.append("which is unusual at this hour of the night" if 0 <= hour <= 5
+                       else "which is out of pattern for this time of day")
+    tail = " — " + ", ".join(clauses) if clauses else ""
+
     try:
         from . import persona
-        register = persona.register_for(urgency) if urgency else ("urgent" if escalated else "neutral")
+        if urgency:
+            register = persona.register_for(urgency)
+        else:
+            register = "urgent" if escalated else "neutral"
         opener = persona.announce_opener(honorific, register)
     except Exception:
-        # honorific may be "" once nobody specific is home to address (see
-        # honorific.py) — an empty opener skips the leading address entirely
-        # rather than emitting a bare ",".
         opener = f"{honorific.title()}," if honorific else ""
-    sep = " " if opener else ""
-    return f"{opener}{sep}{core}{tail}."
+    return opener + (" " if opener else "") + core + tail + "."
 
 
-def compose_announcement(honorific: str, friendly_name: str, entity_id: str = "",
-                         to_state: str = "", device_class: str = "", *,
-                         hour: Optional[int] = None, novelty: str = "unknown",
-                         away: bool = False, escalated: bool = False,
-                         urgency: str = "") -> str:
-    """
-    Public verbalizer — the single voice for ALL local speech. The learned-cache
-    replay, the legacy templates, and the last-ditch fallback all compose through
-    here so local announcements sound like one mind, not three vintages of
-    template. Device-aware, context-claused, hash-varied.
-    """
+def compose_announcement(honorific, friendly_name, entity_id="", to_state="",
+                         device_class="", *, hour=None, novelty="unknown", away=False,
+                         escalated=False, urgency="") -> str:
     if hour is None:
         from datetime import datetime
         hour = datetime.now().hour
-    return _compose(honorific, friendly_name, entity_id, to_state, int(hour),
-                    novelty=novelty, away=away, escalated=escalated,
-                    device_class=device_class, urgency=urgency)
+    opts = dict(novelty=novelty, away=away, escalated=escalated,
+                device_class=device_class, urgency=urgency)
+    return _compose(honorific, friendly_name, entity_id, to_state, int(hour), **opts)
 
 
-# ── The assessment ───────────────────────────────────────────────────────────
+# ── The assessment ─────────────────────────────────────────────────────────
 
-def assess_core(*, honorific: str, entity_id: str, domain: str,
-                device_class: str, category: str, from_state: str,
-                to_state: str, friendly_name: str, urgency: str,
-                anyone_home: bool, recent_announcements: list[str],
-                hour: int, history: dict,
-                prior: tuple[int, int]) -> dict:
-    """The Local Mind decision for one event. The procedure itself is the
-    pure cognitive.evaluators.evaluate_local_mind; this façade keeps the
-    flap memory and the decision counters it always kept, and voices the
-    result."""
+def assess_core(*, honorific, entity_id, domain, device_class, category, from_state,
+                to_state, friendly_name, urgency, anyone_home, recent_announcements,
+                hour, history, prior) -> dict:
+    """Decide and voice one event from already-gathered inputs."""
     from .cognitive.models import EventSnapshot
     from .cognitive.presentation import voiced
     flapping = _note_event(entity_id or friendly_name or "?")
-    snap = EventSnapshot.build(
+    snapshot = EventSnapshot.build(
         entity_id=entity_id, domain=domain, device_class=device_class,
         from_state=from_state, to_state=to_state, friendly_name=friendly_name,
         category=category, urgency=urgency, anyone_home=anyone_home,
         recent_announcements=recent_announcements)
-    d = _ev().evaluate_local_mind(snap, history=history, prior=prior, flapping=flapping,
-                                  hour=hour, flap_count=_FLAP_COUNT,
+    d = _ev().evaluate_local_mind(snapshot, history=history, prior=prior,
+                                  flapping=flapping, hour=hour, flap_count=_FLAP_COUNT,
                                   flap_window_s=_FLAP_WINDOW)
     _stats["decisions"] += 1
     _stats["spoke" if d.speak else "silent"] += 1
     return voiced(d, honorific).as_dict()
 
 
-async def assess(hass, *, honorific: str, entity_id: str = "", domain: str = "",
-                 device_class: str = "", category: str = "", from_state: str = "",
-                 to_state: str = "", friendly_name: str = "",
-                 urgency: str = "medium", anyone_home: bool = False,
-                 recent_announcements: Optional[list[str]] = None) -> dict:
-    """Full assessment: history lookup in executor, then the pure core."""
+async def assess(hass, *, honorific, entity_id="", domain="", device_class="",
+                 category="", from_state="", to_state="", friendly_name="",
+                 urgency="medium", anyone_home=False, recent_announcements=None) -> dict:
+    """Gather history and case memory, then decide offline."""
     from datetime import datetime
     hour = datetime.now().hour
-    try:
-        history = await hass.async_add_executor_job(
-            history_profile, entity_id, to_state, hour)
-    except Exception:
-        history = {"grade": "unknown", "days": 0, "at_hour": 0, "total": 0}
     prior = _case_prior(domain, device_class, category, anyone_home)
+    try:
+        history = await hass.async_add_executor_job(history_profile, entity_id,
+                                                    to_state, hour)
+    except Exception:
+        history = dict(grade="unknown", days=0, at_hour=0, total=0)
     dec = assess_core(
-        honorific=honorific, entity_id=entity_id, domain=domain,
-        device_class=device_class, category=category, from_state=from_state,
-        to_state=to_state, friendly_name=friendly_name, urgency=urgency,
-        anyone_home=anyone_home,
-        recent_announcements=recent_announcements or [],
-        hour=hour, history=history, prior=prior)
+        entity_id=entity_id, friendly_name=friendly_name, domain=domain,
+        device_class=device_class, category=category, urgency=urgency,
+        from_state=from_state, to_state=to_state, honorific=honorific,
+        recent_announcements=recent_announcements or [], anyone_home=anyone_home,
+        prior=prior, history=history, hour=hour)
     try:
         from .websocket import nova_log
-        nova_log("LOCAL", f"{entity_id or friendly_name}: "
-                            f"{'SPEAK' if dec['speak'] else 'silent'} — "
-                            f"{dec['reason'].replace('local mind: ', '')}")
+        why = str(dec.get("reason", "")).removeprefix("local mind: ")
+        verdict = "SPEAK" if dec.get("speak") else "silent"
+        nova_log("LOCAL", f"{entity_id or friendly_name}: {verdict} — {why}")
     except Exception:
         pass
     return dec

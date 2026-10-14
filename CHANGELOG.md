@@ -1,3 +1,11 @@
+## [8.49.16] — Four decision modules rewritten from scratch
+
+Step 9 continues with the decision modules. The event classifier, the learned decision cache, the offline "local mind" and Nova's operational modes are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** how a state change is sorted into a category and urgency, the cache of decisions Nova has learned, the offline decision and announcement wording, and the operational modes (normal, party, movie, away and the rest).
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.15] — Five reasoning support modules rewritten from scratch
 
 Step 9 continues with the reasoning support group. The fault history, the "why did this happen" analysis, local document search, the home snapshot the agent sees and the habit likelihoods are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
