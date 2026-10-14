@@ -154,6 +154,7 @@ class NovaSentinel:
         self._active = False
         self._entity_cache: list[str] = []
         self._unsubs: list = []
+        self._state_unsub = None
         # Keyed "entity_id:rule_id": when the rule began to match, and when it
         # was last announced.
         self._state_start: dict[str, datetime] = {}
@@ -192,16 +193,23 @@ class NovaSentinel:
                      len(self._entity_cache))
 
     def _refresh_subscription(self) -> None:
-        """Listen for state changes on the current entity list.
-
-        Preserved quirk: an earlier listener is never taken down here. It is
-        kept in _unsubs and only removed by async_stop, so after a rescan that
-        changed the list the old listeners still fire alongside the new one.
-        """
+        """Listen for state changes on the current entity list, replacing the
+        previous listener so a removed sensor stops being followed and no
+        event is handled twice."""
+        previous = self._state_unsub
+        self._state_unsub = None
+        if previous is not None:
+            if previous in self._unsubs:
+                self._unsubs.remove(previous)
+            try:
+                previous()
+            except Exception:  # pylint: disable=broad-except
+                pass
         if not self._entity_cache:
             return
-        self._unsubs.append(async_track_state_change_event(
-            self.hass, self._entity_cache, self._handle_state_change))
+        self._state_unsub = async_track_state_change_event(
+            self.hass, self._entity_cache, self._handle_state_change)
+        self._unsubs.append(self._state_unsub)
 
     @callback
     def _refresh_entities(self, now) -> None:  # noqa: ARG002
@@ -227,6 +235,7 @@ class NovaSentinel:
                 remove()
             except Exception:  # pylint: disable=broad-except
                 continue
+        self._state_unsub = None
         self._active = False
         _LOGGER.info("Nova Sentinel stopped.")
 
