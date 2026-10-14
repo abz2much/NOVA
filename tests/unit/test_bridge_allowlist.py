@@ -35,7 +35,7 @@ FOREIGN_ALLOWLIST = {
     ("camera_backends.py", "fetch_best_image", 'nest_data = hass.data.get("nest")'):
         "the Nest integration's own data",
     ("doorbell_training.py", "_iter_nest_doorbell_devices",
-     'data = (hass.data.get("nest") or {}).get(getattr(entry, "entry_id", ""), None)'):
+     'nest = hass.data.get("nest") or {}'):
         "the Nest integration's own data",
     ("automation/inventory.py", "_runtime_entities",
      "component = hass.data.get(DATA_COMPONENT)"):
