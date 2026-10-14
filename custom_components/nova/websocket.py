@@ -304,7 +304,7 @@ def _from_json(raw, keep_bad_text: bool = False):
 
 def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
     """A JSON valued setting, decoded. A layer whose value does not parse is
-    skipped, except config.json, whose text then comes back as it is."""
+    skipped, config.json included."""
     if entry is not None:
         live = _live_runtime_config(entry).get(key)
         if live is not None:
@@ -315,7 +315,9 @@ def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
         from . import nova_config
         saved = nova_config.get(key)
         if saved is not None:
-            return _from_json(saved, keep_bad_text=True)
+            value = _from_json(saved)
+            if value is not _UNREADABLE:
+                return value
     except Exception:
         pass
     if entry is not None:
@@ -325,6 +327,13 @@ def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
             if value is not _UNREADABLE:
                 return value
     return default
+
+
+def _movie_dim_pct(hass: HomeAssistant, entry) -> int:
+    """The saved movie dim level; a saved 0 stays 0, only a missing or blank
+    value reads as the default 15."""
+    value = _runtime_opt(hass, entry, "movie_dim_pct", 15)
+    return 15 if value in (None, "") else int(value)
 
 
 def _get_disabled_rules(hass: HomeAssistant, entry) -> list[str]:
@@ -731,7 +740,7 @@ async def ws_get_panel_data(
                 "available_labels": _available_labels(hass),
                 "sleep_override": sleep_detection.current_override(),
                 "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
-                "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
+                "movie_dim_pct": _movie_dim_pct(hass, entry),
                 "self_hosted_endpoints_migrated": bool(_runtime_opt(
                     hass, entry, "self_hosted_endpoints_migrated", False)),
                 "notify_service": first_notify,
@@ -909,14 +918,15 @@ async def _save_hazard_location(hass: HomeAssistant, live: dict, key: str, value
     from . import hazard_monitor, nova_config
     home = hazard_monitor.base_home_latlon(hass)
 
-    async def _forget_both() -> None:
+    async def _forget_both() -> bool:
+        saved = True
         for name in _HAZARD_PAIR:
             live.pop(name, None)
-            await hass.async_add_executor_job(nova_config.delete, name)
+            saved = await hass.async_add_executor_job(nova_config.delete, name) and saved
+        return saved
 
     if value == "":
-        await _forget_both()
-        return True
+        return await _forget_both()
     mine = _HAZARD_PAIR.index(key)
     theirs = 1 - mine
     pair = [0.0, 0.0]
@@ -929,8 +939,7 @@ async def _save_hazard_location(hass: HomeAssistant, live: dict, key: str, value
     pair[theirs] = float(partner)
     if home is not None and all(
             math.isclose(pair[i], home[i], rel_tol=0.0, abs_tol=1e-7) for i in (0, 1)):
-        await _forget_both()
-        return True
+        return await _forget_both()
     updates = {_HAZARD_PAIR[0]: pair[0], _HAZARD_PAIR[1]: pair[1]}
     live.update(updates)
     return await hass.async_add_executor_job(nova_config.set_many, updates)
@@ -1204,13 +1213,17 @@ async def ws_semantic_search(
     try:
         from . import embeddings, nova_config
         if action == "status":
-            base = embeddings._ollama_base()
-            stored = await hass.async_add_executor_job(embeddings.vector_count)
+            def _status() -> tuple:
+                # config.json may still need loading, so read off the loop.
+                return (bool(nova_config.get("semantic_search", False)),
+                        embeddings._ollama_base(), embeddings._model(),
+                        embeddings.vector_count())
+            enabled, base, model, stored = await hass.async_add_executor_job(_status)
             connection.send_result(msg["id"], {
-                "enabled": bool(nova_config.get("semantic_search", False)),
+                "enabled": enabled,
                 "ollama_configured": bool(base),
                 "base": _masked_url(base),
-                "model": embeddings._model(),
+                "model": model,
                 "vector_count": stored,
             })
             return
