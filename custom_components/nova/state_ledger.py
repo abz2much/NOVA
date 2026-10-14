@@ -1,17 +1,14 @@
-"""Atomic state-recovery ledger for Nova.
+"""Write-ahead ledger for high-stakes device actions.
 
-A small write-ahead log: before a high-stakes action (lock, cover, alarm) fires,
-its *intent* is appended to disk; after it's confirmed, a completion record is
-appended. On boot, ``reconcile`` replays any intent that never completed and
-checks whether the physical device actually reached the desired state — surfacing
-actions that a crash or power loss interrupted mid-flight.
+Before a lock, cover or alarm command is sent, the caller records an
+*intent*; once the command is accepted it records a *completion*. Intents
+left without a completion (a crash or power loss in between) are reported
+at boot so they can be compared with the device's real state.
 
-Append-only JSON-lines on disk (crash-friendly), compacted to just the
-outstanding intents once reconciled. Stdlib-only, so the ledger and its
-reconciliation logic test without Home Assistant.
-
-NOTE: lives at the top level as ``state_ledger.py`` — deliberately NOT under a
-``memory/`` package, which would shadow the canonical ``memory.py`` module.
+Storage is a single append-only JSON-lines file under the Nova data folder,
+periodically compacted down to the intents that are still outstanding.
+Only the standard library is imported at module level, so the file can be
+loaded on its own outside the package.
 """
 from __future__ import annotations
 
@@ -24,123 +21,148 @@ from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_LEDGER_PATH: Optional[str] = None  # override; None resolves via paths.py
+DEFAULT_LEDGER_PATH: Optional[str] = None
+MAX_RECORDS = 5000
+
+_OP_INTENT = "intent"
+_OP_COMPLETE = "complete"
 
 
 def _default_ledger_path() -> str:
-    # Imported here so this stdlib-only module still loads on its own.
+    """Return the ledger location: the module override, else the Nova path."""
+    # Imported lazily so a standalone load of this file stays importable.
     from . import paths
-    return DEFAULT_LEDGER_PATH or paths.nova_path("state_ledger.jsonl")
+
+    if DEFAULT_LEDGER_PATH:
+        return DEFAULT_LEDGER_PATH
+    return paths.nova_path("state_ledger.jsonl")
 
 
-MAX_RECORDS = 5000
+def _ensure_parent(target: str) -> None:
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+
+
+def _encode(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False) + "\n"
+
+
+def _outstanding(records: list) -> list:
+    """Intents in file order whose txn never appears on a completion."""
+    done = {rec.get("txn") for rec in records if rec.get("op") == _OP_COMPLETE}
+    return [
+        rec
+        for rec in records
+        if rec.get("op") == _OP_INTENT and rec.get("txn") not in done
+    ]
 
 
 class StateLedger:
-    """Append-only write-ahead log for high-stakes device intents."""
+    """Durable intent/completion log; all state lives in the file."""
 
-    def __init__(self, path: Optional[str] = None, *, max_records: int = MAX_RECORDS) -> None:
-        self.path = path or _default_ledger_path()
+    def __init__(
+        self, path: Optional[str] = None, *, max_records: int = MAX_RECORDS
+    ) -> None:
+        # No filesystem access here: construction happens on the event loop.
+        self.path: str = path or _default_ledger_path()
         self.max_records = max_records
         self._lock = Lock()
         self._seq = 0
 
-    # ── Disk (append-only JSON lines, corruption-tolerant) ────────────────
-    def _read(self) -> list[dict]:
-        records: list[dict] = []
+    # -- low-level file helpers (callers hold the lock where needed) -------
+
+    def _load(self) -> list:
+        records: list = []
         try:
-            with open(self.path, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                for raw in handle:
+                    text = raw.strip()
+                    if not text:
                         continue
                     try:
-                        records.append(json.loads(line))
+                        records.append(json.loads(text))
                     except json.JSONDecodeError:
-                        continue  # skip a torn final line from a crash
+                        continue
         except FileNotFoundError:
             return []
-        except OSError as exc:
-            _LOGGER.warning("state ledger unreadable (%s)", exc)
+        except OSError as err:
+            _LOGGER.warning("Cannot read state ledger %s: %s", self.path, err)
             return []
         return records
 
     def _append(self, record: dict) -> None:
+        line = _encode(record)
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())  # durable before the action proceeds
-        except OSError as exc:
-            _LOGGER.error("Failed to append to state ledger: %s", exc)
+            _ensure_parent(self.path)
+            with open(self.path, "a", encoding="utf-8") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as err:
+            _LOGGER.error("Cannot append to state ledger %s: %s", self.path, err)
 
-    def _rewrite(self, records: list[dict]) -> None:
+    def _rewrite(self, records: list) -> None:
+        tmp_path = self.path + ".tmp"
         try:
-            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            tmp = f"{self.path}.tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                for record in records:
-                    fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, self.path)
-        except OSError as exc:
-            _LOGGER.error("Failed to rewrite state ledger: %s", exc)
+            _ensure_parent(self.path)
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                for rec in records:
+                    handle.write(_encode(rec))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, self.path)
+        except OSError as err:
+            _LOGGER.error("Cannot compact state ledger %s: %s", self.path, err)
 
-    # ── Write-ahead API ───────────────────────────────────────────────────
+    def _compact_unlocked(self) -> None:
+        self._rewrite(_outstanding(self._load()))
+
+    # -- public API ---------------------------------------------------------
+
     def record_intent(self, entity_id: str, desired_state: str, **meta) -> str:
-        """Durably log the intent to drive ``entity_id`` to ``desired_state``
-        BEFORE issuing the service call. Returns a txn id."""
+        """Durably note that ``entity_id`` is about to be set; return the txn."""
         with self._lock:
             self._seq += 1
             txn = f"{time.time():.6f}-{entity_id}-{self._seq}"
-            self._append({
+            record = {
                 "txn": txn,
-                "op": "intent",
+                "op": _OP_INTENT,
                 "entity_id": entity_id,
                 "desired_state": str(desired_state),
-                "meta": meta,
+                "meta": dict(meta),
                 "ts": time.time(),
-            })
-            # Bound growth: compact if the log has grown large.
-            if len(self._read()) > self.max_records:
-                self._compact_locked()
+            }
+            self._append(record)
+            if len(self._load()) > self.max_records:
+                self._compact_unlocked()
         return txn
 
     def mark_complete(self, txn: str) -> None:
-        """Log that ``txn``'s action was confirmed."""
+        """Note that the action for ``txn`` was accepted."""
         with self._lock:
-            self._append({"txn": txn, "op": "complete", "ts": time.time()})
+            self._append({"txn": txn, "op": _OP_COMPLETE, "ts": time.time()})
 
-    # ── Recovery ──────────────────────────────────────────────────────────
     def pending_intents(self) -> list[dict]:
-        """Intents with no matching completion — i.e. possibly interrupted."""
-        records = self._read()
-        completed = {r.get("txn") for r in records if r.get("op") == "complete"}
-        return [
-            r for r in records
-            if r.get("op") == "intent" and r.get("txn") not in completed
-        ]
+        """Intents that have no matching completion, in file order."""
+        return _outstanding(self._load())
 
     def reconcile(self, verify_fn) -> list[dict]:
-        """For every outstanding intent, compare the desired state against the
-        device's current state via ``verify_fn(entity_id) -> state | None``.
-        Returns the mismatches as {..intent.., 'actual': <state>}."""
-        discrepancies: list[dict] = []
+        """Compare each pending intent with ``verify_fn(entity_id)``.
+
+        Returns the intents whose actual state differs (string comparison),
+        each copied with an added ``"actual"`` key. Nothing is written.
+        """
+        mismatches: list[dict] = []
         for intent in self.pending_intents():
+            entity_id = intent["entity_id"]
             try:
-                actual = verify_fn(intent["entity_id"])
-            except Exception:  # noqa: BLE001
+                actual = verify_fn(entity_id)
+            except Exception:  # noqa: BLE001 - a failing probe counts as unknown
                 actual = None
             if str(actual) != intent["desired_state"]:
-                discrepancies.append({**intent, "actual": actual})
-        return discrepancies
+                mismatches.append({**intent, "actual": actual})
+        return mismatches
 
     def compact(self) -> None:
-        """Drop completed transactions, keeping only outstanding intents."""
+        """Rewrite the ledger so it holds only the outstanding intents."""
         with self._lock:
-            self._compact_locked()
-
-    def _compact_locked(self) -> None:
-        self._rewrite(self.pending_intents())
+            self._compact_unlocked()
