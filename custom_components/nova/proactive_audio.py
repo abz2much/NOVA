@@ -396,7 +396,8 @@ def _history_phrase(matches: list[dict], honorific: str) -> str:
         return ""
     # honorific may be "" once nobody specific is home to address (see
     # honorific.py) — addr collapses to a single comma instead of two.
-    addr = f", {honorific.title()}" if honorific else ""
+    from .persona import capitalise
+    addr = f", {capitalise(honorific)}" if honorific else ""
     if count == 1:
         return f" For context{addr}, this has occurred once before."
     return f" For context{addr}, this has occurred {count} times before."

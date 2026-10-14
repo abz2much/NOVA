@@ -268,7 +268,8 @@ def _compose(honorific, friendly_name, entity_id, to_state, hour, *, novelty, aw
             register = "urgent" if escalated else "neutral"
         opener = persona.announce_opener(honorific, register)
     except Exception:
-        opener = f"{honorific.title()}," if honorific else ""
+        h = " ".join(word.capitalize() for word in (honorific or "").split())
+        opener = f"{h}," if h else ""
     return opener + (" " if opener else "") + core + tail + "."
 
 

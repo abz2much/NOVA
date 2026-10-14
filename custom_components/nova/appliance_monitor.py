@@ -136,6 +136,10 @@ _DELTA_SUSTAIN_S = 30.0
 _WINDOW = 20
 _DELTA_TIMEOUT_S = 14400.0
 _SAME_LOAD_W = 300.0
+# A declared washer, dryer or dishwasher pauses mid-cycle (a heater switching
+# off, the drum resting), so its load must stay off this long to be finished.
+_CYCLE_PAUSE_S = 600.0
+_PAUSING_TYPES = frozenset({"WASHER", "DRYER", "DISHWASHER"})
 
 # Loads Nova must never call "done" (always on, or a safety concern).
 _NEVER_ANNOUNCE = (
@@ -500,14 +504,24 @@ def _discover_native_appliances(hass: HomeAssistant) -> dict[str, _NativeApplian
                      or ApplianceType.GENERIC)
             if forced is not None:
                 atype = forced
-            found[eid] = _NativeAppliance(
+            found[eid] = _seeded(_NativeAppliance(
                 entity_id=eid,
                 device_name=device_name or friendly.lower() or eid,
                 appliance=atype,
                 trigger_states=done,
                 last_state=str(state.state).lower(),
-            )
+            ))
     return found
+
+
+def _seeded(native: _NativeAppliance) -> _NativeAppliance:
+    """Take a real starting state as the first one seen, so a cycle already
+    under way when the monitor starts is announced when it finishes. An
+    unknown or unavailable start leaves the first event to seed it."""
+    if native.last_state not in _SKIP_STATES:
+        native.seeded = True
+        native.announced = native.last_state in native.trigger_states
+    return native
 
 
 def _discover_whole_home_meter(hass: HomeAssistant) -> Optional[_DeltaTracker]:
@@ -659,8 +673,22 @@ def _end_delta(tracker: _DeltaTracker, did: str, d: dict) -> None:
     _schedule(synth, atype.label)
 
 
+def _pause_s(d: dict) -> float:
+    """How long a load must stay off before it counts as finished."""
+    matched = d.get("matched")
+    if matched is None:
+        return 0.0
+    atype = _type_to_appliance(matched.get("type"))
+    return _CYCLE_PAUSE_S if atype.name in _PAUSING_TYPES else 0.0
+
+
 def _process_delta(power_w: float) -> None:
-    """Feed one whole-home reading into load start/stop detection."""
+    """Feed one whole-home reading into load start/stop detection.
+
+    Loads are sized by the step they add on top of the loads already
+    running, so a kettle during a dryer cycle is seen as a kettle. A load
+    whose step goes away is held as ended (``ended_at``) and finished once
+    it has stayed off for its pause; it resumes if its draw comes back."""
     tracker = _MON.delta
     if tracker is None:
         return
@@ -671,23 +699,55 @@ def _process_delta(power_w: float) -> None:
         tracker.baseline_w = sum(tracker.samples) / len(tracker.samples)
 
     now = time.time()
+
+    def _running() -> list[tuple[str, dict]]:
+        return [(did, d) for did, d in tracker.active_deltas.items()
+                if not d.get("ended_at")]
+
+    def _level() -> float:
+        return tracker.baseline_w + sum(d["delta_w"] for _did, d in _running())
+
     diff = power_w - tracker.baseline_w
+    step = power_w - _level()
     if diff > _JUMP_W:
         same = None
-        for d in tracker.active_deltas.values():
+        for _did, d in _running():
             if abs(d["delta_w"] - diff) < _SAME_LOAD_W:
                 same = d
                 break
         if same is not None:
             if power_w > same["peak_w"]:
                 same["peak_w"] = power_w
-        else:
-            _new_delta(tracker, power_w, diff)
+        elif step > _JUMP_W:
+            resumed = None
+            for d in tracker.active_deltas.values():
+                if d.get("ended_at") and abs(d["delta_w"] - step) < _SAME_LOAD_W:
+                    resumed = d
+                    break
+            if resumed is not None:
+                resumed.pop("ended_at", None)
+            else:
+                _new_delta(tracker, power_w, step)
+
+    aged = [(did, d) for did, d in _running()
+            if now - d["start_time"] > _DELTA_SUSTAIN_S and not d.get("announced")]
+    if power_w < tracker.baseline_w + _DROP_W:
+        for _did, d in aged:
+            d["ended_at"] = now
+    elif aged:
+        missing = _level() - power_w
+        if missing > _DROP_W:
+            _did, d = min(aged, key=lambda item: abs(item[1]["delta_w"] - missing))
+            if abs(d["delta_w"] - missing) < _SAME_LOAD_W:
+                d["ended_at"] = now
 
     for did, d in list(tracker.active_deltas.items()):
-        if (power_w < tracker.baseline_w + _DROP_W
-                and now - d["start_time"] > _DELTA_SUSTAIN_S
-                and not d.get("announced")):
+        ended_at = d.get("ended_at")
+        if not ended_at:
+            continue
+        if ended_at != now and power_w - _level() >= _DROP_W:
+            d.pop("ended_at", None)          # its draw came back: same cycle
+        elif now - ended_at >= _pause_s(d):
             d["announced"] = True
             tracker.active_deltas.pop(did, None)
             _end_delta(tracker, did, d)
@@ -881,17 +941,40 @@ def _wire_profile(hass: HomeAssistant) -> None:
         atype = _type_to_appliance(ap["type"])
         state = hass.states.get(eid)
         if state is not None and _looks_like_power(state):
-            if eid not in _MON.sensors:
+            found = _MON.sensors.get(eid)
+            if found is None:
                 _MON.sensors[eid] = _SensorState(
                     entity_id=eid,
                     friendly_name=_friendly(state) or eid or ap["name"],
                     appliance=atype, discovery_method="declared_entity")
+            else:
+                # The user's declaration outranks discovery's guess.
+                found.discovery_method = "declared_entity"
+                found.identified = True
+                if atype != ApplianceType.GENERIC:
+                    found.appliance = atype
         elif eid not in _MON.natives:
             pattern = _native_pattern(eid.lower())
-            _MON.natives[eid] = _NativeAppliance(
+            _MON.natives[eid] = _seeded(_NativeAppliance(
                 entity_id=eid, device_name=ap["name"], appliance=atype,
                 trigger_states=pattern[1] if pattern else _DONE_ON,
-                last_state=str(state.state).lower() if state is not None else "")
+                last_state=str(state.state).lower() if state is not None else ""))
+
+
+def _seed_running_sensors(hass: HomeAssistant) -> None:
+    """A sensor already drawing a running load when the monitor starts is
+    mid-cycle (Nova restarted, or appliances were saved), so its cycle is
+    picked up as running and its finish is announced."""
+    now = time.time()
+    for sensor in _MON.sensors.values():
+        state = hass.states.get(sensor.entity_id)
+        watts = _parse_watts(state) if state is not None else None
+        if watts is None or watts < sensor.appliance.run_threshold:
+            continue
+        sensor.phase = "running"
+        sensor.run_start = now
+        sensor.last_power = watts
+        sensor.peak_power = watts
 
 
 async def start(hass: HomeAssistant, config: dict, entry: Any = None) -> None:
@@ -910,9 +993,13 @@ async def start(hass: HomeAssistant, config: dict, entry: Any = None) -> None:
     _MON.delta = await hass.async_add_executor_job(
         _discover_whole_home_meter, hass)
 
+    if _MON.delta is not None:
+        # The whole-home meter is never an appliance of its own.
+        _MON.sensors.pop(_MON.delta.entity_id, None)
     _drop_superseded_sensors(hass)
     _add_explicit_sensors(hass)
     _wire_profile(hass)
+    _seed_running_sensors(hass)
 
     if not _MON.sensors and not _MON.natives and _MON.delta is None:
         _LOGGER.info("Appliance monitor: no power sensors, completion entities "

@@ -22,13 +22,13 @@ SUMMARY_MODEL = "openai/gpt-oss-120b"
 
 
 def _period(hours: int) -> str:
-    """Plain-English span for ``hours``."""
+    """Plain-English span for ``hours``: whole days of two or more in days,
+    anything else in hours."""
     if hours <= 1:
         return "hour"
-    if hours <= 24:
+    if hours <= 24 or hours % 24:
         return f"{hours} hours"
-    days = hours // 24
-    return f"{days} day" + ("s" if days > 1 else "")
+    return f"{hours // 24} days"
 
 
 def _transcript_line(message: dict) -> str:
@@ -53,8 +53,9 @@ async def async_summarise(hass: HomeAssistant, call: ServiceCall, groq_client,
 
     if not messages:
         addr = f", {honorific}" if honorific else ""
-        quiet = (f"Nothing to report{addr}. The last {period} appear to have "
-                 "been remarkably quiet.")
+        quiet = (f"Nothing to report{addr}. The last {period} "
+                 f"{'appears' if period == 'hour' else 'appear'} "
+                 "to have been remarkably quiet.")
         if announce:
             await async_announce(hass, quiet, tts_entity, speakers,
                                  context="summary")

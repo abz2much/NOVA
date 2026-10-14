@@ -247,7 +247,8 @@ def test_mark_fired_unknown_id_and_failures_are_quiet(rem, clock, monkeypatch, t
     ("daily", timedelta(days=1)), ("weekly", timedelta(days=7)),
     ("hourly", timedelta(hours=1)),
 ])
-def test_repeating_reminders_move_one_step(rem, repeat, step):
+def test_repeating_reminders_move_one_step(rem, clock, repeat, step):
+    clock["now"] = T9 + timedelta(minutes=1)
     rid = rem.add_reminder("x", T9, repeat)
     _sql(rem, "UPDATE reminders SET last_fired = ?", "2026-03-01T09:00:10")
     assert rem.get_due_reminders(T9 + timedelta(minutes=1)) == []
@@ -259,12 +260,24 @@ def test_repeating_reminders_move_one_step(rem, repeat, step):
     assert after["last_fired"] is None
 
 
-def test_advance_does_not_catch_up_to_now(rem):
+def test_advance_catches_up_to_the_first_time_after_now(rem, clock):
+    clock["now"] = T9 + timedelta(minutes=1)
     rem.add_reminder("x", T9 - timedelta(days=10), "daily")
     (row,) = _rows(rem)
     rem._advance_repeating(row)
-    assert _rows(rem)[0]["trigger_at"] == (T9 - timedelta(days=9)).isoformat()
-    assert len(rem.get_due_reminders(T9)) == 1           # still due: fires again
+    assert _rows(rem)[0]["trigger_at"] == (T9 + timedelta(days=1)).isoformat()
+    assert rem.get_due_reminders(clock["now"]) == []
+
+
+def test_advance_with_an_offset_catches_up_too(rem, clock):
+    aware = datetime(2020, 3, 1, 9, 0, tzinfo=timezone.utc)
+    rem.add_reminder("x", aware, "weekly")
+    (row,) = _rows(rem)
+    rem._advance_repeating(row)
+    after = datetime.fromisoformat(_rows(rem)[0]["trigger_at"])
+    now = rem.dt_util.utcnow()
+    assert after.tzinfo is not None and now < after <= now + timedelta(days=7)
+    assert (after - aware) % timedelta(days=7) == timedelta(0)
 
 
 @pytest.mark.parametrize("repeat", [None, "", "weekly:MON", "monthly", "Daily"])
@@ -406,7 +419,7 @@ async def test_a_due_reminder_is_delivered_with_the_reminder_request(rem, home, 
 async def test_the_honorific_leads_verbatim(rem, home, d, clock):
     rem.add_reminder("call the plumber", clock["now"])
     await _watcher(rem, FakeHass(), _Getters(honorific="sir"))._check_async()
-    assert d.state["sent"][0].message == "sir, reminder: call the plumber."
+    assert d.state["sent"][0].message == "Sir, reminder: call the plumber."
 
 
 async def test_missing_speakers_and_engine_become_empty(rem, home, d, clock):
@@ -653,3 +666,35 @@ def test_source_contracts():
     for banned in ("CREATE TABLE", "QUIET_START", "def _in_quiet_hours",
                    "sqlite3.connect", "hass.data", "/config"):
         assert banned not in text
+
+
+# ── 8.49.22 regressions ──────────────────────────────────────────────────────
+
+async def test_a_repeating_reminder_held_while_away_fires_once_on_arrival(
+        rem, home, d, clock):
+    """Bug 5: an hourly reminder held for hours fires once, not once per
+    missed hour, when someone gets home."""
+    rem.add_reminder("take the tablets", clock["now"] - timedelta(hours=9), "hourly")
+    home["summary"] = {"anyone_home": False}
+    w = _watcher(rem, FakeHass(), _Getters())
+    await w._check_async()
+    assert d.state["sent"] == []
+    home["summary"] = {"anyone_home": True}
+    for _ in range(10):                       # five minutes of ticks
+        await w._check_async()
+        clock["now"] += timedelta(seconds=30)
+    assert len(d.state["sent"]) == 1
+    (row,) = _rows(rem)
+    assert datetime.fromisoformat(row["trigger_at"]) > clock["now"]
+
+
+@pytest.mark.parametrize("label, said", [
+    ("call the plumber.", "Sir, reminder: call the plumber."),
+    ("call the plumber", "Sir, reminder: call the plumber."),
+    ("are the bins out?", "Sir, reminder: are the bins out?"),
+])
+async def test_a_reminder_is_capitalised_with_one_full_stop(rem, home, d, clock, label, said):
+    """Bug 6: "Sir" leads with a capital and a label's own stop is not doubled."""
+    rem.add_reminder(label, clock["now"])
+    await _watcher(rem, FakeHass(), _Getters(honorific="sir"))._check_async()
+    assert d.state["sent"][0].message == said

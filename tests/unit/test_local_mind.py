@@ -414,7 +414,7 @@ def test_compose_persona_failure_falls_back(lm, load, monkeypatch):
         raise RuntimeError("x")
     monkeypatch.setattr(persona, "announce_opener", boom)
     assert lm._compose("ma'am", "Kitchen Door", DOOR, "on", 1, novelty="",
-                       away=False, escalated=False) == "Ma'Am, Kitchen Door is open."
+                       away=False, escalated=False) == "Ma'am, Kitchen Door is open."
     assert lm._compose("", "Kitchen Door", DOOR, "on", 1, novelty="",
                        away=False, escalated=False) == "Kitchen Door is open."
 

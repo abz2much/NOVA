@@ -1,3 +1,20 @@
+## [8.49.22] — Eleven bug fixes
+
+Fixes for eleven bugs that were already in Nova before the rewrites. Each fix has a regression test that fails without it. Nothing else changes.
+
+### Fixed
+- **Declared appliances almost never announced their finish.** An appliance you declared that discovery had already found kept discovery's guess, which is never announced. Your declaration now wins.
+- **A finish was silent after a restart or a save mid cycle.** A completion entity's first change after the monitor started was swallowed, and a power sensor already drawing was treated as idle. A cycle under way when the monitor starts is now picked up and its finish announced.
+- **The whole home meter missed overlapping loads and mistook pauses for finishes.** A new load is now sized by the step it adds on top of the loads already running, so a kettle during a dryer cycle is seen as a kettle, and a load can end while others carry on. A declared washer, dryer or dishwasher must now stay off for ten minutes before it counts as finished, so a heater switching off mid cycle is a pause, not a finish.
+- **A meter named like "whole house power" was also treated as an appliance**, which stopped whole home tracking. The meter is now only the meter.
+- **A repeating reminder held while nobody was home fired many times on arrival.** It now fires once and moves on to its next time after now.
+- **Reminders said "sir, reminder:" in lowercase, and a label ending in a full stop gave "..".** The honorific is now capitalised and a label's own full stop, question mark or exclamation mark is kept without adding another.
+- **"Ma'am" was said and shown as "Ma'Am".** Every place Nova capitalises the honorific now keeps the letter after an apostrophe lowercase.
+- **The summary said "The last hour appear".** It now says "appears".
+- **A 47 hour summary was labelled "1 day".** Spans that are not whole days of two or more are now given in hours.
+- **Rooms counted as occupied only from occupancy sensors.** Presence sensors now count too, as they do elsewhere in Nova.
+- **Room names came out as "kitchen sensor" or "room sensor".** A room is now named by the sensor's area, else by its name without the sensor words.
+
 ## [8.49.21] — The appliance monitor rewritten from scratch
 
 Step 9 finishes the user features with the appliance monitor, which tells you when a washer, dryer, dishwasher or other appliance has finished. It is rewritten from an empty file, from a behaviour spec with fresh tests. Nothing Nova does changes: the same appliances are found, finishes are announced with the same words and still go through the household delivery rules.

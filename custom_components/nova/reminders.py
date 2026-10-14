@@ -108,7 +108,9 @@ def mark_fired(reminder_id: int) -> None:
 
 
 def _advance_repeating(reminder: dict) -> None:
-    """Move a repeating reminder one interval past its previous time."""
+    """Move a repeating reminder to its first time after now, so one held
+    back (quiet hours, nobody home) fires once rather than once per missed
+    interval."""
     try:
         step = reminder.get("repeat")
         if not step:
@@ -117,10 +119,14 @@ def _advance_repeating(reminder: dict) -> None:
         delta = _STEPS.get(step)
         if delta is None:
             return
+        following = previous + delta
+        now = _now_local() if previous.tzinfo is None else dt_util.utcnow()
+        if following <= now:
+            following += delta * ((now - following) // delta + 1)
         with _connect() as conn:
             conn.execute(
                 "UPDATE reminders SET trigger_at = ?, last_fired = NULL WHERE id = ?",
-                ((previous + delta).isoformat(), reminder["id"]))
+                (following.isoformat(), reminder["id"]))
     except Exception as err:
         _LOGGER.debug("Could not advance reminder %s: %s", reminder.get("id"), err)
 
@@ -128,9 +134,11 @@ def _advance_repeating(reminder: dict) -> None:
 # ── watcher ──────────────────────────────────────────────────────────────────
 
 def _reminder_text(honorific, label) -> str:
-    if honorific:
-        return f"{honorific}, reminder: {label}."
-    return f"Reminder: {label}."
+    from . import persona
+    text = str(label).rstrip()
+    if not text.endswith((".", "!", "?")):
+        text += "."
+    return persona.lead_in(honorific, f"reminder: {text}")
 
 
 class ReminderWatcher:

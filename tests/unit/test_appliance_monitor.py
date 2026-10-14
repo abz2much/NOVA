@@ -981,7 +981,7 @@ def test_native_discovery_patterns_and_done_states(am, fake_hass):
     assert lg.trigger_states == frozenset({"end", "finished", "finish", "complete", "completed"})
     assert lg.appliance == am.ApplianceType.GENERIC and lg.last_state == "rinsing"
     assert lg.device_name == "lg run state"            # lowercased friendly name
-    assert lg.seeded is False and lg.announced is False
+    assert lg.seeded is True and lg.announced is False   # a real state seeds it
     d = found["sensor.dryer_job_state"]
     assert {"finish", "finished"} <= d.trigger_states and d.device_name == "sensor.dryer_job_state"
 
@@ -1166,7 +1166,7 @@ async def test_declared_appliances_are_wired_by_kind(am, fake_hass, timers, list
     assert tumble.appliance == am.ApplianceType.DRYER and tumble.last_state == "off"
     washer = am._MON.natives["select.lg_job_state"]
     assert "finish" in washer.trigger_states and washer.device_name == "Washer"
-    assert washer.last_state == "idle" and washer.seeded is False
+    assert washer.last_state == "idle" and washer.seeded is True
     # a declared entity with no state yet is taken for a completion entity
     missing = am._MON.natives["sensor.not_there_power"]
     assert missing.trigger_states == frozenset({"on"}) and missing.last_state == ""
@@ -1240,7 +1240,7 @@ async def test_status_shape(am, fake_hass, timers, listens, no_persisted, regist
     ]
     w = st["sensors"]["sensor.washer_power"]
     assert w == {"appliance": "washer", "phase": "idle", "power_w": 0.0, "peak_w": 0.0,
-                 "friendly_name": "Washer Power", "discovery": "keyword",
+                 "friendly_name": "Washer Power", "discovery": "declared_entity",
                  "identified": True, "siblings": [f"switch.s{i}" for i in range(5)]}
     assert st["native_appliances"]["sensor.dryer_job_state"] == {
         "appliance": "dryer", "device_name": "sensor.dryer_job_state",
@@ -1254,15 +1254,77 @@ async def test_status_shape(am, fake_hass, timers, listens, no_persisted, regist
     assert 64 <= d["duration_s"] <= 70
 
 
-async def test_a_declared_entity_already_found_by_keyword_keeps_its_guess_method(
+# ── 8.49.22 regressions ─────────────────────────────────────────────────────
+
+async def test_a_declared_entity_already_found_by_keyword_is_announced(
         am, fake_hass, timers, listens, no_persisted, delivered, honorific):
-    """Preserved quirk: the declared mapping does not upgrade a sensor that
-    discovery already found, so its completion stays silent."""
+    """Bug 1: the declaration must win over discovery's untrusted guess."""
     _power(fake_hass, "sensor.washer_power", "0", friendly_name="Washer Power")
     await am.start(fake_hass, {"appliance_profile": [
         {"name": "Washer", "type": "washer", "entity": "sensor.washer_power"}]})
     s = am._MON.sensors["sensor.washer_power"]
-    assert s.discovery_method == "keyword"
-    assert "sensor.washer_power" in am._MON.claimed
+    assert s.discovery_method == "declared_entity" and s.identified is True
     await am._announce_done(s, "washer")
-    assert delivered == []
+    assert len(delivered) == 1
+
+
+async def test_a_cycle_under_way_when_the_monitor_starts_is_announced(
+        am, fake_hass, timers, listens, no_persisted, scheduled):
+    """Bug 2: a restart or a save mid-cycle must not swallow the finish."""
+    fake_hass.states.set("sensor.dishwasher_job_state", "drying")
+    _power(fake_hass, "sensor.washer_power", "450")
+    await am.start(fake_hass, {})
+    am._on_state_changed(_event(am, "sensor.dishwasher_job_state", "finished",
+                                old="drying"))
+    assert [label for _s, label in scheduled] == ["dishwasher"]
+    washer = am._MON.sensors["sensor.washer_power"]
+    assert washer.phase == "running"
+    assert _settle(am, washer) == "washer"
+
+
+def test_the_whole_home_meter_sees_overlapping_loads_and_heater_pauses(
+        am, meter, scheduled):
+    """Bug 3: a kettle during a dryer cycle is seen, and a washer heater
+    switching off mid-cycle is not a finish."""
+    dryer, kettle, washer = (_decl("Dryer", 2400, "dryer"), _decl("Kettle", 2000, "kettle"),
+                             _decl("Washer", 2000, "washer"))
+    am._MON.profile = [dryer, kettle]
+    am._MON.disagg = [dryer, kettle]
+    _feed(am, *([500.0] * 19), 3000)           # dryer: ~2375 W over the baseline
+    _age(meter, 60)
+    _feed(am, 5000)                            # kettle on top: a 2000 W step
+    assert sorted(d["appliance_guess"] for d in meter.active_deltas.values()) == [
+        "Dryer", "Kettle"]
+    _age(meter, 60)
+    _feed(am, 3000)                            # kettle off, dryer still on
+    assert [label for _s, label in scheduled] == ["Kettle"]
+    assert [d["appliance_guess"] for d in meter.active_deltas.values()] == ["Dryer"]
+
+    meter.active_deltas.clear()
+    scheduled.clear()
+    am._MON.profile = [washer]
+    am._MON.disagg = [washer]
+    _feed(am, 2600)                            # washer heater on
+    _age(meter, 60)
+    _feed(am, 650)                             # heater off: a pause, not a finish
+    assert scheduled == [] and len(meter.active_deltas) == 1
+    _feed(am, 2600)                            # heater back on: the same cycle
+    (d,) = meter.active_deltas.values()
+    assert "ended_at" not in d
+    _feed(am, 650)
+    d["ended_at"] -= am._CYCLE_PAUSE_S + 1
+    _feed(am, 640)                             # off for the whole pause: finished
+    assert [label for _s, label in scheduled] == ["Washer"]
+    assert meter.active_deltas == {}
+
+
+async def test_the_whole_home_meter_is_not_also_an_appliance(
+        am, fake_hass, timers, listens, no_persisted):
+    """Bug 4: a meter named like "whole house power" is only the meter."""
+    _power(fake_hass, "sensor.whole_house_power", "800", friendly_name="Whole House Power")
+    _power(fake_hass, "sensor.washer_power", "0")
+    await am.start(fake_hass, {})
+    assert am._MON.delta.entity_id == "sensor.whole_house_power"
+    assert set(am._MON.sensors) == {"sensor.washer_power"}
+    am._on_state_changed(_event(am, "sensor.whole_house_power", "900"))
+    assert am._MON.delta.last_reading == 900.0

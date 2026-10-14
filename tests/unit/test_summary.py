@@ -68,7 +68,7 @@ MSGS = [
 
 @pytest.mark.parametrize("hours, text", [
     (-3, "hour"), (0, "hour"), (1, "hour"), (2, "2 hours"), (24, "24 hours"),
-    (25, "1 day"), (47, "1 day"), (48, "2 days"), (71, "2 days"), (168, "7 days")])
+    (25, "25 hours"), (47, "47 hours"), (48, "2 days"), (71, "71 hours"), (168, "7 days")])
 def test_period(load, hours, text):
     assert load("summary")._period(hours) == text
 
@@ -87,7 +87,7 @@ async def test_nothing_to_report_with_honorific(env, fake_hass):
 async def test_nothing_to_report_without_honorific(env, fake_hass):
     res = await env.mod.async_summarise(fake_hass, _call(hours=1, announce=False),
                                         None, "", None, [])
-    assert res["summary"] == ("Nothing to report. The last hour appear to have been "
+    assert res["summary"] == ("Nothing to report. The last hour appears to have been "
                               "remarkably quiet.")
     assert env.spoken == []
 
@@ -205,3 +205,19 @@ async def test_language_block_receives_the_built_prompt(env, fake_hass, load, mo
 
 def test_legacy_constant(load):
     assert load("summary").SUMMARY_MODEL == "openai/gpt-oss-120b"
+
+
+# ── 8.49.22 regressions ──────────────────────────────────────────────────────
+
+async def test_a_quiet_hour_reads_as_one_hour(env, fake_hass):
+    """Bug 8: "The last hour appears", not "appear"."""
+    res = await env.mod.async_summarise(fake_hass, _call(hours=1, announce=False),
+                                        None, "", None, [])
+    assert "The last hour appears to have been remarkably quiet." in res["summary"]
+
+
+def test_a_part_day_span_is_not_rounded_down_to_days(load):
+    """Bug 9: 47 hours is "47 hours", never "1 day"."""
+    period = load("summary")._period
+    assert period(47) == "47 hours" and period(25) == "25 hours"
+    assert period(48) == "2 days"
