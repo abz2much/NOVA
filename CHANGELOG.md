@@ -1,3 +1,11 @@
+## [8.49.23] — Cameras, faces, documents and doorbell learning rewritten from scratch
+
+Phase 7a rewrites four modules from empty files, each from a behaviour spec with fresh tests: camera analysis, face recognition, the document library and doorbell learning. Nothing Nova does changes: the same frames are fetched, the same prompts reach the models, the same events fire and the same files and tables are written.
+
+### Changed
+- **Rewritten:** getting and analysing camera frames, the doorbell and visitor paths and camera event handling; who has been seen on which camera; document ingest, watch folders and search; and the doorbell training log and pattern finder.
+- **Proven the same:** each new module passes both its fresh tests and the old ones. The fresh tests then replaced the old test file for recognition, documents and doorbell learning. Camera behaviour was spread over many feature test files, which all still pass; the fresh camera tests are added alongside them.
+
 ## [8.49.22] — Eleven bug fixes
 
 Fixes for eleven bugs that were already in Nova before the rewrites. Each fix has a regression test that fails without it. Nothing else changes.
