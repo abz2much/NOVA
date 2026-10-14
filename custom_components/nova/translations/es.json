@@ -87,41 +87,41 @@
   "options": {
     "step": {
       "init": {
-        "title": "Nova — Configurar",
+        "title": "Ajustes de Nova",
         "menu_options": {
-          "core": "Núcleo — persona, directiva, modelo de conversación",
-          "routing": "Enrutamiento — áreas de dormitorio, grupo de difusión, servicio de notificación",
-          "observer": "Observador — conciencia proactiva (niveles de modelo, horas de silencio)",
-          "identity": "Identidad — reconocimiento por persona",
-          "email": "Correo — bandeja de entrada de solo lectura (contraseña vía secrets.yaml)",
-          "credentials": "Credenciales — claves API de proveedores"
+          "core": "Básico: cómo te llama Nova, su directiva y su modelo de conversación",
+          "routing": "Habitaciones y altavoces: dormitorios, avisos y alertas al teléfono",
+          "observer": "Observador: nota lo que pasa en casa, modelos y horas de silencio",
+          "identity": "Identidad: saber quién habla",
+          "email": "Correo: bandeja de entrada solo lectura, contraseña en secrets.yaml",
+          "credentials": "Credenciales: claves API de cada proveedor"
         }
       },
       "core": {
-        "title": "Nova — Núcleo",
-        "description": "Persona, directiva y modelo de conversación.",
+        "title": "Ajustes básicos de Nova",
+        "description": "Cómo te llama Nova, la directiva que sigue y el modelo con el que conversa.",
         "data": {
-          "honorific": "Dirígete a mí como",
-          "directive_preset": "Preajuste de directiva",
-          "directive": "Directiva personalizada (opcional, anula el preajuste)",
+          "honorific": "Llámame",
+          "directive_preset": "Directiva",
+          "directive": "Tu propia directiva (opcional, sustituye a la de arriba)",
           "model": "Modelo de conversación",
-          "use_hass_api": "Activar el control del hogar (luces, clima, cerraduras, etc.)"
+          "use_hass_api": "Dejar que Nova controle la casa (luces, calefacción, cerraduras y más)"
         }
       },
       "routing": {
-        "title": "Nova — Enrutamiento",
-        "description": "elige qué áreas de HA son dormitorios (para la detección del sueño), qué grupo media_player usar para las difusiones y el servicio de notificación de tu teléfono.",
+        "title": "Habitaciones y altavoces de Nova",
+        "description": "Elige los dormitorios que indican cuándo duerme la casa, el grupo de altavoces para los avisos y el servicio de notificación de tu teléfono.",
         "data": {
-          "bedroom_areas": "Áreas de dormitorio (para detección del sueño en horas de silencio)",
-          "ground_floor_areas": "Áreas de planta baja (para alertas de intrusión nocturna)",
-          "broadcast_group": "Grupo de altavoces de difusión (normalmente tu grupo Cast de casa)",
-          "notify_service": "Servicio de notificación al teléfono (p. ej. notify.mobile_app_yourphone)"
+          "bedroom_areas": "Dormitorios (para saber quién duerme en horas de silencio)",
+          "ground_floor_areas": "Zonas de la planta baja (para alertas de intrusión por la noche)",
+          "broadcast_group": "Altavoces para avisos (normalmente el grupo de toda la casa)",
+          "notify_service": "Servicio de notificación del teléfono (por ejemplo notify.mobile_app_tutelefono)"
         },
         "data_description": {
-          "bedroom_areas": "Cualquier sensor de presencia en estas áreas activa el modo de sueño en horas de silencio.",
-          "ground_floor_areas": "Mientras se duerme, Nova solo alerta ante movimiento si una de estas áreas muestra una puerta o ventana exterior abierta; déjelo vacío para comprobar todas las plantas.",
-          "broadcast_group": "Se usa para anuncios críticos y de alta urgencia.",
-          "notify_service": "Se usa cuando está fuera de casa o durmiendo."
+          "bedroom_areas": "En horas de silencio, la presencia en cualquiera de estas habitaciones activa el modo sueño.",
+          "ground_floor_areas": "De noche Nova solo avisa de movimiento si una de estas zonas tiene una puerta o ventana exterior abierta. Déjalo vacío para vigilar todas las plantas.",
+          "broadcast_group": "Los avisos críticos y urgentes suenan aquí.",
+          "notify_service": "Se usa cuando estás fuera o durmiendo."
         }
       },
       "observer": {
@@ -137,19 +137,19 @@
         }
       },
       "identity": {
-        "title": "Nova — Identidad",
-        "description": "reconocimiento por persona, para que Nova se adapte a quien habla. Funciona sin hardware especial usando la presencia y (si está configurada) el reconocimiento facial por cámara. La huella de voz es la más precisa pero necesita una GPU local, así que está desactivada por defecto.",
+        "title": "Identidad de Nova",
+        "description": "Permite a Nova reconocer quién habla y dirigirse a esa persona. No hace falta hardware especial: usa quién está en casa y, si está configurado, el reconocimiento facial de las cámaras. Las huellas de voz son lo más preciso pero necesitan una GPU local, así que empiezan desactivadas.",
         "data": {
           "identity_enabled": "Reconocer quién habla",
-          "identity_voice_fingerprint": "Huella de voz (requiere una GPU local)",
-          "identity_min_confidence": "Confianza mínima antes de asignar a una persona",
-          "voice_recognition_source": "Fuente de reconocimiento de voz (entidad de un servicio de reconocimiento de hablante, p. ej. binary_sensor.*_voice)",
-          "voice_recognition_auto_enroll": "Marcar automáticamente voces para registrar mientras la gente habla"
+          "identity_voice_fingerprint": "Huellas de voz (necesita una GPU local)",
+          "identity_min_confidence": "Qué seguridad necesita Nova antes de nombrar a alguien",
+          "voice_recognition_source": "Fuente de reconocimiento de voz (una entidad de un servicio de reconocimiento de hablante, como binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Sugerir voces para registrar mientras la gente habla"
         },
         "data_description": {
-          "identity_enabled": "Usa quién está en casa + reconocimiento facial reciente por cámara. No requiere GPU.",
-          "identity_voice_fingerprint": "Déjelo desactivado a menos que tenga un servidor GPU ejecutando un modelo de identificación de voz.",
-          "identity_min_confidence": "Más alto = más cauto; se mantiene neutral cuando hay dudas."
+          "identity_enabled": "Usa quién está en casa y las coincidencias faciales recientes. No necesita GPU.",
+          "identity_voice_fingerprint": "Déjalo desactivado salvo que un servidor GPU ejecute un modelo de identificación de voz.",
+          "identity_min_confidence": "Más alto = más prudente: si duda, Nova no nombra a nadie."
         }
       },
       "email": {

@@ -1,32 +1,37 @@
 blueprint:
-  name: Nova — Announce recognized faces
+  name: Nova — Announce recognised faces
   description: >
-    When DoubleTake recognizes a face on a camera, Nova announces who it is
-    (or "an unknown person") and optionally analyzes what they're doing.
-    Fires on the `nova_face_recognized` event.
+    When a face is recognised on a camera (DoubleTake or Frigate face
+    names), Nova says who it is, or warns about an unknown person and
+    describes them. Runs on the `nova_face_recognized` event.
   domain: automation
+  homeassistant:
+    min_version: 2024.10.0
   input:
     target_camera:
-      name: Camera to filter on (optional)
-      description: Leave blank to announce all recognitions across all cameras
+      name: Camera (optional)
+      description: Only announce faces seen on this camera. Leave empty for every camera.
       default: ""
       selector:
-        text:
+        entity:
+          domain: camera
     greet_known:
-      name: Greet known people by name
-      description: Announce "Your [name] is at [location]"
+      name: Announce known people
+      description: Say who has been recognised and where.
       default: true
       selector:
         boolean:
     alert_unknown:
-      name: Alert on unknown faces
-      description: Announce and analyze when an unknown person is seen
+      name: Warn about unknown people
+      description: Announce an unknown person and have Nova describe them.
       default: true
       selector:
         boolean:
     cooldown_seconds:
-      name: Cooldown per person
-      description: Don't re-announce the same person within this many seconds
+      name: Cooldown
+      description: >-
+        After an announcement, further recognitions on any camera are ignored
+        for this long, so the same visit is not announced twice.
       default: 300
       selector:
         number:
@@ -34,51 +39,51 @@ blueprint:
           max: 3600
           unit_of_measurement: seconds
 
-trigger:
-  - platform: event
+triggers:
+  - trigger: event
     event_type: nova_face_recognized
 
-mode: queued
-max: 10
+# Repeats inside the cooldown are dropped, not queued, so nothing is
+# announced late.
+mode: single
+max_exceeded: silent
 
 variables:
   target_cam: !input target_camera
   greet: !input greet_known
   alert_unk: !input alert_unknown
+  seen: "{{ trigger.event.data }}"
+  place: "{{ seen.camera | replace('_', ' ') }}"
 
-condition:
+conditions:
   - condition: template
     value_template: >-
-      {{ target_cam == "" or trigger.event.data.camera_entity == target_cam }}
-  - condition: template
-    value_template: >-
-      {{ trigger.event.data.is_confident }}
+      {{ not target_cam or seen.camera_entity == target_cam }}
 
-action:
+actions:
   - choose:
+      # A known face must be a confident match before it is named.
       - conditions:
           - condition: template
             value_template: >-
-              {{ not trigger.event.data.is_unknown and greet }}
+              {{ greet and not seen.is_unknown and seen.is_confident }}
         sequence:
-          - service: nova.analyze_on_event
+          - action: nova.analyze_on_event
             data:
-              entity_id: "{{ trigger.event.data.camera_entity }}"
-              reason: >-
-                {{ trigger.event.data.name }} has been recognized at the
-                {{ trigger.event.data.camera | replace('_', ' ') }}
-
+              entity_id: "{{ seen.camera_entity }}"
+              reason: "{{ seen.name }} has been recognised at the {{ place }}"
+      # An unknown face has no match to be confident about.
       - conditions:
           - condition: template
             value_template: >-
-              {{ trigger.event.data.is_unknown and alert_unk }}
+              {{ alert_unk and seen.is_unknown }}
         sequence:
-          - service: nova.analyze_on_event
+          - action: nova.analyze_on_event
             data:
-              entity_id: "{{ trigger.event.data.camera_entity }}"
-              reason: >-
-                An unknown person has been detected at the
-                {{ trigger.event.data.camera | replace('_', ' ') }} — describe them
-
+              entity_id: "{{ seen.camera_entity }}"
+              reason: "An unknown person has been seen at the {{ place }}; describe them"
+    default:
+      # Nothing announced, so no cooldown either.
+      - stop: Nothing to announce
   - delay:
       seconds: !input cooldown_seconds

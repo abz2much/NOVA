@@ -1,34 +1,37 @@
 blueprint:
-  name: Nova — Analyze camera on doorbell or motion
+  name: Nova — Look at a camera when the doorbell or a sensor fires
   description: >
-    When a doorbell rings or motion/person is detected, Nova analyzes the
-    camera snapshot and announces what he sees. Works with Nest doorbells,
-    Frigate person detection, and any camera/binary_sensor pair.
+    When a doorbell is pressed, or a motion or person sensor turns on, Nova
+    looks at the camera you pick and says what it sees. Works with doorbells
+    that report presses as events (such as Nest) and with any binary sensor,
+    for example Frigate person detection.
   domain: automation
+  homeassistant:
+    min_version: 2024.10.0
   input:
     trigger_entity:
-      name: Trigger entity
-      description: Doorbell, motion sensor, or person-detected binary_sensor
+      name: Doorbell or sensor
+      description: A doorbell event, or a motion or person binary sensor.
       selector:
         entity:
           domain:
             - binary_sensor
             - event
     camera_entity:
-      name: Camera to analyze
-      description: The camera that should be analyzed when the trigger fires
+      name: Camera
+      description: The camera Nova looks at when the doorbell or sensor fires.
       selector:
         entity:
           domain: camera
     reason:
-      name: Context for Nova
-      description: What Nova should be told about the trigger
+      name: What to tell Nova
+      description: A short note on what happened, given to Nova with the image.
       default: "Someone has triggered the camera"
       selector:
         text:
     cooldown_seconds:
       name: Cooldown
-      description: Minimum seconds between consecutive analyses (avoid spam)
+      description: The least time between two looks, so a busy sensor does not repeat itself.
       default: 30
       selector:
         number:
@@ -36,19 +39,35 @@ blueprint:
           max: 600
           unit_of_measurement: seconds
 
-trigger:
-  - platform: state
+triggers:
+  # A binary sensor turning on.
+  - trigger: state
     entity_id: !input trigger_entity
     to: "on"
-  - platform: state
+    id: turned_on
+  # An event entity takes a new timestamp on every press, so each press
+  # counts, even the same kind twice in a row. It reads unknown until its
+  # first press, which therefore counts too; coming back from unavailable
+  # after a restart does not.
+  - trigger: state
     entity_id: !input trigger_entity
-    attribute: event_type
+    not_from:
+      - unavailable
+    not_to:
+      - unavailable
+      - unknown
+    id: new_event
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.id == 'turned_on' or trigger.entity_id.startswith('event.') }}
 
 mode: single
 max_exceeded: silent
 
-action:
-  - service: nova.analyze_on_event
+actions:
+  - action: nova.analyze_on_event
     data:
       entity_id: !input camera_entity
       reason: !input reason

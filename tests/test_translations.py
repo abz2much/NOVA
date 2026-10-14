@@ -14,12 +14,16 @@ def _shape(node):
 
 
 def test_all_config_flow_translations_match_en_structure():
+    # Service text is English only for now; Home Assistant falls back to
+    # en.json for a language without it.
     en = json.load(open(os.path.join(BASE, "en.json"), encoding="utf-8"))
+    en.pop("services")
     en_shape = _shape(en)
     files = glob.glob(os.path.join(BASE, "*.json"))
     assert len(files) >= 7, "expected en + at least 6 translations"
     for f in files:
         d = json.load(open(f, encoding="utf-8"))
+        d.pop("services", None)
         assert _shape(d) == en_shape, f"{os.path.basename(f)} structure differs from en.json"
 
 

@@ -1,3 +1,18 @@
+## [8.49.32] — Blueprint fixes, service text in the translations
+
+Phase 8 starts with the files most copied from the original project: services.yaml, the two blueprints and the setup screen translations. Each was reviewed for real improvements, then rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **Recognised faces were announced late.** The face blueprint queued every recognition behind its cooldown, so a second face was announced minutes after it was seen. Recognitions inside the cooldown are now dropped, and a recognition that is not announced no longer starts a cooldown.
+- **Unknown faces were rarely announced.** The face blueprint required a confident match before anything else, which an unknown face almost never has. That check now applies only to naming a known person.
+- **A second doorbell press of the same kind could be missed.** The doorbell blueprint only reacted when an event entity's event type changed, so two rings in a row counted once. Every new press now counts; a doorbell coming back after a restart does not.
+
+### Changed
+- **Service names and descriptions moved into the translation files**, so Home Assistant can show them in the user's language. For now they are in English only, as before; services.yaml keeps each service's fields, which are unchanged.
+- **Service, blueprint and settings wording rewritten** in plain UK English. Service ids such as `nova.analyze_camera`, fields, options and blueprint inputs are unchanged, so existing automations keep working.
+- **The face blueprint's camera is picked from a list** instead of typed. A camera saved before still works.
+- **Both blueprints use the current blueprint layout** and state Home Assistant 2024.10 as their minimum, which Nova already needs.
+
 ## [8.49.31] — Twenty one fixes from the 7e rewrite
 
 Fixes for every bug found while rewriting setup, the panel commands, the setup screens, first run bootstrap and the service health check. Each fix has a test that fails without it. Nothing else changes.

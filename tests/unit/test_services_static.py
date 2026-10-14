@@ -450,7 +450,9 @@ def test_translations_mirror_en_json_top_level_sections():
     strings = json.loads((COMP / "translations" / "en.json").read_text(encoding="utf-8"))
     for path in _translation_files():
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert list(data) == list(strings), path.name
+        # Service text is English only for now (see test_service_text).
+        assert [k for k in data if k != "services"] == \
+            [k for k in strings if k != "services"], path.name
 
 
 def test_non_english_service_errors_are_localized():

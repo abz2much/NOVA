@@ -17,11 +17,13 @@ Focused run:
     python -m pytest tests/unit/test_lifecycle_cleanup.py -q
 """
 import ast
+import json
 import pathlib
 import sys
 import types
 
 import pytest
+
 import yaml
 
 # Stub aiohttp + the HA aiohttp client helper before bootstrap is imported
@@ -307,7 +309,8 @@ def _unloaded_services() -> set:
 def test_services_yaml_documents_test_routing():
     doc = yaml.safe_load((COMP / "services.yaml").read_text())
     assert "test_routing" in doc
-    assert "log" in doc["test_routing"]["description"].lower()
+    text = json.loads((COMP / "translations" / "en.json").read_text())["services"]
+    assert "log" in text["test_routing"]["description"].lower()
 
 
 def test_every_registered_service_is_in_services_yaml():
