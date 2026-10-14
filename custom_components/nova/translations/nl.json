@@ -87,41 +87,41 @@
   "options": {
     "step": {
       "init": {
-        "title": "Nova — Configureren",
+        "title": "Nova instellingen",
         "menu_options": {
-          "core": "Kern — persona, richtlijn, conversatiemodel",
-          "routing": "Routering — slaapkamergebieden, omroepgroep, meldingsdienst",
-          "observer": "Observer — proactief bewustzijn (modelniveaus, stille uren)",
-          "identity": "Identiteit — herkenning per persoon",
-          "email": "E-mail — alleen-lezen inbox (wachtwoord via secrets.yaml)",
-          "credentials": "Inloggegevens — API-sleutels van providers"
+          "core": "Basis: hoe Nova je aanspreekt, de richtlijn en het gespreksmodel",
+          "routing": "Kamers en speakers: slaapkamers, omroepen en meldingen op je telefoon",
+          "observer": "Waarnemer: merkt op wat er thuis gebeurt, modellen en stille uren",
+          "identity": "Identiteit: weten wie er praat",
+          "email": "E-mail: inbox alleen lezen, wachtwoord in secrets.yaml",
+          "credentials": "Inloggegevens: API sleutels per aanbieder"
         }
       },
       "core": {
-        "title": "Nova — Kern",
-        "description": "Persona, richtlijn en conversatiemodel.",
+        "title": "Nova basisinstellingen",
+        "description": "Hoe Nova je aanspreekt, welke richtlijn het volgt en met welk model het praat.",
         "data": {
-          "honorific": "Spreek mij aan met",
-          "directive_preset": "Richtlijn-voorinstelling",
-          "directive": "Aangepaste richtlijn (optioneel, overschrijft voorinstelling)",
-          "model": "Conversatiemodel",
-          "use_hass_api": "Huisbediening inschakelen (verlichting, klimaat, sloten, enz.)"
+          "honorific": "Noem mij",
+          "directive_preset": "Richtlijn",
+          "directive": "Eigen richtlijn (optioneel, vervangt die hierboven)",
+          "model": "Gespreksmodel",
+          "use_hass_api": "Nova het huis laten bedienen (licht, verwarming, sloten en meer)"
         }
       },
       "routing": {
-        "title": "Nova — Routering",
-        "description": "kies welke HA-gebieden slaapkamers zijn (voor slaapdetectie), welke media_player-groep voor omroepberichten en je telefoonmeldingsdienst.",
+        "title": "Nova kamers en speakers",
+        "description": "Kies de slaapkamers waaraan Nova ziet dat het huis slaapt, de speakergroep voor omroepen en de meldingsdienst van je telefoon.",
         "data": {
-          "bedroom_areas": "Slaapkamergebieden (voor slaapdetectie tijdens stille uren)",
-          "ground_floor_areas": "Begane grond gebieden (voor nachtelijke inbraakmeldingen)",
-          "broadcast_group": "Omroepluidsprekergroep (meestal je Cast-groep thuis)",
-          "notify_service": "Telefoonmeldingsdienst (bijv. notify.mobile_app_yourphone)"
+          "bedroom_areas": "Slaapkamers (om in stille uren te zien wie slaapt)",
+          "ground_floor_areas": "Ruimtes op de begane grond (voor inbraakmeldingen 's nachts)",
+          "broadcast_group": "Omroepspeakers (meestal de groep voor het hele huis)",
+          "notify_service": "Meldingsdienst telefoon (bijvoorbeeld notify.mobile_app_jouwtelefoon)"
         },
         "data_description": {
-          "bedroom_areas": "Elke aanwezigheidssensor in deze gebieden activeert de slaapstand tijdens stille uren.",
-          "ground_floor_areas": "Tijdens het slapen waarschuwt Nova alleen bij beweging als een van deze gebieden een open buitendeur of -raam laat zien — laat leeg om elke verdieping te controleren.",
-          "broadcast_group": "Gebruikt voor kritieke en zeer dringende aankondigingen.",
-          "notify_service": "Gebruikt wanneer je van huis of in slaap bent."
+          "bedroom_areas": "In stille uren zet aanwezigheid in een van deze kamers de slaapstand aan.",
+          "ground_floor_areas": "'s Nachts meldt Nova beweging alleen als in een van deze ruimtes een buitendeur of raam open staat. Laat leeg om elke verdieping te bewaken.",
+          "broadcast_group": "Kritieke en dringende omroepen klinken hier.",
+          "notify_service": "Gebruikt als je weg bent of slaapt."
         }
       },
       "observer": {
@@ -137,19 +137,19 @@
         }
       },
       "identity": {
-        "title": "Nova — Identiteit",
-        "description": "herkenning per persoon, zodat Nova zich aanpast aan wie er spreekt. Werkt zonder speciale hardware via aanwezigheid en (indien ingesteld) gezichtsherkenning via camera. Stemherkenning is het nauwkeurigst maar vereist een lokale GPU en staat daarom standaard uit.",
+        "title": "Nova identiteit",
+        "description": "Laat Nova herkennen wie er praat en op die persoon inspelen. Geen speciale hardware nodig: het gebruikt wie er thuis is en, als het is ingesteld, gezichtsherkenning van camera's. Stemafdrukken zijn het nauwkeurigst maar hebben een lokale GPU nodig, dus ze staan eerst uit.",
         "data": {
-          "identity_enabled": "Herkennen wie er spreekt",
-          "identity_voice_fingerprint": "Stemherkenning (vereist een lokale GPU)",
-          "identity_min_confidence": "Minimale zekerheid voordat een persoon wordt vastgelegd",
-          "voice_recognition_source": "Bron voor stemherkenning (entiteit van een sprekerherkenningsdienst, bijv. binary_sensor.*_voice)",
-          "voice_recognition_auto_enroll": "Stemmen automatisch markeren om aan te melden terwijl mensen spreken"
+          "identity_enabled": "Herkennen wie er praat",
+          "identity_voice_fingerprint": "Stemafdrukken (lokale GPU nodig)",
+          "identity_min_confidence": "Hoe zeker Nova moet zijn voordat het iemand noemt",
+          "voice_recognition_source": "Bron voor stemherkenning (een entiteit van een sprekerherkenningsdienst, zoals binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Stemmen voorstellen om aan te leren terwijl mensen praten"
         },
         "data_description": {
-          "identity_enabled": "Gebruikt wie er thuis is + recente gezichtsherkenning via camera. Geen GPU nodig.",
-          "identity_voice_fingerprint": "Laat uit tenzij je een GPU-server met een stem-ID-model hebt.",
-          "identity_min_confidence": "Hoger = voorzichtiger; blijft neutraal bij twijfel."
+          "identity_enabled": "Gebruikt wie er thuis is en recente gezichtsherkenningen. Geen GPU nodig.",
+          "identity_voice_fingerprint": "Laat uit tenzij een GPU server een stem ID model draait.",
+          "identity_min_confidence": "Hoger = voorzichtiger: bij twijfel noemt Nova niemand."
         }
       },
       "email": {

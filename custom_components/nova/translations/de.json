@@ -87,41 +87,41 @@
   "options": {
     "step": {
       "init": {
-        "title": "Nova — Konfigurieren",
+        "title": "Nova Einstellungen",
         "menu_options": {
-          "core": "Kern — Persona, Direktive, Konversationsmodell",
-          "routing": "Routing — Schlafzimmerbereiche, Broadcast-Gruppe, Benachrichtigungsdienst",
-          "observer": "Beobachter — proaktives Bewusstsein (Modellstufen, Ruhezeiten)",
-          "identity": "Identität — Erkennung pro Person",
-          "email": "E-Mail — schreibgeschützter Posteingang (Passwort über secrets.yaml)",
-          "credentials": "Anmeldedaten — API-Schlüssel der Anbieter"
+          "core": "Kern: Anrede, Direktive und Gesprächsmodell",
+          "routing": "Räume und Lautsprecher: Schlafzimmer, Durchsagen und Handy Hinweise",
+          "observer": "Beobachter: bemerkt, was zu Hause passiert, Modelle und Ruhezeiten",
+          "identity": "Identität: erkennen, wer spricht",
+          "email": "E-Mail: Posteingang nur lesen, Passwort in secrets.yaml",
+          "credentials": "Zugangsdaten: API Schlüssel je Anbieter"
         }
       },
       "core": {
-        "title": "Nova — Kern",
-        "description": "Persona, Direktive und Konversationsmodell.",
+        "title": "Nova Kerneinstellungen",
+        "description": "Wie Nova dich anspricht, welcher Direktive es folgt und mit welchem Modell es spricht.",
         "data": {
-          "honorific": "Sprich mich an mit",
-          "directive_preset": "Direktiven-Vorlage",
-          "directive": "Eigene Direktive (optional, überschreibt Vorlage)",
-          "model": "Konversationsmodell",
-          "use_hass_api": "Haussteuerung aktivieren (Licht, Klima, Schlösser usw.)"
+          "honorific": "Nenn mich",
+          "directive_preset": "Direktive",
+          "directive": "Eigene Direktive (optional, ersetzt die obige)",
+          "model": "Gesprächsmodell",
+          "use_hass_api": "Nova das Zuhause steuern lassen (Licht, Heizung, Schlösser und mehr)"
         }
       },
       "routing": {
-        "title": "Nova — Routing",
-        "description": "wähle, welche HA-Bereiche Schlafzimmer sind (für die Schlaferkennung), welche media_player-Gruppe für Broadcasts verwendet wird und deinen Telefon-Benachrichtigungsdienst.",
+        "title": "Nova Räume und Lautsprecher",
+        "description": "Wähle die Schlafzimmer, an denen Nova erkennt, dass das Haus schläft, die Lautsprechergruppe für Durchsagen und den Benachrichtigungsdienst deines Handys.",
         "data": {
-          "bedroom_areas": "Schlafzimmerbereiche (für die Schlaferkennung in Ruhezeiten)",
-          "ground_floor_areas": "Erdgeschossbereiche (für nächtliche Einbruchswarnungen)",
-          "broadcast_group": "Broadcast-Lautsprechergruppe (typischerweise deine Heim-Cast-Gruppe)",
-          "notify_service": "Telefon-Benachrichtigungsdienst (z. B. notify.mobile_app_yourphone)"
+          "bedroom_areas": "Schlafzimmer (um in Ruhezeiten zu erkennen, wer schläft)",
+          "ground_floor_areas": "Bereiche im Erdgeschoss (für nächtliche Einbruchswarnungen)",
+          "broadcast_group": "Lautsprecher für Durchsagen (meist die Gruppe für das ganze Zuhause)",
+          "notify_service": "Handy Benachrichtigungsdienst (zum Beispiel notify.mobile_app_deinhandy)"
         },
         "data_description": {
-          "bedroom_areas": "Jeder Anwesenheitssensor in diesen Bereichen löst den Schlafmodus in Ruhezeiten aus.",
-          "ground_floor_areas": "Während des Schlafs alarmiert Nova bei Bewegung nur, wenn eine dieser Zonen eine offene Außentür oder ein offenes Fenster zeigt — leer lassen, um jede Etage zu prüfen.",
-          "broadcast_group": "Wird für kritische und sehr dringende Ansagen verwendet.",
-          "notify_service": "Wird verwendet, wenn du unterwegs bist oder schläfst."
+          "bedroom_areas": "In Ruhezeiten schaltet Anwesenheit in einem dieser Räume den Schlafmodus ein.",
+          "ground_floor_areas": "Nachts meldet Nova Bewegung nur, wenn in einem dieser Bereiche eine Außentür oder ein Fenster offen ist. Leer lassen, um jedes Stockwerk zu überwachen.",
+          "broadcast_group": "Kritische und dringende Durchsagen laufen hier.",
+          "notify_service": "Wird genutzt, wenn du unterwegs bist oder schläfst."
         }
       },
       "observer": {
@@ -137,19 +137,19 @@
         }
       },
       "identity": {
-        "title": "Nova — Identität",
-        "description": "Erkennung pro Person, damit sich Nova auf den Sprechenden einstellt. Funktioniert ohne spezielle Hardware über Anwesenheit und (falls eingerichtet) Kamera-Gesichtserkennung. Der Stimmabdruck ist am genauesten, benötigt aber eine lokale GPU und ist daher standardmäßig aus.",
+        "title": "Nova Identität",
+        "description": "Lässt Nova erkennen, wer spricht, und auf diese Person eingehen. Keine besondere Hardware nötig: genutzt wird, wer zu Hause ist, und falls eingerichtet die Gesichtserkennung der Kameras. Stimmabdrücke sind am genauesten, brauchen aber eine lokale GPU und sind daher zunächst aus.",
         "data": {
           "identity_enabled": "Erkennen, wer spricht",
-          "identity_voice_fingerprint": "Stimmabdruck (benötigt eine lokale GPU)",
-          "identity_min_confidence": "Mindestkonfidenz, bevor eine Person festgelegt wird",
-          "voice_recognition_source": "Quelle der Stimmerkennung (Entität eines Sprecher-Erkennungsdienstes, z. B. binary_sensor.*_voice)",
-          "voice_recognition_auto_enroll": "Stimmen automatisch zum Anlernen markieren, während gesprochen wird"
+          "identity_voice_fingerprint": "Stimmabdrücke (braucht eine lokale GPU)",
+          "identity_min_confidence": "Wie sicher Nova sein muss, bevor es eine Person nennt",
+          "voice_recognition_source": "Quelle der Stimmerkennung (eine Entität eines Sprechererkennungsdienstes, etwa binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Stimmen zum Anlernen vorschlagen, während Personen sprechen"
         },
         "data_description": {
-          "identity_enabled": "Nutzt, wer zu Hause ist + aktuelle Kamera-Gesichtserkennung. Keine GPU erforderlich.",
-          "identity_voice_fingerprint": "Aus lassen, außer du hast einen GPU-Server mit einem Stimm-ID-Modell.",
-          "identity_min_confidence": "Höher = vorsichtiger; bleibt bei Unsicherheit neutral."
+          "identity_enabled": "Nutzt, wer zu Hause ist, und aktuelle Gesichtstreffer der Kameras. Keine GPU nötig.",
+          "identity_voice_fingerprint": "Aus lassen, außer ein GPU Server betreibt ein Stimm ID Modell.",
+          "identity_min_confidence": "Höher = vorsichtiger: Im Zweifel nennt Nova niemanden."
         }
       },
       "email": {

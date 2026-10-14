@@ -87,41 +87,41 @@
   "options": {
     "step": {
       "init": {
-        "title": "Nova — Configure",
+        "title": "Nova settings",
         "menu_options": {
-          "core": "Core — persona, directive, conversation model",
-          "routing": "Routing — bedroom areas, broadcast group, notify service",
-          "observer": "Observer — proactive awareness (model tiers, quiet hours)",
-          "credentials": "Credentials — provider API keys",
-          "identity": "Identity — per-person recognition",
-          "email": "Email — read-only inbox (password via secrets.yaml)"
+          "core": "Core: how Nova addresses you, its directive and conversation model",
+          "routing": "Rooms and speakers: bedrooms, broadcast speakers and phone alerts",
+          "observer": "Observer: noticing what happens at home, models and quiet hours",
+          "credentials": "Credentials: API keys for each provider",
+          "identity": "Identity: knowing who is speaking",
+          "email": "Email: read only inbox, password kept in secrets.yaml"
         }
       },
       "core": {
-        "title": "Nova — Core",
-        "description": "Persona, directive, and conversation model.",
+        "title": "Nova core settings",
+        "description": "How Nova addresses you, the directive it follows and the model it talks with.",
         "data": {
-          "honorific": "Address me as",
-          "directive_preset": "Directive preset",
-          "directive": "Custom directive (optional, overrides preset)",
+          "honorific": "Call me",
+          "directive_preset": "Directive",
+          "directive": "Your own directive (optional, replaces the one above)",
           "model": "Conversation model",
-          "use_hass_api": "Enable home control (lights, climate, locks, etc.)"
+          "use_hass_api": "Let Nova control the home (lights, heating, locks and more)"
         }
       },
       "routing": {
-        "title": "Nova — Routing",
-        "description": "pick which HA areas are bedrooms (for sleep detection), which media_player group to use for broadcasts, and your phone notify service.",
+        "title": "Nova rooms and speakers",
+        "description": "Choose the bedroom areas used to tell when the house is asleep, the speaker group for broadcasts and the notify service for your phone.",
         "data": {
-          "bedroom_areas": "Bedroom areas (for sleep detection during quiet hours)",
-          "ground_floor_areas": "Ground-floor areas (for night-time intrusion alerts)",
-          "broadcast_group": "Broadcast speaker group (typically your home Cast group)",
-          "notify_service": "Phone notify service (e.g. notify.mobile_app_yourphone)"
+          "bedroom_areas": "Bedrooms (used to tell when people are asleep in quiet hours)",
+          "ground_floor_areas": "Ground floor areas (for night time intrusion alerts)",
+          "broadcast_group": "Broadcast speakers (usually the speaker group for the whole home)",
+          "notify_service": "Phone notify service (for example notify.mobile_app_yourphone)"
         },
         "data_description": {
-          "bedroom_areas": "Any presence sensor in these areas fires sleep mode during quiet hours.",
-          "ground_floor_areas": "While asleep, Nova only alerts on motion if one of these areas shows an open exterior door/window — leave empty to check every floor.",
-          "broadcast_group": "Used for critical and high-urgency announcements.",
-          "notify_service": "Used when you're away from home or asleep."
+          "bedroom_areas": "During quiet hours, presence in any of these rooms switches on sleep mode.",
+          "ground_floor_areas": "At night Nova only alerts on motion when one of these areas has an outside door or window open. Leave empty to watch every floor.",
+          "broadcast_group": "Critical and urgent announcements play here.",
+          "notify_service": "Used when you are out or asleep."
         }
       },
       "observer": {
@@ -156,19 +156,19 @@
         }
       },
       "identity": {
-        "title": "Nova — Identity",
-        "description": "per-person recognition, so Nova tailors itself to who's speaking. Works with no special hardware using presence and (if set up) camera face recognition. Voice fingerprinting is the most accurate but needs a local GPU, so it's off by default.",
+        "title": "Nova identity",
+        "description": "Lets Nova recognise who is speaking and respond to that person. No special hardware is needed: it uses who is home and, if set up, camera face recognition. Voice fingerprints are the most accurate but need a local GPU, so they start switched off.",
         "data": {
-          "identity_enabled": "Recognize who's speaking",
-          "identity_voice_fingerprint": "Voice fingerprinting (requires a local GPU)",
-          "identity_min_confidence": "Minimum confidence before committing to a person",
-          "voice_recognition_source": "Voice recognition source (entity from a speaker-recognition service, e.g. binary_sensor.*_voice)",
-          "voice_recognition_auto_enroll": "Auto-flag voices to enroll as people speak"
+          "identity_enabled": "Recognise who is speaking",
+          "identity_voice_fingerprint": "Voice fingerprints (needs a local GPU)",
+          "identity_min_confidence": "How sure Nova must be before naming a person",
+          "voice_recognition_source": "Voice recognition source (an entity from a speaker recognition service, such as binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Suggest voices to enrol as people speak"
         },
         "data_description": {
-          "identity_enabled": "Uses who's home + recent camera face recognition. No GPU required.",
-          "identity_voice_fingerprint": "Leave off unless you have a GPU server running a voice-ID model.",
-          "identity_min_confidence": "Higher = more cautious; stays neutral when unsure."
+          "identity_enabled": "Uses who is home and recent camera face matches. No GPU needed.",
+          "identity_voice_fingerprint": "Keep off unless a GPU server runs a voice ID model.",
+          "identity_min_confidence": "Higher = more careful: when unsure, Nova names nobody."
         }
       },
       "email": {
@@ -239,6 +239,418 @@
     },
     "multiple_entries": {
       "message": "More than one Nova entry is configured. Remove the extra entry, then try again."
+    }
+  },
+  "services": {
+    "analyze_camera": {
+      "name": "Analyse camera",
+      "description": "Takes a snapshot from a camera and has Nova describe it, out loud if wanted. When Frigate or Nest has a recent event image, that image is used instead.",
+      "fields": {
+        "entity_id": {
+          "name": "Camera",
+          "description": "The camera to look at."
+        },
+        "prompt": {
+          "name": "Question",
+          "description": "What Nova should look for. Leave empty for a general description."
+        },
+        "announce": {
+          "name": "Speak the result",
+          "description": "Read the description out on the speakers. On unless switched off."
+        },
+        "frames": {
+          "name": "Frames",
+          "description": "How many images to take. 1, the default, is a single snapshot; 2 to 4 let Nova describe what happened over a few seconds, such as someone arriving and leaving a parcel."
+        },
+        "interval": {
+          "name": "Seconds between frames",
+          "description": "The gap between images when more than one frame is taken. Default 1.2."
+        }
+      }
+    },
+    "analyze_on_event": {
+      "name": "Analyse camera after an event",
+      "description": "For automations that react to a doorbell press or a person being seen. Nova waits a moment for the event image, then describes it with the reason in mind.",
+      "fields": {
+        "entity_id": {
+          "name": "Camera",
+          "description": "The camera the event came from."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "What happened, for example \"Doorbell pressed\" or \"Person detected\"."
+        }
+      }
+    },
+    "conversation_summary": {
+      "name": "Summarise conversations",
+      "description": "Nova sums up recent conversations and reads the summary out.",
+      "fields": {
+        "hours": {
+          "name": "Hours to cover",
+          "description": "How far back to look. Default 24."
+        },
+        "device_id": {
+          "name": "Device",
+          "description": "Only include conversations from this device. Leave empty for all."
+        },
+        "announce": {
+          "name": "Speak the summary",
+          "description": "Read the summary out on the speakers. On unless switched off."
+        },
+        "store": {
+          "name": "Save the summary",
+          "description": "Keep the summary in the conversation store. On unless switched off."
+        }
+      }
+    },
+    "sentinel_start": {
+      "name": "Start Sentinel",
+      "description": "Turns on Sentinel, which watches doors, locks, motion and anything unusual and speaks up when needed."
+    },
+    "sentinel_stop": {
+      "name": "Stop Sentinel",
+      "description": "Turns Sentinel off."
+    },
+    "database_purge": {
+      "name": "Clear old conversations",
+      "description": "Deletes stored conversations older than the number of days given.",
+      "fields": {
+        "days": {
+          "name": "Days to keep",
+          "description": "Anything older is deleted. Default 30."
+        }
+      }
+    },
+    "database_stats": {
+      "name": "Conversation store figures",
+      "description": "Counts what the conversation store holds and sends the figures as a nova_db_stats event."
+    },
+    "replay_policy": {
+      "name": "Replay policy",
+      "description": "Being retired. Replay was removed in 8.40.0, so this does nothing; it goes in a later release.",
+      "fields": {
+        "kind": {
+          "name": "Kind",
+          "description": "The kind of decision, for example intrusion."
+        },
+        "min_samples": {
+          "name": "Minimum samples",
+          "description": "How many judged decisions were needed before a threshold was suggested."
+        }
+      }
+    },
+    "briefing": {
+      "name": "Give a briefing",
+      "description": "Nova puts together a briefing for the moment and reads it out: the time, weather, who is home, events overnight, open doors, the calendar and unusual energy use.",
+      "fields": {
+        "announce": {
+          "name": "Speak the briefing",
+          "description": "Read the briefing out on the speakers. On unless switched off."
+        },
+        "include_weather": {
+          "name": "Weather",
+          "description": "Include the weather."
+        },
+        "include_calendar": {
+          "name": "Calendar",
+          "description": "Include calendar events."
+        },
+        "include_presence": {
+          "name": "Who is home",
+          "description": "Include who is home."
+        },
+        "include_events": {
+          "name": "Overnight events",
+          "description": "Include what Sentinel noticed overnight."
+        },
+        "include_energy": {
+          "name": "Energy",
+          "description": "Include unusual energy use."
+        },
+        "hours": {
+          "name": "Hours of events",
+          "description": "How many hours of events to cover."
+        }
+      }
+    },
+    "scene_by_intent": {
+      "name": "Scene from a description",
+      "description": "Being retired: ask Nova through conversation.process instead. Nova picks the scene that best fits a description such as \"cosy film night\" or \"time for bed\".",
+      "fields": {
+        "intent": {
+          "name": "Description",
+          "description": "The mood or activity you want."
+        },
+        "announce": {
+          "name": "Speak the choice",
+          "description": "Say which scene was picked."
+        }
+      }
+    },
+    "routine": {
+      "name": "Run a routine",
+      "description": "Being retired: use a Home Assistant script (script.turn_on) instead. Runs a named routine such as goodnight, goodmorning, leaving or arriving, with Nova narrating each step. Your own routines can go in /config/nova_routines.yaml.",
+      "fields": {
+        "name": {
+          "name": "Routine",
+          "description": "The routine to run."
+        }
+      }
+    },
+    "add_reminder": {
+      "name": "Add a reminder",
+      "description": "Nova says the reminder at the time given. By default it waits until someone is home and stays silent in quiet hours.",
+      "fields": {
+        "label": {
+          "name": "Reminder",
+          "description": "What Nova should remind you about."
+        },
+        "trigger_at": {
+          "name": "When",
+          "description": "Date and time in ISO format, for example 2026-04-17T21:00:00."
+        },
+        "repeat": {
+          "name": "Repeat",
+          "description": "Repeat hourly, daily or weekly."
+        },
+        "require_home": {
+          "name": "Only when someone is home",
+          "description": "Skip the reminder when nobody is home."
+        },
+        "respect_quiet": {
+          "name": "Respect quiet hours",
+          "description": "Hold the reminder during quiet hours (22:00 to 07:00)."
+        }
+      }
+    },
+    "nap": {
+      "name": "Pause announcements",
+      "description": "Holds back everything except critical alerts for a while. Smoke, leaks and forced entry are still announced.",
+      "fields": {
+        "duration_minutes": {
+          "name": "Minutes",
+          "description": "How long to stay quiet."
+        }
+      }
+    },
+    "shush": {
+      "name": "Silence an entity or category",
+      "description": "Stops Nova announcing a given entity or category from now on. With nothing filled in, it silences whatever Nova has just said.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The entity to silence, for example sensor.washer_power."
+        },
+        "category": {
+          "name": "Category",
+          "description": "One of: appliances, doors_windows, presence, energy, security, climate, lights, schedule."
+        },
+        "all": {
+          "name": "Everything",
+          "description": "Silence every announcement that is not critical until nova.unshush is used. Kept across restarts; critical safety alerts always get through."
+        }
+      }
+    },
+    "unshush": {
+      "name": "Lift silencing",
+      "description": "Undoes a shush. With nothing filled in, every silencing is lifted.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The entity to hear again."
+        },
+        "category": {
+          "name": "Category",
+          "description": "The category to hear again."
+        }
+      }
+    },
+    "observer_start": {
+      "name": "Start the observer",
+      "description": "Turns on the observer, which notices changes around the home and speaks up about the interesting ones."
+    },
+    "observer_stop": {
+      "name": "Stop the observer",
+      "description": "Turns the observer off."
+    },
+    "observer_status": {
+      "name": "Observer status",
+      "description": "Sends a nova_observer_status event with the observer's state: whether it runs, what is silenced, the last announcement and the sleep state."
+    },
+    "create_automation": {
+      "name": "Create an automation",
+      "description": "Creates a Home Assistant automation from the parts given.",
+      "fields": {
+        "alias": {
+          "name": "Name",
+          "description": "A readable name for the automation."
+        },
+        "trigger": {
+          "name": "Trigger",
+          "description": "The trigger, in Home Assistant's format."
+        },
+        "action": {
+          "name": "Action",
+          "description": "The action, in Home Assistant's format."
+        }
+      }
+    },
+    "diagnose_doorbell": {
+      "name": "Check the doorbell",
+      "description": "Runs the doorbell checks and sends the results as an event."
+    },
+    "test_notify": {
+      "name": "Test notification",
+      "description": "Sends a test push notification to the phone set up for alerts."
+    },
+    "test_tts": {
+      "name": "Test the voice",
+      "description": "Plays a short Nova voice test on the broadcast speakers."
+    },
+    "test_routing": {
+      "name": "Test speaker routing",
+      "description": "For diagnosis only: writes where Nova would speak to the Home Assistant log, including the voice, the broadcast target, occupied areas and each room's reply speaker. Nothing is switched or spoken."
+    },
+    "lockdown": {
+      "name": "Lockdown",
+      "description": "Starts or ends lockdown. Starting it locks every lock and closes every open door. Windows already open stay as they are; a window opened during lockdown counts as a breach.",
+      "fields": {
+        "state": {
+          "name": "State",
+          "description": "on starts lockdown, off ends it."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "An optional note for the log, for example \"away for the weekend\"."
+        }
+      }
+    },
+    "train_doorbell_backlog": {
+      "name": "Learn from past doorbell events",
+      "description": "Looks at the Nest doorbell's stored events with Nova's vision and adds the results to the doorbell training data. Works only as far as the Nest integration makes its stored media available.",
+      "fields": {
+        "limit": {
+          "name": "Most events",
+          "description": "The most past events to look at in one run."
+        }
+      }
+    },
+    "check_packages": {
+      "name": "Check for parcels and post",
+      "description": "Looks at the porch or doorbell cameras now for delivered parcels or post and announces anything new.",
+      "fields": {
+        "entity_id": {
+          "name": "Camera",
+          "description": "A camera to check. Leave empty to use the porch and doorbell cameras found automatically."
+        }
+      }
+    },
+    "speak": {
+      "name": "Speak",
+      "description": "Being retired: use tts.speak instead. Speaks a message in an area, shaped to the room: Nova checks light, noise and playing media, sets volume, pace and style to suit, lowers any media while speaking and restores it after.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "What Nova should say."
+        },
+        "target_area": {
+          "name": "Area",
+          "description": "Where to speak. Decides which speakers and sensors are used."
+        },
+        "critical": {
+          "name": "Critical",
+          "description": "Speak at full volume with authority, ignoring quiet hours and lowering media. For safety and security alerts."
+        },
+        "user_id": {
+          "name": "User",
+          "description": "Optional person this is for. Reserved: passed along and logged only."
+        },
+        "expect_response": {
+          "name": "Wait for a reply",
+          "description": "Listen briefly after speaking without needing the wake word. Use with the confirmation intent to act on a yes."
+        },
+        "confirm_intent": {
+          "name": "Confirmation intent",
+          "description": "The local command to run if the reply is a yes, for example \"secure_area\" or \"lights_off\"."
+        }
+      }
+    },
+    "process_intent": {
+      "name": "Run a phrase locally",
+      "description": "Being retired: ask Nova through conversation.process instead. Matches a spoken or typed phrase to a local Nova command, with no cloud call. If a nova.speak reply window is open, a yes completes the waiting action; otherwise the phrase is treated as a new command, such as \"lock the back door\" or \"turn it off\".",
+      "fields": {
+        "phrase": {
+          "name": "Phrase",
+          "description": "The phrase to act on."
+        },
+        "target_area": {
+          "name": "Area",
+          "description": "The area used to work out what \"it\" or \"here\" means and where to act."
+        },
+        "user_id": {
+          "name": "User",
+          "description": "Optional person this is for."
+        }
+      }
+    },
+    "remember": {
+      "name": "Remember",
+      "description": "Teaches Nova a lasting fact or preference to use in conversation, for example that bin day is Tuesday. It is kept in the knowledge store and shown in the panel's Memory page.",
+      "fields": {
+        "key": {
+          "name": "What",
+          "description": "The thing to remember, for example \"bin day\"."
+        },
+        "value": {
+          "name": "Is",
+          "description": "Its value, for example \"Tuesday\"."
+        },
+        "subject": {
+          "name": "About",
+          "description": "Whether this belongs to the household or the main resident."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "An optional category."
+        },
+        "ttl_seconds": {
+          "name": "Forget after (seconds)",
+          "description": "Optional. The fact is dropped automatically after this many seconds, handy for something that only matters today."
+        }
+      }
+    },
+    "forget": {
+      "name": "Forget",
+      "description": "Removes a stored fact, by its id or by its key, optionally only for one subject.",
+      "fields": {
+        "id": {
+          "name": "Fact id",
+          "description": "The number of the fact to remove."
+        },
+        "key": {
+          "name": "Key",
+          "description": "The fact's key, for example \"bin day\". Used when no id is given."
+        },
+        "subject": {
+          "name": "Subject",
+          "description": "Optional. Only match the key for this subject (household or primary)."
+        }
+      }
+    },
+    "backup": {
+      "name": "Back up Nova",
+      "description": "Saves Nova's memory, patterns, knowledge and settings to an archive in /config/nova_backups, so a rebuild or move keeps them. Download the file before rebuilding the device."
+    },
+    "restore": {
+      "name": "Restore Nova",
+      "description": "Brings back Nova's memory, patterns, knowledge and settings from a backup archive, the newest unless one is named. Restart Home Assistant afterwards.",
+      "fields": {
+        "archive": {
+          "name": "Archive",
+          "description": "Optional. A file name in /config/nova_backups, or a full path. Defaults to the newest backup."
+        }
+      }
     }
   }
 }
