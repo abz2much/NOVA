@@ -209,6 +209,7 @@ def test_camera_friendly_name(cam, fake_hass, monkeypatch):
 # ── frame quality ────────────────────────────────────────────────────────────
 
 def test_frame_stats_and_blank(cam):
+    pytest.importorskip("PIL")
     noisy = _jpeg()
     mean, std, w, h = cam.frame_stats(noisy)
     assert (w, h) == (64, 48) and std > 8
@@ -221,6 +222,7 @@ def test_frame_stats_and_blank(cam):
 
 
 def test_downscale(cam):
+    pytest.importorskip("PIL")
     from PIL import Image
     small = _jpeg(100, 50)
     assert cam._downscale_jpeg(small, 200) is small
@@ -230,6 +232,7 @@ def test_downscale(cam):
 
 
 def test_contact_sheet(cam):
+    pytest.importorskip("PIL")
     from PIL import Image
     assert cam._make_contact_sheet([_jpeg()]) is None
     assert cam._make_contact_sheet([_jpeg(), b"junk"]) is None
@@ -238,6 +241,14 @@ def test_contact_sheet(cam):
     img = Image.open(io.BytesIO(sheet))
     # two columns of the widest cell (200) and two rows of the tallest (100) plus labels
     assert img.size == (2 * 200 + 3 * 6, 2 * (100 + 18) + 3 * 6)
+
+
+def test_without_pillow_frames_pass_through(cam, monkeypatch):
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    assert cam.frame_stats(b"anything") is None
+    assert cam._looks_blank(b"anything") is False
+    assert cam._downscale_jpeg(b"anything", 10) == b"anything"
+    assert cam._make_contact_sheet([b"a", b"b"]) is None
 
 
 # ── grabbing a frame ─────────────────────────────────────────────────────────
