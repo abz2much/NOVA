@@ -1,3 +1,11 @@
+## [8.49.17] — The action ledger rewritten from scratch
+
+Step 9 continues. The ledger Nova writes before it changes a device, so an action cut short by a restart can be checked at startup, is rewritten from an empty file, from a behaviour spec with fresh tests. The file format and the startup check are unchanged. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** recording an intended device change, marking it done, listing what is still pending and keeping the file compact.
+- **Proven the same:** the new module passes its fresh tests and the old ones, which were then replaced by the fresh tests. The integration tests that start and restart Nova pass too.
+
 ## [8.49.16] — Four decision modules rewritten from scratch
 
 Step 9 continues with the decision modules. The event classifier, the learned decision cache, the offline "local mind" and Nova's operational modes are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
