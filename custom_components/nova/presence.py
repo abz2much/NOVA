@@ -1,20 +1,24 @@
 """Who is home and which rooms are occupied.
 
 People come from Home Assistant's ``person.*`` entities; rooms come from
-occupancy binary sensors (mmWave style) that are currently on. The result
-is a structured summary for other modules and a one-line description for
-the conversation agent's prompt. Read-only: no state writes, no service
+occupancy and presence binary sensors (mmWave style) that are currently on,
+named by the sensor's area, else by its name without the sensor words. The
+result is a structured summary for other modules and a one-line description
+for the conversation agent's prompt. Read-only: no state writes, no service
 calls, no storage. Everything here runs on the event loop.
 """
 from __future__ import annotations
 
 import logging
+import re
 
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
+_ROOM_CLASSES = ("occupancy", "presence")
 _ROOM_WORDS = ("presence", "occupancy")
+_SENSOR_WORD = re.compile(r"(?<!\S)sensor(?!\S)")
 _NO_PEOPLE = "No person entities configured in Home Assistant."
 
 
@@ -54,11 +58,33 @@ def _filters():
     return is_excluded, is_object_sensor
 
 
+def _area_name(hass: HomeAssistant, entity_id: str) -> str:
+    """The entity's area name (its own, else its device's), or ""."""
+    try:
+        from homeassistant.helpers import area_registry as ar
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is None:
+            return ""
+        area_id = entry.area_id
+        if not area_id and entry.device_id:
+            device = dr.async_get(hass).async_get(entry.device_id)
+            area_id = getattr(device, "area_id", None)
+        if not area_id:
+            return ""
+        area = ar.async_get(hass).async_get_area(area_id)
+        return str(getattr(area, "name", "") or "")
+    except Exception:  # noqa: BLE001 - registries are best effort
+        return ""
+
+
 def _room_from(name: str) -> str:
     room = name.lower()
     for word in _ROOM_WORDS:
         room = room.replace(word, "")
-    return room.strip()
+    room = " ".join(_SENSOR_WORD.sub(" ", room).split())
+    return "" if room == "room" else room
 
 
 def _occupied_rooms(hass: HomeAssistant) -> dict:
@@ -67,14 +93,14 @@ def _occupied_rooms(hass: HomeAssistant) -> dict:
     for st in hass.states.async_all("binary_sensor"):
         if st.state != "on":
             continue
-        if st.attributes.get("device_class") != "occupancy":
+        if st.attributes.get("device_class") not in _ROOM_CLASSES:
             continue
         if excluded(hass, st.entity_id):
             continue
         name = st.attributes.get("friendly_name", st.entity_id)
         if is_object(st.entity_id, name):
             continue
-        room = _room_from(name)
+        room = _area_name(hass, st.entity_id).strip().lower() or _room_from(name)
         if room:
             rooms.setdefault(room, [])
     return rooms

@@ -255,7 +255,7 @@ class SafetyManager:
                 "urgency": "high" if reminder else "critical",
                 "phone_only": reminder,
                 "message": _notify_i18n().message(
-                    "freeze_critical", lang, honorific=honorific.title(),
+                    "freeze_critical", lang, honorific=_persona().capitalise(honorific),
                     reading=reading, set_to=set_to),
                 # Alert-only (fixed Sept 2026): this said auto_act=True and
                 # "act without approval", but nothing has ever consulted
@@ -271,7 +271,7 @@ class SafetyManager:
                 "type": "freeze_warning",
                 "urgency": "high",
                 "message": _notify_i18n().message(
-                    "freeze_warning", lang, honorific=honorific.title(),
+                    "freeze_warning", lang, honorific=_persona().capitalise(honorific),
                     reading=reading),
                 "auto_act": False,
             }
@@ -507,7 +507,7 @@ class SafetyManager:
                    "confined": "intrusion_alert_confined"}.get(
                        trigger, "intrusion_alert_sleep")
         msg = _i18n.message(
-            msg_key, _lang, honorific=honorific.title(),
+            msg_key, _lang, honorific=_persona().capitalise(honorific),
             where=where, ctx=ctx)
         # Decision Record (v7.39.0): log the proactive intrusion judgement, in
         # the shared safety format (alert_path, 8.23.0). Best-effort; a logging
@@ -1311,7 +1311,7 @@ class SafetyManager:
             if not failed and not reopened:
                 message = i18n.message(
                     "lockdown_nighttime", lang,
-                    honorific=honorific.title(),
+                    honorific=_persona().capitalise(honorific),
                     body=i18n.join_names(parts, lang),
                 )
             else:
@@ -1328,12 +1328,12 @@ class SafetyManager:
                 if parts:
                     message = i18n.message(
                         "lockdown_nighttime_partial", lang,
-                        honorific=honorific.title(),
+                        honorific=_persona().capitalise(honorific),
                         body=i18n.join_names(parts, lang), failed=problem)
                 else:
                     message = i18n.message(
                         "lockdown_nighttime_failed_only", lang,
-                        honorific=honorific.title(), failed=problem)
+                        honorific=_persona().capitalise(honorific), failed=problem)
             actions.append({
                 "type": "lockdown",
                 # A failure to secure (the command failed, or the device did

@@ -70,7 +70,7 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
     # Not coerced to "sir" here — an empty honorific means nobody specifically
     # home to address (see honorific.py), and i18n.message() already handles
     # that by capitalizing the sentence instead of prefixing it.
-    h = (honorific or "").title()
+    h = _persona().capitalise(honorific)
 
     actions = []
     if locked:
@@ -618,7 +618,7 @@ class LockdownManager:
             "type": "lockdown_disengaged",
             "urgency": "low",
             "message": _notify_i18n().message(
-                "lockdown_lifted", _m_common._hass_lang(self.hass), honorific=honorific.title()),
+                "lockdown_lifted", _m_common._hass_lang(self.hass), honorific=_persona().capitalise(honorific)),
             "auto_act": True,
         }
 

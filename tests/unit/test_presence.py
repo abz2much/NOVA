@@ -154,9 +154,8 @@ def test_rooms_from_occupancy_sensor_names(pr, hass, filt):
     assert list(rooms) == ["kitchen", "office", "den mmwave"]
 
 
-def test_only_on_occupancy_sensors_count(pr, hass, filt):
+def test_only_on_occupancy_and_presence_sensors_count(pr, hass, filt):
     _occ(hass, "a", state="off", friendly_name="Attic Occupancy")
-    _occ(hass, "b", device_class="presence", friendly_name="Bedroom Presence")
     _occ(hass, "c", device_class="motion", friendly_name="Cellar Motion")
     hass.states.set("binary_sensor.d", "on", friendly_name="Dining Occupancy")
     hass.states.set("sensor.e_presence", "on", device_class="occupancy",
@@ -166,10 +165,9 @@ def test_only_on_occupancy_sensors_count(pr, hass, filt):
 
 
 def test_every_presence_and_occupancy_word_is_removed(pr, hass, filt):
-    _occ(hass, "one", friendly_name="Presence Room Sensor")
     _occ(hass, "two", friendly_name="LOUNGE OCCUPANCY PRESENCE")
     _occ(hass, "three", friendly_name="   Study   ")
-    assert list(pr.get_presence_summary(hass)["rooms"]) == ["room sensor", "lounge", "study"]
+    assert list(pr.get_presence_summary(hass)["rooms"]) == ["lounge", "study"]
 
 
 def test_a_name_that_is_only_the_keywords_adds_no_room(pr, hass, filt):
@@ -325,3 +323,23 @@ def test_public_names_exist(pr):
     for name in ("person_name", "get_presence_summary", "presence_context_string",
                  "_person_state"):
         assert callable(getattr(pr, name))
+
+
+# ── 8.49.22 regressions ──────────────────────────────────────────────────────
+
+def test_presence_sensors_mark_a_room_occupied(pr, hass, filt):
+    """Bug 10: presence sensors count, as everywhere else in Nova."""
+    _occ(hass, "b", device_class="presence", friendly_name="Bedroom Presence")
+    _occ(hass, "c", device_class="motion", friendly_name="Cellar Motion")
+    assert pr.get_presence_summary(hass)["rooms"] == {"bedroom": []}
+
+
+def test_room_names_carry_no_sensor_words(pr, hass, filt, monkeypatch):
+    """Bug 11: "Kitchen Presence Sensor" is the kitchen, a sensor in an area
+    is named by the area, and a bare "Room Sensor" names no room."""
+    _occ(hass, "k", friendly_name="Kitchen Presence Sensor")
+    _occ(hass, "r", friendly_name="Presence Room Sensor")
+    _occ(hass, "fp2", friendly_name="FP2 Occupancy Sensor")
+    monkeypatch.setattr(pr, "_area_name", lambda h, eid: "Study" if eid.endswith("fp2") else "",
+                        raising=False)
+    assert list(pr.get_presence_summary(hass)["rooms"]) == ["kitchen", "study"]

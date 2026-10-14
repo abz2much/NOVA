@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import bisect
 import random
+import string
 import time
 from collections import deque
 from typing import Optional
@@ -259,6 +260,12 @@ def _has_placeholder(template: str) -> bool:
     return any(mark in template for mark in _PLACEHOLDERS)
 
 
+def capitalise(honorific) -> str:
+    """The honorific with each word capitalised. An apostrophe does not
+    start a new word: "ma'am" gives "Ma'am", never "Ma'Am"."""
+    return string.capwords(_clean(honorific))
+
+
 def _fill(template: str, honorific) -> str:
     h = _clean(honorific)
     upper = h[:1].upper() + h[1:]
@@ -367,5 +374,5 @@ def lead_in(honorific: str, sentence: str) -> str:
         return sentence
     h = _clean(honorific)
     if h:
-        return f"{h.title()}, {sentence}"
+        return f"{capitalise(h)}, {sentence}"
     return sentence[:1].upper() + sentence[1:]

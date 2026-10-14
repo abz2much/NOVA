@@ -546,7 +546,7 @@ def test_a_capitalised_honorific_is_used_as_given(plain):
 @pytest.mark.parametrize("honorific, sentence, out", [
     ("sir", "the back door is open.", "Sir, the back door is open."),
     ("madam", "dinner is ready.", "Madam, dinner is ready."),
-    ("ma'am", "it is raining.", "Ma'Am, it is raining."),
+    ("ma'am", "it is raining.", "Ma'am, it is raining."),     # 8.49.22 bug 7
     ("dr smith", "your call.", "Dr Smith, your call."),
     ("  boss ", "done.", "Boss, done."),
     ("", "the back door is open.", "The back door is open."),
@@ -561,3 +561,21 @@ def test_lead_in(p, honorific, sentence, out):
 
 def test_lead_in_passes_a_none_sentence_through(p):
     assert p.lead_in("sir", None) is None
+
+
+# ── 8.49.22 regressions ──────────────────────────────────────────────────────
+
+def test_maam_keeps_a_lowercase_a_after_its_apostrophe(p):
+    """Bug 7: "Ma'am", never "Ma'Am", wherever Nova capitalises the
+    honorific, and no module title-cases it on its own any more."""
+    import pathlib
+    import re
+    assert p.capitalise("ma'am") == "Ma'am" and p.capitalise(" dr smith ") == "Dr Smith"
+    assert p.lead_in("ma'am", "it is raining.") == "Ma'am, it is raining."
+    root = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+    pattern = re.compile(r"(honorific\b[^\n]*?|\bh)\)?\.title\(\)")
+    offenders = [f"{f.relative_to(root)}:{n}"
+                 for f in root.rglob("*.py")
+                 for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+                 if pattern.search(line)]
+    assert offenders == []

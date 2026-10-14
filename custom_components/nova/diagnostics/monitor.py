@@ -219,7 +219,8 @@ class InfrastructureTriage:
         h = (self.honorific or "").strip()
         if h:
             note = "infrastructure attention is required." if critical else "a minor infrastructure note."
-            lead = f"{h.title()}, {note}"
+            title = " ".join(word.capitalize() for word in h.split())
+            lead = f"{title}, {note}"
         else:
             lead = "Infrastructure attention is required." if critical else "A minor infrastructure note."
         # Capitalise the first clause for a clean sentence.
