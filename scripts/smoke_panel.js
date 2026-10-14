@@ -991,7 +991,13 @@ if (require.main === module) setTimeout(async () => {
   const fakeFile = new window.File([JSON.stringify(fakeLayout)], "nova-floor-plan.json", { type: "application/json" });
   Object.defineProperty(importFile, "files", { value: [fakeFile], configurable: true });
   importFile.dispatchEvent(new window.Event("change"));
-  await new Promise(r => setTimeout(r, 20));
+  // The FileReader and the redraw after it are async; on a busy machine they
+  // can outlast a fixed pause, so wait (up to 10 s) for the imported room.
+  for (let i = 0; i < 2000; i++) {
+    fpeCardNow = elNew.shadowRoot.getElementById("settings-card-floor_plan_editor");
+    if (fpeCardNow && /IMPORTED ROOM/.test(fpeCardNow.textContent)) break;
+    await new Promise(r => setTimeout(r, 5));
+  }
   sRoot = elNew.shadowRoot;
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: Import loads a layout file into the working copy",
@@ -1008,9 +1014,17 @@ if (require.main === module) setTimeout(async () => {
     && /front/i.test(fpeCardNow.textContent)]);
 
   fpeCardNow.querySelector("#fpnSave").click();
-  await new Promise(r => setTimeout(r, 20));
+  // Save re-renders the card; on a busy machine that can take longer than a
+  // fixed pause, so wait (up to 10 s) for the write and the redrawn device chip.
+  const savedEntities = () => _updateConfigCalls.some(
+    c => c.key === "floor_plan_entities" && /camera\.front/.test(c.value));
+  for (let i = 0; i < 2000; i++) {
+    const card = elNew.shadowRoot.getElementById("settings-card-floor_plan_editor");
+    if (savedEntities() && card?.querySelector(".fpn-ent-del")) break;
+    await new Promise(r => setTimeout(r, 5));
+  }
   checks.push(["floor plan editor: Save writes floor_plan_entities alongside the rooms",
-    _updateConfigCalls.some(c => c.key === "floor_plan_entities" && /camera\.front/.test(c.value))]);
+    savedEntities()]);
 
   sRoot = elNew.shadowRoot;
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
@@ -3974,10 +3988,15 @@ if (require.main === module) setTimeout(async () => {
 
   // The hero types its state word (Hello / Thinking / Goodnight) next to the
   // head and echoes it in the scrolling marquee behind it.
-  await new Promise(r => setTimeout(r, 1200));
   {
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const want = words[elNew._coreState()];
+    // The word is typed a letter at a time; a busy machine can take longer
+    // than a fixed pause, so wait (up to 10 s) for it to finish.
+    for (let i = 0; i < 1000; i++) {
+      if (elNew.shadowRoot.getElementById("heroWordText")?.textContent === want) break;
+      await new Promise(r => setTimeout(r, 10));
+    }
     const wordText = elNew.shadowRoot.getElementById("heroWordText")?.textContent;
     const marqueeText = elNew.shadowRoot.getElementById("heroMarquee")?.textContent || "";
     checks.push(["hero types the state word and echoes it in the marquee",

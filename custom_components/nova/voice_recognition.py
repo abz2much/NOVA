@@ -109,7 +109,10 @@ def identify(hass: HomeAssistant, device_id: Optional[str] = None) -> dict[str, 
     src = (_cfg("voice_recognition_source", "") or "").strip()
     if not src:
         return {}
-    conf = float(_cfg("voice_recognition_confidence", 0.85))
+    try:
+        conf = float(_cfg("voice_recognition_confidence", 0.85))
+    except (TypeError, ValueError):
+        conf = 0.85  # left blank or not a number
 
     if _is_pattern(src):
         found: dict[str, float] = {}

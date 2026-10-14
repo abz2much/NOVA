@@ -164,3 +164,14 @@ def test_attentive_listener_slows_rate_only(telemetry, rate):
     assert eased["speech_rate"] == rate
     assert {k: v for k, v in eased.items() if k != "speech_rate"} == \
         {k: v for k, v in plain.items() if k != "speech_rate"}
+
+
+def test_household_quiet_hours_win_over_the_built_in_window():
+    # Late evening outside 22-07, but the household set quiet hours earlier.
+    assert voice(hour=21, ambient_lux=50, ambient_db=50, quiet_hours=True)["style"] == "subdued"
+    # Inside 22-07, but the household's quiet hours have not started.
+    assert voice(hour=23, ambient_lux=50, ambient_db=50, quiet_hours=False)["style"] == "neutral"
+
+
+def test_non_bool_quiet_hours_falls_back_to_the_window():
+    assert voice(hour=23, ambient_lux=50, ambient_db=50, quiet_hours="yes")["style"] == "subdued"

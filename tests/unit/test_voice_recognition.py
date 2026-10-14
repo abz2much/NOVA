@@ -156,10 +156,14 @@ def test_same_person_keeps_highest_score(vr, fake_hass):
     assert vr.identify(fake_hass) == {"robin": 0.9}
 
 
-def test_confidence_none_is_not_handled(vr, fake_hass):
-    vr.settings.update(voice_recognition_source="sensor.speaker", voice_recognition_confidence=None)
-    with pytest.raises(TypeError):
-        vr.identify(fake_hass)
+@pytest.mark.parametrize("blank", [None, "", "abc"])
+def test_blank_confidence_falls_back_to_default(vr, fake_hass, blank):
+    vr.settings["voice_recognition_source"] = "binary_sensor.robin_*"
+    sensor(fake_hass, "binary_sensor.robin_x", "on", friendly_name="Robin")
+    vr.settings["voice_recognition_confidence"] = 0.85
+    expected = vr.identify(fake_hass)
+    vr.settings["voice_recognition_confidence"] = blank
+    assert vr.identify(fake_hass) == expected == {"robin": 0.85}
 
 
 # enrolment chance

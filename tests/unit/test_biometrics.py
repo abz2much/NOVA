@@ -118,7 +118,8 @@ def test_discover_never_raises(bio):
 
 @pytest.mark.parametrize("value,expected", [
     ("Deep", True), ("REM", True), ("light sleep", True), ("asleep", True),
-    ("on", True), ("in_bed", True), ("not_asleep", True), ("monitoring", True),
+    ("on", True), ("in_bed", True), ("deep sleep", True), ("not_asleep", False),
+        ("not asleep", False), ("monitoring", None),
     ("awake", False), ("off", False), ("out_of_bed", False),
     ("unknown", None), ("unavailable", None), ("", None), ("restless", None)])
 def test_sleep_signal_values(bio, value, expected):

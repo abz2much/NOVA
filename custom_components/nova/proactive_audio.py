@@ -37,7 +37,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
-from . import audio_routing
+from . import audio_routing, delivery
 from .audio import NoiseGate, ProsodyController
 from .automation import EntityLockRegistry, PredictiveHabitMatrix
 from .boot_guard import AlertBuffer
@@ -262,6 +262,8 @@ def _build_telemetry(
         "media_active": media_active,
         "skip_preamble": spatial["skip_preamble"],
         "spatial_confidence": spatial["confidence"],
+        # The household's own quiet hours, not prosody's built-in 22-07.
+        "quiet_hours": delivery.in_quiet_hours(hass),
     }
 
 

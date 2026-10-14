@@ -315,6 +315,16 @@ async def test_audit_speaks_only_in_the_chosen_area(hass, monkeypatch, spoken):
     assert [(m, a) for _, m, a, _ in spoken] == [("Root storage is high", "work_area")]
 
 
+@pytest.mark.parametrize("quiet", [True, False])
+async def test_prosody_reads_the_household_quiet_hours(hass, monkeypatch, quiet):
+    """Prosody uses Nova's quiet hours setting, not a fixed 22-07 window."""
+    from custom_components.nova import proactive_audio
+    monkeypatch.setattr("custom_components.nova.delivery.in_quiet_hours",
+                        lambda hass_: quiet)
+    telemetry = proactive_audio._build_telemetry(hass, "nowhere", [], False)
+    assert telemetry["quiet_hours"] is quiet
+
+
 # ── Unload and reload ───────────────────────────────────────────────────────
 
 async def test_unload_releases_everything_and_repeats_safely(hass, routed):

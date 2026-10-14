@@ -1,3 +1,13 @@
+## [8.49.18] — Four small fixes
+
+Fixes for four bugs found while checking the step 9 rewrites. Each fix has a regression test that fails without it.
+
+### Fixed
+- **Announcements ignored your quiet hours.** The voice style picker used a fixed 22:00 to 07:00 night instead of the quiet hours set in Nova. It now follows the setting.
+- **A blank voice recognition confidence broke speaker recognition.** It now falls back to the default of 0.85.
+- **Some wearable sleep states were misread.** A state such as "not asleep" counted as asleep, and "monitoring" counted as "on". Sleep states are now matched as whole words, awake values first.
+- **A panel test failed now and then on a busy machine.** It now waits for the floor plan import and the greeting word instead of fixed pauses.
+
 ## [8.49.17] — The action ledger rewritten from scratch
 
 Step 9 continues. The ledger Nova writes before it changes a device, so an action cut short by a restart can be checked at startup, is rewritten from an empty file, from a behaviour spec with fresh tests. The file format and the startup check are unchanged. Nothing Nova does changes.
