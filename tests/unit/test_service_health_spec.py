@@ -559,12 +559,16 @@ def test_database_module_unimportable_is_off(sh, monkeypatch):
 
 # ── Voice ID and scheduler (both read the entry's runtime) ──────────────────
 
+class _NoRuntime(RuntimeError):
+    """Stands in for runtime.NovaRuntimeUnavailable."""
+
+
 def _runtime(monkeypatch, runtime=None, exc=None):
     def _dr(hass):
         if exc:
             raise exc
         return runtime
-    _fake(monkeypatch, "runtime", domain_runtime=_dr)
+    _fake(monkeypatch, "runtime", domain_runtime=_dr, NovaRuntimeUnavailable=_NoRuntime)
 
 
 def _voice(monkeypatch, status):
@@ -636,7 +640,13 @@ def test_scheduler_outcomes(sh, monkeypatch):
 
 async def test_runtime_lookup_error_reads_idle(sh, monkeypatch):
     """Fixed (bugs.md #3): a broken runtime lookup in Voice ID or the
-    scheduler reads IDLE, as a broken check does everywhere else."""
+    scheduler reads IDLE, as a broken check does everywhere else. A loaded
+    entry without a runtime still raises, so the roll-up shows it DOWN."""
+    _runtime(monkeypatch, exc=_NoRuntime("lost"))
+    with pytest.raises(_NoRuntime):
+        sh.mod._check_voice_id(None)
+    with pytest.raises(_NoRuntime):
+        sh.mod._check_scheduler(None)
     _runtime(monkeypatch, exc=RuntimeError("entry has no runtime"))
     _quiet_all(sh, monkeypatch, keep=("_check_voice_id", "_check_scheduler"))
     res = await sh.mod.run_service_health(None)

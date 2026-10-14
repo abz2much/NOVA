@@ -390,10 +390,13 @@ def _check_database(hass) -> dict:
 def _runtime_or_note(hass, row: dict):
     """The domain runtime (or None). When the lookup itself breaks, `row` is
     marked IDLE with the reason and False comes back: the check broke, not
-    the service."""
+    the service. A loaded entry without a runtime is a real fault, so
+    NovaRuntimeUnavailable still raises and the roll-up shows it DOWN."""
+    from ..runtime import NovaRuntimeUnavailable, domain_runtime
     try:
-        from ..runtime import domain_runtime
         return domain_runtime(hass)
+    except NovaRuntimeUnavailable:
+        raise
     except Exception as exc:
         row["status"] = _IDLE
         row["detail"] = f"health check could not verify: {exc}"
