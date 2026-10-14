@@ -270,9 +270,20 @@ def test_saved_keys_reads_each_cloud_secret_in_order_and_strips(cf, world, load)
                                   for p in ("groq", "anthropic", "openai", "gemini")]
 
 
-def test_saved_keys_keeps_a_blank_secret_as_an_empty_key(cf, world):
+def test_saved_keys_skips_a_blank_secret(cf, world):
+    """Fixed (bugs.md #10): a key of only spaces is not a saved key, so it is
+    never tested or named as failed."""
     world.saved = {"anthropic": "   "}
-    assert cf._saved_keys() == {"anthropic": ""}
+    assert cf._saved_keys() == {}
+
+
+async def test_a_blank_saved_key_is_not_named_as_failed(world):
+    world.saved = {"anthropic": "   "}
+    world.lists = {"groq": GROQ}
+    flow = world.make()
+    form = await flow.async_step_user(_blank(groq_api_key="gsk"))
+    assert form["step_id"] == "roles" and flow._saved_failed == []
+    assert world.discovered == [("groq", "gsk")]
 
 
 # ── screen 1 ─────────────────────────────────────────────────────────────────
@@ -652,24 +663,33 @@ async def test_import_with_a_bad_address_keeps_a_key_with_no_address(world):
     assert res["reason"] == "import_failed"
 
 
-async def test_import_with_a_capitalised_local_provider_and_no_key_aborts(world):
-    # _find_config lower-cases the provider; the import step does not.
+async def test_import_with_a_capitalised_local_provider_is_local(world):
+    """Fixed (bugs.md #7): the import lower-cases the provider too."""
     res = await world.make().async_step_import(
         {"llm_provider": "Ollama", "ollama_base_url": "http://x:11434"})
-    assert res["reason"] == "import_failed"
+    data = res["data"]
+    assert data["llm_provider"] == "ollama" and data["api_key"] == ""
+    assert data["ollama_base_url"] == "http://x:11434"
 
 
-async def test_leftover_config_naming_ollama_without_an_address_blocks_the_dialog(world):
+@pytest.mark.parametrize("leftover", [
+    {"llm_provider": "ollama"},
+    {"llm_provider": "custom", "custom_base_url": "ftp://x"},
+])
+async def test_leftover_config_without_a_usable_address_shows_the_dialog(world, leftover):
+    """Fixed (bugs.md #8): a leftover config.json that cannot be imported no
+    longer blocks setup; screen 1 is shown instead."""
     (world.config_dir / "nova").mkdir()
-    (world.config_dir / "nova" / "config.json").write_text(json.dumps({"llm_provider": "ollama"}))
+    (world.config_dir / "nova" / "config.json").write_text(json.dumps(leftover))
     res = await world.make().async_step_user(None)
-    assert res == {"type": "abort", "reason": "import_failed"}
+    assert res["type"] == "form" and res["step_id"] == "user"
 
 
-async def test_import_with_a_null_groq_key_and_no_api_key_raises(world):
-    with pytest.raises(AttributeError):
-        await world.make().async_step_import(
-            {"groq_api_key": None, "llm_provider": "ollama", "ollama_base_url": "http://x:1"})
+async def test_import_with_a_null_groq_key_and_no_api_key_is_local(world):
+    """Fixed (bugs.md #9): a blank Groq key no longer crashes the import."""
+    res = await world.make().async_step_import(
+        {"groq_api_key": None, "llm_provider": "ollama", "ollama_base_url": "http://x:1"})
+    assert res["data"]["api_key"] == "" and res["data"]["ollama_base_url"] == "http://x:1"
 
 
 # ── Supervisor discovery ─────────────────────────────────────────────────────
