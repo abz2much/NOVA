@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 
 from .safe_errors import safe_error_message
 from .ws_area_helpers import (
+    area_scan,
     _all_areas_with_anything,
     _area_name,
     _format_duration,
@@ -177,7 +178,9 @@ async def ws_mmwave_overview(
         rooms = []
         total_sensors = 0
         rooms_detecting = 0
-        for aid in _all_areas_with_anything(hass):
+        with area_scan(hass):
+            areas = _all_areas_with_anything(hass)
+        for aid in areas:
             sensors = audio_routing.presence_entities_in_area(hass, aid)
             if not sensors:
                 continue

@@ -439,3 +439,62 @@ def test_live_readings_real_motion_and_person_sensors_still_count(mod, registrie
                      ("binary_sensor.hall_mmwave", 45)):
         hass.states.get(eid).last_changed = datetime.fromtimestamp(now - age, timezone.utc)
     assert mod._area_live_readings(hass, "hall")["last_motion_seconds"] == pytest.approx(20)
+
+
+# ── area_scan: one registry walk per panel request (8.49.34) ────────────────
+
+class _CountingEntities(dict):
+    """An entity table that counts full walks."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.walks = 0
+
+    def values(self):
+        self.walks += 1
+        return super().values()
+
+
+def _house(registries, hass, rooms: int):
+    registries.entities = _CountingEntities()
+    for n in range(rooms):
+        registries.areas[f"a{n}"] = _Area(id=f"a{n}", name=f"Room {n}")
+        registries.add_entity(f"light.l{n}", area_id=f"a{n}")
+        hass.states.set(f"light.l{n}", "on")
+        registries.add_entity(f"sensor.t{n}", area_id=f"a{n}")
+        hass.states.set(f"sensor.t{n}", "20", device_class="temperature",
+                        unit_of_measurement="°C")
+
+
+def _room_cards(mod, hass):
+    return [(area, mod._area_capabilities(hass, area), mod._area_light_state(hass, area),
+             mod._area_live_readings(hass, area), mod._area_temp_humidity_entities(hass, area))
+            for area in mod._all_areas_with_anything(hass)]
+
+
+def test_area_scan_walks_the_registry_once_for_every_room(mod, registries, hass):
+    _house(registries, hass, rooms=20)
+    with mod.area_scan(hass):
+        shared = _room_cards(mod, hass)
+    assert registries.entities.walks == 1
+    registries.entities.walks = 0
+    alone = _room_cards(mod, hass)
+    assert alone == shared
+    assert registries.entities.walks == 20 + 20 * 4      # the old cost, outside a scan
+
+
+def test_area_scan_is_dropped_when_the_block_ends(mod, registries, hass):
+    _house(registries, hass, rooms=1)
+    with mod.area_scan(hass):
+        assert mod._entities_in_area(hass, "a0") == ["light.l0", "sensor.t0"]
+    registries.add_entity("switch.new", area_id="a0")
+    assert "switch.new" in mod._entities_in_area(hass, "a0")
+
+
+def test_area_scan_for_another_hass_is_not_shared(mod, registries, hass):
+    from fakes import FakeHass
+    _house(registries, hass, rooms=1)
+    with mod.area_scan(FakeHass()):
+        mod._entities_in_area(hass, "a0")
+        mod._entities_in_area(hass, "a0")
+    assert registries.entities.walks == 2
