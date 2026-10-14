@@ -1,3 +1,11 @@
+## [8.49.25] — Observer, announcements and briefing rewritten from scratch
+
+Phase 7b rewrites five modules from empty files, each from a behaviour spec with fresh tests: the observer, speaker routing, nova.speak and the infrastructure audit, the announcement gate, and the on demand briefing. Nothing Nova does changes: the same events are filtered, classified and delivered, the same speakers are chosen, and the same settings, services and stored files are used.
+
+### Changed
+- **Rewritten:** the observer's filters, debounces, rate limit and classify and reason pipeline; how a speaker is picked for replies, observer alerts and broadcasts, and the television guard; nova.speak's voice shaping, volume ducking and the infrastructure audit; the announcement rate limit, repeats, habituation and mutes; and the nova.briefing service.
+- **Proven the same:** each new module passes both its fresh tests and the old ones. The fresh tests then replaced the old test files for the announcement gate, the briefing and the observer's pure helpers. The other observer and routing test files all still pass and stay.
+
 ## [8.49.24] — Six camera, document and doorbell fixes
 
 Fixes for six bugs found while rewriting the camera, document and doorbell learning modules. Each fix has a test that fails without it. Nothing else changes.
