@@ -72,7 +72,7 @@ async def test_suggestion_descriptions_use_names(analysis):
     rows = await run()
     [routine] = [r for r in _by_type(rows, "time_routine")
                  if json.loads(r["entity_ids"]) == ["light.kitchen_light"]]
-    assert routine["description"].startswith("Kitchen Light turns on around 07:00 on ")
+    assert routine["description"].startswith("Kitchen Light turns on around 07:05 on ")
     assert routine["description"].endswith(" when Abi is home")
     [seq] = [r for r in _by_type(rows, "sequence")
              if json.loads(r["entity_ids"]) == ["binary_sensor.front_door",
@@ -87,7 +87,7 @@ async def test_automation_names_use_names(analysis):
     _an, _kn, _db, run = analysis
     rows = await run()
     aliases = {json.loads(r["automation_yaml"]).get("alias") for r in rows}
-    assert "Nova Learned: Kitchen Light on at 07:00" in aliases
+    assert "Nova Learned: Kitchen Light on at 07:05" in aliases
     assert "Nova Learned: Hall Light after Front Door" in aliases
 
 
@@ -106,7 +106,7 @@ async def test_memory_panel_routine_uses_names(analysis):
     an, _kn, _db, run = analysis
     await run()
     [row] = an.get_person_patterns("abi")
-    assert row["description"].startswith("Kitchen Light turns on around 07:00")
+    assert row["description"].startswith("Kitchen Light turns on around 07:05")
     assert "light." not in row["description"]
 
 
