@@ -1530,9 +1530,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
         _LOGGER.debug("Local: read-only request, no local action")
         return None
 
-    for step in (_bulk(hass, normalized, addr, device_id),
-                 _scene(hass, normalized, addr, device_id)):
-        outcome = await step
+    for step in (_bulk, _scene):
+        outcome = await step(hass, normalized, addr, device_id)
         if outcome is _DEFER:
             return None
         if outcome is not None:
