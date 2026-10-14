@@ -1,3 +1,11 @@
+## [8.49.30] — Setup, panel commands and health checks rewritten from scratch
+
+Phase 7e rewrites five modules from empty files, each from a behaviour spec with fresh tests: integration setup and unload, the panel's websocket commands, the setup and options screens, first run bootstrap and the service health check. Nothing Nova does changes: the same things start and stop in the same order, the panel sends and receives the same commands, existing config entries load unchanged, and the same health rows are shown.
+
+### Changed
+- **Rewritten:** setup, unload and failed setup clean up, the scheduled ticks, briefings and camera reactions; every panel websocket command, its schema and its replies; the config flow and options flow, including the leftover config import and the saved key checks; the first run voice bootstrap and its marker file; and every service health check and its summary.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, and the fresh tests passed on the old modules first. The old test files all still pass and stay; the fresh tests are added alongside them.
+
 ## [8.49.29] — Two sentinel and hazard fixes
 
 Fixes for two bugs found while rewriting the sentinel and the hazard monitor. Each fix has a test that fails without it. Nothing else changes.

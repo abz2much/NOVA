@@ -1,20 +1,21 @@
-"""
-Nova Panel WebSocket API (v5.4.2).
+"""Nova's panel websocket layer.
 
-Registers the `nova/get_panel_data` WebSocket command that the custom
-panel calls (on mount + every 5s) to refresh live state.
-
-The single command returns everything the panel needs in one round-trip:
-status flags, area registry with capabilities and occupancy, dominant
-room, satellite count, bedroom count, uptime.
-
-Activity log is a separate endpoint (deferred to session 3, needs DB work).
+async_register puts every nova/* command on Home Assistant's websocket API.
+Most handlers live in the ws_*.py modules and are imported here by name; this
+module keeps the config readers they share (reached through ws_bridge) and
+the commands that are still its own: the panel data poll, the activity and
+debug logs, the generic config write, the health reports, provider activity,
+semantic search, the document library, area sparklines and the appliance
+monitor reload.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import time
+from functools import partial
+from pathlib import Path
 from typing import Any, Optional
 
 import voluptuous as vol
@@ -23,298 +24,233 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from . import audio_routing, optional_features, settings_schema, sleep_detection
-from .safe_errors import safe_error_message
-# The debug log lives in ws_log.py (it imports no Home Assistant code). Other
-# modules and tests reach these names through this module, so they stay
-# importable from here. _LOG_FILE is deliberately not re-exported: it is
-# reassigned in tests, and a patch on a copy of it here would do nothing.
-from .ws_log import (  # noqa: F401
-    _DEBUG_LOG,
-    _LOG_QUEUE,
-    _ensure_writer,
-    nova_log,
-    recent_conversation_log,
-    recent_debug_log,
+from .const import (
+    CONF_BEDROOM_AREAS, CONF_BROADCAST_GROUP, CONF_GEMINI_API_KEY, CONF_GROUND_FLOOR_AREAS,
+    CONF_NOTIFY_SERVICE, CONF_NOTIFY_SERVICES, CONF_OBSERVER_ENABLED, CONF_OBSERVER_QUIET_END,
+    CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START, DOMAIN,
 )
-# The panel helpers live in ws_area_helpers.py and ws_panel_stats.py. The
-# handlers here, and tests that patch these names on this module, look them
-# up in this module's namespace, so they are imported by name.
+from .safe_errors import safe_error_message
+
+# The debug log is ws_log's. Other modules and tests still reach these names
+# through here, so they are imported under their own names. _LOG_FILE stays
+# out on purpose: tests reassign it, and a copy held here would go stale.
+from .ws_log import (  # noqa: F401
+    _DEBUG_LOG, _LOG_QUEUE, _ensure_writer, nova_log, recent_conversation_log, recent_debug_log,
+)
+
+# Panel helpers. Handlers look them up in this module's namespace at call
+# time, which is what lets a test (or a slow tile) be patched here.
 from .ws_area_helpers import (
-    _all_areas_with_anything,
-    _area_capabilities,
-    _area_light_state,
-    _area_live_readings,
-    _area_name,
-    _area_temp_humidity_entities,
-    _dominant_area,
-    _format_duration,
-    _get_all_people,
-    _get_camera_names,
-    _get_camera_overrides,
-    _get_cameras,
-    _get_cast_devices,
-    _get_onboarding_state,
-    _get_satellites,
-    _get_speaker_assignable_areas,
-    _is_outdoor_area,
+    _all_areas_with_anything, _area_capabilities, _area_light_state, _area_live_readings,
+    _area_name, _area_temp_humidity_entities, _dominant_area, _format_duration,
+    _get_all_people, _get_camera_names, _get_camera_overrides, _get_cameras, _get_cast_devices,
+    _get_onboarding_state, _get_satellites, _get_speaker_assignable_areas, _is_outdoor_area,
     _satellite_count,
 )
 from .ws_panel_stats import (
-    _entity_names,
-    _format_uptime,
-    _get_alarm_panels,
-    _get_announcements_today,
-    _get_appliance_status,
-    _get_area_sparklines,
-    _get_doorbell_training,
-    _get_filtered_suggestions,
-    _get_goals,
-    _get_intrusion_status,
-    _get_knowledge_stats,
-    _get_lockdown_status,
-    _get_observer_stats,
-    _get_output_mutes,
-    _get_sentinel_rules,
-    _get_stt_entities,
-    _get_suggestions,
-    _get_voice_id_status,
+    _entity_names, _format_uptime, _get_alarm_panels, _get_announcements_today,
+    _get_appliance_status, _get_area_sparklines, _get_doorbell_training,
+    _get_filtered_suggestions, _get_goals, _get_intrusion_status, _get_knowledge_stats,
+    _get_lockdown_status, _get_observer_stats, _get_output_mutes, _get_sentinel_rules,
+    _get_stt_entities, _get_suggestions, _get_voice_id_status,
 )
-# The AI settings commands live in ws_ai.py. async_register registers the
-# handlers by name; invalidate_model_cache is public and stays importable
-# from here. nova/update_config uses the panel AI key checks below.
+
+# The AI settings commands, plus the checks nova/update_config borrows from
+# them. invalidate_model_cache is public and stays importable from here.
 from .ws_ai import (  # noqa: F401
-    HIDDEN_PASSWORD_MESSAGE,
-    PANEL_AI_ENDPOINT_KEYS,
-    PANEL_AI_VALUE_KEYS,
-    invalidate_model_cache,
-    panel_ai_value,
-    shows_hidden_password,
-    ws_apply_ai_config,
-    ws_delete_credential,
-    ws_get_credential_status,
-    ws_list_models,
-    ws_set_credential,
-    ws_test_provider_endpoint,
+    HIDDEN_PASSWORD_MESSAGE, PANEL_AI_ENDPOINT_KEYS, PANEL_AI_VALUE_KEYS,
+    invalidate_model_cache, panel_ai_value, shows_hidden_password,
+    ws_apply_ai_config, ws_delete_credential, ws_get_credential_status, ws_list_models,
+    ws_set_credential, ws_test_provider_endpoint,
 )
-# The Faces tab commands live in ws_faces.py.
-from .ws_faces import ws_add_resident, ws_list_faces, ws_remove_resident
-# The knowledge, decision and automation commands live in ws_knowledge.py,
-# ws_decisions.py and ws_automation.py. async_register registers the handlers
-# by name.
+
+# Every other command handler, by the module that owns it.
 from .ws_automation import (
-    ws_automation_trial_feedback,
-    ws_get_person_routines,
-    ws_goal_action,
-    ws_list_automation_inventory,
-    ws_list_automation_trials,
-    ws_suggestion_action,
+    ws_automation_trial_feedback, ws_get_person_routines, ws_goal_action,
+    ws_list_automation_inventory, ws_list_automation_trials, ws_suggestion_action,
 )
+from .ws_cameras import (
+    ws_camera_diagnostics, ws_camera_location, ws_camera_snapshot, ws_compute_camera_coverage,
+    ws_mmwave_overview, ws_rename_camera,
+)
+from .ws_chat import ws_chat, ws_chat_new
 from .ws_convenience import ws_convenience_choice, ws_convenience_status
 from .ws_decisions import (
-    ws_get_calibration,
-    ws_get_cognitive_status,
-    ws_get_decision,
-    ws_list_decisions,
-    ws_root_cause,
-    ws_run_analysis,
-    ws_set_decision_outcome,
+    ws_get_calibration, ws_get_cognitive_status, ws_get_decision, ws_list_decisions,
+    ws_root_cause, ws_run_analysis, ws_set_decision_outcome,
 )
+from .ws_faces import ws_add_resident, ws_list_faces, ws_remove_resident
 from .ws_knowledge import (
-    ws_add_knowledge,
-    ws_clear_scene_memory,
-    ws_edit_pending_fact,
-    ws_edit_relation,
-    ws_forget_knowledge,
-    ws_get_knowledge,
-    ws_list_relations,
-    ws_pending_fact_action,
-    ws_relation_action,
-    ws_search_memory,
-    ws_set_lockdown,
+    ws_add_knowledge, ws_clear_scene_memory, ws_edit_pending_fact, ws_edit_relation,
+    ws_forget_knowledge, ws_get_knowledge, ws_list_relations, ws_pending_fact_action,
+    ws_relation_action, ws_search_memory, ws_set_lockdown,
 )
-# The camera commands live in ws_cameras.py. async_register registers them by name.
-from .ws_cameras import (
-    ws_camera_diagnostics,
-    ws_camera_location,
-    ws_camera_snapshot,
-    ws_compute_camera_coverage,
-    ws_mmwave_overview,
-    ws_rename_camera,
-)
-# The mode, intrusion, hazard, energy, solar and biometrics
-# commands live in ws_modes.py. async_register registers them by name.
 from .ws_modes import (
-    ws_biometrics,
-    ws_energy,
-    ws_energy_flow,
-    ws_energy_outlook,
-    ws_hazard,
-    ws_intrusion,
-    ws_mode,
-    ws_solar,
+    ws_biometrics, ws_energy, ws_energy_flow, ws_energy_outlook, ws_hazard, ws_intrusion,
+    ws_mode, ws_solar,
 )
-# The Chat tab's command lives in ws_chat.py. async_register registers it by name.
-from .ws_chat import ws_chat, ws_chat_new
-# The voice and history commands live in ws_voice.py. async_register registers them by name.
 from .ws_voice import (
-    ws_get_spoken_history,
-    ws_list_actions,
-    ws_repeat_spoken,
-    ws_say_hello,
-    ws_voice_confirm_test,
+    ws_get_spoken_history, ws_list_actions, ws_repeat_spoken, ws_say_hello, ws_voice_confirm_test,
 )
-# The Voice Phrases card's commands live in ws_voice_phrases.py. async_register registers them by name.
-from .ws_voice_phrases import (
-    ws_voice_phrases_delete,
-    ws_voice_phrases_list,
-    ws_voice_phrases_save,
-    ws_voice_phrases_set_enabled,
-    ws_voice_phrases_test,
-)
-# The Nova Voice ID commands (8.36.0) live in ws_voice_id.py. async_register registers them by name.
 from .ws_voice_id import (
-    ws_voice_id_delete,
-    ws_voice_id_profiles,
-    ws_voice_id_record,
-    ws_voice_id_record_cancel,
-    ws_voice_id_record_status,
-    ws_voice_id_token_get,
-    ws_voice_id_token_set,
+    ws_voice_id_delete, ws_voice_id_profiles, ws_voice_id_record, ws_voice_id_record_cancel,
+    ws_voice_id_record_status, ws_voice_id_token_get, ws_voice_id_token_set,
 )
-from .const import (
-    CONF_BEDROOM_AREAS,
-    CONF_GROUND_FLOOR_AREAS,
-    CONF_BROADCAST_GROUP,
-    CONF_GEMINI_API_KEY,
-    CONF_NOTIFY_SERVICE,
-    CONF_NOTIFY_SERVICES,
-    CONF_OBSERVER_ENABLED,
-    CONF_OBSERVER_QUIET_END,
-    CONF_OBSERVER_QUIET_START,
-    DEFAULT_OBSERVER_QUIET_END,
-    DEFAULT_OBSERVER_QUIET_START,
-    DOMAIN,
+from .ws_voice_phrases import (
+    ws_voice_phrases_delete, ws_voice_phrases_list, ws_voice_phrases_save,
+    ws_voice_phrases_set_enabled, ws_voice_phrases_test,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# Startup wall-clock — for uptime computation
+# When this module was imported; the panel's uptime counts from here.
 _STARTUP_TS: float = time.time()
 
+# The only keys nova/update_config will write. Each one's kind and default
+# live in settings_schema.SETTINGS (8.42.0).
+PANEL_WRITABLE_KEYS = set(settings_schema.PANEL_KEYS)
 
-# ─── Command registration ────────────────────────────────────────────────────
+# What get_panel_data shows when a reading is missing.
+_DASH = "—"
+
+# The hazard location override is saved as one pair.
+_HAZARD_PAIR = ("hazard_lat", "hazard_lon")
+# Settings a running observer re-reads when one of them changes.
+_OBSERVER_TIER_KEYS = ("classifier_provider", "classifier_model",
+                       "reasoning_provider", "reasoning_model")
+
+
+def _manifest_version() -> str:
+    """The version in manifest.json, or "?" when it cannot be read. Read
+    once at import, so the panel shows the running version rather than one
+    a cached panel script remembers."""
+    try:
+        manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
+        return manifest.get("version", "?")
+    except Exception:
+        return "?"
+
+
+_INTEGRATION_VERSION = _manifest_version()
+
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    """Register all Nova panel WebSocket commands. Idempotent-ish."""
+    """Put every Nova panel command on the websocket API. A failure part way
+    through is only noted at debug level (a second call after a reload finds
+    the commands already there)."""
     try:
-        websocket_api.async_register_command(hass, ws_get_panel_data)
+        # This module's own commands.
+        websocket_api.async_register_command(hass, ws_documents)
+        websocket_api.async_register_command(hass, ws_diagnostics)
         websocket_api.async_register_command(hass, ws_get_activity_log)
-        websocket_api.async_register_command(hass, ws_update_config)
-        websocket_api.async_register_command(hass, ws_set_lockdown)
-        websocket_api.async_register_command(hass, ws_get_knowledge)
-        websocket_api.async_register_command(hass, ws_add_knowledge)
-        websocket_api.async_register_command(hass, ws_forget_knowledge)
-        websocket_api.async_register_command(hass, ws_clear_scene_memory)
-        websocket_api.async_register_command(hass, ws_pending_fact_action)
-        websocket_api.async_register_command(hass, ws_edit_pending_fact)
-        websocket_api.async_register_command(hass, ws_root_cause)
-        websocket_api.async_register_command(hass, ws_compute_camera_coverage)
-        websocket_api.async_register_command(hass, ws_reload_appliances)
-        websocket_api.async_register_command(hass, ws_search_memory)
+        websocket_api.async_register_command(hass, ws_get_area_sparklines)
         websocket_api.async_register_command(hass, ws_get_debug_log)
-        websocket_api.async_register_command(hass, ws_get_cognitive_status)
-        websocket_api.async_register_command(hass, ws_run_analysis)
-        websocket_api.async_register_command(hass, ws_get_calibration)
-        websocket_api.async_register_command(hass, ws_list_decisions)
-        websocket_api.async_register_command(hass, ws_get_decision)
-        websocket_api.async_register_command(hass, ws_set_decision_outcome)
-        websocket_api.async_register_command(hass, ws_convenience_status)
-        websocket_api.async_register_command(hass, ws_convenience_choice)
-        websocket_api.async_register_command(hass, ws_list_models)
-        websocket_api.async_register_command(hass, ws_test_provider_endpoint)
+        websocket_api.async_register_command(hass, ws_get_panel_data)
+        websocket_api.async_register_command(hass, ws_get_provider_activity)
+        websocket_api.async_register_command(hass, ws_get_setup_health)
+        websocket_api.async_register_command(hass, ws_reload_appliances)
+        websocket_api.async_register_command(hass, ws_semantic_search)
+        websocket_api.async_register_command(hass, ws_update_config)
+        # AI models and credentials.
         websocket_api.async_register_command(hass, ws_apply_ai_config)
-        websocket_api.async_register_command(hass, ws_get_credential_status)
-        websocket_api.async_register_command(hass, ws_set_credential)
         websocket_api.async_register_command(hass, ws_delete_credential)
-        websocket_api.async_register_command(hass, ws_suggestion_action)
+        websocket_api.async_register_command(hass, ws_get_credential_status)
+        websocket_api.async_register_command(hass, ws_list_models)
+        websocket_api.async_register_command(hass, ws_set_credential)
+        websocket_api.async_register_command(hass, ws_test_provider_endpoint)
+        # Suggestions, goals, routines and automation trials.
+        websocket_api.async_register_command(hass, ws_automation_trial_feedback)
+        websocket_api.async_register_command(hass, ws_get_person_routines)
+        websocket_api.async_register_command(hass, ws_goal_action)
         websocket_api.async_register_command(hass, ws_list_automation_inventory)
         websocket_api.async_register_command(hass, ws_list_automation_trials)
-        websocket_api.async_register_command(hass, ws_automation_trial_feedback)
-        websocket_api.async_register_command(hass, ws_goal_action)
-        websocket_api.async_register_command(hass, ws_get_person_routines)
-        websocket_api.async_register_command(hass, ws_get_area_sparklines)
-        websocket_api.async_register_command(hass, ws_camera_snapshot)
+        websocket_api.async_register_command(hass, ws_suggestion_action)
+        # Cameras.
         websocket_api.async_register_command(hass, ws_camera_diagnostics)
-        websocket_api.async_register_command(hass, ws_rename_camera)
         websocket_api.async_register_command(hass, ws_camera_location)
+        websocket_api.async_register_command(hass, ws_camera_snapshot)
+        websocket_api.async_register_command(hass, ws_compute_camera_coverage)
         websocket_api.async_register_command(hass, ws_mmwave_overview)
-        websocket_api.async_register_command(hass, ws_documents)
-        websocket_api.async_register_command(hass, ws_semantic_search)
-        websocket_api.async_register_command(hass, ws_diagnostics)
-        websocket_api.async_register_command(hass, ws_get_setup_health)
-        websocket_api.async_register_command(hass, ws_say_hello)
+        websocket_api.async_register_command(hass, ws_rename_camera)
+        # Chat and the convenience path.
         websocket_api.async_register_command(hass, ws_chat)
         websocket_api.async_register_command(hass, ws_chat_new)
-        websocket_api.async_register_command(hass, ws_get_provider_activity)
-        websocket_api.async_register_command(hass, ws_get_spoken_history)
-        websocket_api.async_register_command(hass, ws_list_actions)
-        websocket_api.async_register_command(hass, ws_repeat_spoken)
-        websocket_api.async_register_command(hass, ws_voice_confirm_test)
-        websocket_api.async_register_command(hass, ws_intrusion)
-        websocket_api.async_register_command(hass, ws_mode)
-        websocket_api.async_register_command(hass, ws_energy)
-        websocket_api.async_register_command(hass, ws_solar)
-        websocket_api.async_register_command(hass, ws_energy_flow)
-        websocket_api.async_register_command(hass, ws_energy_outlook)
-        websocket_api.async_register_command(hass, ws_hazard)
-        websocket_api.async_register_command(hass, ws_biometrics)
+        websocket_api.async_register_command(hass, ws_convenience_choice)
+        websocket_api.async_register_command(hass, ws_convenience_status)
+        # Decisions and cognition.
+        websocket_api.async_register_command(hass, ws_get_calibration)
+        websocket_api.async_register_command(hass, ws_get_cognitive_status)
+        websocket_api.async_register_command(hass, ws_get_decision)
+        websocket_api.async_register_command(hass, ws_list_decisions)
+        websocket_api.async_register_command(hass, ws_root_cause)
+        websocket_api.async_register_command(hass, ws_run_analysis)
+        websocket_api.async_register_command(hass, ws_set_decision_outcome)
+        # Faces.
         websocket_api.async_register_command(hass, ws_list_faces)
         websocket_api.async_register_command(hass, ws_add_resident)
         websocket_api.async_register_command(hass, ws_remove_resident)
+        # Knowledge, relations and lockdown.
+        websocket_api.async_register_command(hass, ws_add_knowledge)
+        websocket_api.async_register_command(hass, ws_clear_scene_memory)
+        websocket_api.async_register_command(hass, ws_edit_pending_fact)
+        websocket_api.async_register_command(hass, ws_forget_knowledge)
+        websocket_api.async_register_command(hass, ws_get_knowledge)
+        websocket_api.async_register_command(hass, ws_pending_fact_action)
+        websocket_api.async_register_command(hass, ws_search_memory)
+        websocket_api.async_register_command(hass, ws_set_lockdown)
         websocket_api.async_register_command(hass, ws_list_relations)
         websocket_api.async_register_command(hass, ws_relation_action)
         websocket_api.async_register_command(hass, ws_edit_relation)
+        # Modes, safety and energy.
+        websocket_api.async_register_command(hass, ws_biometrics)
+        websocket_api.async_register_command(hass, ws_energy)
+        websocket_api.async_register_command(hass, ws_energy_flow)
+        websocket_api.async_register_command(hass, ws_energy_outlook)
+        websocket_api.async_register_command(hass, ws_hazard)
+        websocket_api.async_register_command(hass, ws_intrusion)
+        websocket_api.async_register_command(hass, ws_mode)
+        websocket_api.async_register_command(hass, ws_solar)
+        # Speech history and voice confirmation.
+        websocket_api.async_register_command(hass, ws_get_spoken_history)
+        websocket_api.async_register_command(hass, ws_list_actions)
+        websocket_api.async_register_command(hass, ws_repeat_spoken)
+        websocket_api.async_register_command(hass, ws_say_hello)
+        websocket_api.async_register_command(hass, ws_voice_confirm_test)
+        # Voice phrases.
+        websocket_api.async_register_command(hass, ws_voice_phrases_delete)
         websocket_api.async_register_command(hass, ws_voice_phrases_list)
         websocket_api.async_register_command(hass, ws_voice_phrases_save)
-        websocket_api.async_register_command(hass, ws_voice_phrases_delete)
         websocket_api.async_register_command(hass, ws_voice_phrases_set_enabled)
         websocket_api.async_register_command(hass, ws_voice_phrases_test)
+        # Nova Voice ID.
+        websocket_api.async_register_command(hass, ws_voice_id_delete)
         websocket_api.async_register_command(hass, ws_voice_id_profiles)
         websocket_api.async_register_command(hass, ws_voice_id_record)
         websocket_api.async_register_command(hass, ws_voice_id_record_cancel)
         websocket_api.async_register_command(hass, ws_voice_id_record_status)
-        websocket_api.async_register_command(hass, ws_voice_id_delete)
         websocket_api.async_register_command(hass, ws_voice_id_token_get)
         websocket_api.async_register_command(hass, ws_voice_id_token_set)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
 
 
-# ─── Helpers ────────────────────────────────────────────────────────────────
+# ─── Config readers ──────────────────────────────────────────────────────────
+#
+# Precedence everywhere: the loaded entry's live NovaRuntime.runtime_config,
+# then config.json, then the entry's options, then its data, then the default.
+# hass.data is never consulted, which keeps the compatibility bridge out.
 
 def _get_entry(hass: HomeAssistant):
-    """Return the first Nova config entry's ConfigEntry object, or None."""
-    # The ConfigEntry carries options/data and, once loaded, its NovaRuntime
-    # (entry.runtime_data), which owns the live panel runtime_config.
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        return entry
-    return None
-
-
-def _entry_opt(entry, key: str, default=None):
-    """Config read via the canonical resolver (no hass here, so runtime_config is
-    skipped): config.json → options → data → default."""
-    from . import nova_config
-    return nova_config.runtime_get(None, entry, key, default)
+    """Nova's config entry (the first one), or None."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    return entries[0] if entries else None
 
 
 def _live_runtime_config(entry) -> dict:
-    """The entry's live NovaRuntime.runtime_config, for synchronous reads on
-    the event loop. {} when there is no entry or it is not loaded (setup still
-    running, failed, or unloaded), so callers keep their defaults. Raises
-    NovaRuntimeUnavailable for a loaded entry without a runtime rather than
-    showing made-up defaults. Never reads hass.data."""
+    """The live runtime_config dict, for reads on the event loop. {} without
+    an entry or before it has loaded; a loaded entry with no runtime raises
+    NovaRuntimeUnavailable rather than showing invented defaults."""
     if entry is None:
         return {}
     from .runtime import lifecycle_runtime_config
@@ -322,317 +258,113 @@ def _live_runtime_config(entry) -> dict:
 
 
 def _executor_runtime_config(entry) -> dict:
-    """A fresh runtime_config snapshot to hand to one executor job. Same
-    ownership rules as _live_runtime_config. Take it right before the
-    async_add_executor_job call and never keep it for a later command."""
+    """A private copy of runtime_config for one executor job. Same rules as
+    _live_runtime_config; take it just before the job and do not keep it."""
     if entry is None:
         return {}
     from .runtime import runtime_config_snapshot
     return runtime_config_snapshot(entry)
 
 
-async def _voice_id_token(hass: HomeAssistant) -> str:
-    """Whether a Voice ID token is set, for the panel. The value itself only
-    ever goes out through nova/voice_id_token_get."""
-    try:
-        from . import voice_id_store
-        return await voice_id_store.async_get_token(hass)
-    except Exception:
-        return ""
-
-
-def _get_voice_id_enrol() -> dict:
-    try:
-        from . import voice_enrol
-        return voice_enrol.status()
-    except Exception:
-        return {"state": "idle"}
-
-
-def _runtime_opt(hass: HomeAssistant, entry, key: str, default=None):
-    """Runtime-aware config read: live NovaRuntime.runtime_config first, then
-    the canonical resolver for the rest (config.json → options → data →
-    default). A None or blank runtime value falls through, as before."""
+def _entry_opt(entry, key: str, default=None):
+    """Every layer below runtime_config (config.json, options, data)."""
     from . import nova_config
-    rc = _live_runtime_config(entry)
-    if key in rc and rc[key] not in (None, ""):
-        return rc[key]
     return nova_config.runtime_get(None, entry, key, default)
 
 
+def _runtime_opt(hass: HomeAssistant, entry, key: str, default=None):
+    """The live runtime value, unless it is None or blank, else _entry_opt."""
+    live = _live_runtime_config(entry).get(key)
+    if live not in (None, ""):
+        return live
+    return _entry_opt(entry, key, default)
+
+
 def _int_opt(hass: HomeAssistant, entry, key: str, default: int) -> int:
-    """Read an int option, preserving 0 — `value or default` clobbers a valid 0."""
-    v = _runtime_opt(hass, entry, key, default)
+    """_runtime_opt as an int. A stored 0 is kept; junk gives the default."""
     try:
-        return int(v)
+        return int(_runtime_opt(hass, entry, key, default))
     except (TypeError, ValueError):
         return default
 
 
-# ─── WebSocket command ───────────────────────────────────────────────────────
+_UNREADABLE = object()
 
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_panel_data",
-})
-@websocket_api.async_response
-async def ws_get_panel_data(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Return all data the panel needs for one render."""
+
+def _from_json(raw, keep_bad_text: bool = False):
+    """raw when it is already a dict or list, else raw parsed as JSON. Text
+    that does not parse is _UNREADABLE, or raw itself with keep_bad_text."""
+    if isinstance(raw, (dict, list)):
+        return raw
     try:
-        entry = _get_entry(hass)
+        return json.loads(raw)
+    except Exception:
+        return raw if keep_bad_text else _UNREADABLE
 
-        # ── Status flags ────────────────────────────────────────────────────
-        observer_running = False
-        if entry is not None:
-            from .runtime import observer_status
-            observer_running = observer_status(entry)
 
-        bedroom_areas = _entry_opt(entry, CONF_BEDROOM_AREAS, []) or []
-        quiet_start = _entry_opt(entry, CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_START)
-        quiet_end = _entry_opt(entry, CONF_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_END)
+def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
+    """A JSON valued setting, decoded. A layer whose value does not parse is
+    skipped, except config.json, whose text then comes back as it is."""
+    if entry is not None:
+        live = _live_runtime_config(entry).get(key)
+        if live is not None:
+            value = _from_json(live)
+            if value is not _UNREADABLE:
+                return value
+    try:
+        from . import nova_config
+        saved = nova_config.get(key)
+        if saved is not None:
+            return _from_json(saved, keep_bad_text=True)
+    except Exception:
+        pass
+    if entry is not None:
+        bootstrap = _entry_opt(entry, key, None)
+        if bootstrap is not None:
+            value = _from_json(bootstrap)
+            if value is not _UNREADABLE:
+                return value
+    return default
 
-        sleeping, sleep_reason = sleep_detection.is_sleeping(
-            hass,
-            bedroom_area_ids=bedroom_areas,
-            quiet_start=quiet_start,
-            quiet_end=quiet_end,
-        )
 
-        gemini_key = bool(_entry_opt(entry, CONF_GEMINI_API_KEY, ""))
-        broadcast_group = _entry_opt(entry, CONF_BROADCAST_GROUP, "") or ""
-        from .notify_targets import configured_notify_services
-        notify_config = {CONF_NOTIFY_SERVICE: _runtime_opt(
-            hass, entry, CONF_NOTIFY_SERVICE, "") or ""}
-        entry_notify_services = _runtime_opt(
-            hass, entry, CONF_NOTIFY_SERVICES, None)
-        if entry_notify_services is not None:
-            notify_config[CONF_NOTIFY_SERVICES] = entry_notify_services
-        selected_notify_services = configured_notify_services(notify_config)
-        observer_enabled_cfg = bool(_runtime_opt(hass, entry, CONF_OBSERVER_ENABLED, False))
+def _get_disabled_rules(hass: HomeAssistant, entry) -> list[str]:
+    """The sentinel rule ids the user switched off, as a list."""
+    if entry is None:
+        return []
+    live = _live_runtime_config(entry)
+    raw = live.get("disabled_sentinel_rules", _entry_opt(entry, "disabled_sentinel_rules", "[]"))
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str):
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
 
-        sat_avail, sat_total = _satellite_count(hass)
 
-        # ── Areas grid ──────────────────────────────────────────────────────
-        areas_list = []
-        for aid in _all_areas_with_anything(hass):
-            caps = _area_capabilities(hass, aid)
-            active = audio_routing.is_area_occupied(hass, aid)
-            l_on, l_total = _area_light_state(hass, aid)
-            readings = _area_live_readings(hass, aid)
-            temp_eid, humidity_eid = _area_temp_humidity_entities(hass, aid)
-            areas_list.append({
-                "id":       aid,
-                "name":     _area_name(hass, aid),
-                "caps":     caps,
-                "active":   active,
-                "bedroom":  aid in bedroom_areas,
-                "lights_on":    l_on,
-                "lights_total": l_total,
-                "temp":         readings.get("temp"),
-                "humidity":     readings.get("humidity"),
-                "temp_entity":     temp_eid,
-                "humidity_entity": humidity_eid,
-                "last_motion":  _format_duration(readings.get("last_motion_seconds")),
-            })
-        # Sort: active first, then bedrooms, then alphabetical
-        areas_list.sort(key=lambda a: (not a["active"], not a["bedroom"], a["name"].lower()))
+# ─── Panel display helpers ───────────────────────────────────────────────────
 
-        # ── Dominant room ───────────────────────────────────────────────────
-        dominant_id = _dominant_area(hass)
-        if dominant_id:
-            readings = _area_live_readings(hass, dominant_id)
-            dominant_satellites = audio_routing.satellites_in_area(hass, dominant_id)
-            sat_id = dominant_satellites[0] if dominant_satellites else None
-            dominant = {
-                "area_id":    dominant_id,
-                "name":       _area_name(hass, dominant_id),
-                "subtitle":   f"Occupied · {_format_duration(readings.get('last_motion_seconds'))}" if readings.get('last_motion_seconds') is not None else "Occupied",
-                "coord":      f"#{dominant_id[:8]}",
-                "temp":       readings.get("temp") or "—",
-                "humidity":   readings.get("humidity") or "—",
-                "lights":     readings.get("lights") or "—",
-                "satellite":  sat_id.split(".", 1)[-1][:20] if sat_id else "—",
-                "last_motion": _format_duration(readings.get("last_motion_seconds")),
-            }
-        else:
-            # No presence detected anywhere
-            anyone = audio_routing.anyone_home(hass)
-            dominant = {
-                "area_id":    None,
-                "name":       "AWAY" if not anyone else "AT HOME",
-                "subtitle":   "no presence detected",
-                "coord":      "—",
-                "temp":       "—",
-                "humidity":   "—",
-                "lights":     "—",
-                "satellite":  "—",
-                "last_motion": "—",
-            }
-
-        # ── Status tiles ────────────────────────────────────────────────────
-        status = {
-            "observer": {
-                "state": "RUNNING" if observer_running else ("READY" if observer_enabled_cfg else "DISABLED"),
-                "level": "live" if observer_running else ("warn" if observer_enabled_cfg else "off"),
-            },
-            "sleep": {
-                "state": "ASLEEP" if sleeping else "AWAKE",
-                "level": "warn" if sleeping else "live",
-            },
-            "gemini": {
-                "state": "READY" if gemini_key else "UNSET",
-                "level": "live" if gemini_key else "warn",
-            },
-            "broadcast": {
-                "state": "ONLINE" if broadcast_group else "UNSET",
-                "level": "live" if broadcast_group else "warn",
-            },
-            "notify": {
-                "state": "READY" if selected_notify_services else "UNSET",
-                "level": "live" if selected_notify_services else "warn",
-            },
-            "satellites": {
-                "state": f"{sat_avail} / {sat_total}" if sat_total > 0 else "NONE",
-                "level": "live" if sat_avail == sat_total and sat_total > 0 else ("warn" if sat_total > 0 else "off"),
-            },
-        }
-
-        uptime_seconds = time.time() - _STARTUP_TS
-        uptime_str = _format_uptime(uptime_seconds)
-
-        # ── Config flags for settings panel ─────────────────────────────
-        announcements_on = bool(_runtime_opt(
-            hass, entry, "announcements_enabled",
-            settings_schema.default("announcements_enabled")))
-        sentinel_on = bool(_runtime_opt(hass, entry, "sentinel_enabled", True))
-
-        # Available notify services for phone notification dropdown
-        notify_services = []
-        try:
-            for svc in hass.services.async_services().get("notify", {}):
-                notify_services.append(f"notify.{svc}")
-        except Exception:
-            pass
-        runtime_notify_services = _runtime_opt(
-            hass, entry, CONF_NOTIFY_SERVICES, None)
-        notify_config = {CONF_NOTIFY_SERVICE: str(
-            _runtime_opt(hass, entry, CONF_NOTIFY_SERVICE, "") or "")}
-        if runtime_notify_services is not None:
-            notify_config[CONF_NOTIFY_SERVICES] = runtime_notify_services
-        current_notify_services = configured_notify_services(notify_config)
-        current_notify = current_notify_services[0] if current_notify_services else ""
-
-        # Reads the whole doorbell log file on every panel poll: off the loop.
-        doorbell_training_data = await hass.async_add_executor_job(
-            _get_doorbell_training, hass)
-
-        home = _get_home_doors(hass, entry)
-        result = {
-            "status":         status,
-            "version":        _INTEGRATION_VERSION,
-            "meta": {
-                "bedrooms":          len(bedroom_areas),
-                "areas_monitored":   len(areas_list),
-                "announcements_today": _get_announcements_today(),
-                "est_cost":          "—",
-                "uptime":            uptime_str,
-            },
-            "dominant":       dominant,
-            "areas":          areas_list,
-            "sleep_reason":   sleep_reason if sleeping else None,
-            "doorbell_training": doorbell_training_data,
-            "lockdown":       _get_lockdown_status(),
-            "intrusion":      _get_intrusion_status(),
-            "knowledge":      _get_knowledge_stats(),
-            # Reads patterns.db: run it off the event loop.
-            "suggestions":    await hass.async_add_executor_job(
-                _get_suggestions, _entity_names(hass)),
-            "suggestions_filtered": await hass.async_add_executor_job(
-                _get_filtered_suggestions, _entity_names(hass)),
-            "goals":          _get_goals(),
-            "config": {
-                # Every "plain" setting, from its kind and default (settings_schema).
-                **settings_schema.payload(
-                    lambda key, default: _runtime_opt(hass, entry, key, default),
-                    lambda key, default: _get_runtime_json(hass, entry, key, default),
-                    _masked_url),
-                "announcements_enabled": announcements_on,
-                "sentinel_enabled": sentinel_on,
-                "observer_enabled": observer_enabled_cfg,
-                "camera_historical_awareness": bool(_runtime_opt(
-                    hass, entry, "camera_historical_awareness",
-                    _runtime_opt(hass, entry, "camera_event_learning", True),
-                )),
-                "host_health_status": _get_host_health_status(hass, entry),
-                "available_labels": _available_labels(hass),
-                "sleep_override": sleep_detection.current_override(),
-                "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
-                "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
-                "self_hosted_endpoints_migrated": bool(_runtime_opt(
-                    hass, entry, "self_hosted_endpoints_migrated", False)),
-                "notify_service": current_notify,
-                "notify_services": current_notify_services,
-                "notify_services_available": notify_services,
-                "lockdown_exempt_locks": _get_lockdown_exempt_locks(),
-                "alarm_panels": _get_alarm_panels(hass),
-                "onboarding": _get_onboarding_state(hass, entry, current_notify),
-                "sentinel_rules": _get_sentinel_rules(),
-                "disabled_sentinel_rules": _get_disabled_rules(hass, entry),
-                "observer_stats": _get_observer_stats(),
-                "output_mutes": _get_output_mutes(),
-                "lockdown": _get_lockdown_status(),
-                "appliances": _get_appliance_status(),
-                "memory_stats": _get_memory_stats(),
-                "satellites": _get_satellites(hass),
-                "cast_devices": _get_cast_devices(hass),
-                "cameras": _get_cameras(hass),
-                "camera_overrides": _get_camera_overrides(),
-                "camera_names": _get_camera_names(),
-                "speaker_areas": _get_speaker_assignable_areas(hass),
-                "all_people": _get_all_people(hass),
-                "garage_mode": home["garage_mode"],
-                "has_garage": home["has_garage"],
-                "exit_doors": home["exit_doors"],
-                "exit_door_status": home["exit_door_status"],
-                "exit_door_candidates": home["exit_door_candidates"],
-                "basement_mode": home["basement_mode"],
-                "home_features": home["home_features"],
-                "suggestion_review_provider": str(_runtime_opt(hass, entry, "suggestion_review_provider", "")
-                                                  or _runtime_opt(hass, entry, "llm_provider", "") or ""),
-                "suggestion_review_model":   str(_runtime_opt(hass, entry, "suggestion_review_model", "")
-                                                 or _runtime_opt(hass, entry, "model", "") or ""),
-                "voice_id_status": _get_voice_id_status(entry),
-                "stt_entities": _get_stt_entities(hass, entry),
-                "voice_id_token_set": bool(await _voice_id_token(hass)),
-                "voice_id_enrol": _get_voice_id_enrol(),
-                "hazard_lat":             _hazard_coordinate(hass, entry, "hazard_lat", 0),
-                "hazard_lon":             _hazard_coordinate(hass, entry, "hazard_lon", 1),
-                # 8.8.0: region-aware (off by default for an Irish home
-                # unless saved); a saved value is shown as saved.
-                "hazard_quakes_on":       _hazard_flag(hass, "hazard_quakes_on"),
-                "hazard_weather_on":      _hazard_flag(hass, "hazard_weather_on"),
-                "hazard_disasters_on":    _hazard_flag(hass, "hazard_disasters_on"),
-                # Weather warnings (8.8.0)
-                "hazard_met_eireann_on":  _hazard_flag(hass, "hazard_met_eireann_on"),
-                "hazard_source":          _hazard_source(hass, entry),
-                "home_context_max_entities": _int_opt(hass, entry, "home_context_max_entities", 15),
-                # Which optional features are set up, so the panel can mark
-                # the cards of the rest (8.43.0).
-                "optional_features": optional_features.status(hass),
-            },
-        }
-        connection.send_result(msg["id"], result)
-    except Exception as exc:
-        _LOGGER.exception("ws_get_panel_data failed: %s", exc)
-        connection.send_error(msg["id"], "panel_data_failed", safe_error_message(exc))
+def _masked_url(value) -> str:
+    """A saved URL as text for the panel, with any user:pass@ or credential
+    looking query value hidden by the diagnostics scrubber (8.7.23). The
+    saved value itself is untouched. Never raises: without the scrubber, any
+    text holding an "@" is hidden whole."""
+    text = str(value or "")
+    if not text:
+        return text
+    try:
+        from .diagnostics import _scrub_text
+        return _scrub_text(text)
+    except Exception:
+        from .safe_errors import REDACTED
+        return text if "@" not in text else REDACTED
 
 
 def _hazard_flag(hass: HomeAssistant, key: str) -> bool:
-    """A hazard source switch as the monitor sees it: saved, else the region
-    default (8.8.0). Falls back to the pre-8.8.0 default on any error."""
+    """A hazard source switch as the monitor reads it (saved, else the region
+    default, 8.8.0). If the monitor cannot answer, every source but Met
+    Éireann reads as on, as before 8.8.0."""
     try:
         from . import hazard_monitor
         return hazard_monitor.effective_flag(hass, key)
@@ -641,7 +373,7 @@ def _hazard_flag(hass: HomeAssistant, key: str) -> bool:
 
 
 def _hazard_source(hass: HomeAssistant, entry) -> str:
-    """The saved or compatibility-derived single weather-warning source."""
+    """The one weather warning source: saved, else derived, else custom."""
     saved = _runtime_opt(hass, entry, "hazard_source", None)
     if saved in ("met_eireann", "us", "custom"):
         return saved
@@ -653,10 +385,10 @@ def _hazard_source(hass: HomeAssistant, entry) -> str:
 
 
 def _hazard_coordinate(hass: HomeAssistant, entry, key: str, index: int):
-    """Saved override for the panel, else the current HA home coordinate."""
-    value = _runtime_opt(hass, entry, key, "")
-    if value not in (None, ""):
-        return value
+    """A saved coordinate override, else Home Assistant's own home one, else ""."""
+    saved = _runtime_opt(hass, entry, key, "")
+    if saved not in (None, ""):
+        return saved
     try:
         from . import hazard_monitor
         home = hazard_monitor.base_home_latlon(hass)
@@ -665,25 +397,9 @@ def _hazard_coordinate(hass: HomeAssistant, entry, key: str, index: int):
         return ""
 
 
-def _masked_url(value) -> str:
-    """A saved URL for display, as a string, with any user:pass@ (and any
-    credential-like query value) masked by the diagnostics scrubber
-    (8.7.23). Only what is sent to the panel changes; the saved value is
-    untouched. Never raises."""
-    text = str(value or "")
-    if not text:
-        return text
-    try:
-        from .diagnostics import _scrub_text
-        return _scrub_text(text)
-    except Exception:
-        from .safe_errors import REDACTED
-        return REDACTED if "@" in text else text
-
-
 def _get_lockdown_exempt_locks() -> list:
-    """The locks lockdown leaves out right now, from the running manager,
-    the one source the sweep and the "unlocked" lists also read (8.29.0)."""
+    """The locks lockdown leaves alone right now, sorted. Read from the
+    running manager, the same source as the sweep (8.29.0)."""
     try:
         from .core_lockdown_sync import _lockdown_exempt_locks
         return sorted(_lockdown_exempt_locks())
@@ -692,12 +408,11 @@ def _get_lockdown_exempt_locks() -> list:
 
 
 def _get_home_doors(hass: HomeAssistant, entry) -> dict:
-    """The garage flag, the user's exit doors (8.26.0) and the other rooms
-    the home has (8.27.0) for the panel.
-    Display only: none of this changes a safety check. Read each time the
-    panel data loads, so a garage added or removed shows up on the next load."""
+    """The garage, exit door (8.26.0) and other room (8.27.0) details the
+    panel shows. Display only: no safety check reads this. Worked out on
+    every load, so a garage added or removed shows straight away."""
     from . import home_doors
-    cfg = {
+    layout = {
         "garage_mode": _runtime_opt(hass, entry, "garage_mode", home_doors.DEFAULT_GARAGE_MODE),
         "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
         "exit_doors": _get_runtime_json(hass, entry, "exit_doors", []),
@@ -711,74 +426,379 @@ def _get_home_doors(hass: HomeAssistant, entry) -> dict:
         exempt = set()
     try:
         return {
-            "garage_mode": home_doors.garage_mode(cfg),
-            "has_garage": home_doors.has_garage(hass, cfg),
-            "exit_doors": home_doors.exit_doors(cfg),
-            "exit_door_status": home_doors.exit_door_status(hass, cfg, exempt),
-            "exit_door_candidates": home_doors.exit_door_candidates(hass, cfg),
-            "basement_mode": home_doors.basement_mode(cfg),
-            "home_features": home_doors.home_features(hass, cfg),
+            "garage_mode": home_doors.garage_mode(layout),
+            "has_garage": home_doors.has_garage(hass, layout),
+            "exit_doors": home_doors.exit_doors(layout),
+            "exit_door_status": home_doors.exit_door_status(hass, layout, exempt),
+            "exit_door_candidates": home_doors.exit_door_candidates(hass, layout),
+            "basement_mode": home_doors.basement_mode(layout),
+            "home_features": home_doors.home_features(hass, layout),
         }
     except Exception as exc:
         _LOGGER.debug("home doors read failed: %s", exc)
-        return {"garage_mode": home_doors.garage_mode(cfg), "has_garage": False,
-                "exit_doors": [], "exit_door_status": [], "exit_door_candidates": [],
-                "basement_mode": home_doors.basement_mode(cfg),
-                "home_features": {"basement": False, "utility": False}}
-
-
-def _get_disabled_rules(hass: HomeAssistant, entry) -> list[str]:
-    """Return list of disabled sentinel rule IDs from runtime config."""
-    if entry is None:
-        return []
-    rc = _live_runtime_config(entry)
-    raw = rc.get("disabled_sentinel_rules", _entry_opt(entry, "disabled_sentinel_rules", "[]"))
-    if isinstance(raw, list):
-        return raw
-    try:
-        import json
-        return json.loads(raw) if isinstance(raw, str) else []
-    except Exception:
-        return []
+    return {
+        "garage_mode": home_doors.garage_mode(layout),
+        "has_garage": False,
+        "exit_doors": [],
+        "exit_door_status": [],
+        "exit_door_candidates": [],
+        "basement_mode": home_doors.basement_mode(layout),
+        "home_features": {"basement": False, "utility": False},
+    }
 
 
 def _get_host_health_status(hass: HomeAssistant, entry) -> dict:
-    """Live discovery + mapping + snapshot for the Host Health settings card
-    (Phase 10) — candidate entities per metric, current mapping status
-    (mapped/ambiguous/missing/disabled), and the last tick's readings.
-    Computed fresh on every panel load; never mutates host_health's own
-    persistence state machine (that only advances on the periodic tick)."""
+    """What the Host Health card shows (Phase 10): for each metric its
+    candidate sensors and mapping status, plus the last tick's readings.
+    Worked out fresh each load; host_health's own alert state only moves
+    on its periodic tick."""
     try:
         from . import host_health
-        config = {
+        settings = {
             "host_health_enabled": bool(_runtime_opt(hass, entry, "host_health_enabled", False)),
             "host_health_mappings": _get_runtime_json(hass, entry, "host_health_mappings", {}),
             "host_health_thresholds": _get_runtime_json(hass, entry, "host_health_thresholds", {}),
         }
-        candidates = host_health.discover_candidates(hass)
-        mappings = host_health.resolve_mappings(hass, config, candidates)
-        metrics = []
+        found = host_health.discover_candidates(hass)
+        mapped = host_health.resolve_mappings(hass, settings, found)
+        rows = []
         for metric in host_health.METRICS:
-            mapping = mappings[metric.key]
-            metrics.append({
+            result = mapped[metric.key]
+            rows.append({
                 "key": metric.key,
                 "label": metric.label,
                 "recommended": metric.recommended,
-                "status": mapping.status,
-                "source": mapping.source,
-                "entity_id": mapping.entity_id,
-                "candidates": [
-                    {"entity_id": c.entity_id, "friendly_name": c.friendly_name,
-                     "disabled": c.disabled}
-                    for c in mapping.candidates
-                ],
+                "status": result.status,
+                "source": result.source,
+                "entity_id": result.entity_id,
+                "candidates": [{"entity_id": option.entity_id,
+                                "friendly_name": option.friendly_name,
+                                "disabled": option.disabled}
+                               for option in result.candidates],
             })
-        return {"metrics": metrics, "snapshot": host_health.snapshot(hass, config)}
+        return {"metrics": rows, "snapshot": host_health.snapshot(hass, settings)}
     except Exception as exc:
         return {"error": safe_error_message(exc, where="host health read", log=True)}
 
 
-# ─── Activity log WebSocket command ──────────────────────────────────────────
+def _available_labels(hass: HomeAssistant) -> list:
+    """Home Assistant's labels as [{id, name}] by name, for the exclusion
+    picker. [] when the label registry is not there."""
+    try:
+        from homeassistant.helpers import label_registry
+        registry = label_registry.async_get(hass)
+        found = [{"id": label.label_id, "name": label.name}
+                 for label in registry.labels.values()]
+        return sorted(found, key=lambda item: (item.get("name") or "").lower())
+    except Exception:
+        return []
+
+
+def _get_memory_stats() -> dict:
+    """The memory store's counts, or a placeholder when it cannot say."""
+    try:
+        from .memory import get_memory_stats
+        return get_memory_stats()
+    except Exception:
+        return {"backend": "unavailable", "total_memories": 0}
+
+
+async def _voice_id_token(hass: HomeAssistant) -> str:
+    """The saved Voice ID token, "" when unset or unreadable. The panel only
+    learns whether one is set; the value goes out through
+    nova/voice_id_token_get alone."""
+    try:
+        from . import voice_id_store
+        return await voice_id_store.async_get_token(hass)
+    except Exception:
+        return ""
+
+
+def _get_voice_id_enrol() -> dict:
+    """Where a Voice ID recording stands, idle when that cannot be read."""
+    try:
+        from . import voice_enrol
+        return voice_enrol.status()
+    except Exception:
+        return {"state": "idle"}
+
+
+def _named_log_entries(entries: list, names: dict) -> list:
+    """Copies of the log entries for display, known entity_ids replaced by
+    their names. The entries themselves are left alone; with no names, or
+    if naming fails, they are returned as they are."""
+    if not names:
+        return entries
+    try:
+        from .cognitive.naming import humanize_text
+        shown = []
+        for item in entries:
+            if isinstance(item, dict):
+                item = {**item, "msg": humanize_text(item.get("msg", ""), names)}
+            shown.append(item)
+        return shown
+    except Exception:
+        return entries
+
+
+def _chosen_notify_services(hass: HomeAssistant, entry, as_text: bool) -> list:
+    """The notify services the user picked. The settings card (as_text)
+    sends the single service through str(); the status tile does not."""
+    from .notify_targets import configured_notify_services
+    single = _runtime_opt(hass, entry, CONF_NOTIFY_SERVICE, "") or ""
+    picked = {CONF_NOTIFY_SERVICE: str(single) if as_text else single}
+    several = _runtime_opt(hass, entry, CONF_NOTIFY_SERVICES, None)
+    if several is not None:
+        picked[CONF_NOTIFY_SERVICES] = several
+    return configured_notify_services(picked)
+
+
+def _known_notify_services(hass: HomeAssistant) -> list:
+    """Every notify.* service Home Assistant has, for the phone dropdown."""
+    known: list = []
+    try:
+        for service in hass.services.async_services().get("notify", {}):
+            known.append(f"notify.{service}")
+    except Exception:
+        pass
+    return known
+
+
+def _area_rows(hass: HomeAssistant, bedrooms) -> list:
+    """One card per area with anything in it: occupied rooms first, then
+    bedrooms, then by name."""
+    rows = []
+    for area_id in _all_areas_with_anything(hass):
+        capabilities = _area_capabilities(hass, area_id)
+        occupied = audio_routing.is_area_occupied(hass, area_id)
+        lit, lights = _area_light_state(hass, area_id)
+        live = _area_live_readings(hass, area_id)
+        temp_sensor, humidity_sensor = _area_temp_humidity_entities(hass, area_id)
+        rows.append({
+            "id": area_id,
+            "name": _area_name(hass, area_id),
+            "caps": capabilities,
+            "active": occupied,
+            "bedroom": area_id in bedrooms,
+            "lights_on": lit,
+            "lights_total": lights,
+            "temp": live.get("temp"),
+            "humidity": live.get("humidity"),
+            "temp_entity": temp_sensor,
+            "humidity_entity": humidity_sensor,
+            "last_motion": _format_duration(live.get("last_motion_seconds")),
+        })
+    rows.sort(key=lambda row: (not row["active"], not row["bedroom"], row["name"].lower()))
+    return rows
+
+
+def _dominant_card(hass: HomeAssistant) -> dict:
+    """The big room card: where people are, or home / away when nowhere."""
+    area_id = _dominant_area(hass)
+    if not area_id:
+        return {
+            "area_id": None,
+            "name": "AT HOME" if audio_routing.anyone_home(hass) else "AWAY",
+            "subtitle": "no presence detected",
+            "coord": _DASH, "temp": _DASH, "humidity": _DASH, "lights": _DASH,
+            "satellite": _DASH, "last_motion": _DASH,
+        }
+    live = _area_live_readings(hass, area_id)
+    seconds = live.get("last_motion_seconds")
+    satellites = audio_routing.satellites_in_area(hass, area_id)
+    return {
+        "area_id": area_id,
+        "name": _area_name(hass, area_id),
+        "subtitle": "Occupied" if seconds is None else f"Occupied · {_format_duration(seconds)}",
+        "coord": f"#{area_id[:8]}",
+        "temp": live.get("temp") or _DASH,
+        "humidity": live.get("humidity") or _DASH,
+        "lights": live.get("lights") or _DASH,
+        "satellite": satellites[0].split(".", 1)[-1][:20] if satellites else _DASH,
+        "last_motion": _format_duration(seconds),
+    }
+
+
+def _tile(on: bool, on_state: str) -> dict:
+    """A status tile that is live when on and an UNSET warning when not."""
+    return {"state": on_state, "level": "live"} if on else {"state": "UNSET", "level": "warn"}
+
+
+def _satellite_tile(online: int, total: int) -> dict:
+    if total <= 0:
+        return {"state": "NONE", "level": "off"}
+    return {"state": f"{online} / {total}", "level": "live" if online == total else "warn"}
+
+
+# ─── nova/get_panel_data ─────────────────────────────────────────────────────
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_panel_data",
+})
+@websocket_api.async_response
+async def ws_get_panel_data(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
+) -> None:
+    """Everything one panel render needs, in a single round trip."""
+    try:
+        entry = _get_entry(hass)
+        observer_running = False
+        if entry is not None:
+            from .runtime import observer_status
+            observer_running = observer_status(entry)
+
+        bedrooms = _entry_opt(entry, CONF_BEDROOM_AREAS, []) or []
+        sleeping, why_asleep = sleep_detection.is_sleeping(
+            hass,
+            bedroom_area_ids=bedrooms,
+            quiet_start=_entry_opt(entry, CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_START),
+            quiet_end=_entry_opt(entry, CONF_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_END),
+        )
+        has_gemini = bool(_entry_opt(entry, CONF_GEMINI_API_KEY, ""))
+        has_broadcast = bool(_entry_opt(entry, CONF_BROADCAST_GROUP, "") or "")
+        has_notify = bool(_chosen_notify_services(hass, entry, as_text=False))
+        observer_wanted = bool(_runtime_opt(hass, entry, CONF_OBSERVER_ENABLED, False))
+        online, total = _satellite_count(hass)
+        areas = _area_rows(hass, bedrooms)
+        dominant = _dominant_card(hass)
+
+        if observer_running:
+            observer_tile = {"state": "RUNNING", "level": "live"}
+        elif observer_wanted:
+            observer_tile = {"state": "READY", "level": "warn"}
+        else:
+            observer_tile = {"state": "DISABLED", "level": "off"}
+        status = {
+            "observer": observer_tile,
+            "sleep": {"state": "ASLEEP", "level": "warn"} if sleeping
+            else {"state": "AWAKE", "level": "live"},
+            "gemini": _tile(has_gemini, "READY"),
+            "broadcast": _tile(has_broadcast, "ONLINE"),
+            "notify": _tile(has_notify, "READY"),
+            "satellites": _satellite_tile(online, total),
+        }
+        uptime = _format_uptime(time.time() - _STARTUP_TS)
+
+        picked_notify = _chosen_notify_services(hass, entry, as_text=True)
+        first_notify = picked_notify[0] if picked_notify else ""
+        # The doorbell log is read whole on every poll: keep it off the loop.
+        doorbell = await hass.async_add_executor_job(_get_doorbell_training, hass)
+        home = _get_home_doors(hass, entry)
+        review_provider = (_runtime_opt(hass, entry, "suggestion_review_provider", "")
+                           or _runtime_opt(hass, entry, "llm_provider", "") or "")
+        review_model = (_runtime_opt(hass, entry, "suggestion_review_model", "")
+                        or _runtime_opt(hass, entry, "model", "") or "")
+        historical = _runtime_opt(hass, entry, "camera_historical_awareness",
+                                  _runtime_opt(hass, entry, "camera_event_learning", True))
+
+        result = {
+            "status": status,
+            "version": _INTEGRATION_VERSION,
+            "meta": {
+                "bedrooms": len(bedrooms),
+                "areas_monitored": len(areas),
+                "announcements_today": _get_announcements_today(),
+                "est_cost": _DASH,
+                "uptime": uptime,
+            },
+            "dominant": dominant,
+            "areas": areas,
+            "sleep_reason": why_asleep if sleeping else None,
+            "doorbell_training": doorbell,
+            "lockdown": _get_lockdown_status(),
+            "intrusion": _get_intrusion_status(),
+            "knowledge": _get_knowledge_stats(),
+            # Both read patterns.db, so both run in the executor.
+            "suggestions": await hass.async_add_executor_job(
+                _get_suggestions, _entity_names(hass)),
+            "suggestions_filtered": await hass.async_add_executor_job(
+                _get_filtered_suggestions, _entity_names(hass)),
+            "goals": _get_goals(),
+            "config": {
+                # Every "plain" setting, from its kind and default
+                # (settings_schema); the entries below come after and win.
+                **settings_schema.payload(
+                    lambda key, default: _runtime_opt(hass, entry, key, default),
+                    lambda key, default: _get_runtime_json(hass, entry, key, default),
+                    _masked_url),
+                "announcements_enabled": bool(_runtime_opt(
+                    hass, entry, "announcements_enabled",
+                    settings_schema.default("announcements_enabled"))),
+                "sentinel_enabled": bool(_runtime_opt(hass, entry, "sentinel_enabled", True)),
+                "observer_enabled": observer_wanted,
+                "camera_historical_awareness": bool(historical),
+                "host_health_status": _get_host_health_status(hass, entry),
+                "available_labels": _available_labels(hass),
+                "sleep_override": sleep_detection.current_override(),
+                "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
+                "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
+                "self_hosted_endpoints_migrated": bool(_runtime_opt(
+                    hass, entry, "self_hosted_endpoints_migrated", False)),
+                "notify_service": first_notify,
+                "notify_services": picked_notify,
+                "notify_services_available": _known_notify_services(hass),
+                "lockdown_exempt_locks": _get_lockdown_exempt_locks(),
+                "alarm_panels": _get_alarm_panels(hass),
+                "onboarding": _get_onboarding_state(hass, entry, first_notify),
+                "sentinel_rules": _get_sentinel_rules(),
+                "disabled_sentinel_rules": _get_disabled_rules(hass, entry),
+                "observer_stats": _get_observer_stats(),
+                "output_mutes": _get_output_mutes(),
+                "lockdown": _get_lockdown_status(),
+                "appliances": _get_appliance_status(),
+                "memory_stats": _get_memory_stats(),
+                "satellites": _get_satellites(hass),
+                "cast_devices": _get_cast_devices(hass),
+                "cameras": _get_cameras(hass),
+                "camera_overrides": _get_camera_overrides(), "camera_names": _get_camera_names(),
+                "speaker_areas": _get_speaker_assignable_areas(hass),
+                "all_people": _get_all_people(hass),
+                "garage_mode": home["garage_mode"],
+                "has_garage": home["has_garage"],
+                "exit_doors": home["exit_doors"],
+                "exit_door_status": home["exit_door_status"],
+                "exit_door_candidates": home["exit_door_candidates"],
+                "basement_mode": home["basement_mode"],
+                "home_features": home["home_features"],
+                "suggestion_review_provider": str(review_provider),
+                "suggestion_review_model": str(review_model),
+                "voice_id_status": _get_voice_id_status(entry),
+                "stt_entities": _get_stt_entities(hass, entry),
+                "voice_id_token_set": bool(await _voice_id_token(hass)),
+                "voice_id_enrol": _get_voice_id_enrol(),
+                "hazard_lat": _hazard_coordinate(hass, entry, "hazard_lat", 0),
+                "hazard_lon": _hazard_coordinate(hass, entry, "hazard_lon", 1),
+                # Region aware since 8.8.0; a saved value is shown as saved.
+                "hazard_quakes_on": _hazard_flag(hass, "hazard_quakes_on"),
+                "hazard_weather_on": _hazard_flag(hass, "hazard_weather_on"),
+                "hazard_disasters_on": _hazard_flag(hass, "hazard_disasters_on"),
+                "hazard_met_eireann_on": _hazard_flag(hass, "hazard_met_eireann_on"),
+                "hazard_source": _hazard_source(hass, entry),
+                "home_context_max_entities": _int_opt(hass, entry, "home_context_max_entities", 15),
+                # Which optional features are set up, so the panel can mark
+                # the cards of the others (8.43.0).
+                "optional_features": optional_features.status(hass),
+            },
+        }
+        connection.send_result(msg["id"], result)
+    except Exception as exc:
+        _LOGGER.exception("ws_get_panel_data failed: %s", exc)
+        connection.send_error(msg["id"], "panel_data_failed", safe_error_message(exc))
+
+
+# ─── nova/get_activity_log ───────────────────────────────────────────────────
+
+def _clock_time(stamp) -> str:
+    """A stored UTC ISO timestamp as local HH:MM; unparseable text gives its
+    first five characters."""
+    try:
+        from datetime import datetime, timezone
+        from homeassistant.util import dt as dt_util
+        moment = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc)
+        return dt_util.as_local(moment).strftime("%H:%M")
+    except Exception:
+        return stamp[:5]
+
 
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_activity_log",
@@ -787,86 +807,33 @@ def _get_host_health_status(hass: HomeAssistant, entry) -> dict:
 })
 @websocket_api.async_response
 async def ws_get_activity_log(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
 ) -> None:
-    """Return recent activity log entries for the panel."""
+    """Recent activity rows, shaped for the panel's feed."""
     try:
         from .database import get_recent_activity
-        entries = await hass.async_add_executor_job(
-            lambda: get_recent_activity(hours=msg["hours"], limit=msg["limit"])
-        )
-        # Format for the panel
+        rows = await hass.async_add_executor_job(
+            partial(get_recent_activity, hours=msg["hours"], limit=msg["limit"]))
         from .cognitive.naming import humanize_text
         names = _entity_names(hass)
-        result = []
-        for e in entries:
-            ts_str = e.get("timestamp", "")
-            # Parse "2026-04-23T05:30:00" → "05:30"
-            try:
-                from datetime import datetime as _dt, timezone as _tz
-                from homeassistant.util import dt as dt_util
-                # Parse UTC timestamp and convert to local
-                dt = _dt.fromisoformat(ts_str).replace(tzinfo=_tz.utc)
-                local_dt = dt_util.as_local(dt)
-                hhmm = local_dt.strftime("%H:%M")
-            except Exception:
-                hhmm = ts_str[:5] if len(ts_str) >= 5 else ts_str
-            result.append({
-                "ts": hhmm,
-                "urgency": e.get("urgency", "low"),
-                "tag": ((names.get(e.get("entity_id", "")) or
-                         e.get("entity_id", "").split(".", 1)[-1])[:20]
-                        or e.get("source", "")).upper(),
-                "msg": humanize_text(e.get("message", ""), names),
-                "source": e.get("source", "observer"),
+        entries = []
+        for row in rows:
+            entity_id = row.get("entity_id", "")
+            label = (names.get(entity_id) or entity_id.split(".", 1)[-1])[:20]
+            entries.append({
+                "ts": _clock_time(row.get("timestamp", "")),
+                "urgency": row.get("urgency", "low"),
+                "tag": (label or row.get("source", "")).upper(),
+                "msg": humanize_text(row.get("message", ""), names),
+                "source": row.get("source", "observer"),
             })
-        connection.send_result(msg["id"], {"entries": result})
+        connection.send_result(msg["id"], {"entries": entries})
     except Exception as exc:
         _LOGGER.warning("ws_get_activity_log failed: %s", exc)
         connection.send_error(msg["id"], "activity_log_failed", safe_error_message(exc))
 
-# ─── Config update WebSocket command ─────────────────────────────────────────
 
-# Only these keys can be changed from the panel. Prevents arbitrary writes.
-# Each one's kind and default are in settings_schema.SETTINGS (8.42.0).
-PANEL_WRITABLE_KEYS = set(settings_schema.PANEL_KEYS)
-
-# ── Integration version ──────────────────────────────────────────────────────
-from pathlib import Path as _Path
-import json as _json_mod
-
-
-def _read_integration_version() -> str:
-    """
-    Read the integration version from manifest.json — the single source of
-    truth. Done once at import (not per-request) so the panel can display the
-    actually-running version. This fixes the banner drifting out of sync: the
-    version was hardcoded in the panel JS, so a browser-cached panel showed a
-    stale number after an addon update. Now the panel fetches this live.
-    """
-    try:
-        mf = _Path(__file__).parent / "manifest.json"
-        return _json_mod.loads(mf.read_text()).get("version", "?")
-    except Exception:
-        return "?"
-
-
-_INTEGRATION_VERSION = _read_integration_version()
-
-
-def _named_log_entries(entries: list, names: dict) -> list:
-    """Display copies of log entries with known entity_ids named."""
-    if not names:
-        return entries
-    try:
-        from .cognitive.naming import humanize_text
-        return [dict(e, msg=humanize_text(e.get("msg", ""), names))
-                if isinstance(e, dict) else e for e in entries]
-    except Exception:
-        return entries
-
+# ─── nova/reload_appliances ──────────────────────────────────────────────────
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({
@@ -874,26 +841,130 @@ def _named_log_entries(entries: list, names: dict) -> list:
 })
 @websocket_api.async_response
 async def ws_reload_appliances(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
 ) -> None:
-    """Restart the appliance monitor so profile edits take effect immediately
-    (no Home Assistant restart needed)."""
+    """Restart the appliance monitor, so profile edits apply without a
+    Home Assistant restart."""
     try:
         from . import appliance_monitor, nova_config
         entry = _get_entry(hass)
-        cfg: dict = {}
+        merged: dict = {}
         if entry:
-            cfg = await hass.async_add_executor_job(
+            merged = await hass.async_add_executor_job(
                 nova_config.effective_config_with_runtime, entry,
                 _executor_runtime_config(entry))
-        await appliance_monitor.start(hass, cfg, entry=entry)
-        connection.send_result(msg["id"], {
-            "ok": True, "appliances": _get_appliance_status(),
-        })
+        await appliance_monitor.start(hass, merged, entry=entry)
+        connection.send_result(msg["id"], {"ok": True, "appliances": _get_appliance_status()})
     except Exception as exc:
-        connection.send_error(msg["id"], "reload_failed", safe_error_message(exc, where="reload_appliances", log=True))
+        reason = safe_error_message(exc, where="reload_appliances", log=True)
+        connection.send_error(msg["id"], "reload_failed", reason)
+
+
+# ─── nova/update_config ──────────────────────────────────────────────────────
+
+def _vet_panel_write(key: str, value) -> tuple[Optional[str], str, Any]:
+    """Check a panel write before anything is touched. Returns (error code,
+    message, value): the code is None when the write may go ahead, and the
+    value is the one to store (provider and model names are cleaned)."""
+    # Credentials only ever go through nova/set_credential and
+    # nova/delete_credential. None is in PANEL_WRITABLE_KEYS, but this check
+    # runs first so an allowlist slip can never store, log or show one.
+    from . import ha_secrets
+    if key in ha_secrets.CREDENTIAL_KEYS:
+        return ("invalid_key",
+                "Credentials are set via nova/set_credential, not nova/update_config", value)
+    if key not in PANEL_WRITABLE_KEYS:
+        return "invalid_key", f"Key '{key}' is not writable from the panel", value
+    # A URL the panel showed with its password masked, sent straight back,
+    # would overwrite the real one; it is refused and the saved value kept
+    # (8.7.24).
+    if shows_hidden_password(value):
+        return "invalid_value", HIDDEN_PASSWORD_MESSAGE, value
+    # AI endpoints are only saved by nova/apply_ai_config, which normalises,
+    # checks the destination and tests the connection first (8.7.23).
+    if key in PANEL_AI_ENDPOINT_KEYS:
+        return ("invalid_key",
+                f"Key '{key}' is set with nova/apply_ai_config (Settings, AI Models), "
+                "not nova/update_config", value)
+    if key in PANEL_AI_VALUE_KEYS:
+        from .safe_errors import NovaValidationError
+        try:
+            value = panel_ai_value(key, value)
+        except NovaValidationError as exc:
+            return "invalid_value", safe_error_message(exc), value
+    from . import safety_config
+    if not safety_config.valid_panel_value(key, value):
+        return "invalid_value", safety_config.invalid_panel_value_message(key), value
+    if not settings_schema.valid_kind(key, value):
+        return "invalid_value", settings_schema.invalid_kind_message(key), value
+    return None, "", value
+
+
+async def _save_hazard_location(hass: HomeAssistant, live: dict, key: str, value):
+    """Save a hazard coordinate as half of one lat/lon pair (8.8.2). The
+    other half comes from the saved override, else Home Assistant's home.
+    An empty value, or a pair that matches home, removes both keys, so a
+    later move of home is never hidden by a stale copy. Returns whether the
+    save stuck, or None when there is no other half to pair with."""
+    from . import hazard_monitor, nova_config
+    home = hazard_monitor.base_home_latlon(hass)
+
+    async def _forget_both() -> None:
+        for name in _HAZARD_PAIR:
+            live.pop(name, None)
+            await hass.async_add_executor_job(nova_config.delete, name)
+
+    if value == "":
+        await _forget_both()
+        return True
+    mine = _HAZARD_PAIR.index(key)
+    theirs = 1 - mine
+    pair = [0.0, 0.0]
+    pair[mine] = float(value)
+    partner = live.get(_HAZARD_PAIR[theirs], None)
+    if partner in (None, ""):
+        partner = home[theirs] if home else None
+    if partner is None:
+        return None
+    pair[theirs] = float(partner)
+    if home is not None and all(
+            math.isclose(pair[i], home[i], rel_tol=0.0, abs_tol=1e-7) for i in (0, 1)):
+        await _forget_both()
+        return True
+    updates = {_HAZARD_PAIR[0]: pair[0], _HAZARD_PAIR[1]: pair[1]}
+    live.update(updates)
+    return await hass.async_add_executor_job(nova_config.set_many, updates)
+
+
+async def _apply_sleep_override(hass: HomeAssistant, value) -> None:
+    """Give a sleep override its expiry. Saving the value alone would leave
+    it inert: sleep_detection.set_override schedules the return to Auto at
+    the next end of quiet hours."""
+    try:
+        from . import nova_config
+        quiet_end = await hass.async_add_executor_job(
+            nova_config.get, "observer_quiet_end", "07:00")
+        await hass.async_add_executor_job(sleep_detection.set_override, value, quiet_end)
+    except Exception as exc:
+        _LOGGER.warning("sleep_override apply failed: %s", exc)
+
+
+async def _refresh_after_write(hass: HomeAssistant, runtime, key: str, value) -> None:
+    """Live follow ups for keys other parts of Nova hold on to."""
+    if key in ("voice_id_uri", "voice_id_fallback_stt"):
+        # Check the new address now, so the card's status is current.
+        voice_id = getattr(runtime, "voice_id", None)
+        if voice_id is not None:
+            await voice_id.async_refresh_info()
+    if key in _OBSERVER_TIER_KEYS:
+        # A running observer picks up a new classifier or reasoning provider
+        # or model straight away, as vision already does (Phase 3, v7.108.0).
+        try:
+            from . import observer
+            if observer.is_running():
+                await observer.refresh_tier_providers(hass, {key: value})
+        except Exception as exc:
+            _LOGGER.debug("Observer tier refresh note: %s", exc)
 
 
 @websocket_api.require_admin
@@ -904,88 +975,25 @@ async def ws_reload_appliances(
 })
 @websocket_api.async_response
 async def ws_update_config(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
 ) -> None:
-    """
-    Update a config toggle from the panel.
+    """Change one setting from the panel.
 
-    Stores in NovaRuntime.runtime_config (NOT entry.options) to avoid
-    triggering an entry reload which would navigate the browser away
-    from the panel. Sentinel and observer check runtime_config first,
-    then fall back to entry.options.
-
-    The runtime is resolved before anything is written or applied, so an
-    entry without one fails with update_failed and nothing changes.
-    observer_enabled is transactional: the observer is started or stopped
-    first, and only a successful transition updates the observer state,
-    runtime_config and config.json.
+    The value goes into NovaRuntime.runtime_config, not entry.options, since
+    an options change reloads the entry and pulls the browser off the panel;
+    readers look at runtime_config first. The runtime is resolved before any
+    write or side effect, so an entry without one fails with update_failed
+    and changes nothing. observer_enabled is all or nothing: the observer is
+    started or stopped first, and only a confirmed change is recorded in the
+    observer state, runtime_config and config.json.
     """
     key = msg["key"]
-    value = msg["value"]
-
-    # Defense in depth (Phase 2, v7.107.0): no credential key is in
-    # PANEL_WRITABLE_KEYS today, so this is already unreachable in practice —
-    # but a credential must never be writable, loggable, or land in panel
-    # runtime_config through this generic command, even if that allowlist is
-    # ever edited by mistake. Credentials go only through the dedicated
-    # nova/set_credential and nova/delete_credential commands.
-    from . import ha_secrets
-    if key in ha_secrets.CREDENTIAL_KEYS:
-        connection.send_error(
-            msg["id"], "invalid_key",
-            "Credentials are set via nova/set_credential, not nova/update_config",
-        )
+    code, problem, value = _vet_panel_write(key, msg["value"])
+    if code == "invalid_key":
+        connection.send_error(msg["id"], "invalid_key", problem)
         return
-
-    if key not in PANEL_WRITABLE_KEYS:
-        connection.send_error(
-            msg["id"], "invalid_key",
-            f"Key '{key}' is not writable from the panel",
-        )
-        return
-
-    # The panel shows saved URLs with any password masked. A value still
-    # holding the mask is that shown text sent back, so it is refused and the
-    # saved value is kept (8.7.24). A plain URL, or a real new one with a
-    # password, is not affected.
-    if shows_hidden_password(value):
-        connection.send_error(msg["id"], "invalid_value", HIDDEN_PASSWORD_MESSAGE)
-        return
-
-    # AI endpoints are written only by nova/apply_ai_config, which normalises
-    # them, checks the destination and tests the connection (8.7.23). The
-    # panel never sends them here. Already saved values still load.
-    if key in PANEL_AI_ENDPOINT_KEYS:
-        connection.send_error(
-            msg["id"], "invalid_key",
-            f"Key '{key}' is set with nova/apply_ai_config (Settings, AI Models), "
-            "not nova/update_config",
-        )
-        return
-
-    # Provider and model keys get nova/apply_ai_config's own checks.
-    if key in PANEL_AI_VALUE_KEYS:
-        from .safe_errors import NovaValidationError
-        try:
-            value = panel_ai_value(key, value)
-        except NovaValidationError as exc:
-            connection.send_error(msg["id"], "invalid_value", safe_error_message(exc))
-            return
-
-    from . import safety_config
-    if not safety_config.valid_panel_value(key, value):
-        connection.send_error(
-            msg["id"], "invalid_value",
-            safety_config.invalid_panel_value_message(key),
-        )
-        return
-
-    # The kind every setting takes, from settings_schema (8.42.0).
-    if not settings_schema.valid_kind(key, value):
-        connection.send_error(
-            msg["id"], "invalid_value", settings_schema.invalid_kind_message(key))
+    if code is not None:
+        connection.send_error(msg["id"], "invalid_value", problem)
         return
 
     entry = _get_entry(hass)
@@ -995,123 +1003,74 @@ async def ws_update_config(
 
     try:
         from .runtime import get_runtime
-        # Ownership first: resolve the runtime before any write, save, cache
-        # invalidation or side effect. Raises (→ update_failed) without one.
+        # Ownership before anything else: raises (update_failed) without one.
         runtime = get_runtime(entry)
         rc = runtime.runtime_config
         if not isinstance(rc, dict):
             connection.send_error(msg["id"], "no_data", "Nova runtime data not found")
             return
 
-        # The fallback is never Nova's own Voice ID entity: it would call
-        # itself (8.35.0).
         if key == "voice_id_fallback_stt" and value:
+            # Falling back to Nova's own Voice ID entity would loop (8.35.0).
             own = getattr(runtime, "voice_id", None)
-            if own is not None and value == own.entity_id:
-                connection.send_error(
-                    msg["id"], "invalid_value",
-                    "The fallback can't be Nova Voice ID itself")
+            if own is not None and own.entity_id == value:
+                connection.send_error(msg["id"], "invalid_value",
+                                      "The fallback can't be Nova Voice ID itself")
                 return
         if key == "voice_id_uri" and isinstance(value, str):
             value = value.strip()
 
-        # A location override is one coordinate pair. The panel still writes
-        # through nova/update_config, but either coordinate update resolves the
-        # other value and saves both together. Clearing either field, or making
-        # the pair equal to HA's home, deletes both keys so a later home move is
-        # never shadowed by a stale copy of the old coordinates (8.8.2).
-        if key in ("hazard_lat", "hazard_lon"):
-            from . import hazard_monitor, nova_config
-            keys = ("hazard_lat", "hazard_lon")
-            home = hazard_monitor.base_home_latlon(hass)
-            if value == "":
-                for location_key in keys:
-                    rc.pop(location_key, None)
-                    await hass.async_add_executor_job(nova_config.delete, location_key)
-                connection.send_result(
-                    msg["id"], {"key": key, "value": value, "persisted": True})
-                return
-            index = 0 if key == "hazard_lat" else 1
-            other = 1 - index
-            new_value = float(value)
-            other_value = rc.get(keys[other], None)
-            if other_value in (None, ""):
-                other_value = home[other] if home else None
-            if other_value is None:
+        if key in _HAZARD_PAIR:
+            saved = await _save_hazard_location(hass, rc, key, value)
+            if saved is None:
                 connection.send_error(
                     msg["id"], "invalid_value",
                     "Both hazard coordinates are required when Home Assistant has no home location",
                 )
                 return
-            other_number = float(other_value)
-            pair = ((new_value, other_number) if index == 0
-                    else (other_number, new_value))
-            if (home is not None
-                    and math.isclose(pair[0], home[0], rel_tol=0.0, abs_tol=1e-7)
-                    and math.isclose(pair[1], home[1], rel_tol=0.0, abs_tol=1e-7)):
-                for location_key in keys:
-                    rc.pop(location_key, None)
-                    await hass.async_add_executor_job(nova_config.delete, location_key)
-                persisted = True
-            else:
-                updates = dict(zip(keys, pair))
-                rc.update(updates)
-                persisted = await hass.async_add_executor_job(nova_config.set_many, updates)
-            connection.send_result(
-                msg["id"], {"key": key, "value": value, "persisted": persisted})
+            connection.send_result(msg["id"], {"key": key, "value": value, "persisted": saved})
             return
 
-        # observer_enabled: change the observer first and confirm the result
-        # with is_running(). A failed or unconfirmed start or stop raises
-        # here, before runtime_config, observer state or config.json are
-        # touched. No rollback afterwards, so there is never a second
-        # observer transition.
         if key == "observer_enabled":
+            # Change the observer and confirm it with is_running() before
+            # anything is recorded. A failed or unconfirmed change raises
+            # here, so there is nothing to roll back afterwards.
             from . import observer as observer_mod
             from .runtime import set_observer_running
-            # Never start or stop an unowned observer.
             get_runtime(entry)
             if value:
-                # Already running: never restart it.
                 if not observer_mod.is_running():
                     from . import nova_config
-                    # The candidate is this operation's own snapshot plus the
-                    # requested value; the executor never sees the live dict.
                     from .runtime import runtime_config_snapshot
+                    # This request's own copy plus the new value; the
+                    # executor never sees the live dict.
                     candidate = runtime_config_snapshot(entry, strict=True)
                     candidate[key] = value
-                    observer_config = await hass.async_add_executor_job(
+                    merged = await hass.async_add_executor_job(
                         nova_config.effective_config_with_runtime, entry, candidate)
-                    await observer_mod.start(hass, observer_config, entry=entry)
-                # start() can return without the observer running; confirm
-                # the requested state before anything is recorded.
+                    await observer_mod.start(hass, merged, entry=entry)
                 if not observer_mod.is_running():
                     raise RuntimeError("Observer did not start")
                 set_observer_running(entry, True)
             else:
-                # Already stopped: never stop it again.
                 if observer_mod.is_running():
                     await observer_mod.stop()
                 if observer_mod.is_running():
                     raise RuntimeError("Observer did not stop")
                 set_observer_running(entry, False)
 
-        # Store in runtime_config — does NOT trigger entry reload
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
-        # Disabling cognition opens an observation gap now, not at the next
-        # state change: "none yet today" must never span it (v7.120.2).
         if key == "cognition_enabled" and not value:
+            # The observation gap starts now, so "none yet today" never
+            # spans it (v7.120.2).
             from . import cognition
             cognition.mark_unobserved()
 
-        # Persist via centralized config module (survives restarts). The
-        # in-memory runtime_config above is already set either way, so this
-        # session keeps working even on a save failure — but the panel is
-        # told, since otherwise the setting silently reverts on next restart
-        # with no visible sign anything went wrong.
-        persisted = True
+        # Saved to config.json so it survives a restart. This session keeps
+        # the new value either way, but the panel is told when the save
+        # failed, since the setting would quietly revert on restart.
         try:
             from . import nova_config
             persisted = await hass.async_add_executor_job(nova_config.set, key, value)
@@ -1123,46 +1082,13 @@ async def ws_update_config(
                             "FAILED to persist to disk — it will revert on restart",
                             key, str(value)[:80])
 
-        # sleep_override needs its expiry computed too (a plain nova_config.set
-        # above would otherwise leave the override permanently inert — see
-        # sleep_detection.set_override, which is what actually schedules the
-        # revert to Auto at the next quiet-hours end).
         if key == "sleep_override":
-            try:
-                from . import nova_config
-                quiet_end = await hass.async_add_executor_job(
-                    nova_config.get, "observer_quiet_end", "07:00")
-                await hass.async_add_executor_job(
-                    sleep_detection.set_override, value, quiet_end)
-            except Exception as exc:
-                _LOGGER.warning("sleep_override apply failed: %s", exc)
-
-        if key in ("security_alarm_entity", "lockdown_auto_on_arm",
+            await _apply_sleep_override(hass, value)
+        if key in ("security_alarm_entity", "lockdown_auto_on_arm", "lockdown_exempt_locks",
                    "intrusion_requires_confinement", "face_stand_down"):
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
-        if key == "lockdown_exempt_locks":   # takes effect at once (8.29.0)
-            from . import cognitive_core
-            await cognitive_core.apply_runtime_config(key, value)
-        if key in ("voice_id_uri", "voice_id_fallback_stt"):
-            # Check the new address now, so the card's status is current.
-            entity = getattr(runtime, "voice_id", None)
-            if entity is not None:
-                await entity.async_refresh_info()
-
-        # Classifier/reasoning provider or model changed while Observer is
-        # already running — refresh those two tier providers live, the same
-        # way vision/camera-reasoning already apply on their very next
-        # analysis (Phase 3, v7.108.0). A no-op if Observer isn't running or
-        # this key isn't one of the four that matter.
-        if key in ("classifier_provider", "classifier_model",
-                   "reasoning_provider", "reasoning_model"):
-            try:
-                from . import observer as observer_mod
-                if observer_mod.is_running():
-                    await observer_mod.refresh_tier_providers(hass, {key: value})
-            except Exception as exc:
-                _LOGGER.debug("Observer tier refresh note: %s", exc)
+        await _refresh_after_write(hass, runtime, key, value)
 
         connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:
@@ -1170,72 +1096,7 @@ async def ws_update_config(
         connection.send_error(msg["id"], "update_failed", safe_error_message(exc))
 
 
-def _get_memory_stats() -> dict:
-    """Return memory system stats for the panel."""
-    try:
-        from .memory import get_memory_stats
-        return get_memory_stats()
-    except Exception:
-        return {"backend": "unavailable", "total_memories": 0}
-
-
-def _available_labels(hass: HomeAssistant) -> list:
-    """[{id, name}] of Home Assistant labels, for the exclusion label picker.
-    Empty list if the label registry isn't available on this HA version."""
-    try:
-        from homeassistant.helpers import label_registry as _lr
-        reg = _lr.async_get(hass)
-        out = []
-        for lbl in reg.labels.values():
-            out.append({"id": lbl.label_id, "name": lbl.name})
-        out.sort(key=lambda x: (x.get("name") or "").lower())
-        return out
-    except Exception:
-        return []
-
-
-def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
-    """Read a JSON-encoded value from runtime_config → nova_config → entry options."""
-    import json as _json
-    # 1. Live NovaRuntime.runtime_config (fastest)
-    if entry is not None:
-        rc = _live_runtime_config(entry)
-        raw = rc.get(key)
-        if raw is not None:
-            if isinstance(raw, (dict, list)):
-                return raw
-            try:
-                return _json.loads(raw)
-            except Exception:
-                pass
-
-    # 2. Persistent config file (survives restarts)
-    try:
-        from . import nova_config
-        val = nova_config.get(key)
-        if val is not None:
-            if isinstance(val, (dict, list)):
-                return val
-            try:
-                return _json.loads(val)
-            except Exception:
-                return val
-    except Exception:
-        pass
-
-    # 3. Entry options (bootstrap defaults)
-    if entry is not None:
-        raw = _entry_opt(entry, key, None)
-        if raw is not None:
-            if isinstance(raw, (dict, list)):
-                return raw
-            try:
-                return _json.loads(raw)
-            except Exception:
-                pass
-
-    return default
-
+# ─── Logs and health ─────────────────────────────────────────────────────────
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({
@@ -1243,17 +1104,14 @@ def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
 })
 @websocket_api.async_response
 async def ws_get_debug_log(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Return Nova internal debug log entries, with entities named. The
-    persisted log file and the diagnostics export keep the entity_ids.
+    """Nova's debug log with entities named for reading. The file on disk
+    and the diagnostics export keep the raw entity_ids.
 
-    Never raises (8.7.23). If naming fails, the entries go back with their
-    entity_ids, and the failure goes to the Home Assistant log. The pinned
-    contract has no error code for this command, so it answers with the
-    same {"entries": [...]} shape rather than a new error."""
+    Never answers with an error (8.7.23): the pinned contract has no error
+    code for this command, so if naming fails the entries go out unnamed
+    and the reason goes to the Home Assistant log."""
     entries = list(_DEBUG_LOG)
     try:
         names = _entity_names(hass)
@@ -1263,28 +1121,18 @@ async def ws_get_debug_log(
     connection.send_result(msg["id"], {"entries": _named_log_entries(entries, names)})
 
 
-# ─── Decision Record browser (Phase 1: decision explanations + feedback) ────
-
-
-# ─── Automation probation (Phase 3) ──────────────────────────────────────────
-
-
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/diagnostics",
 })
 @websocket_api.async_response
 async def ws_diagnostics(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Core dependency health for the panel (v6.60.0): LLM, embeddings, TTS,
-    STT. Returns per-service status so the user can see at a glance what's up
-    and get a specific reason for anything down."""
+    """Service health for the panel (v6.60.0): the LLM, embeddings, TTS and
+    STT, each with its status and, when down, why."""
     try:
         from . import diagnostics
-        res = await diagnostics.run_service_health(hass)
-        connection.send_result(msg["id"], res)
+        connection.send_result(msg["id"], await diagnostics.run_service_health(hass))
     except Exception as exc:
         _LOGGER.exception("ws_diagnostics failed: %s", exc)
         connection.send_error(msg["id"], "diagnostics_failed", safe_error_message(exc))
@@ -1296,21 +1144,17 @@ async def ws_diagnostics(
 })
 @websocket_api.async_response
 async def ws_get_setup_health(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Setup Doctor (Phase 2): read-only configuration health — stale entity
-    references, room speakers, camera overrides, notification service,
-    Assist pipeline wiring, person entities, required integrations, and
-    persistence — plus the existing service-health checks folded in unchanged.
-    Admin-only: the response can contain entity_ids. Never makes a
-    configuration change, offers no automatic fix, and never creates a
-    Repair issue — this is a panel-only report."""
+    """The Setup Doctor (Phase 2): a read only check of the configuration
+    (stale entity references, room speakers, camera overrides, the notify
+    service, Assist pipelines, people, required integrations, persistence)
+    with the service health checks folded in. Admin only, since the report
+    names entities. It changes nothing, fixes nothing and raises no Repair
+    issue; the report is for the panel alone."""
     try:
         from . import setup_health
-        res = await setup_health.run_setup_health(hass)
-        connection.send_result(msg["id"], res)
+        connection.send_result(msg["id"], await setup_health.run_setup_health(hass))
     except Exception as exc:
         _LOGGER.exception("ws_get_setup_health failed: %s", exc)
         connection.send_error(msg["id"], "get_setup_health_failed", safe_error_message(exc))
@@ -1323,25 +1167,25 @@ async def ws_get_setup_health(
 })
 @websocket_api.async_response
 async def ws_get_provider_activity(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Bounded daily LLM provider/model/role activity (Phase 5) — call
-    counts, success/failure, average tokens and latency. Never prompts,
-    responses, tool arguments, images, or credentials; admin-only regardless,
-    since it still reveals which providers/models are configured."""
+    """Daily LLM use per provider, model and role (Phase 5): calls, successes
+    and failures, mean tokens and latency, for 1 to 90 days. No prompts,
+    replies, tool arguments, images or credentials are kept; admin only even
+    so, since it shows which providers and models are set up."""
     try:
         from . import provider_activity
-        days = max(1, min(int(msg.get("days", 7)), 90))
+        days = min(90, max(1, int(msg.get("days", 7))))
         db_path = provider_activity.db_path_for(hass)
-        result = await hass.async_add_executor_job(
-            lambda: provider_activity.list_days(days, db_path=db_path))
-        connection.send_result(msg["id"], {"days": result})
+        history = await hass.async_add_executor_job(
+            partial(provider_activity.list_days, days, db_path=db_path))
+        connection.send_result(msg["id"], {"days": history})
     except Exception as exc:
         _LOGGER.exception("ws_get_provider_activity failed: %s", exc)
         connection.send_error(msg["id"], "get_provider_activity_failed", safe_error_message(exc))
 
+
+# ─── nova/semantic_search ────────────────────────────────────────────────────
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({
@@ -1350,51 +1194,100 @@ async def ws_get_provider_activity(
 })
 @websocket_api.async_response
 async def ws_semantic_search(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Local semantic search control (v6.57.0). Instead of ChromaDB (whose
-    onnxruntime dep has no Python-3.14 wheel), Nova embeds via the Ollama
-    server it already uses and stores vectors in its own SQLite DB. This
-    reports status, toggles it on/off, and runs a live embedding health check."""
+    """Local semantic search (v6.57.0). Nova embeds text with the Ollama
+    server it already talks to and keeps the vectors in its own SQLite store
+    (ChromaDB's onnxruntime has no Python 3.14 wheel). Actions: status, turn
+    it on or off, and test, a live embedding check."""
     action = msg["action"]
     try:
         from . import embeddings, nova_config
-        if action == "enable":
-            await hass.async_add_executor_job(nova_config.set, "semantic_search", True)
-            await hass.async_add_executor_job(embeddings.init_store)
-            res = await embeddings.probe(hass)
-            res["enabled"] = True
-            if res.get("ok"):
-                nova_log("AGENT", f"semantic search enabled "
-                                    f"(Ollama {res.get('model')}, dim "
-                                    f"{res.get('dim')}) — re-ingest to embed docs")
-            else:
-                nova_log("AGENT", f"semantic search enabled but Ollama not "
-                                    f"ready: {res.get('error')}")
-            connection.send_result(msg["id"], res)
-        elif action == "disable":
-            await hass.async_add_executor_job(nova_config.set, "semantic_search", False)
-            nova_log("AGENT", "semantic search disabled — keyword (FTS) active")
-            connection.send_result(msg["id"], {"enabled": False, "ok": True})
-        elif action == "test":
-            res = await embeddings.probe(hass)
-            connection.send_result(msg["id"], res)
-        else:  # status
-            enabled = bool(nova_config.get("semantic_search", False))
+        if action == "status":
             base = embeddings._ollama_base()
-            vcount = await hass.async_add_executor_job(embeddings.vector_count)
+            stored = await hass.async_add_executor_job(embeddings.vector_count)
             connection.send_result(msg["id"], {
-                "enabled": enabled,
+                "enabled": bool(nova_config.get("semantic_search", False)),
                 "ollama_configured": bool(base),
                 "base": _masked_url(base),
                 "model": embeddings._model(),
-                "vector_count": vcount,
+                "vector_count": stored,
             })
+            return
+        if action == "disable":
+            await hass.async_add_executor_job(nova_config.set, "semantic_search", False)
+            nova_log("AGENT", "semantic search disabled — keyword (FTS) active")
+            connection.send_result(msg["id"], {"enabled": False, "ok": True})
+            return
+        if action == "enable":
+            await hass.async_add_executor_job(nova_config.set, "semantic_search", True)
+            await hass.async_add_executor_job(embeddings.init_store)
+        probe = await embeddings.probe(hass)
+        if action == "enable":
+            probe["enabled"] = True
+            if probe.get("ok"):
+                nova_log("AGENT", f"semantic search enabled (Ollama {probe.get('model')}, "
+                                  f"dim {probe.get('dim')}) — re-ingest to embed docs")
+            else:
+                nova_log("AGENT", "semantic search enabled but Ollama not ready: "
+                                  f"{probe.get('error')}")
+        connection.send_result(msg["id"], probe)
     except Exception as exc:
         _LOGGER.exception("ws_semantic_search failed: %s", exc)
         connection.send_error(msg["id"], "semantic_search_failed", safe_error_message(exc))
+
+
+# ─── nova/documents ──────────────────────────────────────────────────────────
+
+async def _documents_ingest(hass: HomeAssistant, documents, msg: dict) -> dict:
+    outcome = await documents.ingest_directory_async(hass)
+    embedded = (f", {outcome.get('embedded_chunks', 0)} embedded"
+                if outcome.get("semantic") else "")
+    nova_log("AGENT", f"documents ingested via panel: {outcome.get('files_ingested', 0)} "
+                      f"files, {outcome.get('total_chunks', 0)} chunks{embedded}")
+    return outcome
+
+
+async def _documents_upload(hass: HomeAssistant, documents, msg: dict) -> dict:
+    outcome = await documents.save_and_ingest_upload(
+        hass, msg.get("filename", ""), msg.get("content", ""))
+    if outcome.get("ok"):
+        nova_log("AGENT", f"document uploaded: {outcome.get('filename')} "
+                          f"({outcome.get('chunks', 0)} chunks)")
+    return outcome
+
+
+async def _documents_scan(hass: HomeAssistant, documents, msg: dict) -> dict:
+    outcome = await documents.scan_watch_folders(hass)
+    if outcome.get("new_files"):
+        nova_log("AGENT", f"watch-folder scan: {outcome['new_files']} new document(s) ingested")
+    return outcome
+
+
+async def _documents_delete(hass: HomeAssistant, documents, msg: dict) -> dict:
+    outcome = await hass.async_add_executor_job(
+        documents.delete_source, msg.get("filename", ""))
+    if outcome.get("ok"):
+        nova_log("AGENT", f"document removed: {msg.get('filename')}")
+    return outcome
+
+
+async def _documents_status(hass: HomeAssistant, documents, msg: dict) -> dict:
+    return await hass.async_add_executor_job(documents.library_status)
+
+
+async def _documents_search(hass: HomeAssistant, documents, msg: dict) -> dict:
+    return {"results": await documents.search_documents_async(hass, msg.get("query", ""), 5)}
+
+
+_DOCUMENT_ACTIONS = {
+    "status": _documents_status,
+    "ingest": _documents_ingest,
+    "upload": _documents_upload,
+    "scan_watch": _documents_scan,
+    "delete": _documents_delete,
+    "search": _documents_search,
+}
 
 
 @websocket_api.require_admin
@@ -1404,78 +1297,46 @@ async def ws_semantic_search(
                                     "scan_watch", "delete"]),
     vol.Optional("query"): str,
     vol.Optional("filename"): str,
-    vol.Optional("content"): str,        # base64 for upload
+    vol.Optional("content"): str,        # base64, for upload
 })
 @websocket_api.async_response
 async def ws_documents(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
-    """Document library control for the panel. status / ingest (rescan) /
-    search / upload (base64 file → save + ingest) / scan_watch (pull new files
-    from configured watch folders) / delete (remove a source). The retrieval
-    Nova uses in conversation is the search_documents agent tool; this exposes
-    the same store to the UI (v6.55.0; upload+watch v6.59.0)."""
-    action = msg["action"]
+    """The document library for the panel (v6.55.0, upload and watch folders
+    v6.59.0): status, ingest (rescan), search, upload (a base64 file, saved
+    and ingested), scan_watch (pull new files from the watch folders) and
+    delete (drop one source). In conversation Nova reaches the same store
+    through its search_documents tool."""
+    handler = _DOCUMENT_ACTIONS.get(msg["action"], _documents_search)
     try:
         from . import documents
-        if action == "status":
-            res = await hass.async_add_executor_job(documents.library_status)
-        elif action == "ingest":
-            res = await documents.ingest_directory_async(hass)
-            extra = (f", {res.get('embedded_chunks',0)} embedded"
-                     if res.get("semantic") else "")
-            nova_log("AGENT", f"documents ingested via panel: "
-                                f"{res.get('files_ingested',0)} files, "
-                                f"{res.get('total_chunks',0)} chunks{extra}")
-        elif action == "upload":
-            res = await documents.save_and_ingest_upload(
-                hass, msg.get("filename", ""), msg.get("content", ""))
-            if res.get("ok"):
-                nova_log("AGENT", f"document uploaded: {res.get('filename')} "
-                                    f"({res.get('chunks',0)} chunks)")
-        elif action == "scan_watch":
-            res = await documents.scan_watch_folders(hass)
-            if res.get("new_files"):
-                nova_log("AGENT", f"watch-folder scan: {res['new_files']} "
-                                    f"new document(s) ingested")
-        elif action == "delete":
-            res = await hass.async_add_executor_job(
-                documents.delete_source, msg.get("filename", ""))
-            if res.get("ok"):
-                nova_log("AGENT", f"document removed: {msg.get('filename')}")
-        else:  # search
-            hits = await documents.search_documents_async(
-                hass, msg.get("query", ""), 5)
-            res = {"results": hits}
-        connection.send_result(msg["id"], res)
+        connection.send_result(msg["id"], await handler(hass, documents, msg))
     except Exception as exc:
         _LOGGER.exception("ws_documents failed: %s", exc)
         connection.send_error(msg["id"], "documents_failed", safe_error_message(exc))
 
+
+# ─── nova/get_area_sparklines ────────────────────────────────────────────────
 
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_area_sparklines",
 })
 @websocket_api.async_response
 async def ws_get_area_sparklines(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
 ) -> None:
-    """Recent temp/humidity history per area, for dashboard sparklines.
-    Deliberately a separate, slow-polled command — recorder history queries
-    are heavier than the rest of the panel payload and shouldn't ride along
-    on the fast real-time-triggered refresh."""
+    """Recent temperature and humidity history per area, for the dashboard
+    sparklines. A command of its own, polled slowly: recorder history is far
+    heavier than the rest of the panel data and must not ride on the fast
+    refresh."""
     try:
-        entity_map: dict[str, dict[str, Optional[str]]] = {}
-        for aid in _all_areas_with_anything(hass):
-            t_eid, h_eid = _area_temp_humidity_entities(hass, aid)
-            if t_eid or h_eid:
-                entity_map[aid] = {"temp": t_eid, "humidity": h_eid}
-        sparklines = await _get_area_sparklines(hass, entity_map)
-        connection.send_result(msg["id"], {"sparklines": sparklines})
+        sensors: dict[str, dict[str, Optional[str]]] = {}
+        for area_id in _all_areas_with_anything(hass):
+            temp_sensor, humidity_sensor = _area_temp_humidity_entities(hass, area_id)
+            if temp_sensor or humidity_sensor:
+                sensors[area_id] = {"temp": temp_sensor, "humidity": humidity_sensor}
+        connection.send_result(msg["id"], {"sparklines": await _get_area_sparklines(hass, sensors)})
     except Exception as exc:
         _LOGGER.exception("get_area_sparklines failed: %s", exc)
         connection.send_error(msg["id"], "sparklines_failed", safe_error_message(exc))

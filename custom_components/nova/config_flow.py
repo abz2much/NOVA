@@ -1,757 +1,779 @@
-"""
-Nova Config Flow.
+"""Nova's setup dialog and its Configure dialog.
 
-HACS integration: the config flow is the primary setup path.
-  1. Manual entry of a cloud API key OR a local LLM endpoint (the common case).
-  2. If /config/nova/config.json already exists (a previous install — the
-     panel's runtime config survives integration removal), auto-imports it so
-     a re-install is zero-touch.
-  3. Options flow: a 4-step Configure dialog (Core, Routing, Observer, Identity)
-     for the common settings — the full set still lives in the Nova panel.
+Setup (Settings, Add integration) is three screens: AI keys and an Ollama
+address, a provider for each role, then a model for each role. Every entry
+is tested before the dialog moves on, and nothing is written until the last
+screen's tests pass. A config.json left behind by an earlier install is
+imported with no screens at all, and the Nova Voice ID app is picked up by
+Supervisor discovery.
 
-All runtime configuration is managed via the Nova panel and
-persisted by nova_config.py. The HA config entry is just the
-bootstrap shell that registers the conversation platform.
-"""
+The Configure dialog is a menu of small sections. Each one saves on its own
+into Nova's runtime settings (nova_config) and the entry's options. The Nova
+panel remains the full settings surface; the config entry is mainly the
+shell that lets Home Assistant load Nova."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, Callable
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .migrations import CURRENT_SCHEMA_VERSION
 from .const import (
     CONF_API_KEY,
-    CONF_HONORIFIC,
-    CONF_MODEL,
+    CONF_BEDROOM_AREAS,
+    CONF_BROADCAST_GROUP,
+    CONF_CLASSIFIER_MODEL,
     CONF_DIRECTIVE,
     CONF_DIRECTIVE_PRESET,
-    CONF_USE_HASS_API,
-    CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
-    CONF_BROADCAST_GROUP,
+    CONF_HONORIFIC,
+    CONF_MODEL,
     CONF_NOTIFY_SERVICE,
     CONF_OBSERVER_ENABLED,
-    CONF_CLASSIFIER_MODEL,
+    CONF_OBSERVER_QUIET_END,
+    CONF_OBSERVER_QUIET_START,
     CONF_REASONING_MODEL,
     CONF_REVIEW_MODEL,
-    CONF_OBSERVER_QUIET_START,
-    CONF_OBSERVER_QUIET_END,
+    CONF_USE_HASS_API,
+    DEFAULT_CLASSIFIER_MODEL,
+    DEFAULT_DIRECTIVE_PRESET,
     DEFAULT_HONORIFIC,
     DEFAULT_MODEL,
-    DEFAULT_DIRECTIVE_PRESET,
-    DEFAULT_CLASSIFIER_MODEL,
+    DEFAULT_OBSERVER_QUIET_END,
+    DEFAULT_OBSERVER_QUIET_START,
     DEFAULT_REASONING_MODEL,
     DEFAULT_REVIEW_MODEL,
-    DEFAULT_OBSERVER_QUIET_START,
-    DEFAULT_OBSERVER_QUIET_END,
     DIRECTIVE_PRESETS,
-    HONORIFIC_OPTIONS,
     DOMAIN,
+    HONORIFIC_OPTIONS,
+    PROVIDER_API_KEY_FIELDS,
 )
+from .migrations import CURRENT_SCHEMA_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
+# Screen 1's one field that is not a key.
+_ADDRESS_FIELD = "ollama_base_url"
+# Passed as a placeholder because hassfest refuses a URL typed straight
+# into translation text.
+_ADDRESS_EXAMPLE = "http://192.168.1.50:11434"
+_NONE_LISTED = "—"
+
+# Settings an earlier install may have left in config.json that would undo
+# a fresh setup: the welcome flag, per role addresses (they would beat the
+# new Ollama address) and the suggestion review switch. The review tier,
+# which setup never asks about, is deliberately left alone.
+_STALE_SETTINGS = (
+    "welcome_shown",
+    "conversation_base_url", "classifier_base_url", "reasoning_base_url",
+    "suggestion_review_enabled", "suggestion_review_provider", "suggestion_review_model",
+)
+# Never copied from an imported config.json into the entry's options.
+_NOT_CARRIED = (CONF_API_KEY, "groq_api_key", "schema_version")
+
+
 def _find_config(config_path: str) -> dict | None:
-    """Read an existing runtime config at config_path, if one with a usable
-    LLM exists. This is the panel's runtime config — survives integration
-    removal, so a re-install can pick everything back up without re-entry.
-    (v6.45.0: the legacy add-on path /config/nova_config.json is no longer
-    read.) config_path is resolved by the caller via hass.config.path(),
-    since a bare module constant can't see which directory THIS Home
-    Assistant instance was actually configured with."""
+    """The runtime config.json at `config_path` when it names an LLM Nova
+    can use, else None.
+
+    The file outlives the integration, so a reinstall can be set up from it
+    with no screens. Usable means a cloud key, any self hosted address, or a
+    self hosted provider. The caller builds the path with hass.config.path().
+    Tests run this function on its own with only json, os and CONF_API_KEY
+    in scope, so it must not reach for anything else."""
     try:
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                data = json.load(f)
-            provider = str(data.get("llm_provider") or "").strip().lower()
-            has_endpoint = any(str(data.get(key) or "").strip() for key in (
-                "ollama_base_url", "custom_base_url", "llm_base_url",
-            ))
-            if (data.get(CONF_API_KEY) or data.get("groq_api_key")
-                    or has_endpoint or provider in ("ollama", "custom")):
-                return data
-    except Exception:
-        pass
+        if not os.path.exists(config_path):
+            return None
+        with open(config_path) as handle:
+            found = json.load(handle)
+        self_hosted = str(found.get("llm_provider") or "").strip().lower() in ("ollama", "custom")
+        addressed = any(str(found.get(name) or "").strip()
+                        for name in ("ollama_base_url", "custom_base_url", "llm_base_url"))
+        keyed = found.get(CONF_API_KEY) or found.get("groq_api_key")
+        if keyed or addressed or self_hosted:
+            return found
+    except Exception:  # noqa: BLE001 - an unreadable file simply is not imported
+        return None
     return None
 
 
-_OLLAMA_FIELD = "ollama_base_url"
-# Shown as a placeholder: Home Assistant's checks reject URLs written
-# directly in translation text.
-_OLLAMA_EXAMPLE = "http://192.168.1.50:11434"
-
-
 def _saved_keys() -> dict[str, str]:
-    """Nova keys already in secrets.yaml, for example from an earlier
-    install. Blocking: run it in the executor."""
+    """Cloud keys already in secrets.yaml (an earlier install), by provider.
+    Reads a file, so call it through the executor."""
     from . import ha_secrets, setup_roles
-    from .const import PROVIDER_API_KEY_FIELDS
-    found: dict[str, str] = {}
+
+    keys: dict[str, str] = {}
     for provider in setup_roles.CLOUD:
-        value = ha_secrets.get_secret_sync(
-            ha_secrets.secret_key_for(PROVIDER_API_KEY_FIELDS[provider]), None)
+        name = ha_secrets.secret_key_for(PROVIDER_API_KEY_FIELDS[provider])
+        stored = ha_secrets.get_secret_sync(name, None)
+        if stored:
+            keys[provider] = str(stored).strip()
+    return keys
+
+
+def _suggest(value: Any) -> dict[str, Any]:
+    """A field description that pre-fills the field without forcing it."""
+    return {"suggested_value": value}
+
+
+def _listed(names: list[str]) -> str:
+    return ", ".join(names) or _NONE_LISTED
+
+
+def _secret_box() -> Any:
+    return selector.TextSelector(selector.TextSelectorConfig(
+        type=selector.TextSelectorType.PASSWORD))
+
+
+def _sort_credentials(user_input: dict[str, Any]) -> tuple[str | None, dict[str, str], list[str]]:
+    """Split the credentials form into (error, keys to write, providers to
+    clear). A provider with both a new key and its clear box ticked is an
+    error, and nothing is returned with it."""
+    writes: dict[str, str] = {}
+    clears: list[str] = []
+    for provider in PROVIDER_API_KEY_FIELDS:
+        value = (user_input.get(f"{provider}_credential") or "").strip()
+        wipe = bool(user_input.get(f"clear_{provider}", False))
+        if value and wipe:
+            return "credential_set_and_clear", {}, []
         if value:
-            found[provider] = str(value).strip()
-    return found
+            writes[provider] = value
+        elif wipe:
+            clears.append(provider)
+    return None, writes, clears
 
 
 class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle Nova config flow — auto-imports an existing runtime config."""
+    """The setup dialog, the reinstall import and Voice ID discovery."""
 
     VERSION = 1
 
     def __init__(self) -> None:
         super().__init__()
+        # Screen 1's results: the working value per provider (a key, or the
+        # normalised Ollama address), which of them were typed rather than
+        # saved, each one's model list, and saved keys that failed.
         self._entries: dict[str, str] = {}
         self._typed: set[str] = set()
         self._lists: dict[str, tuple[list[str], list[dict]]] = {}
         self._saved_failed: list[str] = []
+        # Screen 2's provider per role.
         self._roles: dict[str, str] = {}
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None,
-    ) -> dict:
-        """Screen 1: a key per cloud provider, and an Ollama address.
+    # ── screen 1: keys and the Ollama address ──
 
-        A reinstall with an old config.json still imports it with no
-        screens. Keys already in secrets.yaml are found and kept."""
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> dict:
+        """Keys per cloud provider and an Ollama address. A reinstall with a
+        usable config.json is imported instead, and keys already saved in
+        secrets.yaml are found and offered without retyping."""
         from . import paths, setup_roles
 
-        # The screens run before Nova is loaded, so set Nova's paths first.
+        # Nova is not loaded while these screens run, so point it at this
+        # instance's folders before anything is read.
         paths.configure(self.hass)
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        config_path = self.hass.config.path("nova", "config.json")
-        cfg = await self.hass.async_add_executor_job(_find_config, config_path)
-        if cfg:
-            return await self.async_step_import(cfg)
+        leftover = await self.hass.async_add_executor_job(
+            _find_config, self.hass.config.path("nova", "config.json"))
+        if leftover:
+            return await self.async_step_import(leftover)
 
         saved = await self.hass.async_add_executor_job(_saved_keys)
         errors: dict[str, str] = {}
-        values: dict[str, Any] = {}
+        shown: dict[str, Any] = {}
         if user_input is not None:
-            errors = await self._check_entries(user_input, saved)
+            errors = await self._test_entries(user_input, saved)
             if not errors:
                 return await self.async_step_roles()
-            # Keep what passed; never send a failing key back to the browser.
-            # The Ollama address is not secret, so it stays for correcting.
-            values = {k: ("" if k in errors and k.endswith("_api_key") else v)
-                      for k, v in user_input.items()}
+            # A key that failed is never sent back to the browser. Keys that
+            # passed, and the address (not a secret), stay for correcting.
+            shown = {
+                field: "" if field in errors and field.endswith("_api_key") else value
+                for field, value in user_input.items()
+            }
 
+        found = [setup_roles.PROVIDER_LABELS[p] for p in setup_roles.CLOUD if p in saved]
         return self.async_show_form(
             step_id="user",
-            data_schema=self._keys_schema(values),
+            data_schema=self._key_fields(shown),
             errors=errors,
-            description_placeholders={
-                "saved": ", ".join(setup_roles.PROVIDER_LABELS[p]
-                                   for p in setup_roles.CLOUD if p in saved) or "—",
-                "example": _OLLAMA_EXAMPLE,
-            },
+            description_placeholders={"saved": _listed(found), "example": _ADDRESS_EXAMPLE},
         )
 
-    async def _check_entries(self, user_input: dict[str, Any],
-                             saved: dict[str, str]) -> dict[str, str]:
-        """Test every typed key, saved key and the Ollama address at the
-        same time. Fills self._entries, _typed, _lists and _saved_failed.
-        Returns the screen's errors (empty when it may move on)."""
+    def _key_fields(self, shown: dict[str, Any]) -> vol.Schema:
         from . import setup_roles
-        from .const import PROVIDER_API_KEY_FIELDS
-        from .llm_provider import normalize_provider_endpoint
 
-        self._lists, self._saved_failed = {}, []
-        errors: dict[str, str] = {}
-        typed = {p: str(user_input.get(PROVIDER_API_KEY_FIELDS[p]) or "").strip()
-                 for p in setup_roles.CLOUD}
-        typed = {p: k for p, k in typed.items() if k}
-        entries = {**{p: k for p, k in saved.items() if p not in typed}, **typed}
-        url = str(user_input.get(_OLLAMA_FIELD) or "").strip()
-        if url:
-            try:
-                entries["ollama"] = normalize_provider_endpoint(url, "ollama")
-            except ValueError:
-                errors[_OLLAMA_FIELD] = "cannot_connect"
-        if not entries and not errors:
-            return {"base": "need_llm"}
-
-        results = await asyncio.gather(
-            *(self._check(p, v, p in typed) for p, v in entries.items()))
-        for (provider, _value), (err, models, details) in zip(entries.items(), results):
-            if err is None:
-                self._lists[provider] = (models, details)
-            elif provider in typed:
-                errors[PROVIDER_API_KEY_FIELDS[provider]] = err
-            elif provider == "ollama":
-                errors[_OLLAMA_FIELD] = err
-            else:
-                self._saved_failed.append(provider)
-        if not errors and not self._lists:
-            errors["base"] = "no_working_provider"
-        if not errors:
-            self._entries = {p: v for p, v in entries.items() if p in self._lists}
-            self._typed = {p for p in typed if p in self._lists}
-        return errors
-
-    async def _check(self, provider: str, value: str, typed: bool
-                     ) -> tuple[str | None, list[str], list[dict]]:
-        """(error key or None, models, details) for one entry. A cloud key
-        whose list cannot be read, or is empty, is tested with the default
-        model. Ollama has no default model, so its list must be readable."""
-        from . import setup_probe, setup_roles
-        listed = await self._discover(provider, value)
-        if listed is not None and (listed[0] or provider == "ollama"):
-            return None, listed[0], listed[1]
-        if provider == "ollama":
-            return "cannot_connect", [], []
-        from .llm_provider import DEFAULT_MODELS
-        kind = await setup_probe.probe_model(
-            self.hass, setup_probe.Job(provider, DEFAULT_MODELS[provider]), value, None)
-        # A key that works but cannot use the default model passes here with
-        # an empty list, so screen 3 shows a text box for the model.
-        return (None if kind is None else setup_roles.key_error(kind, typed)), [], []
-
-    def _keys_schema(self, values: dict[str, Any]) -> vol.Schema:
-        from . import setup_roles
-        from .const import PROVIDER_API_KEY_FIELDS
         fields: dict[Any, Any] = {}
         for provider in setup_roles.CLOUD:
-            key = PROVIDER_API_KEY_FIELDS[provider]
-            fields[vol.Optional(key, description={"suggested_value": values.get(key, "")})] = \
-                selector.TextSelector(selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.PASSWORD))
-        fields[vol.Optional(_OLLAMA_FIELD, description={
-            "suggested_value": values.get(_OLLAMA_FIELD, "")})] = str
+            name = PROVIDER_API_KEY_FIELDS[provider]
+            fields[vol.Optional(name, description=_suggest(shown.get(name, "")))] = _secret_box()
+        address = vol.Optional(_ADDRESS_FIELD, description=_suggest(shown.get(_ADDRESS_FIELD, "")))
+        fields[address] = str
         return vol.Schema(fields)
 
-    async def _discover(self, provider: str, value: str
-                        ) -> tuple[list[str], list[dict]] | None:
+    async def _test_entries(self, user_input: dict[str, Any],
+                            saved: dict[str, str]) -> dict[str, str]:
+        """Test every typed key, every saved key that was not retyped, and the
+        Ollama address, all at once. Returns screen 1's errors; when there are
+        none, the passing entries are kept for the later screens."""
+        from . import setup_roles
+        from .llm_provider import normalize_provider_endpoint
+
+        self._lists = {}
+        self._saved_failed = []
+        typed: dict[str, str] = {}
+        for provider in setup_roles.CLOUD:
+            key = str(user_input.get(PROVIDER_API_KEY_FIELDS[provider]) or "").strip()
+            if key:
+                typed[provider] = key
+        # Saved keys first, then typed ones, then Ollama.
+        candidates = {p: key for p, key in saved.items() if p not in typed}
+        candidates.update(typed)
+
+        errors: dict[str, str] = {}
+        address = str(user_input.get(_ADDRESS_FIELD) or "").strip()
+        if address:
+            try:
+                candidates["ollama"] = normalize_provider_endpoint(address, "ollama")
+            except ValueError:
+                errors[_ADDRESS_FIELD] = "cannot_connect"
+        if not candidates and not errors:
+            return {"base": "need_llm"}
+
+        names = list(candidates)
+        outcomes = await asyncio.gather(
+            *(self._test_one(name, candidates[name], name in typed) for name in names))
+        for provider, (problem, models, details) in zip(names, outcomes):
+            if problem is None:
+                self._lists[provider] = (models, details)
+            elif provider in typed:
+                errors[PROVIDER_API_KEY_FIELDS[provider]] = problem
+            elif provider == "ollama":
+                errors[_ADDRESS_FIELD] = problem
+            else:
+                # A stale saved key is left out and named on screen 2; it
+                # never holds the user up.
+                self._saved_failed.append(provider)
+        if errors:
+            return errors
+        if not self._lists:
+            return {"base": "no_working_provider"}
+        self._entries = {p: value for p, value in candidates.items() if p in self._lists}
+        self._typed = {p for p in typed if p in self._lists}
+        return {}
+
+    async def _test_one(self, provider: str, value: str,
+                        typed: bool) -> tuple[str | None, list[str], list[dict]]:
+        """(error key or None, model ids, model details) for one entry.
+
+        A readable, non-empty list is proof enough. Ollama has no default
+        model, so for it any readable list passes and an unreadable one
+        fails. A cloud key otherwise gets one test call with its default
+        model."""
+        from . import setup_probe, setup_roles
+
+        listing = await self._discover(provider, value)
+        if listing is not None:
+            models, details = listing
+            if models or provider == "ollama":
+                return None, models, details
+        if provider == "ollama":
+            return "cannot_connect", [], []
+
+        from .llm_provider import DEFAULT_MODELS
+        job = setup_probe.Job(provider, DEFAULT_MODELS[provider])
+        kind = await setup_probe.probe_model(self.hass, job, value, None)
+        if kind is None:
+            return None, [], []
+        # key_error may still pass a key that only lacks the default model;
+        # screen 3 then shows a text box for the model.
+        return setup_roles.key_error(kind, typed), [], []
+
+    async def _discover(self, provider: str,
+                        value: str) -> tuple[list[str], list[dict]] | None:
         """The provider's model ids and details, or None when the list
-        could not be read. Never raises."""
+        cannot be read. Best effort: never raises."""
         try:
             from homeassistant.helpers import aiohttp_client
-            from .const import PROVIDER_API_KEY_FIELDS
             from .providers import discovery
 
-            config: dict[str, Any] = {"llm_provider": provider}
-            if provider == "ollama":
-                config["ollama_base_url"] = value
-            else:
-                config[PROVIDER_API_KEY_FIELDS[provider]] = value
-            request = discovery.resolve_discovery_request(config, provider)
+            field = _ADDRESS_FIELD if provider == "ollama" else PROVIDER_API_KEY_FIELDS[provider]
+            request = discovery.resolve_discovery_request(
+                {"llm_provider": provider, field: value}, provider)
             session = aiohttp_client.async_get_clientsession(self.hass)
-            result = await discovery.fetch_models(self.hass, session, request)
-            models, _truncated, details = result.as_tuple()
-            return [str(m) for m in models], list(details)
-        except Exception as exc:  # noqa: BLE001 - discovery is best effort
+            reply = await discovery.fetch_models(self.hass, session, request)
+            ids, _truncated, details = reply.as_tuple()
+            return [str(model_id) for model_id in ids], list(details)
+        except Exception as exc:  # noqa: BLE001 - discovery is optional
             _LOGGER.debug("Nova setup: %s model list unavailable (%s)",
                           provider, type(exc).__name__)
             return None
 
-    async def async_step_roles(
-        self, user_input: dict[str, Any] | None = None,
-    ) -> dict:
-        """Screen 2: the provider for each role, from the ones that passed."""
+    # ── screen 2: a provider per role ──
+
+    async def async_step_roles(self, user_input: dict[str, Any] | None = None) -> dict:
+        """Which of the passing providers serves each role."""
         from . import setup_roles
 
-        passed = list(self._lists)
         if user_input is not None:
-            self._roles = {role: str(user_input.get(role) or "")
-                           for role in setup_roles.ROLES}
+            self._roles = {role: str(user_input.get(role) or "") for role in setup_roles.ROLES}
             return await self.async_step_models()
 
-        details = self._lists.get("ollama", ([], []))[1]
-        ollama_vision = setup_roles.ollama_has(details, "vision")
+        passed = list(self._lists)
+        _ids, ollama_details = self._lists.get("ollama", ([], []))
+        reads_pictures = setup_roles.ollama_has(ollama_details, "vision")
         fields: dict[Any, Any] = {}
         for role in setup_roles.ROLES:
-            fields[vol.Required(role, default=setup_roles.default_provider(
-                role, passed, ollama_vision))] = selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=setup_roles.provider_options(role, passed),
-                        translation_key="setup_provider",
-                        mode=selector.SelectSelectorMode.DROPDOWN))
+            preset = setup_roles.default_provider(role, passed, reads_pictures)
+            fields[vol.Required(role, default=preset)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=setup_roles.provider_options(role, passed),
+                    translation_key="setup_provider",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                ))
+        stale = [setup_roles.PROVIDER_LABELS[p] for p in self._saved_failed]
         return self.async_show_form(
             step_id="roles",
             data_schema=vol.Schema(fields),
-            description_placeholders={"failed": ", ".join(
-                setup_roles.PROVIDER_LABELS[p] for p in self._saved_failed) or "—"},
+            description_placeholders={"failed": _listed(stale)},
         )
 
-    async def async_step_models(
-        self, user_input: dict[str, Any] | None = None,
-    ) -> dict:
-        """Screen 3: the model for each role, tested on submit. Keys are
-        written only after every test passed and the "already set up"
-        check ran again."""
-        from . import setup_probe, setup_roles
+    # ── screen 3: a model per role, then save ──
 
-        roles = [r for r in setup_roles.ROLES
-                 if not (r == "vision" and self._roles.get(r) == setup_roles.NOT_NOW)]
+    async def async_step_models(self, user_input: dict[str, Any] | None = None) -> dict:
+        """The model for each role. Every model is tested on submit; keys and
+        settings are written only once all pass and the "already set up"
+        check has run again."""
+        from . import setup_roles
+
+        roles = [role for role in setup_roles.ROLES
+                 if role != "vision" or self._roles.get(role) != setup_roles.NOT_NOW]
         errors: dict[str, str] = {}
-        values: dict[str, str] = {}
+        typed: dict[str, str] = {}
         if user_input is not None:
-            values = {f"{r}_model": str(user_input.get(f"{r}_model") or "").strip()
-                      for r in roles}
-            chosen = {r: values[f"{r}_model"] for r in roles if values[f"{r}_model"]}
-            errors = {f"{r}_model": "model_required"
-                      for r in roles if r != "vision" and r not in chosen}
+            for role in roles:
+                typed[f"{role}_model"] = str(user_input.get(f"{role}_model") or "").strip()
+            chosen = {role: typed[f"{role}_model"] for role in roles if typed[f"{role}_model"]}
+            # Vision may be left empty: it is then set up later.
+            errors = {f"{role}_model": "model_required"
+                      for role in roles if role != "vision" and role not in chosen}
             if not errors:
-                jobs = {r: setup_probe.Job(self._roles[r], m, picture=(r == "vision"))
-                        for r, m in chosen.items()}
-                creds = {p: self._credential(p) for p in {j.provider for j in jobs.values()}}
-                results = await setup_probe.probe_all(self.hass, jobs, creds)
-                errors = {f"{r}_model": setup_roles.error_key(kind, r == "vision")
-                          for r, kind in results.items() if kind is not None}
+                errors = await self._test_models(chosen)
             if not errors:
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
-                if not await self._save_keys():
-                    errors = {"base": "secrets_write_failed"}
-                elif not await self.hass.async_add_executor_job(
-                        self._apply_to_config, chosen):
-                    errors = {"base": "config_write_failed"}
-                else:
-                    return self.async_create_entry(
-                        title="Nova", data=self._entry_data(chosen))
+                problem = await self._store(chosen)
+                if problem is None:
+                    return self.async_create_entry(title="Nova", data=self._entry_data(chosen))
+                errors = {"base": problem}
 
+        names: dict[str, str] = {}
+        for role in setup_roles.ROLES:
+            provider = self._roles.get(role, "")
+            names[f"{role}_provider"] = setup_roles.PROVIDER_LABELS.get(provider, provider)
         return self.async_show_form(
             step_id="models",
-            data_schema=self._models_schema(roles, values),
+            data_schema=self._model_fields(roles, typed),
             errors=errors,
-            description_placeholders={
-                f"{r}_provider": setup_roles.PROVIDER_LABELS.get(
-                    self._roles.get(r, ""), self._roles.get(r, ""))
-                for r in setup_roles.ROLES},
+            description_placeholders=names,
         )
 
-    def _credential(self, provider: str) -> tuple[str, str | None]:
+    def _model_fields(self, roles: list[str], typed: dict[str, str]) -> vol.Schema:
+        from . import setup_roles
+        from .llm_provider import DEFAULT_MODELS
+
+        fields: dict[Any, Any] = {}
+        for role in roles:
+            provider = self._roles[role]
+            ids, details = self._lists.get(provider, ([], []))
+            name = f"{role}_model"
+            if name in typed:
+                start = typed[name]
+            else:
+                start = setup_roles.default_model(role, provider, DEFAULT_MODELS, details)
+            marker = vol.Optional if role == "vision" else vol.Required
+            if ids:
+                widget: Any = selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=ids, custom_value=True, mode=selector.SelectSelectorMode.DROPDOWN))
+            else:
+                # No list to choose from: a free text box.
+                widget = selector.TextSelector()
+            fields[marker(name, description=_suggest(start))] = widget
+        return vol.Schema(fields)
+
+    async def _test_models(self, chosen: dict[str, str]) -> dict[str, str]:
+        """One test call per chosen model (a picture for vision); the error
+        for each role whose test failed."""
+        from . import setup_probe, setup_roles
+
+        jobs = {role: setup_probe.Job(self._roles[role], model, picture=role == "vision")
+                for role, model in chosen.items()}
+        creds = {job.provider: self._credentials_for(job.provider) for job in jobs.values()}
+        verdicts = await setup_probe.probe_all(self.hass, jobs, creds)
+        return {f"{role}_model": setup_roles.error_key(kind, role == "vision")
+                for role, kind in verdicts.items() if kind is not None}
+
+    def _credentials_for(self, provider: str) -> tuple[str, str | None]:
+        """(api key, base url) for a test call."""
         if provider == "ollama":
             return "", self._entries["ollama"]
         return self._entries[provider], None
 
-    def _models_schema(self, roles: list[str], values: dict[str, str]) -> vol.Schema:
-        from . import setup_roles
-        from .llm_provider import DEFAULT_MODELS
-        fields: dict[Any, Any] = {}
-        for role in roles:
-            provider = self._roles[role]
-            models, details = self._lists.get(provider, ([], []))
-            key = f"{role}_model"
-            suggested = values[key] if key in values else setup_roles.default_model(
-                role, provider, DEFAULT_MODELS, details)
-            marker = vol.Optional if role == "vision" else vol.Required
-            field: Any = selector.SelectSelector(selector.SelectSelectorConfig(
-                options=models, custom_value=True,
-                mode=selector.SelectSelectorMode.DROPDOWN)) if models \
-                else selector.TextSelector()
-            fields[marker(key, description={"suggested_value": suggested})] = field
-        return vol.Schema(fields)
+    async def _store(self, chosen: dict[str, str]) -> str | None:
+        """Write the typed keys, then config.json. The error key of the
+        first write that failed, or None when both landed."""
+        if not await self._save_keys():
+            return "secrets_write_failed"
+        wrote = await self.hass.async_add_executor_job(self._apply_to_config, chosen)
+        return None if wrote else "config_write_failed"
 
     async def _save_keys(self) -> bool:
-        """Write the keys typed on screen 1 to secrets.yaml. Saved keys
-        are already there and are not rewritten."""
+        """Put the keys typed on screen 1 into secrets.yaml, stopping at the
+        first failure. Saved keys are already there and are left as they are."""
         from . import ha_secrets
+
         for provider in sorted(self._typed):
-            if not await ha_secrets.async_set_provider_credential(
-                    self.hass, provider, self._entries[provider]):
+            stored = await ha_secrets.async_set_provider_credential(
+                self.hass, provider, self._entries[provider])
+            if not stored:
                 return False
         return True
 
+    def _role_settings(self, chosen: dict[str, str]) -> dict[str, str]:
+        """The provider and model setting of each chosen role."""
+        from . import setup_roles
+
+        out: dict[str, str] = {}
+        for role, model in chosen.items():
+            provider_key, model_key = setup_roles.ROLE_KEYS[role]
+            out[provider_key] = self._roles[role]
+            out[model_key] = model
+        return out
+
     def _apply_to_config(self, chosen: dict[str, str]) -> bool:
-        """Write the AI choices into config.json as well. A reinstall can
-        leave an old config.json behind, and config.json wins over the
-        entry, so without this the old choices would beat the new ones.
-        Also clears the old "welcome shown" flag, old per role addresses and
-        old suggestion review settings. Other settings, such as the
-        honorific, are kept. Blocking: run it in the executor."""
+        """Copy the AI choices into config.json too. config.json beats the
+        entry, so a file left by an earlier install would otherwise bring its
+        old choices back. Also drops the stale settings above and the
+        settings of any role not chosen; everything else (the honorific, for
+        one) is kept. Blocking: run it in the executor."""
         from . import nova_config, setup_roles
+
         nova_config.configure(self.hass)
-        values: dict[str, Any] = {
+        fresh: dict[str, Any] = {
             "welcome_pending": True,
             "self_hosted_endpoints_migrated": True,
             "ollama_base_url": self._entries.get("ollama", ""),
         }
-        # Old per role addresses would beat the new Ollama address, and an old
-        # suggestion review setting would switch it back on: first run starts
-        # both fresh. The unused review tier is left alone.
-        drop = ["welcome_shown", "conversation_base_url", "classifier_base_url",
-                "reasoning_base_url", "suggestion_review_enabled",
-                "suggestion_review_provider", "suggestion_review_model"]
+        fresh.update(self._role_settings(chosen))
+        dropped = list(_STALE_SETTINGS)
         for role in setup_roles.ROLES:
-            provider_key, model_key = setup_roles.ROLE_KEYS[role]
-            if role in chosen:
-                values[provider_key] = self._roles[role]
-                values[model_key] = chosen[role]
-            else:
-                drop += [provider_key, model_key]
-        # Delete first, save last: set_many saves the whole cache, so its
-        # result also covers the deletions.
-        for key in drop:
+            if role not in chosen:
+                dropped.extend(setup_roles.ROLE_KEYS[role])
+        # set_many saves the whole cache, so doing it last means its result
+        # covers the deletions as well.
+        for key in dropped:
             nova_config.delete(key)
-        return nova_config.set_many(values)
+        return nova_config.set_many(fresh)
 
     def _entry_data(self, chosen: dict[str, str]) -> dict[str, Any]:
-        from . import setup_roles
         data: dict[str, Any] = {
             CONF_HONORIFIC: DEFAULT_HONORIFIC,
-            # A fresh install starts at the current schema, so no migration
-            # runs (8.28.0: nothing is exempt from lockdown by default).
+            # A fresh install is already at the current schema, so no
+            # migration runs for it.
             "schema_version": CURRENT_SCHEMA_VERSION,
-            # Fresh install only: welcome.py posts "Nova is ready" once.
+            # welcome.py posts "Nova is ready" once, on a fresh install only.
             "welcome_pending": True,
-            # Only Ollama's own address field is used; the old shared one is not.
+            # Ollama's own address field is the one read from now on.
             "self_hosted_endpoints_migrated": True,
         }
         if "ollama" in self._entries:
             data["ollama_base_url"] = self._entries["ollama"]
-        for role, model in chosen.items():
-            provider_key, model_key = setup_roles.ROLE_KEYS[role]
-            data[provider_key] = self._roles[role]
-            data[model_key] = model
+        data.update(self._role_settings(chosen))
         return data
 
-    async def async_step_import(
-        self, import_data: dict[str, Any],
-    ) -> dict:
-        """Create the entry from an existing runtime config (re-install)."""
-        api_key = (
-            import_data.get(CONF_API_KEY)
-            or import_data.get("groq_api_key", "")
-        ).strip()
-        provider = import_data.get("llm_provider", "groq")
-        from .llm_provider import resolve_provider_endpoint
-        try:
-            base_url = resolve_provider_endpoint(import_data, provider) or ""
-        except ValueError:
-            base_url = ""
-        local_ok = provider in ("ollama", "custom") and bool(base_url)
+    # ── reinstall import ──
 
-        # An LLM is required, but a local model counts: proceed if we have either
-        # a cloud key OR a local endpoint (provider=ollama/custom, or a base_url).
-        if not api_key and not local_ok:
+    async def async_step_import(self, import_data: dict[str, Any]) -> dict:
+        """Create the entry from the config.json an earlier install left."""
+        from .llm_provider import resolve_provider_endpoint
+
+        key = (import_data.get(CONF_API_KEY) or import_data.get("groq_api_key", "")).strip()
+        provider = import_data.get("llm_provider", "groq")
+        try:
+            address = resolve_provider_endpoint(import_data, provider) or ""
+        except ValueError:
+            address = ""
+        local = provider in ("ollama", "custom") and bool(address)
+        # A cloud key or a working local endpoint will do; one is required.
+        if not (key or local):
             _LOGGER.warning("Nova: config found but no API key and no local LLM")
             return self.async_abort(reason="import_failed")
 
         await self.async_set_unique_id(DOMAIN)
-        self._abort_if_unique_id_configured(
-            updates={CONF_API_KEY: api_key}
-        )
-
+        self._abort_if_unique_id_configured(updates={CONF_API_KEY: key})
         _LOGGER.info("Nova: auto-configuring from existing runtime config (provider=%s%s)",
-                     provider, ", local" if (not api_key and local_ok) else "")
-        return self.async_create_entry(
-            title="Nova",
-            data={
-                CONF_API_KEY: api_key,
-                CONF_MODEL: import_data.get(CONF_MODEL, import_data.get("model", DEFAULT_MODEL)),
-                CONF_HONORIFIC: import_data.get(CONF_HONORIFIC, import_data.get("honorific", DEFAULT_HONORIFIC)),
-                "llm_provider": provider,
-                "llm_base_url": base_url,
-                "ollama_base_url": base_url if provider == "ollama" else "",
-                "custom_base_url": base_url if provider == "custom" else "",
-                # Imported from an existing install's config.json: start at v7
-                # so the v7 to v8 migration keeps its lockdown exempt locks.
-                "schema_version": 7,
-            },
-            options={k: v for k, v in import_data.items()
-                     if k not in (CONF_API_KEY, "groq_api_key", "schema_version")},
-        )
+                     provider, "" if key else ", local")
+
+        data: dict[str, Any] = {
+            CONF_API_KEY: key,
+            CONF_MODEL: import_data.get(CONF_MODEL, DEFAULT_MODEL),
+            CONF_HONORIFIC: import_data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC),
+            "llm_provider": provider,
+            "llm_base_url": address,
+        }
+        for hosted in ("ollama", "custom"):
+            data[f"{hosted}_base_url"] = address if provider == hosted else ""
+        data.update({
+            # An existing install starts at 7, so the v7 to v8 migration
+            # still runs and keeps its lockdown exempt locks.
+            "schema_version": 7,
+        })
+        carried = {name: value for name, value in import_data.items() if name not in _NOT_CARRIED}
+        return self.async_create_entry(title="Nova", data=data, options=carried)
+
+    # ── Supervisor discovery ──
 
     async def async_step_hassio(self, discovery_info) -> dict:
-        """Supervisor discovery from the Nova Voice ID app (8.35.0, 8.36.0).
+        """The Nova Voice ID app announcing itself (service ``nova``, config
+        {"uri": "tcp://<host>:10350", "token": "..."}) each time it starts.
 
-        The app announces service ``nova`` with {"uri": "tcp://<host>:10350",
-        "token": "..."} each time it starts. This never creates an entry. With
-        a Nova entry, each value is saved only where the field is empty or
-        still holds what the last discovery sent: a value the user typed
-        always wins (voice_id_store.async_apply_discovery). Without an entry
-        the flow just aborts. The token is never logged."""
+        Never creates an entry: with no Nova entry the flow just aborts. With
+        one, voice_id_store fills each value only where the field is empty or
+        still holds the last discovered value, so anything the user typed
+        wins. The token is never logged."""
         from . import paths, voice_id, voice_id_store
         from .runtime import lifecycle_runtime
 
-        config = getattr(discovery_info, "config", None) or {}
-        uri = str(config.get("uri") or "").strip()
-        token = config.get("token")
-        token = token.strip() if isinstance(token, str) else ""
+        sent = getattr(discovery_info, "config", None) or {}
+        uri = str(sent.get("uri") or "").strip()
+        raw_token = sent.get("token")
+        token = raw_token.strip() if isinstance(raw_token, str) else ""
         if not uri or not voice_id.valid_uri(uri):
             _LOGGER.warning("Nova: Voice ID discovery sent an unusable address")
             return self.async_abort(reason="invalid_discovery_info")
 
-        entries = self._async_current_entries(include_ignore=False)
-        if not entries:
+        current = self._async_current_entries(include_ignore=False)
+        if not current:
             return self.async_abort(reason="no_nova_entry")
-        entry = entries[0]
+        entry = current[0]
 
         paths.configure(self.hass)
         filled = await voice_id_store.async_apply_discovery(self.hass, entry, uri, token or None)
         runtime = lifecycle_runtime(entry)
-        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
-        if entity is not None and filled["uri"]:
+        entity = None if runtime is None else getattr(runtime, "voice_id", None)
+        if filled["uri"] and entity is not None:
             self.hass.async_create_background_task(
                 entity.async_refresh_info(), "nova voice id info")
+
+        address_note = "saved" if filled["uri"] else "kept yours"
+        if filled["token"]:
+            token_note = "saved"
+        else:
+            token_note = "kept yours" if token else "not sent"
         _LOGGER.info("Nova: Voice ID app found by discovery at %s (address %s, token %s)",
-                     uri, "saved" if filled["uri"] else "kept yours",
-                     "saved" if filled["token"] else ("kept yours" if token else "not sent"))
+                     uri, address_note, token_note)
         return self.async_abort(reason="updated")
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> "NovaOptionsFlow":
+    def async_get_options_flow(config_entry: ConfigEntry) -> NovaOptionsFlow:
         return NovaOptionsFlow(config_entry)
 
 
+# ── Configure dialog ─────────────────────────────────────────────────────────
+
+def _text() -> Any:
+    return selector.TextSelector()
+
+
+def _switch() -> Any:
+    return selector.BooleanSelector()
+
+
+def _areas() -> Any:
+    return selector.AreaSelector(selector.AreaSelectorConfig(multiple=True))
+
+
+def _choice(options: list[str], *, custom: bool = False) -> Any:
+    config: dict[str, Any] = {"options": options}
+    if custom:
+        config["custom_value"] = True
+    config["mode"] = selector.SelectSelectorMode.DROPDOWN
+    return selector.SelectSelector(selector.SelectSelectorConfig(**config))
+
+
+def _number(low: float, high: float, step: float, mode: str) -> Any:
+    return selector.NumberSelector(selector.NumberSelectorConfig(
+        min=low, max=high, step=step, mode=getattr(selector.NumberSelectorMode, mode)))
+
+
+# Each section's fields, in display order: (setting, default, widget).
+# Widgets are built when the form is shown.
+_Field = tuple[str, Any, Callable[[], Any]]
+_SECTIONS: dict[str, tuple[_Field, ...]] = {
+    # Persona, directive, conversation model, home control.
+    "core": (
+        (CONF_HONORIFIC, DEFAULT_HONORIFIC, lambda: _choice(HONORIFIC_OPTIONS, custom=True)),
+        (CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET, lambda: _choice(list(DIRECTIVE_PRESETS))),
+        (CONF_DIRECTIVE, "", lambda: selector.TextSelector(
+            selector.TextSelectorConfig(multiline=True))),
+        (CONF_MODEL, DEFAULT_MODEL, _text),
+        (CONF_USE_HASS_API, True, _switch),
+    ),
+    # Where announcements and alerts go.
+    "routing": (
+        (CONF_BEDROOM_AREAS, [], _areas),
+        # Limits the sleeping household intrusion check to exterior doors and
+        # windows on these floors; empty checks every exterior door and
+        # window, as when nobody is home.
+        (CONF_GROUND_FLOOR_AREAS, [], _areas),
+        (CONF_BROADCAST_GROUP, "", lambda: selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="media_player"))),
+        (CONF_NOTIFY_SERVICE, "", _text),
+    ),
+    # Proactive awareness: model tiers and quiet hours. Provider keys live in
+    # the credentials section only, so none is ever shown here.
+    "observer": (
+        (CONF_OBSERVER_ENABLED, False, _switch),
+        (CONF_CLASSIFIER_MODEL, DEFAULT_CLASSIFIER_MODEL, _text),
+        (CONF_REASONING_MODEL, DEFAULT_REASONING_MODEL, _text),
+        (CONF_REVIEW_MODEL, DEFAULT_REVIEW_MODEL, _text),
+        (CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_START, _text),
+        (CONF_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_END, _text),
+    ),
+    # Recognising who is speaking; the voice fingerprint tier needs a GPU.
+    "identity": (
+        ("identity_enabled", True, _switch),
+        ("identity_voice_fingerprint", False, _switch),
+        ("voice_recognition_source", "", _text),
+        ("voice_recognition_auto_enroll", True, _switch),
+        ("identity_min_confidence", 0.45, lambda: _number(0.0, 1.0, 0.05, "SLIDER")),
+    ),
+    # Read only IMAP access. The password stays in secrets.yaml under the
+    # name given here, never in the panel's settings.
+    "email": (
+        ("imap_enabled", False, _switch),
+        ("imap_host", "", _text),
+        ("imap_port", 993, lambda: _number(1, 65535, 1, "BOX")),
+        ("imap_user", "", _text),
+        ("imap_folder", "INBOX", _text),
+        ("imap_ssl", True, _switch),
+        ("imap_secret_key", "nova_imap_password", _text),
+    ),
+}
+_MENU = ("core", "routing", "observer", "credentials", "identity", "email")
+
+
 class NovaOptionsFlow(OptionsFlow):
-    """
-    Options flow — Nova is configurable from Settings → Devices &
-    Services → Nova → Configure (in addition to the in-app panel).
+    """Settings, Devices & services, Nova, Configure.
 
-    A menu lets you jump straight to the section you want instead of clicking
-    through every screen: Core (persona/model/home control), Routing (bedroom
-    areas, broadcast group, notify service), Observer (proactive awareness),
-    and Identity (per-person recognition). Each section saves on its own and
-    returns to the menu, so changing one setting no longer means walking the
-    whole sequence.
-
-    Collected values are written straight into nova_config (the runtime source
-    of truth the panel and modules read) and persisted as entry options, which
-    triggers a reload so they take effect immediately.
-    """
+    A menu leads straight to one section; submitting it saves just that
+    section's values to nova_config (what the panel and Nova read) and to
+    the entry's options, whose change reloads Nova so they apply at once.
+    Credentials are the exception: they go only to secrets.yaml."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
         self._data: dict[str, Any] = {}
 
-    def _cur(self, key: str, default: Any = None) -> Any:
-        """Current value: runtime config first, then entry options/data."""
+    def _current(self, key: str, default: Any = None) -> Any:
+        """The live runtime value when set, else the entry's options, else
+        its data, else the default."""
         try:
             from . import nova_config
-            val = nova_config.get(key, None)
-            if val not in (None, ""):
-                return val
-        except Exception:
+            live = nova_config.get(key, None)
+            if live is not None and live != "":
+                return live
+        except Exception:  # noqa: BLE001 - fall back to what the entry holds
             pass
         return self._entry.options.get(key, self._entry.data.get(key, default))
 
-    def _sv(self, key: str, default: Any = None) -> dict:
-        """suggested_value wrapper to pre-fill a field with its current value."""
-        return {"suggested_value": self._cur(key, default)}
-
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Landing menu — jump to any section directly."""
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=["core", "routing", "observer", "credentials", "identity", "email"],
-        )
+        return self.async_show_menu(step_id="init", menu_options=list(_MENU))
 
     async def async_step_core(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Core — persona, directive, conversation model, home control."""
-        if user_input is not None:
-            return await self._save_section(user_input)
-        schema = vol.Schema({
-            vol.Optional(CONF_HONORIFIC, description=self._sv(CONF_HONORIFIC, DEFAULT_HONORIFIC)):
-                selector.SelectSelector(selector.SelectSelectorConfig(
-                    options=HONORIFIC_OPTIONS, custom_value=True,
-                    mode=selector.SelectSelectorMode.DROPDOWN)),
-            vol.Optional(CONF_DIRECTIVE_PRESET,
-                         description=self._sv(CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET)):
-                selector.SelectSelector(selector.SelectSelectorConfig(
-                    options=list(DIRECTIVE_PRESETS.keys()),
-                    mode=selector.SelectSelectorMode.DROPDOWN)),
-            vol.Optional(CONF_DIRECTIVE, description=self._sv(CONF_DIRECTIVE, "")):
-                selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
-            vol.Optional(CONF_MODEL, description=self._sv(CONF_MODEL, DEFAULT_MODEL)):
-                selector.TextSelector(),
-            vol.Optional(CONF_USE_HASS_API, description=self._sv(CONF_USE_HASS_API, True)):
-                selector.BooleanSelector(),
-        })
-        return self.async_show_form(step_id="core", data_schema=schema)
+        return await self._section("core", user_input)
 
     async def async_step_routing(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Routing — bedroom areas, broadcast group, phone notify service."""
-        if user_input is not None:
-            return await self._save_section(user_input)
-        schema = vol.Schema({
-            vol.Optional(CONF_BEDROOM_AREAS, description=self._sv(CONF_BEDROOM_AREAS, [])):
-                selector.AreaSelector(selector.AreaSelectorConfig(multiple=True)),
-            # Scopes the sleeping-household intrusion check to a real breach
-            # (an exterior door/window on these floors) instead of any indoor
-            # motion — leave empty to fall back to checking every exterior
-            # door/window, same as when Nova is away.
-            vol.Optional(CONF_GROUND_FLOOR_AREAS, description=self._sv(CONF_GROUND_FLOOR_AREAS, [])):
-                selector.AreaSelector(selector.AreaSelectorConfig(multiple=True)),
-            vol.Optional(CONF_BROADCAST_GROUP, description=self._sv(CONF_BROADCAST_GROUP, "")):
-                selector.EntitySelector(selector.EntitySelectorConfig(domain="media_player")),
-            vol.Optional(CONF_NOTIFY_SERVICE, description=self._sv(CONF_NOTIFY_SERVICE, "")):
-                selector.TextSelector(),
-        })
-        return self.async_show_form(step_id="routing", data_schema=schema)
+        return await self._section("routing", user_input)
 
     async def async_step_observer(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Observer — proactive awareness (model tiers + quiet hours). Provider
-        credentials (including Gemini) live in the Credentials section — never
-        shown or re-collected here, so this step can't leak or re-plaintext one."""
-        if user_input is not None:
-            return await self._save_section(user_input)
-        schema = vol.Schema({
-            vol.Optional(CONF_OBSERVER_ENABLED, description=self._sv(CONF_OBSERVER_ENABLED, False)):
-                selector.BooleanSelector(),
-            vol.Optional(CONF_CLASSIFIER_MODEL,
-                         description=self._sv(CONF_CLASSIFIER_MODEL, DEFAULT_CLASSIFIER_MODEL)):
-                selector.TextSelector(),
-            vol.Optional(CONF_REASONING_MODEL,
-                         description=self._sv(CONF_REASONING_MODEL, DEFAULT_REASONING_MODEL)):
-                selector.TextSelector(),
-            vol.Optional(CONF_REVIEW_MODEL,
-                         description=self._sv(CONF_REVIEW_MODEL, DEFAULT_REVIEW_MODEL)):
-                selector.TextSelector(),
-            vol.Optional(CONF_OBSERVER_QUIET_START,
-                         description=self._sv(CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_START)):
-                selector.TextSelector(),
-            vol.Optional(CONF_OBSERVER_QUIET_END,
-                         description=self._sv(CONF_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_END)):
-                selector.TextSelector(),
-        })
-        return self.async_show_form(
-            step_id="observer",
-            data_schema=schema,
-        )
-
-    async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Credentials — one dedicated key per provider (Phase 2, v7.107.0).
-
-        Values are never shown back: every field starts blank, so leaving it
-        blank makes no change to that provider's stored credential (an empty
-        form field can never erase one). To remove a credential, tick its
-        "clear" box explicitly. Clearing the credential for the provider
-        currently driving the Main Agent (Core → Model provider) additionally
-        requires the confirmation box, so a stray click can't silently break
-        the Main Agent.
-        """
-        from . import ha_secrets
-        from .const import PROVIDER_API_KEY_FIELDS
-
-        active_provider = str(self._cur("llm_provider", "groq") or "groq").strip().lower()
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            writes: dict[str, str] = {}
-            deletes: list[str] = []
-            for provider in PROVIDER_API_KEY_FIELDS:
-                new_val = (user_input.get(f"{provider}_credential") or "").strip()
-                clear = bool(user_input.get(f"clear_{provider}", False))
-                if new_val and clear:
-                    errors["base"] = "credential_set_and_clear"
-                    break
-                if new_val:
-                    writes[provider] = new_val
-                elif clear:
-                    deletes.append(provider)
-
-            if not errors:
-                deleting_active = active_provider in deletes and active_provider not in writes
-                confirmed = bool(user_input.get("confirm_delete_active", False))
-                if deleting_active and not confirmed:
-                    errors["base"] = "confirm_required_for_active_provider"
-                else:
-                    for provider, value in writes.items():
-                        await ha_secrets.async_set_provider_credential(self.hass, provider, value)
-                    for provider in deletes:
-                        await ha_secrets.async_delete_provider_credential(self.hass, provider)
-                    return self.async_create_entry(title="", data={**self._entry.options})
-
-        status = {
-            provider: await self.hass.async_add_executor_job(
-                ha_secrets.has_provider_credential_sync, provider)
-            for provider in PROVIDER_API_KEY_FIELDS
-        }
-        schema_dict: dict = {}
-        for provider in PROVIDER_API_KEY_FIELDS:
-            schema_dict[vol.Optional(f"{provider}_credential", default="")] = \
-                selector.TextSelector(selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.PASSWORD))
-            schema_dict[vol.Optional(f"clear_{provider}", default=False)] = \
-                selector.BooleanSelector()
-        schema_dict[vol.Optional("confirm_delete_active", default=False)] = \
-            selector.BooleanSelector()
-
-        status_note = ", ".join(
-            f"{provider} {'✓' if configured else '✗'}"   # no words, so it reads in every language
-            for provider, configured in status.items()
-        )
-        return self.async_show_form(
-            step_id="credentials",
-            data_schema=vol.Schema(schema_dict),
-            errors=errors,
-            description_placeholders={
-                "status": status_note,
-                "active": active_provider,
-            },
-        )
+        return await self._section("observer", user_input)
 
     async def async_step_identity(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Identity — per-person recognition; voice fingerprint tier needs a GPU."""
-        if user_input is not None:
-            return await self._save_section(user_input)
-        schema = vol.Schema({
-            vol.Optional("identity_enabled", description=self._sv("identity_enabled", True)):
-                selector.BooleanSelector(),
-            vol.Optional("identity_voice_fingerprint",
-                         description=self._sv("identity_voice_fingerprint", False)):
-                selector.BooleanSelector(),
-            vol.Optional("voice_recognition_source",
-                         description=self._sv("voice_recognition_source", "")):
-                selector.TextSelector(),
-            vol.Optional("voice_recognition_auto_enroll",
-                         description=self._sv("voice_recognition_auto_enroll", True)):
-                selector.BooleanSelector(),
-            vol.Optional("identity_min_confidence",
-                         description=self._sv("identity_min_confidence", 0.45)):
-                selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=0.0, max=1.0, step=0.05, mode=selector.NumberSelectorMode.SLIDER)),
-        })
-        return self.async_show_form(step_id="identity", data_schema=schema)
+        return await self._section("identity", user_input)
 
     async def async_step_email(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Email — read-only IMAP inbox access. The password lives in HA
-        secrets.yaml (imap_secret_key), never in the panel config."""
-        if user_input is not None:
-            return await self._save_section(user_input)
-        schema = vol.Schema({
-            vol.Optional("imap_enabled", description=self._sv("imap_enabled", False)):
-                selector.BooleanSelector(),
-            vol.Optional("imap_host", description=self._sv("imap_host", "")):
-                selector.TextSelector(),
-            vol.Optional("imap_port", description=self._sv("imap_port", 993)):
-                selector.NumberSelector(selector.NumberSelectorConfig(
-                    min=1, max=65535, step=1, mode=selector.NumberSelectorMode.BOX)),
-            vol.Optional("imap_user", description=self._sv("imap_user", "")):
-                selector.TextSelector(),
-            vol.Optional("imap_folder", description=self._sv("imap_folder", "INBOX")):
-                selector.TextSelector(),
-            vol.Optional("imap_ssl", description=self._sv("imap_ssl", True)):
-                selector.BooleanSelector(),
-            vol.Optional("imap_secret_key",
-                         description=self._sv("imap_secret_key", "nova_imap_password")):
-                selector.TextSelector(),
-        })
-        return self.async_show_form(step_id="email", data_schema=schema)
+        return await self._section("email", user_input)
 
-    async def _save_section(self, user_input: dict[str, Any]) -> dict:
-        """Persist one section's values to runtime config + entry options, then
-        finish. Each section saves independently (menu-based flow), so only the
-        edited keys are written — other sections' stored values are untouched."""
+    async def _section(self, name: str, user_input: dict[str, Any] | None) -> dict:
+        """Show one section pre-filled with current values, or save it."""
+        if user_input is not None:
+            return await self._keep(user_input)
+        fields: dict[Any, Any] = {}
+        for key, default, build in _SECTIONS[name]:
+            fallback = list(default) if isinstance(default, list) else default
+            fields[vol.Optional(key, description=_suggest(self._current(key, fallback)))] = build()
+        return self.async_show_form(step_id=name, data_schema=vol.Schema(fields))
+
+    async def _keep(self, user_input: dict[str, Any]) -> dict:
+        """Save one section. Only its own keys are written, so the other
+        sections' stored values are left alone."""
         self._data.update(user_input)
         try:
             from . import nova_config
             await self.hass.async_add_executor_job(nova_config.set_many, dict(user_input))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the entry options still save
             _LOGGER.warning("Nova options: nova_config write failed: %s", exc)
-        return self.async_create_entry(title="", data={**self._entry.options, **self._data})
+        merged = dict(self._entry.options)
+        merged.update(self._data)
+        return self.async_create_entry(title="", data=merged)
+
+    async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> dict:
+        """One key per provider, written straight to secrets.yaml.
+
+        Stored keys are never shown: every field starts blank and a blank
+        field changes nothing. Removing a key takes its clear box, and
+        removing the key of the provider that runs the conversation agent
+        also takes the confirmation box."""
+        from . import ha_secrets
+
+        active = str(self._current("llm_provider", "groq") or "groq").strip().lower()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            problem, writes, clears = _sort_credentials(user_input)
+            confirmed = bool(user_input.get("confirm_delete_active", False))
+            if problem is None and active in clears and active not in writes and not confirmed:
+                problem = "confirm_required_for_active_provider"
+            if problem is None:
+                for provider, value in writes.items():
+                    await ha_secrets.async_set_provider_credential(self.hass, provider, value)
+                for provider in clears:
+                    await ha_secrets.async_delete_provider_credential(self.hass, provider)
+                return self.async_create_entry(title="", data=dict(self._entry.options))
+            errors["base"] = problem
+
+        present: dict[str, bool] = {}
+        fields: dict[Any, Any] = {}
+        for provider in PROVIDER_API_KEY_FIELDS:
+            present[provider] = await self.hass.async_add_executor_job(
+                ha_secrets.has_provider_credential_sync, provider)
+            fields[vol.Optional(f"{provider}_credential", default="")] = _secret_box()
+            fields[vol.Optional(f"clear_{provider}", default=False)] = selector.BooleanSelector()
+        fields[vol.Optional("confirm_delete_active", default=False)] = selector.BooleanSelector()
+        # Marks rather than words, so the note reads the same in every language.
+        status = ", ".join(f"{p} {'✓' if has else '✗'}" for p, has in present.items())
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders={"status": status, "active": active},
+        )
