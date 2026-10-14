@@ -1,29 +1,14 @@
-"""
-Nova goal planner — outcomes pursued across time.
+"""Goal planner: outcomes Nova keeps working toward until they are closed.
 
-The third tier of agency. `execute_plan` runs many service calls *now*;
-`schedule_followup` runs one instruction *later*; a **goal** is an *outcome*
-Nova keeps working toward until it's done, failed, or called off:
-
-    "Get the house ready for guests by Saturday 4pm"
-    "Warm the living room to 72 and tell me when it's there"
-    "Keep an eye on the basement humidity today; dehumidify if it climbs"
-
-A goal carries its plan (steps with states), a progress log, a re-engagement
-cadence, and an optional deadline. When one comes due, the cognitive core runs
-it through the same headless agent brain the follow-ups use — full toolset:
-check states, act (verify-after-act rides along), investigate — under a prompt
-that mandates recording progress via the `update_goal` tool before finishing.
-
-Noise policy (deliberate): goals work **quietly**. Mid-progress runs log to the
-activity trail but say nothing out loud; Nova speaks when a goal *finishes* —
-done or failed — through the normal routing, so quiet hours apply. "What are
-you working on?" reviews them any time.
-
-Safety valves: bounded active goals, a per-goal run budget, pre-armed
-re-engagement (a crash can never hot-loop a goal), and deadlines that force
-closure. Same construction discipline as followups.py: sqlite in patterns.db,
-call-time db-path resolution, SYNC CRUD via executor, never raises.
+A goal carries a title, an outcome, a numbered plan, a progress log, a
+re-engagement cadence, an optional deadline, a run counter and a last
+result. The cognitive tick calls :func:`async_process_due`, which engages
+each due goal through the headless agent runner with a prompt asking the
+model to record progress via ``update_goal``. Goals stay quiet: only a goal
+that ends (done or failed) produces an announce action. Safety valves are
+an active-goal cap, a per-goal run budget, a re-engagement armed before each
+run and forced closure once a deadline has passed. The CRUD helpers are
+blocking SQLite calls for the executor and never raise.
 """
 from __future__ import annotations
 
@@ -31,373 +16,415 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+DB_PATH: Optional[str] = None
+
+MAX_ACTIVE = 10
+MAX_RUNS = 120
+DEFAULT_INTERVAL_MIN = 30
+MAX_DEADLINE_MIN = 30 * 24 * 60
+PROGRESS_TAIL = 5
+STATUSES = ("active", "done", "failed", "cancelled")
+
+_STEP_STATUSES = ("pending", "done", "failed", "skipped")
+_STEP_MARKS = {"pending": " ", "done": "x", "failed": "!", "skipped": "-"}
+_PROGRESS_KEEP = 50
 
 
 def _db_path() -> str:
-    return DB_PATH or paths.patterns_db()
+    """The store location, resolved on every call."""
+    return DB_PATH if DB_PATH else paths.patterns_db()
 
 
-MAX_ACTIVE = 10            # concurrent outcomes Nova may pursue
-MAX_RUNS = 120             # per-goal engagement budget (runaway guard)
-DEFAULT_INTERVAL_MIN = 30  # re-engage cadence when the model doesn't set one
-MAX_DEADLINE_MIN = 30 * 24 * 60   # a month out, at most
-PROGRESS_TAIL = 5          # progress entries shown in the goal prompt
-STATUSES = ("active", "done", "failed", "cancelled")
-
-
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = _store.connect(db_path, mkdir=False)
+def _open(db_path: Optional[str]) -> sqlite3.Connection:
+    conn = _store.connect(db_path or _db_path(), mkdir=False)
     _store.ensure(conn, "goals")
     return conn
 
 
-def _now(now: Optional[datetime]) -> datetime:
+def _now(now: Optional[datetime] = None) -> datetime:
     return now or datetime.now()
 
 
-def _iso(d: datetime) -> str:
-    return d.isoformat(sep=" ")
+def _iso(moment: datetime) -> str:
+    return moment.isoformat(sep=" ")
 
 
-def _row_to_goal(r) -> dict:
-    g = dict(r)
-    for key in ("steps", "progress"):
-        try:
-            g[key] = json.loads(g.get(key) or "[]")
-        except Exception:
-            g[key] = []
-    return g
+def _clamp(value: float, low: float, high: float) -> float:
+    return min(max(value, low), high)
 
 
-# ── CRUD (sync — executor) ───────────────────────────────────────────────────
+def _decode_list(raw: Any) -> list:
+    try:
+        decoded = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
+def _as_goal(row: Any) -> dict:
+    goal = dict(row)
+    goal["steps"] = _decode_list(goal.get("steps"))
+    goal["progress"] = _decode_list(goal.get("progress"))
+    return goal
+
+
+def _select(sql: str, args: tuple, db_path: Optional[str]) -> list[dict]:
+    try:
+        conn = _open(db_path)
+        with conn:
+            rows = conn.execute(sql, args).fetchall()
+        return [_as_goal(row) for row in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
 
 def create(title: str, outcome: str, steps: Optional[list] = None, *,
            check_interval_min: float = DEFAULT_INTERVAL_MIN,
            deadline_minutes: Optional[float] = None,
            now: Optional[datetime] = None,
            db_path: Optional[str] = None) -> dict:
-    """Open a new goal. Returns the row, or an 'error' dict — never raises."""
-    db_path = db_path or _db_path()
+    """Open a new active goal, due for its first engagement immediately."""
     outcome = (outcome or "").strip()
     title = (title or outcome[:60] or "").strip()
     if not outcome:
         return {"error": "empty outcome"}
+
     try:
-        interval = max(1.0, min(float(check_interval_min or DEFAULT_INTERVAL_MIN),
-                                24 * 60.0))
+        interval = float(check_interval_min or DEFAULT_INTERVAL_MIN)
     except (TypeError, ValueError):
-        interval = DEFAULT_INTERVAL_MIN
-    t = _now(now)
-    deadline = None
+        interval = float(DEFAULT_INTERVAL_MIN)
+    interval = _clamp(interval, 1, 1440)
+
+    moment = _now(now)
+    deadline_ts: Optional[str] = None
     if deadline_minutes is not None:
         try:
-            deadline = _iso(t + timedelta(
-                minutes=max(1.0, min(float(deadline_minutes), MAX_DEADLINE_MIN))))
+            span = _clamp(float(deadline_minutes), 1, MAX_DEADLINE_MIN)
+            deadline_ts = _iso(moment + timedelta(minutes=span))
         except (TypeError, ValueError):
-            deadline = None
-    norm_steps = [{"n": i + 1, "step": str(s).strip(), "status": "pending",
-                   "note": ""}
-                  for i, s in enumerate(steps or []) if str(s).strip()]
+            deadline_ts = None
+
+    plan: list[dict] = []
+    for index, item in enumerate(steps or []):
+        text = str(item).strip()
+        if text:
+            plan.append({"n": index + 1, "step": text,
+                         "status": "pending", "note": ""})
+
+    stamp = _iso(moment)
     try:
-        with _connect(db_path) as conn:
-            open_n = conn.execute(
-                "SELECT COUNT(*) FROM goals WHERE status='active'").fetchone()[0]
-            if open_n >= MAX_ACTIVE:
-                return {"error": f"goal list is full ({MAX_ACTIVE} active)"}
+        conn = _open(db_path)
+        with conn:
+            (count,) = conn.execute(
+                "SELECT COUNT(*) FROM goals WHERE status = 'active'"
+            ).fetchone()
+            cap = MAX_ACTIVE
+            if count >= cap:
+                return {"error": f"goal list is full ({cap} active)"}
             cur = conn.execute(
                 "INSERT INTO goals (created_ts, updated_ts, title, outcome, steps, "
                 "next_check_ts, check_interval_min, deadline_ts) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (_iso(t), _iso(t), title, outcome, json.dumps(norm_steps),
-                 _iso(t), interval, deadline))   # due immediately: first engagement
-            return {"id": cur.lastrowid, "title": title, "outcome": outcome,
-                    "steps": norm_steps, "next_check_ts": _iso(t),
-                    "deadline_ts": deadline}
-    except Exception as exc:
-        _LOGGER.warning("goals.create failed: %s", exc)
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (stamp, stamp, title, outcome, json.dumps(plan), stamp,
+                 interval, deadline_ts),
+            )
+            new_id = cur.lastrowid
+        return {"id": new_id, "title": title, "outcome": outcome, "steps": plan,
+                "next_check_ts": stamp, "deadline_ts": deadline_ts}
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Nova goals: could not create goal: %s", exc)
         return {"error": str(exc)}
 
 
 def get(goal_id: int, *, db_path: Optional[str] = None) -> Optional[dict]:
-    db_path = db_path or _db_path()
+    """One goal by id, or None."""
     try:
-        with _connect(db_path) as conn:
-            r = conn.execute("SELECT * FROM goals WHERE id=?",
-                             (int(goal_id),)).fetchone()
-            return _row_to_goal(r) if r else None
-    except Exception:
+        target = int(goal_id)
+        conn = _open(db_path)
+        with conn:
+            row = conn.execute("SELECT * FROM goals WHERE id = ?",
+                               (target,)).fetchone()
+        return _as_goal(row) if row is not None else None
+    except Exception:  # noqa: BLE001
         return None
 
 
 def active(*, db_path: Optional[str] = None) -> list[dict]:
-    db_path = db_path or _db_path()
-    try:
-        with _connect(db_path) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals WHERE status='active' "
-                "ORDER BY datetime(next_check_ts)").fetchall()
-            return [_row_to_goal(r) for r in rows]
-    except Exception:
-        return []
+    """Active goals, next engagement first."""
+    return _select(
+        "SELECT * FROM goals WHERE status = 'active' "
+        "ORDER BY datetime(next_check_ts) ASC",
+        (), db_path,
+    )
 
 
 def due(*, now: Optional[datetime] = None,
         db_path: Optional[str] = None) -> list[dict]:
-    db_path = db_path or _db_path()
-    try:
-        with _connect(db_path) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals WHERE status='active' AND "
-                "datetime(next_check_ts) <= datetime(?) "
-                "ORDER BY datetime(next_check_ts)",
-                (_iso(_now(now)),)).fetchall()
-            return [_row_to_goal(r) for r in rows]
-    except Exception:
-        return []
+    """Active goals whose next engagement has arrived."""
+    return _select(
+        "SELECT * FROM goals WHERE status = 'active' "
+        "AND datetime(next_check_ts) <= datetime(?) "
+        "ORDER BY datetime(next_check_ts) ASC",
+        (_iso(_now(now)),), db_path,
+    )
 
 
 def recent(*, limit: int = 20, db_path: Optional[str] = None) -> list[dict]:
-    """All goals regardless of status (active + done/failed/cancelled),
-    most recently updated first — the panel's history view. active() only
-    ever returns active ones, which can't show what Nova just finished."""
-    db_path = db_path or _db_path()
+    """Goals of any status, most recently touched first."""
     try:
-        with _connect(db_path) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals ORDER BY datetime(updated_ts) DESC LIMIT ?",
-                (max(1, min(int(limit), 100)),)).fetchall()
-            return [_row_to_goal(r) for r in rows]
-    except Exception:
+        cap = int(_clamp(int(limit), 1, 100))
+    except Exception:  # noqa: BLE001
         return []
+    return _select(
+        "SELECT * FROM goals ORDER BY datetime(updated_ts) DESC LIMIT ?",
+        (cap,), db_path,
+    )
 
 
-def update(goal_id: int, *, step_updates: Optional[list] = None,
-           next_check_minutes: Optional[float] = None,
-           status: Optional[str] = None, result: Optional[str] = None,
-           progress_note: Optional[str] = None,
-           now: Optional[datetime] = None,
-           db_path: Optional[str] = None) -> dict:
-    """Advance a goal: mark steps, set the next engagement, log progress, or
-    close it out. The headless runs are *required* to call this. Never raises."""
-    db_path = db_path or _db_path()
-    t = _now(now)
-    g = get(goal_id, db_path=db_path)
-    if g is None:
+def update(goal_id: int, *, status: Optional[str] = None,
+           step_updates: Optional[list] = None, progress_note: Optional[str] = None,
+           result: Optional[str] = None, next_check_minutes: Optional[float] = None,
+           db_path: Optional[str] = None, now: Optional[datetime] = None) -> dict:
+    """Apply the model's (or the user's) progress to a goal."""
+    goal = get(goal_id, db_path=db_path)
+    if goal is None:
         return {"error": f"no goal #{goal_id}"}
+    moment = _now(now)
     try:
-        steps = g["steps"]
-        if step_updates:
-            by_n = {s["n"]: s for s in steps}
-            for u in step_updates:
-                s = by_n.get(int(u.get("n", 0)))
-                if not s:
-                    continue
-                if u.get("status") in ("pending", "done", "failed", "skipped"):
-                    s["status"] = u["status"]
-                if u.get("note"):
-                    s["note"] = str(u["note"])[:300]
-        progress = g["progress"]
+        plan = goal["steps"]
+        for change in step_updates or []:
+            wanted = int(change.get("n", 0))
+            step = next((s for s in plan if s.get("n") == wanted), None)
+            if step is None:
+                continue
+            if change.get("status") in _STEP_STATUSES:
+                step["status"] = change["status"]
+            if change.get("note"):
+                step["note"] = str(change["note"])[:300]
+
+        log = goal["progress"]
         if progress_note:
-            progress.append({"t": _iso(t), "note": str(progress_note)[:500]})
-            progress = progress[-50:]
-        sets = ["updated_ts=?", "steps=?", "progress=?"]
-        params: list = [_iso(t), json.dumps(steps), json.dumps(progress)]
+            log.append({"t": _iso(moment), "note": str(progress_note)[:500]})
+            log = log[-_PROGRESS_KEEP:]
+
+        fields: dict[str, Any] = {
+            "updated_ts": _iso(moment),
+            "steps": json.dumps(plan),
+            "progress": json.dumps(log),
+        }
         if next_check_minutes is not None:
             try:
-                mins = max(1.0, min(float(next_check_minutes), 7 * 24 * 60.0))
-                sets.append("next_check_ts=?")
-                params.append(_iso(t + timedelta(minutes=mins)))
+                span = _clamp(float(next_check_minutes), 1, 10080)
+                fields["next_check_ts"] = _iso(moment + timedelta(minutes=span))
             except (TypeError, ValueError):
                 pass
         if status in STATUSES:
-            sets.append("status=?")
-            params.append(status)
+            fields["status"] = status
         if result is not None:
-            sets.append("last_result=?")
-            params.append(str(result)[:1000])
-        params.append(int(goal_id))
-        with _connect(db_path) as conn:
-            conn.execute(f"UPDATE goals SET {', '.join(sets)} WHERE id=?", params)
+            fields["last_result"] = str(result)[:1000]
+
+        assignments = ", ".join(f"{column} = ?" for column in fields)
+        conn = _open(db_path)
+        with conn:
+            conn.execute(f"UPDATE goals SET {assignments} WHERE id = ?",
+                         (*fields.values(), goal["id"]))
         return {"ok": True, "id": int(goal_id)}
-    except Exception as exc:
-        _LOGGER.warning("goals.update failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Nova goals: update of #%s failed: %s", goal_id, exc)
         return {"error": str(exc)}
 
 
 def cancel(goal_id: int, *, db_path: Optional[str] = None) -> bool:
-    db_path = db_path or _db_path()
+    """Cancel an active goal. True only when a row changed."""
     try:
-        with _connect(db_path) as conn:
+        target = int(goal_id)
+        conn = _open(db_path)
+        with conn:
             cur = conn.execute(
-                "UPDATE goals SET status='cancelled', updated_ts=? "
-                "WHERE id=? AND status='active'",
-                (_iso(datetime.now()), int(goal_id)))
+                "UPDATE goals SET status = 'cancelled', updated_ts = ? "
+                "WHERE id = ? AND status = 'active'",
+                (_iso(datetime.now()), target),
+            )
             return cur.rowcount > 0
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
 def delete(goal_id: int, *, db_path: Optional[str] = None) -> bool:
-    """Permanently remove a goal row (any status). Unlike cancel(), which keeps
-    the row for history, this hard-deletes it — for tidying the goals list.
-    Returns True if a row was removed. Never raises."""
-    db_path = db_path or _db_path()
+    """Remove a goal in any status. True only when a row was removed."""
     try:
-        with _connect(db_path) as conn:
-            cur = conn.execute("DELETE FROM goals WHERE id=?", (int(goal_id),))
+        target = int(goal_id)
+        conn = _open(db_path)
+        with conn:
+            cur = conn.execute("DELETE FROM goals WHERE id = ?", (target,))
             return cur.rowcount > 0
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
 def _arm(goal_id: int, when: datetime, runs: int, *,
          db_path: Optional[str] = None) -> None:
-    """Pre-arm the next engagement + count the run (crash-safe: set BEFORE the
-    run so a mid-run failure can never hot-loop the goal)."""
-    db_path = db_path or _db_path()
+    """Set the next engagement time and run counter."""
     try:
-        with _connect(db_path) as conn:
-            conn.execute("UPDATE goals SET next_check_ts=?, runs=? WHERE id=?",
-                         (_iso(when), runs, int(goal_id)))
-    except Exception:
-        pass
+        conn = _open(db_path)
+        with conn:
+            conn.execute(
+                "UPDATE goals SET next_check_ts = ?, runs = ? WHERE id = ?",
+                (_iso(when), runs, goal_id),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Nova goals: arming #%s failed: %s", goal_id, exc)
 
-
-# ── the goal prompt ──────────────────────────────────────────────────────────
 
 def build_prompt(goal: dict, *, deadline_passed: bool = False) -> str:
-    marks = {"pending": " ", "done": "x", "failed": "!", "skipped": "-"}
+    """The instruction handed to the runner for one engagement."""
+    gid = goal["id"]
+    title = goal["title"]
+    outcome = goal["outcome"]
+    plan = goal["steps"]
+    log = goal["progress"]
+
     lines = [
-        f"You are working on YOUR OWN goal #{goal['id']}: {goal['title']}",
-        f"OUTCOME to achieve: {goal['outcome']}",
+        f"You are working on YOUR OWN goal #{gid}: {title}",
+        f"OUTCOME to achieve: {outcome}",
     ]
     if goal.get("deadline_ts"):
         lines.append(f"Deadline: {goal['deadline_ts']}")
     if deadline_passed:
-        lines.append("THE DEADLINE HAS PASSED — wrap up now: finish what you "
-                      "can immediately, then close the goal (done or failed) "
-                      "with an honest result.")
-    if goal["steps"]:
+        lines.append(
+            "THE DEADLINE HAS PASSED: wrap up now and close the goal "
+            "(status 'done' or 'failed') with an honest result."
+        )
+    if plan:
         lines.append("Plan:")
-        for s in goal["steps"]:
-            note = f" — {s['note']}" if s.get("note") else ""
-            lines.append(f"  [{marks.get(s['status'], ' ')}] {s['n']}. {s['step']}{note}")
-    if goal["progress"]:
+        for step in plan:
+            mark = _STEP_MARKS.get(step.get("status"), " ")
+            line = f"  [{mark}] {step.get('n')}. {step.get('step')}"
+            if step.get("note"):
+                line += f" — {step['note']}"
+            lines.append(line)
+    if log:
         lines.append("Recent progress:")
-        for p in goal["progress"][-PROGRESS_TAIL:]:
-            lines.append(f"  {p['t']}: {p['note']}")
+        for entry in log[-PROGRESS_TAIL:]:
+            lines.append(f"  {entry.get('t')}: {entry.get('note')}")
     lines.append(
-        "Advance this goal now: check the relevant states and verify what "
-        "you can — a scheduled run can look and report but cannot control "
-        "devices or change anything, so if something needs doing, say what in "
-        "your note. Before you finish you MUST call update_goal(goal_id="
-        f"{goal['id']}, ...) exactly once to record what happened — mark step "
-        "statuses, add a progress_note, and EITHER set next_check_minutes for "
-        "when you should re-engage OR set status='done'/'failed' with a result "
-        "the user will hear. If nothing needs doing yet, say so in the note and "
-        "set a sensible next check.")
+        "Advance this goal now. Check the relevant states and verify "
+        "rather than assume. A scheduled run can look and report but cannot "
+        "control devices, so if something needs doing, say so in the note. "
+        f"Before you finish you MUST call update_goal(goal_id={gid}, ...) "
+        "exactly once: mark the step statuses, add a progress_note, and "
+        "EITHER set next_check_minutes OR set status='done'/'failed' with a "
+        "result the user will hear. If nothing needs doing yet, say so and "
+        "set a sensible next check."
+    )
     return "\n".join(lines)
 
 
-# ── execution (async — the core tick calls this) ─────────────────────────────
+def _finish_action(goal: Optional[dict]) -> dict:
+    """Announce action for a goal that has ended."""
+    goal = goal or {}
+    title = goal.get("title", "")
+    message = goal.get("last_result")
+    if not message:
+        if goal.get("status") == "done":
+            message = f"Goal '{title}' is complete."
+        else:
+            message = f"Goal '{title}' is closed."
+    return {"type": "goal", "urgency": "medium", "message": message,
+            "auto_act": True}
+
 
 async def async_process_due(
-    hass, config: dict,
+    hass: Any,
+    config: dict,
     runner: Optional[Callable[[str, str], Awaitable[str]]] = None,
-    *, now: Optional[datetime] = None, db_path: Optional[str] = None,
+    *,
+    now: Optional[datetime] = None,
+    db_path: Optional[str] = None,
 ) -> list[dict]:
-    """Engage every due goal through the headless agent. Quiet while a goal is
-    active; returns announce actions only for goals that FINISH (done/failed).
-    Never raises."""
-    db_path = db_path or _db_path()
-    actions: list[dict] = []
+    """Engage every due goal once; return actions for goals that ended."""
     t = _now(now)
     try:
         todo = await hass.async_add_executor_job(
-            lambda: due(now=t, db_path=db_path))
-    except Exception:
-        return actions
+            lambda: due(now=t, db_path=db_path)
+        )
+    except Exception:  # noqa: BLE001
+        todo = []
     if not todo or runner is None:
-        return actions
+        return []
 
-    for g in todo:
-        gid = g["id"]
-        runs = int(g.get("runs") or 0) + 1
-        # Pre-arm the default re-engagement (crash-safe; the model's own
-        # update_goal(next_check_minutes) overrides it during the run).
-        interval = float(g.get("check_interval_min") or DEFAULT_INTERVAL_MIN)
+    def _reread(gid: int):
+        return hass.async_add_executor_job(lambda: get(gid, db_path=db_path))
+
+    def _apply(gid: int, **changes):
+        return hass.async_add_executor_job(
+            lambda: update(gid, now=t, db_path=db_path, **changes)
+        )
+
+    actions: list[dict] = []
+    for goal in todo:
+        gid = goal["id"]
+        title = goal["title"]
+        runs = (goal["runs"] or 0) + 1
+        interval = float(goal["check_interval_min"] or 30)
         await hass.async_add_executor_job(
             lambda: _arm(gid, t + timedelta(minutes=interval), runs,
-                         db_path=db_path))
+                         db_path=db_path)
+        )
 
         if runs > MAX_RUNS:
-            await hass.async_add_executor_job(
-                lambda: update(gid, status="failed",
-                               result=f"I've engaged this goal {MAX_RUNS} times "
-                                      f"without completing it, so I'm setting it "
-                                      f"aside: {g['title']}",
-                               progress_note="run budget exhausted",
-                               now=t, db_path=db_path))
-            g2 = await hass.async_add_executor_job(
-                lambda: get(gid, db_path=db_path))
-            actions.append(_finish_action(g2))
+            await _apply(
+                gid,
+                status="failed",
+                result=(f"I've engaged this goal {MAX_RUNS} times without "
+                        f"completing it, so I'm setting it aside: {title}"),
+                progress_note="run budget exhausted",
+            )
+            actions.append(_finish_action(await _reread(gid)))
             continue
 
-        deadline_passed = bool(g.get("deadline_ts")) and \
-            _iso(t) > str(g["deadline_ts"])
-        prompt = build_prompt(g, deadline_passed=deadline_passed)
+        deadline_ts = goal.get("deadline_ts")
+        deadline_passed = bool(deadline_ts) and _iso(t) > str(deadline_ts)
+
         try:
-            result = (await runner(prompt, "") or "").strip()
-        except Exception as exc:
-            _LOGGER.warning("goal #%s run failed: %s", gid, exc)
-            await hass.async_add_executor_job(
-                lambda e=str(exc): update(gid, progress_note=f"run error: {e}",
-                                          now=t, db_path=db_path))
-            continue      # stays active; pre-armed next check stands
-
-        g2 = await hass.async_add_executor_job(lambda: get(gid, db_path=db_path))
-        if g2 is None:
+            prompt = build_prompt(goal, deadline_passed=deadline_passed)
+            result = ((await runner(prompt, "")) or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("Nova goal #%s run failed: %s", gid, exc)
+            await _apply(gid, progress_note=f"run error: {exc}")
             continue
-        if deadline_passed and g2["status"] == "active":
-            # The model was told to close it and didn't — close it honestly.
-            await hass.async_add_executor_job(
-                lambda: update(gid, status="failed",
-                               result=result or f"The deadline for "
-                                                f"'{g['title']}' passed.",
-                               progress_note="deadline passed — force-closed",
-                               now=t, db_path=db_path))
-            g2 = await hass.async_add_executor_job(
-                lambda: get(gid, db_path=db_path))
+
+        latest = await _reread(gid)
+        if latest is None:
+            continue
+        if deadline_passed and latest.get("status") == "active":
+            await _apply(
+                gid,
+                status="failed",
+                result=result or f"The deadline for '{title}' passed.",
+                progress_note="deadline passed — force-closed",
+            )
+            latest = await _reread(gid)
 
         try:
             from . import database
             database.save_activity(
-                category="goal", urgency="low",
-                message=f"Goal #{gid} '{g['title']}' engaged (run {runs}): "
-                        f"{(result or 'no report')[:160]}",
-                source="agent")
-        except Exception:
+                category="goal",
+                urgency="low",
+                message=(f"Goal #{gid} '{title}' engaged (run {runs}): "
+                         f"{(result or 'no report')[:160]}"),
+                source="agent",
+            )
+        except Exception:  # noqa: BLE001
             pass
 
-        if g2["status"] in ("done", "failed"):
-            actions.append(_finish_action(g2))
-        # still active → quiet by design
-
+        if latest["status"] in ("done", "failed"):
+            actions.append(_finish_action(latest))
     return actions
-
-
-def _finish_action(goal: Optional[dict]) -> dict:
-    goal = goal or {}
-    verdict = goal.get("last_result") or (
-        f"Goal '{goal.get('title', '')}' is "
-        f"{'complete' if goal.get('status') == 'done' else 'closed'}.")
-    return {"type": "goal", "urgency": "medium", "message": verdict,
-            "auto_act": True}

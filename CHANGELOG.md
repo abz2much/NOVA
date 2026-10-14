@@ -1,3 +1,11 @@
+## [8.49.19] — Six user features rewritten from scratch
+
+Step 9 continues with the user features. Follow-ups, travel times, goals, the conversation summary, the home state summary the agent reads and continued conversation are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** scheduled follow-ups, travel time lookups, long-running goals, the spoken conversation summary, the home state summary and keeping the conversation open after Nova asks a question.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests. The goal agent tool tests are kept in their own file.
+
 ## [8.49.18] — Four small fixes
 
 Fixes for four bugs found while checking the step 9 rewrites. Each fix has a regression test that fails without it.
