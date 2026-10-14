@@ -1,3 +1,11 @@
+## [8.49.27] — Conversation, local engine and intent router rewritten from scratch
+
+Phase 7c rewrites three modules from empty files, each from a behaviour spec with fresh tests: the conversation agent, the local engine and the local intent router. Nothing Nova does changes: the same words pass the relevance gate, the same commands are handled without the AI, the same requests ask for confirmation, and replies go to the same speakers.
+
+### Changed
+- **Rewritten:** a conversation turn from the multi wake dedup and relevance gate through memory, offers, the local engine, the agent and its offline fallbacks to reply routing and the follow up mic; the local engine's matching, scoring, status answers and device actions; and the local intent router's commands, locks, write ahead log and feedback window.
+- **Proven the same:** each new module passes both its fresh tests and the old ones. The fresh tests then replaced the old test files for the local engine and the intent router. The conversation's own test files all still pass and stay; the fresh conversation tests are added alongside them.
+
 ## [8.49.26] — Two routing fixes and a status count
 
 Fixes for three bugs found while rewriting the announcement gate and speaker routing. Each fix has a test that fails without it. Nothing else changes.
