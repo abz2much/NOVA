@@ -1,11 +1,17 @@
-"""Nova — Conversation summary service."""
+"""Conversation summary service: a short spoken briefing of recent history.
+
+Reads the recent conversation log, asks the model (through the provider
+activity boundary) for a few sentences in Nova's voice, optionally writes the
+summary back into the log and optionally announces it. An empty log yields a
+fixed "nothing to report" line without calling the model.
+"""
 from __future__ import annotations
 
 import logging
 
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from .const import NOVA_PERSONA
+from .const import NOVA_PERSONA  # noqa: F401
 from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
 from .tts_helper import async_announce
@@ -15,94 +21,85 @@ _LOGGER = logging.getLogger(__name__)
 SUMMARY_MODEL = "openai/gpt-oss-120b"
 
 
-async def async_summarise(
-    hass: HomeAssistant,
-    call: ServiceCall,
-    groq_client,
-    honorific: str,
-    tts_entity: str | None,
-    speakers: list[str],
-) -> dict:
-    """
-    Service: nova.conversation_summary
-    Summarises recent conversation history and delivers a Nova briefing.
-    """
-    hours:   int        = int(call.data.get("hours", 24))
-    device_id: str|None = call.data.get("device_id")
-    announce: bool      = call.data.get("announce", True)
-    store: bool         = call.data.get("store", True)
+def _period(hours: int) -> str:
+    """Plain-English span for ``hours``."""
+    if hours <= 1:
+        return "hour"
+    if hours <= 24:
+        return f"{hours} hours"
+    days = hours // 24
+    return f"{days} day" + ("s" if days > 1 else "")
+
+
+def _transcript_line(message: dict) -> str:
+    stamp = message["timestamp"][:16].replace("T", " ")
+    speaker = "You" if message["role"] == "user" else "Nova"
+    return f"[{stamp}] {speaker}: {message['content']}"
+
+
+async def async_summarise(hass: HomeAssistant, call: ServiceCall, groq_client,
+                          honorific: str, tts_entity: str | None,
+                          speakers: list[str]) -> dict:
+    """Summarise recent conversation; store and/or announce the result."""
+    hours = int(call.data.get("hours", 24))
+    device_id = call.data.get("device_id")
+    announce = call.data.get("announce", True)
+    store = call.data.get("store", True)
+    period = _period(hours)
 
     messages = await hass.async_add_executor_job(
         lambda: get_recent_messages(hours=hours, device_id=device_id, limit=300)
     )
 
     if not messages:
-        # honorific may be "" once nobody specific is home to address (see
-        # honorific.py) — addr collapses the trailing ", {honorific}" to
-        # nothing rather than a dangling comma.
         addr = f", {honorific}" if honorific else ""
-        summary = (
-            f"Nothing to report{addr}. "
-            f"The last {_period(hours)} appear to have been remarkably quiet."
-        )
+        quiet = (f"Nothing to report{addr}. The last {period} appear to have "
+                 "been remarkably quiet.")
         if announce:
-            await async_announce(hass, summary, tts_entity, speakers, context="summary")
-        return {"success": True, "summary": summary, "message_count": 0}
+            await async_announce(hass, quiet, tts_entity, speakers,
+                                 context="summary")
+        return {"success": True, "summary": quiet, "message_count": 0}
 
-    # ── Build transcript ──────────────────────────────────────────────────────
-    lines = []
-    for m in messages:
-        ts      = m["timestamp"][:16].replace("T", " ")
-        speaker = "You" if m["role"] == "user" else "Nova"
-        lines.append(f"[{ts}] {speaker}: {m['content']}")
-    transcript = "\n".join(lines)
-
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — instruct the model accordingly instead of a dangling
-    # "briefing to ."
-    to_whom = f"to {honorific}" if honorific else "to the household"
+    transcript = "\n".join(_transcript_line(m) for m in messages)
+    audience = f"to {honorific}" if honorific else "to the household"
     task = (
-        f"Summarise the following conversation transcript from the past {_period(hours)}. "
-        f"3–5 sentences maximum. Highlight anything notable, unusual, or actionable. "
-        f"Speak as Nova giving a briefing {to_whom}. "
-        f"Extract the essence — do not list every exchange."
+        f"Summarise the conversation transcript from the past {period}. "
+        "Keep it to 3–5 sentences maximum. Highlight anything notable, "
+        "unusual or actionable. Speak as Nova giving a briefing "
+        f"{audience}. Extract the essence; do not list every exchange."
     )
     system = build_system_prompt(hass, honorific, task)
     from . import output_language
-    system = output_language.with_language(hass, system)   # a spoken summary
+    system = output_language.with_language(hass, system)
 
     try:
         from .providers.activity import execute_chat
         result = await execute_chat(
-            hass, groq_client,
+            hass,
+            groq_client,
             [
                 {"role": "system", "content": system},
-                {"role": "user", "content": f"Transcript:\n\n{transcript}"},
+                {"role": "user", "content": "Transcript:\n\n" + transcript},
             ],
-            role="summary", data_category="text",
-            max_tokens=300, temperature=0.7,
+            role="summary",
+            data_category="text",
+            max_tokens=300,
+            temperature=0.7,
         )
         summary = result.text.strip()
-    except Exception as exc:  # pylint: disable=broad-except
-        _LOGGER.error("Nova summary Groq error: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.error("Nova: conversation summary failed: %s", exc)
         return {"success": False, "error": str(exc)}
 
     if store:
         await hass.async_add_executor_job(
-            save_message, "assistant", f"[Summary — {_period(hours)}] {summary}", "summary"
+            save_message, "assistant", f"[Summary — {period}] {summary}", "summary"
         )
-
     if announce:
-        await async_announce(hass, summary, tts_entity, speakers, context="summary")
+        await async_announce(hass, summary, tts_entity, speakers,
+                             context="summary")
 
-    _LOGGER.info("Nova summary: %d messages → %d chars", len(messages), len(summary))
-    return {"success": True, "summary": summary, "message_count": len(messages), "period_hours": hours}
-
-
-def _period(hours: int) -> str:
-    if hours <= 1:
-        return "hour"
-    if hours <= 24:
-        return f"{hours} hours"
-    days = hours // 24
-    return f"{days} day{'s' if days > 1 else ''}"
+    _LOGGER.info("Nova: summarised %d messages from the last %s",
+                 len(messages), period)
+    return {"success": True, "summary": summary,
+            "message_count": len(messages), "period_hours": hours}

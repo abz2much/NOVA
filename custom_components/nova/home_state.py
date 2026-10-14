@@ -1,154 +1,142 @@
-"""
-Home State Awareness (v5.7.00).
+"""Plain-text snapshot of the home for the conversation system prompt.
 
-Builds a concise summary of the home's current state for injection into
-the Nova conversation system prompt. Updated every 60 seconds.
-
-Covers: occupancy, climate, lights, locks, covers, security, media, and
-any anomalous sensor readings. Designed to keep Nova contextually aware
-without listing every entity individually.
+Covers the time, occupancy, room temperatures, lights, unlocked locks, open
+covers, open doors and windows, alarm state and playing media. The result is
+cached for a minute. Read-only: nothing here acts on the home.
 """
 from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
 _cache: dict = {"summary": "", "ts": 0.0}
-_TTL = 60.0  # rebuild every 60 seconds
+_TTL = 60.0
+
+_ROOM_WORDS = ("room", "bedroom", "kitchen", "living", "garage", "office",
+               "hallway", "basement")
+_OPENING_CLASSES = ("door", "window", "garage_door")
 
 
 def get_home_summary(hass: HomeAssistant) -> str:
-    """
-    Return a concise home state summary string. Cached for _TTL seconds.
-    Safe to call from sync context (uses cached value, async rebuild
-    happens lazily on next call after TTL expires).
-    """
+    """The cached snapshot, rebuilt when older than the TTL."""
     now = time.time()
-    if (now - _cache["ts"]) < _TTL and _cache["summary"]:
+    if now - _cache["ts"] < _TTL and _cache["summary"]:
         return _cache["summary"]
-    _cache["summary"] = _build_summary(hass)
+    summary = _build_summary(hass)
+    _cache["summary"] = summary
     _cache["ts"] = now
-    return _cache["summary"]
-
-
-def _build_summary(hass: HomeAssistant) -> str:
-    """Build the home state summary from current HA states."""
-    parts = []
-
-    # ── Occupancy ────────────────────────────────────────────────────────
-    occupied_areas = []
-    try:
-        from . import audio_routing
-        occupied_areas = audio_routing.currently_occupied_areas(hass)
-        if occupied_areas:
-            area_names = []
-            for aid in occupied_areas:
-                name = _area_name(hass, aid)
-                area_names.append(name)
-            parts.append(f"Occupied areas: {', '.join(area_names)}")
-        else:
-            if audio_routing.anyone_home(hass):
-                parts.append("Someone is home but no specific room occupancy detected")
-            else:
-                parts.append("No one appears to be home")
-    except Exception:
-        pass
-
-    # ── Climate ──────────────────────────────────────────────────────────
-    try:
-        _default_unit = hass.config.units.temperature_unit
-    except Exception:
-        _default_unit = "°F"
-    temps = []
-    for state in hass.states.async_all("sensor"):
-        if state.attributes.get("device_class") == "temperature":
-            try:
-                val = float(state.state)
-                name = state.attributes.get("friendly_name", state.entity_id)
-                unit = state.attributes.get("unit_of_measurement", _default_unit)
-                # Only include room-level temps, not device internals
-                if any(kw in name.lower() for kw in ("room", "bedroom", "kitchen",
-                    "living", "garage", "office", "hallway", "basement")):
-                    temps.append(f"{name}: {val:.0f}{unit}")
-            except (ValueError, TypeError):
-                pass
-    if temps:
-        parts.append(f"Temperatures: {'; '.join(temps[:6])}")
-
-    # ── Lights ───────────────────────────────────────────────────────────
-    lights_on = []
-    lights_total = 0
-    for state in hass.states.async_all("light"):
-        lights_total += 1
-        if state.state == "on":
-            lights_on.append(state.attributes.get("friendly_name", state.entity_id))
-    if lights_on:
-        parts.append(f"Lights on ({len(lights_on)}/{lights_total}): {', '.join(lights_on[:8])}")
-    else:
-        parts.append(f"All {lights_total} lights are off")
-
-    # ── Locks ────────────────────────────────────────────────────────────
-    from .cognitive_core import _lockdown_exempt_locks
-    exempt = _lockdown_exempt_locks()
-    unlocked = []
-    for state in hass.states.async_all("lock"):
-        if state.state == "unlocked" and state.entity_id not in exempt:
-            unlocked.append(state.attributes.get("friendly_name", state.entity_id))
-    if unlocked:
-        parts.append(f"Unlocked: {', '.join(unlocked)}")
-
-    # ── Covers (garage doors, blinds) ────────────────────────────────────
-    open_covers = []
-    for state in hass.states.async_all("cover"):
-        if state.state == "open":
-            open_covers.append(state.attributes.get("friendly_name", state.entity_id))
-    if open_covers:
-        parts.append(f"Open covers: {', '.join(open_covers)}")
-
-    # ── Security ─────────────────────────────────────────────────────────
-    open_doors = []
-    for state in hass.states.async_all("binary_sensor"):
-        dclass = state.attributes.get("device_class")
-        if dclass in ("door", "window", "garage_door") and state.state == "on":
-            open_doors.append(state.attributes.get("friendly_name", state.entity_id))
-    if open_doors:
-        parts.append(f"Open doors/windows: {', '.join(open_doors[:6])}")
-
-    # ── Alarm ────────────────────────────────────────────────────────────
-    from . import alarm_source
-    for state in alarm_source.states(hass):
-        parts.append(f"Alarm: {state.state}")
-
-    # ── Media ────────────────────────────────────────────────────────────
-    playing = []
-    for state in hass.states.async_all("media_player"):
-        if state.state == "playing":
-            title = state.attributes.get("media_title", "")
-            name = state.attributes.get("friendly_name", state.entity_id)
-            playing.append(f"{name}" + (f" ({title})" if title else ""))
-    if playing:
-        parts.append(f"Playing media: {', '.join(playing[:4])}")
-
-    # ── Time context ─────────────────────────────────────────────────────
-    from homeassistant.util import dt as dt_util
-    from .locale_format import format_date
-    now = dt_util.now()
-    parts.insert(0, f"Current time: {now.strftime('%I:%M %p')}, "
-                    f"{format_date(now, hass, pad_month_first_day=True)}")
-
-    return "\n".join(parts)
+    return summary
 
 
 def _area_name(hass: HomeAssistant, area_id: str) -> str:
+    """Human name of an area, or its id."""
     try:
         from homeassistant.helpers import area_registry as ar
-        reg = ar.async_get(hass)
-        area = reg.async_get_area(area_id)
+        area = ar.async_get(hass).async_get_area(area_id)
         return area.name if area else area_id
-    except Exception:
+    except Exception:  # noqa: BLE001
         return area_id
+
+
+def _name(state: Any) -> str:
+    return state.attributes.get("friendly_name", state.entity_id)
+
+
+def _occupancy_line(hass: HomeAssistant) -> str:
+    from . import audio_routing
+    areas = audio_routing.currently_occupied_areas(hass)
+    if areas:
+        return "Occupied areas: " + ", ".join(_area_name(hass, a) for a in areas)
+    if audio_routing.anyone_home(hass):
+        return "Someone is home but no specific room occupancy detected"
+    return "No one appears to be home"
+
+
+def _temperature_items(hass: HomeAssistant) -> list[str]:
+    try:
+        default_unit = hass.config.units.temperature_unit
+    except Exception:  # noqa: BLE001
+        default_unit = "°F"
+    items: list[str] = []
+    for state in hass.states.async_all("sensor"):
+        if state.attributes.get("device_class") != "temperature":
+            continue
+        try:
+            value = float(state.state)
+        except (ValueError, TypeError):
+            continue
+        name = _name(state)
+        unit = state.attributes.get("unit_of_measurement", default_unit)
+        lowered = name.lower()
+        if any(word in lowered for word in _ROOM_WORDS):
+            items.append(f"{name}: {'%.0f' % value}{unit}")
+    return items
+
+
+def _build_summary(hass: HomeAssistant) -> str:
+    """Assemble the snapshot lines (time line first)."""
+    lines: list[str] = []
+
+    try:
+        lines.append(_occupancy_line(hass))
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Nova home state: occupancy unavailable: %s", exc)
+
+    temps = _temperature_items(hass)
+    if temps:
+        lines.append("Temperatures: " + "; ".join(temps[:6]))
+
+    lights = hass.states.async_all("light")
+    lit = [_name(s) for s in lights if s.state == "on"]
+    if lit:
+        lines.append(f"Lights on ({len(lit)}/{len(lights)}): " + ", ".join(lit[:8]))
+    else:
+        lines.append(f"All {len(lights)} lights are off")
+
+    from .cognitive_core import _lockdown_exempt_locks
+    exempt = _lockdown_exempt_locks()
+    unlocked = [_name(s) for s in hass.states.async_all("lock")
+                if s.state == "unlocked" and s.entity_id not in exempt]
+    if unlocked:
+        lines.append("Unlocked: " + ", ".join(unlocked))
+
+    covers = [_name(s) for s in hass.states.async_all("cover") if s.state == "open"]
+    if covers:
+        lines.append("Open covers: " + ", ".join(covers))
+
+    openings = [_name(s) for s in hass.states.async_all("binary_sensor")
+                if s.attributes.get("device_class") in _OPENING_CLASSES
+                and s.state == "on"]
+    if openings:
+        lines.append("Open doors/windows: " + ", ".join(openings[:6]))
+
+    from . import alarm_source
+    for panel in alarm_source.states(hass):
+        lines.append(f"Alarm: {panel.state}")
+
+    media = []
+    for state in hass.states.async_all("media_player"):
+        if state.state != "playing":
+            continue
+        item = _name(state)
+        title = state.attributes.get("media_title")
+        if title:
+            item += f" ({title})"
+        media.append(item)
+    if media:
+        lines.append("Playing media: " + ", ".join(media[:4]))
+
+    from homeassistant.util import dt as dt_util
+    from .locale_format import format_date
+    now = dt_util.now()
+    lines.insert(
+        0,
+        f"Current time: {now.strftime('%I:%M %p')}, "
+        f"{format_date(now, hass, pad_month_first_day=True)}",
+    )
+    return "\n".join(lines)

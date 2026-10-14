@@ -1,181 +1,204 @@
-"""
-Nova follow-ups — the agent scheduling its *own* future actions.
+"""Self-scheduled follow-ups: instructions the agent leaves for its future self.
 
-This is the substrate that makes Nova agentic across time rather than only
-within a single turn. The model can decide "I'll check the garage actually
-closed in five minutes", "re-check the temperature after the heat has had time
-to work", or "remind about the oven in an hour" — and the cognitive core's loop
-executes the instruction later by running it back through the same agent brain
-(run_agent), headlessly. Results are announced through the normal proactive
-channel, so quiet hours and urgency routing all apply.
-
-Storage is a small table in patterns.db (same one-DB story as the state logger
-and cognition model). SYNC sqlite — call via executor. Never raises.
+Each follow-up is a row in the ``followups`` table of the patterns store.
+The cognitive tick calls :func:`async_process_due`, which hands every due
+instruction to a headless agent runner and turns each answer into a
+proactive action for the normal delivery path (quiet hours and urgency
+routing are applied there). The CRUD helpers are blocking SQLite calls for
+the executor and never raise to their callers.
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+DB_PATH: Optional[str] = None
+
+MAX_OPEN = 25
+MAX_DELAY_MINUTES = 7 * 24 * 60
+STATUSES = ("pending", "done", "cancelled", "failed")
+
+_MIN_DELAY_MINUTES = 0.1
 
 
 def _db_path() -> str:
-    return DB_PATH or paths.patterns_db()
+    """The store location, resolved on every call."""
+    return DB_PATH if DB_PATH else paths.patterns_db()
 
 
-MAX_OPEN = 25                 # safety valve: the agent can't queue unbounded work
-MAX_DELAY_MINUTES = 7 * 24 * 60   # a week out, at most
-STATUSES = ("pending", "done", "cancelled", "failed")
+def _resolve(db_path: Optional[str]) -> str:
+    return db_path or _db_path()
 
 
-def _connect(db_path: str) -> sqlite3.Connection:
-    conn = _store.connect(db_path, mkdir=False)
+def _open(db_path: Optional[str]) -> sqlite3.Connection:
+    conn = _store.connect(_resolve(db_path), mkdir=False)
     _store.ensure(conn, "followups")
     return conn
 
 
-def _now(now: Optional[datetime]) -> datetime:
+def _now(now: Optional[datetime] = None) -> datetime:
     return now or datetime.now()
 
 
-# ── CRUD (sync — executor) ───────────────────────────────────────────────────
+def _stamp(moment: datetime) -> str:
+    return moment.isoformat(sep=" ")
+
 
 def schedule(instruction: str, delay_minutes: float, *, context: str = "",
-             now: Optional[datetime] = None, db_path: Optional[str] = None) -> dict:
-    """Queue a self-directed follow-up. Returns the row, or an 'error' dict
-    (queue full / bad input) — never raises."""
-    instruction = (instruction or "").strip()
-    if not instruction:
+             now: Optional[datetime] = None,
+             db_path: Optional[str] = None) -> dict:
+    """Queue ``instruction`` to run ``delay_minutes`` from now."""
+    text = (instruction or "").strip()
+    if not text:
         return {"error": "empty instruction"}
     try:
-        delay = max(0.1, min(float(delay_minutes), MAX_DELAY_MINUTES))
+        delay = float(delay_minutes)
     except (TypeError, ValueError):
         return {"error": f"bad delay: {delay_minutes!r}"}
-    db_path = db_path or _db_path()
-    t = _now(now)
-    due = t + timedelta(minutes=delay)
+    delay = min(max(delay, _MIN_DELAY_MINUTES), MAX_DELAY_MINUTES)
+
+    moment = _now(now)
+    due = moment + timedelta(minutes=delay)
     try:
-        with _connect(db_path) as conn:
-            open_n = conn.execute(
-                "SELECT COUNT(*) FROM followups WHERE status='pending'"
-            ).fetchone()[0]
-            if open_n >= MAX_OPEN:
-                return {"error": f"follow-up queue is full ({MAX_OPEN} pending)"}
+        conn = _open(db_path)
+        with conn:
+            (open_count,) = conn.execute(
+                "SELECT COUNT(*) FROM followups WHERE status = 'pending'"
+            ).fetchone()
+            cap = MAX_OPEN
+            if open_count >= cap:
+                return {"error": f"follow-up queue is full ({cap} pending)"}
             cur = conn.execute(
                 "INSERT INTO followups (created_ts, due_ts, instruction, context) "
-                "VALUES (?,?,?,?)",
-                (t.isoformat(sep=" "), due.isoformat(sep=" "), instruction, context))
-            return {"id": cur.lastrowid, "due_ts": due.isoformat(sep=" "),
-                    "instruction": instruction}
-    except Exception as exc:
-        _LOGGER.warning("followups.schedule failed: %s", exc)
+                "VALUES (?, ?, ?, ?)",
+                (_stamp(moment), _stamp(due), text, context),
+            )
+            new_id = cur.lastrowid
+        return {"id": new_id, "due_ts": _stamp(due), "instruction": text}
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Nova follow-ups: could not schedule: %s", exc)
         return {"error": str(exc)}
 
 
 def pending(*, now: Optional[datetime] = None, due_only: bool = False,
             db_path: Optional[str] = None) -> list[dict]:
-    """Open follow-ups; with due_only, just those whose time has arrived."""
-    db_path = db_path or _db_path()
+    """Pending follow-ups, soonest first; only the due ones with ``due_only``."""
     try:
-        with _connect(db_path) as conn:
+        conn = _open(db_path)
+        with conn:
             if due_only:
                 rows = conn.execute(
-                    "SELECT * FROM followups WHERE status='pending' AND "
-                    "datetime(due_ts) <= datetime(?) ORDER BY datetime(due_ts)",
-                    (_now(now).isoformat(sep=" "),)).fetchall()
+                    "SELECT * FROM followups WHERE status = 'pending' "
+                    "AND datetime(due_ts) <= datetime(?) "
+                    "ORDER BY datetime(due_ts) ASC",
+                    (_stamp(_now(now)),),
+                ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM followups WHERE status='pending' "
-                    "ORDER BY datetime(due_ts)").fetchall()
-            return [dict(r) for r in rows]
-    except Exception:
+                    "SELECT * FROM followups WHERE status = 'pending' "
+                    "ORDER BY datetime(due_ts) ASC"
+                ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception:  # noqa: BLE001
         return []
 
 
 def cancel(followup_id: int, *, db_path: Optional[str] = None) -> bool:
-    db_path = db_path or _db_path()
+    """Cancel a pending follow-up. True only when a row actually changed."""
     try:
-        with _connect(db_path) as conn:
+        target = int(followup_id)
+        conn = _open(db_path)
+        with conn:
             cur = conn.execute(
-                "UPDATE followups SET status='cancelled' "
-                "WHERE id=? AND status='pending'", (int(followup_id),))
+                "UPDATE followups SET status = 'cancelled' "
+                "WHERE id = ? AND status = 'pending'",
+                (target,),
+            )
             return cur.rowcount > 0
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
-def mark(followup_id: int, status: str, result: str = "",
-         *, db_path: Optional[str] = None) -> None:
+def mark(followup_id: int, status: str, result: str = "", *,
+         db_path: Optional[str] = None) -> None:
+    """Record an outcome on a follow-up, whatever its current status."""
     if status not in STATUSES:
         return
-    db_path = db_path or _db_path()
     try:
-        with _connect(db_path) as conn:
-            conn.execute("UPDATE followups SET status=?, result=? WHERE id=?",
-                         (status, result[:2000], int(followup_id)))
-    except Exception as exc:
-        _LOGGER.debug("followups.mark failed: %s", exc)
+        conn = _open(db_path)
+        with conn:
+            conn.execute(
+                "UPDATE followups SET status = ?, result = ? WHERE id = ?",
+                (status, result[:2000], followup_id),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Nova follow-ups: mark %s failed: %s", followup_id, exc)
 
-
-# ── execution (async — the core tick calls this) ─────────────────────────────
 
 async def async_process_due(
-    hass, config: dict,
+    hass: Any,
+    config: dict,
     runner: Optional[Callable[[str, str], Awaitable[str]]] = None,
-    *, now: Optional[datetime] = None, db_path: Optional[str] = None,
+    *,
+    now: Optional[datetime] = None,
+    db_path: Optional[str] = None,
 ) -> list[dict]:
-    """Execute every due follow-up through `runner(instruction, context)` (the
-    headless agent). Returns proactive action dicts for the normal emission
-    path — quiet hours and urgency routing apply there. Never raises."""
-    actions: list[dict] = []
-    db_path = db_path or _db_path()
+    """Run every due follow-up and return the proactive actions they produce."""
     try:
         due = await hass.async_add_executor_job(
-            lambda: pending(now=now, due_only=True, db_path=db_path))
-    except Exception:
-        return actions
+            lambda: pending(now=now, due_only=True, db_path=db_path)
+        )
+    except Exception:  # noqa: BLE001
+        due = []
     if not due:
-        return actions
+        return []
+
     if runner is None:
         for row in due:
             await hass.async_add_executor_job(
-                lambda r=row: mark(r["id"], "failed", "no runner available",
-                                   db_path=db_path))
-        return actions
+                lambda fid=row["id"]: mark(fid, "failed", "no runner available",
+                                           db_path=db_path)
+            )
+        return []
 
+    actions: list[dict] = []
     for row in due:
+        fid = row["id"]
+        instruction = row["instruction"]
         try:
-            result = await runner(row["instruction"], row.get("context") or "")
-            result = (result or "").strip() or "Done."
+            answer = await runner(instruction, row["context"] or "")
+            answer = (answer or "").strip() or "Done."
             await hass.async_add_executor_job(
-                lambda r=row, res=result: mark(r["id"], "done", res,
-                                               db_path=db_path))
-            actions.append({
-                "type": "followup",
-                "urgency": "medium",
-                "message": result,
-                "auto_act": True,
-            })
-            try:
-                from . import database
-                database.save_activity(
-                    category="followup", urgency="low",
-                    message=f"Follow-up #{row['id']} ran: "
-                            f"{row['instruction'][:120]} → {result[:160]}",
-                    source="agent")
-            except Exception:
-                pass
-        except Exception as exc:
-            _LOGGER.warning("followup #%s failed: %s", row.get("id"), exc)
+                lambda f=fid, r=answer: mark(f, "done", r, db_path=db_path)
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("Nova follow-up #%s failed: %s", fid, exc)
             await hass.async_add_executor_job(
-                lambda r=row, e=str(exc): mark(r["id"], "failed", e,
-                                               db_path=db_path))
+                lambda f=fid, e=str(exc): mark(f, "failed", e, db_path=db_path)
+            )
+            continue
+
+        actions.append({
+            "type": "followup",
+            "urgency": "medium",
+            "message": answer,
+            "auto_act": True,
+        })
+        try:
+            from . import database
+            database.save_activity(
+                category="followup",
+                urgency="low",
+                message=f"Follow-up #{fid} ran: {instruction[:120]} → {answer[:160]}",
+                source="agent",
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return actions
