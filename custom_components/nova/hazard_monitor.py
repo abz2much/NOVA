@@ -1,47 +1,29 @@
-"""Real-time multi-hazard monitor (v6.71.0; warnings sources 8.8.0).
+"""Nova's hazard monitor: weather warnings plus three public hazard feeds.
 
-Weather warnings (8.8.0; single source 8.8.2): Met Éireann's warnings for the
-chosen counties (hazard_met_eireann.py), the US National Weather Service, or a
-custom CAP feed (hazard_cap.py). The CAP sources share one lifecycle
-(hazard_warnings.py): a warning is
-announced once, again when its level changes, and a phone-only notice
-follows when it is cancelled. hazard_push_level (default yellow) is the
-lowest level sent to the phone; hazard_speak_level (default orange) and
-above is also spoken. What was announced survives a restart.
+Weather warnings come from one source at a time, chosen in the panel: Met
+Éireann for chosen counties (hazard_met_eireann), the US National Weather
+Service, or a custom CAP feed (hazard_cap). Met Éireann and CAP warnings share
+hazard_warnings' lifecycle: told once, told again when the level moves, and a
+phone notice when cancelled. Pushing starts at hazard_push_level (yellow by
+default), speaking at hazard_speak_level (orange). What was told is kept on
+disk across restarts.
 
-Region defaults (8.8.0): for an Irish home (Home Assistant's country IE, or
-the home point on the island with no country set), the Met Éireann source
-is on and the three legacy feeds below are off, unless the user has saved
-a value. Everywhere else the defaults are as before.
+The other feeds need no key and are polled on a timer; only new, nearby,
+significant events are passed on:
 
-The legacy feeds poll three free, no-key government/agency feeds on an
-interval and speak/push only *new*, *nearby*, *significant* events through
-Nova's existing alert path:
+  - USGS earthquakes inside a radius and above a magnitude
+  - NWS active alerts at the home point (the "us" source)
+  - NASA EONET open natural events (wildfires, volcanoes, storms) nearby
 
-  - USGS earthquakes  — FDSN event query, bounding-box + min-magnitude scoped
-  - NWS weather alerts — api.weather.gov active alerts for the home point
-  - NASA EONET        — Earth Observatory natural events (wildfires, volcanoes,
-                        severe storms), bbox-scoped, status=open
+An Irish home (country IE, or a home point on the island with no country set)
+has Met Éireann on and these feeds off until the user saves otherwise.
 
-Location comes from the home coordinates HA already knows (zone.home /
-hass.config), or a lat/long override the user sets in the panel. None of these
-APIs take a ZIP directly, so a ZIP is converted to lat/long once (via a free
-geocode) and stored as the override.
+The centre is Home Assistant's home point unless the panel sets a latitude and
+longitude. Every feed remembers the ids it has passed on, so a standing event
+is told once. A failed fetch is logged and skipped, never turned into an
+alert. NWS turns away requests without a User-Agent, so one is always sent.
 
-Design deliberately mirrors the rest of Nova and the lessons this codebase has
-learned the hard way:
-  - Each feed dedups on stable event IDs (a per-feed "seen" set) so a standing
-    event never re-alerts — the same discipline package_monitor uses.
-  - A feed that errors is logged and skipped; it never fabricates an alert. A
-    transient fetch failure is not a hazard. (Same "don't cry wolf" principle as
-    the service-health work.)
-  - NWS *requires* a descriptive User-Agent or it rejects the request; we send
-    one. A missing UA is a silent-failure trap, so it's not optional here.
-  - Severity/magnitude thresholds keep it to genuinely notable events, not every
-    micro-quake or minor advisory.
-
-Nothing here runs unless the user turns the monitor on (hazard_monitor_enabled).
-"""
+Nothing runs while hazard_monitor_enabled is off."""
 from __future__ import annotations
 
 import logging
@@ -49,76 +31,56 @@ import math
 import time
 from typing import Optional
 
-_LOGGER = logging.getLogger(__name__)
-
-# ── endpoints (verified real, not the placeholder hosts some guides show) ────
 _USGS_FDSN = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 _NWS_ACTIVE = "https://api.weather.gov/alerts/active"
 _EONET_EVENTS = "https://eonet.gsfc.nasa.gov/api/v3/events"
 
-# A descriptive User-Agent. NWS mandates one; EONET/USGS appreciate one. Generic
-# on purpose — no personal data (contact is the project, not the user).
+_LOGGER = logging.getLogger(__name__)
+
+# Names the project, never the user.
 _USER_AGENT = "Nova Home Assistant hazard monitor (github.com/abz2much/nova)"
 
-# ── defaults (all overridable via config) ────────────────────────────────────
-_DEF_QUAKE_RADIUS_KM = 300.0     # earthquakes within this of home
-_DEF_QUAKE_MIN_MAG = 2.5         # ignore micro-quakes
-_DEF_DISASTER_RADIUS_KM = 300.0  # EONET events within this of home
-_DEF_DISASTER_DAYS = 3           # EONET look-back window
-# NWS severities we alert on (skip Minor/Unknown advisories by default)
+# Defaults, each one a setting.
+_DEF_QUAKE_RADIUS_KM = 300.0
+_DEF_QUAKE_MIN_MAG = 2.5
+_DEF_DISASTER_RADIUS_KM = 300.0
+_DEF_DISASTER_DAYS = 3
 _DEF_WX_SEVERITIES = ("Extreme", "Severe")
+_DEF_PUSH_LEVEL = "yellow"
+_DEF_SPEAK_LEVEL = "orange"
+_DEF_NIGHT_SPEAK_LEVEL = "red"
 
-# Per-feed dedup sets + a cap so they don't grow without bound across a long
-# uptime. Module-level so they persist across polls within a HA run.
+# Ids each feed has passed on during this run. Past the cap a feed sheds about
+# half its ids, whichever the set gives up first.
 _SEEN: dict = {"quake": set(), "wx": set(), "disaster": set()}
 _SEEN_CAP = 500
 
-# Titles for the push (reuses _notify_all_devices' action_type → title map where
-# possible; these are new types so we pass a readable title via the message).
-_ACTION = {
-    "quake": "hazard_earthquake",
-    "wx": "hazard_weather",
-    "disaster": "hazard_disaster",
-    "warning": "hazard_weather",
-}
+# The delivery source for each kind of alert.
+_ACTION = {"quake": "hazard_earthquake", "wx": "hazard_weather",
+           "disaster": "hazard_disaster", "warning": "hazard_weather"}
 
-# Region-aware defaults (8.8.0) for settings the user has not saved:
-# (Irish home, anywhere else).
+# Unsaved on/off settings: (Irish home, anywhere else).
 _REGION_DEFAULTS = {
     "hazard_met_eireann_on": (True, False),
     "hazard_quakes_on": (False, True),
     "hazard_weather_on": (False, True),
     "hazard_disasters_on": (False, True),
 }
-_DEF_PUSH_LEVEL = "yellow"
-_DEF_SPEAK_LEVEL = "orange"
-_DEF_NIGHT_SPEAK_LEVEL = "red"
 HAZARD_SOURCES = ("met_eireann", "us", "custom")
+_LEVELS = ("yellow", "orange", "red")
+_EARTH_RADIUS_KM = 6371.0
+_KM_PER_DEGREE = 111.0
 
-# Warnings memory ({source: {id: entry}}), loaded from disk once per run,
-# and the warnings each source last reported after a successful poll (for
-# the panel). See hazard_warnings.py.
+# The warnings told so far ({source: {id: entry}}), read from disk on the first
+# poll, and each source's live warnings from its last good poll (the panel's).
 _STORE: Optional[dict] = None
 _LAST_WARNINGS: dict = {}
 
 
-# ── config access ────────────────────────────────────────────────────────────
-
-def _cfg(key: str, default=None):
-    try:
-        from . import nova_config
-        v = nova_config.get(key, default)
-        return v if v is not None else default
-    except Exception:
-        return default
-
-
-def _enabled() -> bool:
-    return bool(_cfg("hazard_monitor_enabled", False))
-
+# ── settings ────────────────────────────────────────────────────────────────
 
 def _saved(key: str):
-    """The user's saved value, or None when nothing is saved."""
+    """The user's own saved value; None when there is none."""
     try:
         from . import nova_config
         return nova_config.get(key, None)
@@ -126,92 +88,68 @@ def _saved(key: str):
         return None
 
 
-def is_irish_home(hass) -> bool:
-    from . import hazard_met_eireann
+def _cfg(key: str, default=None):
+    """A saved value, or the default when it is unset or None."""
     try:
-        country = getattr(hass.config, "country", None)
+        from . import nova_config
+        value = nova_config.get(key, default)
     except Exception:
-        country = None
-    return hazard_met_eireann.in_ireland(country, _home_latlon(hass))
+        return default
+    return default if value is None else value
 
 
-def effective_flag(hass, key: str) -> bool:
-    """A source on/off setting: the saved value, else the region default.
-    A saved value is never overridden."""
-    saved = _saved(key)
-    if saved is not None:
-        return bool(saved)
-    irish, other = _REGION_DEFAULTS[key]
-    return irish if is_irish_home(hass) else other
+def _enabled() -> bool:
+    return bool(_cfg("hazard_monitor_enabled", False))
 
 
-def default_source(hass) -> str:
-    """The weather-warning source for a home with no saved choice."""
-    try:
-        country = str(getattr(hass.config, "country", "") or "").upper()
-    except Exception:
-        country = ""
-    if country == "IE":
-        return "met_eireann"
-    if country == "US":
-        return "us"
-    if not country and is_irish_home(hass):
-        return "met_eireann"
-    return "custom"
-
-
-def effective_source(hass) -> str:
-    """Saved source, old-setting derivation, or the geographic default.
-
-    The derived choice is deliberately read-only: upgrading never writes a new
-    setting merely because old source flags exist.
-    """
-    saved = _saved("hazard_source")
-    if saved in HAZARD_SOURCES:
-        return saved
-    if _saved("hazard_met_eireann_on") is True:
-        return "met_eireann"
-    if (_saved("hazard_cap_on") is True
-            and str(_saved("hazard_cap_url") or "").strip()):
-        return "custom"
-    if _saved("hazard_weather_on") is True:
-        return "us"
-    return default_source(hass)
+def _clean(value) -> str:
+    return str(value or "").strip().lower()
 
 
 def _level_setting(key: str, default: str) -> str:
-    value = str(_saved(key) or "").strip().lower()
-    return value if value in ("yellow", "orange", "red") else default
+    level = _clean(_saved(key))
+    return level if level in _LEVELS else default
 
 
 def _night_level_setting() -> str:
-    value = str(_saved("hazard_night_speak_level") or "").strip().lower()
-    return value if value in ("yellow", "orange", "red", "off") else _DEF_NIGHT_SPEAK_LEVEL
+    level = _clean(_saved("hazard_night_speak_level"))
+    return level if level in (*_LEVELS, "off") else _DEF_NIGHT_SPEAK_LEVEL
+
+
+def _json_list(key: str) -> list:
+    """A saved list of strings, stored as a list or as JSON text."""
+    import json
+    value = _saved(key)
+    if isinstance(value, str):
+        if not value.strip():
+            return []
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _runtime(hass, key: str, default):
-    """Live panel config, matching package_monitor's event-loop read."""
+    """The panel's live config, as package_monitor reads it."""
     from .runtime import domain_runtime_config
-    rc = domain_runtime_config(hass)
-    return rc[key] if key in rc else default
+    live = domain_runtime_config(hass)
+    return live[key] if key in live else default
 
 
 def _in_quiet_hours(hass) -> bool:
-    """The household's quiet hours (delivery.py); a read or parse failure is
-    safely not quiet."""
+    """delivery's quiet hours; a bad read counts as not quiet."""
     from . import delivery
     return delivery.in_quiet_hours(hass)
 
 
-def _json_list(key: str) -> list:
-    import json
-    value = _saved(key)
-    if isinstance(value, str):
-        try:
-            value = json.loads(value) if value.strip() else []
-        except ValueError:
-            return []
-    return [str(v) for v in value] if isinstance(value, list) else []
+def _config_attr(hass, name: str, default=None):
+    try:
+        return getattr(hass.config, name, default)
+    except Exception:
+        return default
 
 
 def _tz(hass) -> Optional[str]:
@@ -228,276 +166,292 @@ def _lang(hass) -> str:
         return ""
 
 
+# ── where home is ───────────────────────────────────────────────────────────
+
 def base_home_latlon(hass) -> Optional[tuple[float, float]]:
-    """Home Assistant's home coordinates, without Nova's override."""
+    """Home Assistant's own home point (zone.home first), ignoring Nova's
+    override."""
     try:
-        z = hass.states.get("zone.home")
-        if z is not None:
-            la = z.attributes.get("latitude")
-            lo = z.attributes.get("longitude")
-            if la is not None and lo is not None:
-                return float(la), float(lo)
+        zone = hass.states.get("zone.home")
+        point = (zone.attributes.get("latitude"), zone.attributes.get("longitude")) if zone else ()
+        if point and None not in point:
+            return float(point[0]), float(point[1])
     except Exception:
         pass
     try:
-        return float(hass.config.latitude), float(hass.config.longitude)
+        config = hass.config
+        return float(config.latitude), float(config.longitude)
     except Exception:
         return None
 
 
 def _home_latlon(hass) -> Optional[tuple[float, float]]:
-    """Resolve the monitoring center: an explicit override if set, else home."""
-    ov_lat = _cfg("hazard_lat", None)
-    ov_lon = _cfg("hazard_lon", None)
-    try:
-        if ov_lat not in (None, "") and ov_lon not in (None, ""):
-            return float(ov_lat), float(ov_lon)
-    except Exception:
-        pass
+    """The point to watch around: the panel's override when both halves are
+    set and numeric, else home."""
+    lat, lon = _cfg("hazard_lat", None), _cfg("hazard_lon", None)
+    if lat not in (None, "") and lon not in (None, ""):
+        try:
+            return float(lat), float(lon)
+        except Exception:
+            pass
     return base_home_latlon(hass)
 
 
+def is_irish_home(hass) -> bool:
+    from . import hazard_met_eireann
+    return hazard_met_eireann.in_ireland(_config_attr(hass, "country"), _home_latlon(hass))
+
+
+def effective_flag(hass, key: str) -> bool:
+    """A source switch: the user's saved value always, else the region's."""
+    saved = _saved(key)
+    if saved is not None:
+        return bool(saved)
+    irish_default, other_default = _REGION_DEFAULTS[key]
+    return irish_default if is_irish_home(hass) else other_default
+
+
+def default_source(hass) -> str:
+    """The warnings source for a home where nothing is chosen."""
+    country = str(_config_attr(hass, "country", "") or "").upper()
+    if country == "IE" or (not country and is_irish_home(hass)):
+        return "met_eireann"
+    return "us" if country == "US" else "custom"
+
+
+def effective_source(hass) -> str:
+    """The chosen warnings source: the saved one, else one read from older
+    settings, else the region's. Nothing is written back on the way."""
+    chosen = _saved("hazard_source")
+    if chosen in HAZARD_SOURCES:
+        return chosen
+    if _saved("hazard_met_eireann_on") is True:
+        return "met_eireann"
+    cap_url = str(_saved("hazard_cap_url") or "").strip()
+    if cap_url and _saved("hazard_cap_on") is True:
+        return "custom"
+    if _saved("hazard_weather_on") is True:
+        return "us"
+    return default_source(hass)
+
+
+# ── geometry and memory ─────────────────────────────────────────────────────
+
 def _haversine_km(lat1, lon1, lat2, lon2) -> float:
-    """Great-circle distance in km."""
-    r = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = (math.sin(dp / 2) ** 2
-         + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2)
-    return 2 * r * math.asin(math.sqrt(a))
+    """Great circle distance in kilometres."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    half_dphi = math.radians(lat2 - lat1) / 2
+    half_dlam = math.radians(lon2 - lon1) / 2
+    h = math.sin(half_dphi) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(half_dlam) ** 2
+    return 2 * _EARTH_RADIUS_KM * math.asin(math.sqrt(h))
 
 
 def _bbox(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
-    """A lat/long bounding box roughly `radius_km` around a point. Coarse (used
-    to pre-filter the API query); exact distance is checked with haversine after."""
-    dlat = radius_km / 111.0
-    # guard against cos(lat)=0 near the poles
-    coslat = max(0.01, math.cos(math.radians(lat)))
-    dlon = radius_km / (111.0 * coslat)
-    return (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
+    """A rough box of radius_km around a point, (min lat, max lat, min lon,
+    max lon), to narrow a feed query; distance is checked exactly afterwards.
+    The longitude span is capped near the poles."""
+    lat_span = radius_km / _KM_PER_DEGREE
+    lon_span = radius_km / (_KM_PER_DEGREE * max(0.01, math.cos(math.radians(lat))))
+    return lat - lat_span, lat + lat_span, lon - lon_span, lon + lon_span
 
 
 def _remember(feed: str, event_id: str) -> bool:
-    """Record an event id as seen. Returns True if it was NEW (not seen before)."""
-    s = _SEEN.setdefault(feed, set())
-    if event_id in s:
+    """Mark an id as passed on; True only the first time."""
+    seen = _SEEN.setdefault(feed, set())
+    if event_id in seen:
         return False
-    s.add(event_id)
-    if len(s) > _SEEN_CAP:
-        # drop the oldest-ish half (sets are unordered; this just bounds memory)
-        for _ in range(len(s) - _SEEN_CAP // 2):
-            s.pop()
+    seen.add(event_id)
+    if len(seen) > _SEEN_CAP:
+        for _ in range(len(seen) - _SEEN_CAP // 2):
+            seen.pop()
     return True
 
 
 async def _get_json(hass, url: str, params: dict | None = None) -> Optional[dict]:
-    """GET JSON with the required User-Agent. Returns parsed dict or None on any
-    failure (never raises, never fabricates)."""
+    """Fetch JSON with Nova's User-Agent. Any failure is None: no raise, no
+    made up data."""
     try:
         import aiohttp
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
-        session = async_get_clientsession(hass)
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/geo+json"}
-        async with session.get(
-            url, params=params, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as resp:
-            if resp.status != 200:
-                _LOGGER.debug("hazard: %s → HTTP %s", url, resp.status)
-                return None
-            return await resp.json(content_type=None)
+        request = async_get_clientsession(hass).get(
+            url, params=params, timeout=aiohttp.ClientTimeout(total=20),
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/geo+json"})
+        async with request as resp:
+            if resp.status == 200:
+                return await resp.json(content_type=None)
+            _LOGGER.debug("hazard: %s gave HTTP %s", url, resp.status)
+            return None
     except Exception as exc:
-        _LOGGER.debug("hazard: fetch failed %s: %s", url, exc)
+        _LOGGER.debug("hazard: fetching %s failed: %s", url, exc)
         return None
 
 
-# ── individual feeds ─────────────────────────────────────────────────────────
+# ── the three feeds ─────────────────────────────────────────────────────────
+
+def _f4(value: float) -> str:
+    return f"{value:.4f}"
+
 
 async def _check_earthquakes(hass, lat: float, lon: float) -> list[dict]:
-    """USGS FDSN, bounding-box + min-mag scoped. Returns NEW nearby quakes."""
+    """New USGS quakes from the past hour within the radius."""
     radius = float(_cfg("hazard_quake_radius_km", _DEF_QUAKE_RADIUS_KM))
     min_mag = float(_cfg("hazard_quake_min_mag", _DEF_QUAKE_MIN_MAG))
-    min_lat, max_lat, min_lon, max_lon = _bbox(lat, lon, radius)
-    params = {
-        "format": "geojson",
-        "starttime": time.strftime("%Y-%m-%dT%H:%M:%S",
-                                    time.gmtime(time.time() - 3600)),  # last hour
-        "minlatitude": f"{min_lat:.4f}", "maxlatitude": f"{max_lat:.4f}",
-        "minlongitude": f"{min_lon:.4f}", "maxlongitude": f"{max_lon:.4f}",
-        "minmagnitude": f"{min_mag:.1f}", "orderby": "time",
-    }
-    data = await _get_json(hass, _USGS_FDSN, params)
+    south, north, west, east = _bbox(lat, lon, radius)
+    hour_ago = time.gmtime(time.time() - 3600)
+    query = {"format": "geojson", "starttime": time.strftime("%Y-%m-%dT%H:%M:%S", hour_ago),
+             "minlatitude": _f4(south), "maxlatitude": _f4(north),
+             "minlongitude": _f4(west), "maxlongitude": _f4(east),
+             "minmagnitude": f"{min_mag:.1f}", "orderby": "time"}
+    data = await _get_json(hass, _USGS_FDSN, query)
     if not data or "features" not in data:
         return []
-    out = []
-    for feat in data.get("features", []):
+    found = []
+    for feature in data.get("features", []):
         try:
-            eid = feat.get("id")
-            props = feat.get("properties", {}) or {}
-            coords = (feat.get("geometry", {}) or {}).get("coordinates", [])
-            if not eid or len(coords) < 2:
+            quake_id = feature.get("id")
+            info = feature.get("properties", {}) or {}
+            point = (feature.get("geometry", {}) or {}).get("coordinates", [])
+            if not quake_id or len(point) < 2:
                 continue
-            qlon, qlat = float(coords[0]), float(coords[1])
-            dist = _haversine_km(lat, lon, qlat, qlon)
-            if dist > radius:                     # exact radius (bbox is square)
+            km = _haversine_km(lat, lon, float(point[1]), float(point[0]))
+            # The box is square, so the radius is checked here.
+            if km > radius or not _remember("quake", quake_id):
                 continue
-            if not _remember("quake", eid):       # already alerted
-                continue
-            out.append({
-                "id": eid,
-                "mag": props.get("mag"),
-                "place": props.get("place") or "unknown location",
-                "dist_km": round(dist),
-                "url": props.get("url"),
-            })
+            found.append({"id": quake_id, "mag": info.get("mag"),
+                          "place": info.get("place") or "unknown location",
+                          "dist_km": round(km), "url": info.get("url")})
         except Exception:
             continue
-    return out
+    return found
 
 
 async def _check_weather(hass, lat: float, lon: float) -> list[dict]:
-    """NWS active alerts for the home point, filtered to notable severities."""
-    sevs = _cfg("hazard_wx_severities", None) or _DEF_WX_SEVERITIES
-    sevs = tuple(sevs) if isinstance(sevs, (list, tuple)) else _DEF_WX_SEVERITIES
-    params = {"point": f"{lat:.4f},{lon:.4f}"}
-    data = await _get_json(hass, _NWS_ACTIVE, params)
+    """New NWS alerts at the home point of a notable severity."""
+    wanted = _cfg("hazard_wx_severities", None) or _DEF_WX_SEVERITIES
+    if not isinstance(wanted, (list, tuple)):
+        wanted = _DEF_WX_SEVERITIES
+    wanted = tuple(wanted)
+    data = await _get_json(hass, _NWS_ACTIVE, {"point": f"{_f4(lat)},{_f4(lon)}"})
     if not data or "features" not in data:
         return []
-    out = []
-    for feat in data.get("features", []):
+    found = []
+    for feature in data.get("features", []):
         try:
-            eid = feat.get("id")
-            props = feat.get("properties", {}) or {}
-            severity = props.get("severity") or "Unknown"
-            if severity not in sevs:
+            alert_id = feature.get("id")
+            info = feature.get("properties", {}) or {}
+            severity = info.get("severity") or "Unknown"
+            if severity not in wanted or not alert_id or not _remember("wx", alert_id):
                 continue
-            if not eid or not _remember("wx", eid):
-                continue
-            out.append({
-                "id": eid,
-                "event": props.get("event") or "Weather alert",
-                "severity": severity,
-                "headline": props.get("headline") or "",
-                "area": props.get("areaDesc") or "",
-                "instruction": props.get("instruction") or "",
-            })
+            found.append({"id": alert_id, "event": info.get("event") or "Weather alert",
+                          "severity": severity, "headline": info.get("headline") or "",
+                          "area": info.get("areaDesc") or "",
+                          "instruction": info.get("instruction") or ""})
         except Exception:
             continue
-    return out
+    return found
+
+
+def _nearest_km(lat: float, lon: float, geometry) -> Optional[float]:
+    """Distance to an event's nearest usable point; None when it has none."""
+    best = None
+    for shape in geometry or []:
+        point = shape.get("coordinates")
+        if not point or len(point) < 2:
+            continue
+        try:
+            km = _haversine_km(lat, lon, float(point[1]), float(point[0]))
+        except Exception:
+            continue
+        best = km if best is None else min(best, km)
+    return best
 
 
 async def _check_disasters(hass, lat: float, lon: float) -> list[dict]:
-    """NASA EONET open natural events, bbox-scoped + exact-radius filtered."""
+    """New open EONET events whose nearest point is within the radius."""
     radius = float(_cfg("hazard_disaster_radius_km", _DEF_DISASTER_RADIUS_KM))
     days = int(_cfg("hazard_disaster_days", _DEF_DISASTER_DAYS))
-    min_lat, max_lat, min_lon, max_lon = _bbox(lat, lon, radius)
-    # EONET bbox order is minlon,maxlat,maxlon,minlat (WWSE)
-    params = {
-        "status": "open", "days": str(days),
-        "bbox": f"{min_lon:.4f},{max_lat:.4f},{max_lon:.4f},{min_lat:.4f}",
-    }
-    data = await _get_json(hass, _EONET_EVENTS, params)
+    south, north, west, east = _bbox(lat, lon, radius)
+    # EONET wants the box as west, north, east, south.
+    box = ",".join(_f4(v) for v in (west, north, east, south))
+    data = await _get_json(hass, _EONET_EVENTS, {"status": "open", "days": str(days), "bbox": box})
     if not data or "events" not in data:
         return []
-    out = []
-    for ev in data.get("events", []):
+    found = []
+    for event in data.get("events", []):
         try:
-            eid = ev.get("id")
-            if not eid:
+            event_id = event.get("id")
+            if not event_id:
                 continue
-            # nearest geometry point to home
-            best = None
-            for g in ev.get("geometry", []) or []:
-                c = g.get("coordinates")
-                if not c or len(c) < 2:
-                    continue
-                try:
-                    elon, elat = float(c[0]), float(c[1])
-                except Exception:
-                    continue
-                d = _haversine_km(lat, lon, elat, elon)
-                if best is None or d < best:
-                    best = d
-            if best is None or best > radius:
+            km = _nearest_km(lat, lon, event.get("geometry", []))
+            if km is None or km > radius or not _remember("disaster", event_id):
                 continue
-            if not _remember("disaster", eid):
-                continue
-            cats = ", ".join(c.get("title", "") for c in ev.get("categories", []) if c)
-            out.append({
-                "id": eid,
-                "title": ev.get("title") or "Natural event",
-                "category": cats or "event",
-                "dist_km": round(best),
-                "url": (ev.get("sources") or [{}])[0].get("url") if ev.get("sources") else None,
-            })
+            kinds = ", ".join(c.get("title", "") for c in event.get("categories", []) if c)
+            links = event.get("sources")
+            found.append({"id": event_id, "title": event.get("title") or "Natural event",
+                          "category": kinds or "event", "dist_km": round(km),
+                          "url": links[0].get("url") if links else None})
         except Exception:
             continue
-    return out
+    return found
 
 
-# ── message formatting ───────────────────────────────────────────────────────
+# ── wording ─────────────────────────────────────────────────────────────────
+
+def _addressed(honorific: str) -> str:
+    """", sir" style address; nothing when nobody is addressed."""
+    return f", {honorific}" if honorific else ""
+
 
 def _fmt_quake(q: dict, honorific: str) -> str:
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — addr collapses the trailing ", {honorific}" to
-    # nothing rather than a dangling comma.
-    addr = f", {honorific}" if honorific else ""
     mag = q.get("mag")
-    magtxt = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
-    return (f"Seismic alert{addr}. A {magtxt} earthquake was just "
+    size = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
+    # Preserved quirk: with no magnitude this reads "A an earthquake earthquake".
+    return (f"Seismic alert{_addressed(honorific)}. A {size} earthquake was just "
             f"recorded {q['dist_km']} km away — {q['place']}.")
 
 
 def _fmt_weather(w: dict, honorific: str) -> str:
-    addr = f", {honorific}" if honorific else ""
-    base = f"{w['severity']} weather alert{addr}: {w['event']}"
-    if w.get("area"):
-        base += f" for {w['area']}"
-    base += "."
+    where = f" for {w['area']}" if w.get("area") else ""
+    text = f"{w['severity']} weather alert{_addressed(honorific)}: {w['event']}{where}."
     if w.get("instruction"):
-        base += f" {w['instruction'][:200]}"
-    return base
+        text = f"{text} {w['instruction'][:200]}"
+    return text
 
 
 def _fmt_disaster(d: dict, honorific: str) -> str:
-    addr = f", {honorific}" if honorific else ""
-    return (f"Natural hazard nearby{addr}: {d['title']} ({d['category']}), "
-            f"about {d['dist_km']} km away.")
+    return (f"Natural hazard nearby{_addressed(honorific)}: {d['title']} "
+            f"({d['category']}), about {d['dist_km']} km away.")
 
 
-# ── delivery ─────────────────────────────────────────────────────────────────
+# ── delivery ────────────────────────────────────────────────────────────────
 
 async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "",
                    night: bool = False) -> None:
-    """Push to every phone, and speak ``speak_text`` when given, through the
-    one delivery path (delivery.py, 8.44.0). Whether it may be spoken is the
-    caller's level rule; ``night`` means the household's night level allowed
-    it in quiet hours. Shush, the Announcements switch, sleep and
-    "Notifications only" apply as for every proactive message; the phones
-    always get it. Never raises."""
+    """Hand one hazard to delivery: every phone always, and speak_text on the
+    whole house broadcast when given. The caller has already applied the level
+    rules; night says the night level let it speak in quiet hours. Shush, the
+    Announcements switch, sleep and notifications only still apply in
+    delivery. Never raises."""
     try:
         from . import audio_routing, delivery, tts_helper
-        # a whole-house broadcast: earthquakes and severe weather are
-        # relevant everywhere
-        spk = audio_routing.broadcast_target(
-            hass,
-            broadcast_group=_cfg("broadcast_group", "") or None,
-            announcement_speakers=_cfg("announcement_speakers", None),
-        ) if speak_text else []
-        await delivery.async_deliver(hass, delivery.DeliveryRequest(
+        speakers = []
+        if speak_text:
+            speakers = audio_routing.broadcast_target(
+                hass, broadcast_group=_cfg("broadcast_group", "") or None,
+                announcement_speakers=_cfg("announcement_speakers", None))
+        request = delivery.DeliveryRequest(
             source=_ACTION.get(action_key, action_key), message=push_text,
             spoken=speak_text, urgency="high", category="hazard",
-            phone_only=not speak_text, quiet_ok=night, sleep_ok=night,
-            speakers=tuple(spk or ()), push=delivery.PUSH_ALWAYS, all_phones=True,
-            push_first=True,
-            tts_entity=tts_helper.find_best_tts_entity(hass) or "",
-            tts_context="hazard", record_kind="hazard"))
+            speakers=tuple(speakers or ()), phone_only=not speak_text,
+            quiet_ok=night, sleep_ok=night, push=delivery.PUSH_ALWAYS,
+            all_phones=True, push_first=True, tts_context="hazard",
+            tts_entity=tts_helper.find_best_tts_entity(hass) or "", record_kind="hazard")
+        await delivery.async_deliver(hass, request)
     except Exception as exc:
         _LOGGER.debug("hazard: delivery failed: %s", exc)
 
 
-# ── weather warnings (8.8.0) ─────────────────────────────────────────────────
+# ── weather warnings ────────────────────────────────────────────────────────
 
 def _cap_settings() -> dict:
     return {"url": str(_saved("hazard_cap_url") or "").strip(),
@@ -506,35 +460,50 @@ def _cap_settings() -> dict:
 
 
 async def _fetch_warnings(hass) -> dict:
-    """The chosen CAP warning source, if any; failures are incomplete lists."""
+    """{source: (complete, warnings)} for the chosen source; empty when it is
+    the US source or has nothing to ask about."""
     from . import hazard_cap, hazard_met_eireann
     home = _home_latlon(hass)
-    out: dict = {}
     source = effective_source(hass)
+    result: dict = {}
     if source == "met_eireann":
         counties = hazard_met_eireann.chosen_counties(_saved("hazard_counties"), home)
         if counties:
-            complete, warnings, _via = await hazard_met_eireann.fetch(
+            complete, warnings, _how = await hazard_met_eireann.fetch(
                 hass, counties, lang=_lang(hass), user_agent=_USER_AGENT)
-            out[hazard_met_eireann.SOURCE] = (complete, warnings)
+            result[hazard_met_eireann.SOURCE] = (complete, warnings)
     cap = _cap_settings()
     if source == "custom" and cap["url"]:
         complete, alerts = await hazard_cap.collect(
             hass, cap["url"], lang=_lang(hass), user_agent=_USER_AGENT)
-        out[hazard_cap.SOURCE] = (complete, hazard_cap.to_warnings(
-            alerts, home=home, area_codes=cap["codes"], area_names=cap["names"]))
-    return out
+        matched = hazard_cap.to_warnings(alerts, home=home, area_codes=cap["codes"],
+                                         area_names=cap["names"])
+        result[hazard_cap.SOURCE] = (complete, matched)
+    return result
 
 
 def _active(warnings: list[dict], now) -> list[dict]:
-    """Warnings that are warnings now: not a Cancel, not expired."""
+    """The warnings in force: a known level, not a Cancel, not expired."""
     from . import hazard_warnings as hw
-    return [w for w in warnings if w.get("msg_type") != "Cancel"
-            and w.get("level") in hw.LEVELS and not hw._expired(w.get("expiry", ""), now)]
+
+    def live(w):
+        if w.get("msg_type") == "Cancel" or w.get("level") not in hw.LEVELS:
+            return False
+        return not hw._expired(w.get("expiry", ""), now)
+    return [w for w in warnings if live(w)]
+
+
+def _note_situations() -> None:
+    """Tell the open situations list how many warnings are live."""
+    try:
+        from . import situations
+        situations.note_weather(sum(len(found) for found in _LAST_WARNINGS.values()))
+    except Exception:
+        pass
 
 
 async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
-    """One poll of the warnings sources: reconcile, deliver, remember."""
+    """Poll the warnings source once; returns {source: events}."""
     global _STORE
     from datetime import datetime, timezone
     from . import hazard_warnings as hw
@@ -549,195 +518,158 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
     night_level = _night_level_setting()
     tz = _tz(hass)
     counts: dict = {}
-    changed = False
-    # Every change is saved before anything is delivered (8.39.1): a restart
-    # between the two must never announce the same warning again.
-    outbox: list = []
+    dirty = False
+    # Deliveries wait until the store is saved: a restart in between must not
+    # tell the same warning twice.
+    pending: list = []
     for source, (complete, warnings) in fetched.items():
-        before = _STORE.get(source, {})
-        after, events = hw.reconcile(before, warnings, complete=complete, now=now,
-                                     push_level=push_level)
-        if after != before:
-            _STORE[source] = after
-            changed = True
+        known = _STORE.get(source, {})
+        updated, events = hw.reconcile(known, warnings, complete=complete, now=now,
+                                       push_level=push_level)
+        if updated != known:
+            _STORE[source] = updated
+            dirty = True
         if complete or warnings:
             _LAST_WARNINGS[source] = _active(warnings, now)
-            try:  # for the open situations list (situations.py, 8.24.0)
-                from . import situations
-                situations.note_weather(sum(len(v) for v in _LAST_WARNINGS.values()))
-            except Exception:
-                pass
+            _note_situations()
         for event in events:
-            kind = event[0]
+            kind, warning = event[0], event[1]
             if kind == "cancelled":
-                # Phone only, whatever the level.
-                outbox.append((hw.pushed("cancelled", event[1], honorific, tz), "", False))
+                pending.append((hw.pushed(kind, warning, honorific, tz), "", False))
                 continue
-            w, old = event[1], (event[2] if len(event) > 2 else "")
-            # At or above the speak level (and the push level): spoken and
-            # pushed. Below it, including a warning lowered under the push
-            # level after it was announced: phone only.
-            speak = hw.speak_allowed(
-                w["level"], in_quiet, speak_level, push_level, night_level)
-            outbox.append((hw.pushed(kind, w, honorific, tz, old),
-                           hw.spoken(kind, w, honorific, tz, old) if speak else "",
-                           speak and in_quiet))
+            was = event[2] if len(event) > 2 else ""
+            # Spoken as well as pushed only at or above the speak level, and at
+            # night only at the night level. Anything else (a warning lowered
+            # after it was told, say) goes to the phone.
+            say = hw.speak_allowed(warning["level"], in_quiet, speak_level, push_level,
+                                   night_level)
+            words = hw.spoken(kind, warning, honorific, tz, was) if say else ""
+            pending.append((hw.pushed(kind, warning, honorific, tz, was), words,
+                            say and in_quiet))
         counts[source] = len(events)
-    if changed:
+    if dirty:
         await hass.async_add_executor_job(hw.save_store, _STORE, now)
-    for push_text, speak_text, night in outbox:
-        await _deliver(hass, push_text, "warning", speak_text=speak_text, night=night)
+    for push_text, words, at_night in pending:
+        await _deliver(hass, push_text, "warning", speak_text=words, night=at_night)
     return counts
 
 
-# ── the periodic entry point (called on an interval from __init__) ───────────
+# ── entry points ────────────────────────────────────────────────────────────
+
+def _rounded(point, places: int = 3) -> list:
+    return [round(point[0], places), round(point[1], places)]
+
 
 async def periodic_check(hass, honorific: str = "sir") -> dict:
-    """Poll all enabled feeds once; push/speak any NEW nearby significant events.
-    Returns a small summary dict. Never raises."""
+    """The timed poll: every enabled feed once, telling each new event.
+    Returns a short summary and never raises."""
     if not _enabled():
         return {"skipped": "disabled"}
-
     in_quiet = _in_quiet_hours(hass)
     try:
         warnings = await _poll_warnings(hass, honorific, in_quiet=in_quiet)
     except Exception as exc:
         _LOGGER.debug("hazard: warnings poll failed: %s", type(exc).__name__)
         warnings = {}
-
-    center = _home_latlon(hass)
-    if center is None:
-        _LOGGER.debug("hazard: no home coordinates available; skipping")
+    centre = _home_latlon(hass)
+    if centre is None:
+        _LOGGER.debug("hazard: no home coordinates, nothing to check around")
         return {"skipped": "no_location", "warnings": warnings}
-    lat, lon = center
-
-    fired = {"quake": 0, "wx": 0, "disaster": 0}
-
-    async def _announce(action_key: str, message: str) -> None:
-        # deliver via the same paths every other Nova alert uses: pushed
-        # to the phones, and spoken only outside quiet hours.  These legacy
-        # feeds have no shared severity scale for a safe night exception.
-        await _deliver(hass, message, action_key,
-                       speak_text="" if in_quiet else message)
-
-    # Earthquakes
-    if effective_flag(hass, "hazard_quakes_on"):
-        for q in await _check_earthquakes(hass, lat, lon):
-            await _announce("quake", _fmt_quake(q, honorific))
-            fired["quake"] += 1
-
-    # Weather
-    if effective_source(hass) == "us":
-        for w in await _check_weather(hass, lat, lon):
-            await _announce("wx", _fmt_weather(w, honorific))
-            fired["wx"] += 1
-
-    # Disasters
-    if effective_flag(hass, "hazard_disasters_on"):
-        for d in await _check_disasters(hass, lat, lon):
-            await _announce("disaster", _fmt_disaster(d, honorific))
-            fired["disaster"] += 1
-
-    total = sum(fired.values())
-    if total:
-        _LOGGER.info("hazard: %d new alert(s) — %s", total, fired)
-    return {"checked": True, "fired": fired, "center": [round(lat, 3), round(lon, 3)],
-            "warnings": warnings}
+    lat, lon = centre
+    # These feeds share no severity scale that could justify speaking at
+    # night, so in quiet hours they only reach the phones.
+    feeds = (("quake", effective_flag(hass, "hazard_quakes_on"), _check_earthquakes, _fmt_quake),
+             ("wx", effective_source(hass) == "us", _check_weather, _fmt_weather),
+             ("disaster", effective_flag(hass, "hazard_disasters_on"), _check_disasters,
+              _fmt_disaster))
+    fired = {key: 0 for key, *_rest in feeds}
+    for key, wanted, check, word in feeds:
+        if not wanted:
+            continue
+        for item in await check(hass, lat, lon):
+            text = word(item, honorific)
+            await _deliver(hass, text, key, speak_text="" if in_quiet else text)
+            fired[key] += 1
+    if any(fired.values()):
+        _LOGGER.info("hazard: %d new alert(s): %s", sum(fired.values()), fired)
+    return {"checked": True, "fired": fired, "center": _rounded(centre), "warnings": warnings}
 
 
 async def scan_now(hass, honorific: str = "sir") -> dict:
-    """On-demand read-only scan for the agent tool / panel test. Queries all
-    feeds and returns what's currently active near home WITHOUT touching the
-    dedup sets or announcing — so asking 'any hazards?' never suppresses the
-    background monitor's future alerts, and never double-speaks. Never raises."""
+    """What is active near home now, for the agent tool and the panel. It
+    reads only: nothing is announced and the seen ids are put back after, so
+    asking never hides a later alert. Feeds that are off are not asked."""
     from datetime import datetime, timezone
     from . import hazard_warnings as hw
-    center = _home_latlon(hass)
-    # Weather warnings (8.8.0): read-only, never reconciled or announced.
+    centre = _home_latlon(hass)
     now = datetime.now(timezone.utc)
     warnings: list = []
     try:
-        for _source, (_complete, found) in (await _fetch_warnings(hass)).items():
+        for _complete, found in (await _fetch_warnings(hass)).values():
             warnings.extend(hw.for_panel(w, _tz(hass)) for w in _active(found, now))
     except Exception as exc:
         _LOGGER.debug("hazard: warnings scan failed: %s", type(exc).__name__)
-    if center is None:
+    if centre is None:
         return {"ok": False, "error": "no home location configured",
                 "warnings": warnings, "counts": {"warnings": len(warnings)}}
-    lat, lon = center
-
-    # Temporarily bypass dedup by scanning into a scratch: we re-run the feed
-    # logic but read everything (not just new). Simplest: snapshot & restore the
-    # seen sets around a scan so nothing is marked consumed. A legacy feed
-    # that is off is not queried (8.8.0; it used to be scanned regardless).
-    saved = {k: set(v) for k, v in _SEEN.items()}
+    lat, lon = centre
+    kept = {feed: set(ids) for feed, ids in _SEEN.items()}
     try:
-        quakes = (await _check_earthquakes(hass, lat, lon)
-                  if effective_flag(hass, "hazard_quakes_on") else [])
-        wx = (await _check_weather(hass, lat, lon)
-              if effective_source(hass) == "us" else [])
-        disasters = (await _check_disasters(hass, lat, lon)
-                     if effective_flag(hass, "hazard_disasters_on") else [])
+        quakes = disasters = wx = []
+        if effective_flag(hass, "hazard_quakes_on"):
+            quakes = await _check_earthquakes(hass, lat, lon)
+        if effective_source(hass) == "us":
+            wx = await _check_weather(hass, lat, lon)
+        if effective_flag(hass, "hazard_disasters_on"):
+            disasters = await _check_disasters(hass, lat, lon)
     finally:
         _SEEN.clear()
-        _SEEN.update(saved)
+        _SEEN.update(kept)
+    counts = {"earthquakes": len(quakes), "weather": len(wx), "disasters": len(disasters),
+              "warnings": len(warnings)}
+    return {"ok": True, "center": _rounded(centre), "earthquakes": quakes, "weather": wx,
+            "disasters": disasters, "warnings": warnings, "counts": counts}
 
-    return {
-        "ok": True,
-        "center": [round(lat, 3), round(lon, 3)],
-        "earthquakes": quakes,
-        "weather": wx,
-        "disasters": disasters,
-        "warnings": warnings,
-        "counts": {"earthquakes": len(quakes), "weather": len(wx),
-                   "disasters": len(disasters), "warnings": len(warnings)},
-    }
+
+def _county(code, names) -> dict:
+    return {"code": code, "name": names(code)}
 
 
 async def status(hass) -> dict:
-    """Panel status: config + what the monitor would watch, without alerting.
-    Runs a *read-only* count so the user can confirm it's wired to their area."""
-    from . import hazard_met_eireann, hazard_warnings as hw
-    center = _home_latlon(hass)
+    """The panel's view of the settings and what would be watched. Reads
+    only."""
+    from . import hazard_met_eireann as met, hazard_warnings as hw
+    centre = _home_latlon(hass)
     home = base_home_latlon(hass)
     source = effective_source(hass)
-    nearest = hazard_met_eireann.nearest_county(*center) if center else None
-    chosen = hazard_met_eireann.chosen_counties(_saved("hazard_counties"), center)
-    tz = _tz(hass)
-    cap = _cap_settings()
-    out = {
+    nearest = met.nearest_county(*centre) if centre else None
+    chosen = met.chosen_counties(_saved("hazard_counties"), centre)
+    table = sorted(met.COUNTIES.items(), key=lambda row: row[1][0])
+    shown: list = []
+    if source in ("met_eireann", "custom"):
+        last = _LAST_WARNINGS.get(met.SOURCE if source == "met_eireann" else "cap", [])
+        tz = _tz(hass)
+        shown = [hw.for_panel(w, tz) for w in last]
+    return {
         "enabled": _enabled(),
-        "center": [round(center[0], 3), round(center[1], 3)] if center else None,
+        "center": _rounded(centre) if centre else None,
         "using_override": bool(_cfg("hazard_lat", None) and _cfg("hazard_lon", None)),
         "quake_radius_km": float(_cfg("hazard_quake_radius_km", _DEF_QUAKE_RADIUS_KM)),
         "quake_min_mag": float(_cfg("hazard_quake_min_mag", _DEF_QUAKE_MIN_MAG)),
         "disaster_radius_km": float(_cfg("hazard_disaster_radius_km", _DEF_DISASTER_RADIUS_KM)),
-        "feeds": {
-            "earthquakes": effective_flag(hass, "hazard_quakes_on"),
-            "weather": source == "us",
-            "disasters": effective_flag(hass, "hazard_disasters_on"),
-        },
-        # 8.8.0: weather warnings.
+        "feeds": {"earthquakes": effective_flag(hass, "hazard_quakes_on"),
+                  "weather": source == "us",
+                  "disasters": effective_flag(hass, "hazard_disasters_on")},
         "in_ireland": is_irish_home(hass),
         "source": source,
-        "home_center": [round(home[0], 6), round(home[1], 6)] if home else None,
-        "sources": {
-            "met_eireann": source == "met_eireann",
-            "cap": source == "custom",
-            "cap_configured": bool(cap["url"]),
-        },
-        "detected_county": ({"code": nearest, "name": hazard_met_eireann.county_name(nearest)}
-                            if nearest else None),
-        "counties": [{"code": c, "name": hazard_met_eireann.county_name(c)} for c in chosen],
-        "county_table": [{"code": c, "name": n}
-                         for c, (n, _la, _lo) in sorted(hazard_met_eireann.COUNTIES.items(),
-                                                       key=lambda kv: kv[1][0])],
+        "home_center": _rounded(home, 6) if home else None,
+        "sources": {"met_eireann": source == "met_eireann", "cap": source == "custom",
+                    "cap_configured": bool(_cap_settings()["url"])},
+        "detected_county": _county(nearest, met.county_name) if nearest else None,
+        "counties": [_county(code, met.county_name) for code in chosen],
+        "county_table": [{"code": code, "name": row[0]} for code, row in table],
         "push_level": _level_setting("hazard_push_level", _DEF_PUSH_LEVEL),
         "speak_level": _level_setting("hazard_speak_level", _DEF_SPEAK_LEVEL),
         "night_speak_level": _night_level_setting(),
-        "warnings": [hw.for_panel(w, tz)
-                     for w in _LAST_WARNINGS.get(
-                         hazard_met_eireann.SOURCE if source == "met_eireann" else "cap", [])]
-                    if source in ("met_eireann", "custom") else [],
+        "warnings": shown,
     }
-    return out

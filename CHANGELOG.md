@@ -1,3 +1,11 @@
+## [8.49.28] — Cognition, decisions and safety monitors rewritten from scratch
+
+Phase 7d rewrites six modules from empty files, each from a behaviour spec with fresh tests: local cognition, the decision record, the observer's reasoning loop, the sentinel, the hazard monitor and intrusion support. Nothing Nova does changes: the same events are escalated and anticipated, the same alerts are worded and delivered the same way, and the same settings, tables and files are used.
+
+### Changed
+- **Rewritten:** local cognition's salience, learning and anticipation (openings by hour, daily routines, departures, arrivals, leave times and per person routines); the decision record's storage, outcomes and calibration; the reasoning loop's snapshot, local rules and observer prompt; the sentinel's rules, timers and alerts; the hazard monitor's feeds, weather warnings and delivery; and intrusion snapshots, call offs and learning from labels.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, and every alert path was pinned by tests before it was touched. The old test files all still pass and stay; the fresh tests are added alongside them.
+
 ## [8.49.27] — Conversation, local engine and intent router rewritten from scratch
 
 Phase 7c rewrites three modules from empty files, each from a behaviour spec with fresh tests: the conversation agent, the local engine and the local intent router. Nothing Nova does changes: the same words pass the relevance gate, the same commands are handled without the AI, the same requests ask for confirmation, and replies go to the same speakers.
