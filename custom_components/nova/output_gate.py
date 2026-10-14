@@ -1,25 +1,20 @@
 """
-Nova — Observer output gate.
+Nova — the output gate.
 
-The final line of defense before an announcement actually plays. Handles:
+Everything Nova says on its own initiative passes through here last. The gate
+holds back a message when:
 
-  - Rate limiting: max N announcements per rolling hour
-  - Dedup: don't say the same thing within M minutes
-  - Mute memory: entities the user has told Nova to stop announcing
-  - Habituation: an entity announced three days running goes quiet
-    (habituation.py); emergencies are exempt
-  - Quiet hours integration (sleep_detection handles this mostly)
-  - Announcement log for feedback learning
+* the blanket shush is on, or its entity or category has been muted;
+* the thing has come up days running and is now normal for the home
+  (habituation.py), unless it is exempt;
+* the hourly cap of spoken announcements is reached (high urgency is let
+  through; the optional adaptive budget can tighten the cap);
+* the same message, or one with the same repeat key, went out recently.
 
-State lives in memory (dict). Simple and works across the reasoning loop
-and service calls. Mutes (entities, categories and the blanket shush) are
-also saved to output_mutes.json under Nova's data folder and loaded once
-when Nova sets up, so they survive a restart. Rate-limit, dedup and
-announcement history stay in memory only.
-
-The `nova.shush` service lets the user say "stop announcing that" and
-pushes the entity_id (or category) of the most recent announcement into
-the mute set.
+Critical urgency skips every one of these, so no shush can silence a safety
+alert. Mutes are saved to output_mutes.json in Nova's data folder and loaded
+once at setup; the history used for the cap, repeats and status lives in
+memory only. Each announcement is also written to the activity log.
 """
 from __future__ import annotations
 
@@ -30,39 +25,42 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
-_LOGGER = logging.getLogger(__name__)
-
-
-# Rate-limit defaults — conservative to start, the user can tune later
+MUTES_FILE = "output_mutes.json"
 DEFAULT_MAX_PER_HOUR = 6
 DEFAULT_DEDUP_MINUTES = 10
+_HOUR = 3600
+_BUDGET_TTL = 60.0
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
 class Announcement:
-    """A record of something Nova said."""
+    """One thing Nova said, or would have said had the gate let it."""
     timestamp: float
     entity_id: str
     category: str
     urgency: str
     message: str
-    was_spoken: bool = True          # False if suppressed by gate
+    was_spoken: bool = True
 
 
 @dataclass
 class GateState:
-    """Module-level state. One global instance per HA process."""
+    """The gate's memory; one per Home Assistant process."""
     history: deque = field(default_factory=lambda: deque(maxlen=100))
     muted_entities: set[str] = field(default_factory=set)
     muted_categories: set[str] = field(default_factory=set)
     recent_messages: deque = field(default_factory=lambda: deque(maxlen=20))
-    mute_all: bool = False   # blanket kill switch set by shush(all=True)
+    mute_all: bool = False
 
 
 _STATE = GateState()
-
-MUTES_FILE = "output_mutes.json"
 _SAVE_LOCK = asyncio.Lock()
+
+# The adaptive budget's last answer and when it was read, so the decision
+# record is consulted at most once a minute.
+_BUDGET_CACHE = {"ts": 0.0, "mult": 1.0}
 
 
 def _now() -> float:
@@ -70,257 +68,202 @@ def _now() -> float:
 
 
 def _recent_within(history: deque, seconds: float) -> list[Announcement]:
-    cutoff = _now() - seconds
-    return [a for a in history if a.timestamp >= cutoff and a.was_spoken]
-
-
-# ─── Public gate API ────────────────────────────────────────────────────────
-
-# Adaptive interruption budget: when enabled, the recent rate of unwelcome
-# proactive decisions (from decision_record) scales the hourly cap down, so
-# Nova interrupts less after a run of dismissed/false alarms. Opt-in and
-# cached (60s) so we never query the store on every gate check.
-_BUDGET_CACHE = {"ts": 0.0, "mult": 1.0}
+    """Spoken announcements from the last ``seconds``."""
+    since = _now() - seconds
+    return [ann for ann in history if ann.was_spoken and ann.timestamp >= since]
 
 
 def _budget_multiplier() -> float:
-    """Multiplier (<= 1.0) applied to the hourly cap when the adaptive
-    interruption budget is on. 1.0 (no change) when disabled or on any error."""
+    """How far the hourly cap shrinks (at most 1.0) when the adaptive
+    interruption budget is on: recent dismissed or false alarms make Nova
+    interrupt less. 1.0 when it is off or anything fails."""
     try:
         from . import nova_config
-        if not nova_config.get("adaptive_interruption_budget", False):
-            return 1.0
-    except Exception:
+        enabled = nova_config.get("adaptive_interruption_budget", False)
+    except Exception:  # noqa: BLE001
+        return 1.0
+    if not enabled:
         return 1.0
     now = _now()
-    if now - _BUDGET_CACHE["ts"] < 60.0:
+    if now - _BUDGET_CACHE["ts"] < _BUDGET_TTL:
         return _BUDGET_CACHE["mult"]
     try:
         from . import decision_record
-        mult = float(decision_record.interruption_budget().get("multiplier", 1.0))
-    except Exception:
-        mult = 1.0
-    _BUDGET_CACHE.update(ts=now, mult=mult)
-    return mult
+        budget = decision_record.interruption_budget()
+        multiplier = float(budget.get("multiplier", 1.0))
+    except Exception:  # noqa: BLE001
+        multiplier = 1.0
+    _BUDGET_CACHE["ts"], _BUDGET_CACHE["mult"] = now, multiplier
+    return multiplier
+
+
+def _habit_key(entity_id: str, habit_key: Optional[str]) -> str:
+    """The key habituation counts days under: the caller's own when given
+    ("" meaning the caller counts its own), otherwise the entity."""
+    if habit_key is None:
+        return entity_id
+    return habit_key
+
+
+def _habituated(key: str, urgency: str, category: str, entity_id: str = "") -> bool:
+    if not key:
+        return False
+    try:
+        from . import habituation
+        if habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id or key):
+            return False
+        return bool(habituation.is_quiet(key))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _is_repeat(message: str, dedup_key: str, window_minutes: int) -> Optional[str]:
+    since = _now() - window_minutes * 60
+    for said in _STATE.recent_messages:
+        if said["timestamp"] < since:
+            continue
+        if dedup_key and said.get("key") == dedup_key:
+            return "repeat of a recent message"
+        if _messages_similar(said["message"], message):
+            return "duplicate of recent message"
+    return None
 
 
 def can_announce(
-    *,
-    entity_id: str,
-    category: str,
-    urgency: str,
-    message: str,
+    *, entity_id: str, category: str, urgency: str, message: str,
     max_per_hour: int = DEFAULT_MAX_PER_HOUR,
     dedup_minutes: int = DEFAULT_DEDUP_MINUTES,
-    dedup_key: str = "",
-    habit_key: Optional[str] = None,
+    dedup_key: str = "", habit_key: Optional[str] = None,
 ) -> tuple[bool, str]:
-    """
-    Decide whether this announcement can proceed.
+    """Whether this announcement may go out now, and why.
 
-    Critical urgency bypasses every gate check: blanket mute, entity and
-    category mutes, the rate limit and dedup. A safety alert must never be
-    silenced by a shush.
-
-    Blanket mute (`_STATE.mute_all`) blocks every non-critical announcement
-    until unshush() is called. It is saved, so it survives a restart.
-    """
-    # Critical first, so no mute of any kind can suppress a safety alert.
+    Critical urgency always passes. Otherwise, in order: the blanket shush,
+    entity and category mutes, habituation, the hourly cap (not applied to
+    high urgency) and repeats within ``dedup_minutes``, where a matching
+    ``dedup_key`` counts as the same message whatever its words."""
     if urgency == "critical":
         return True, "critical bypass"
-
     if _STATE.mute_all:
         return False, "blanket shush active"
-
-    # Explicit mute check
     if entity_id in _STATE.muted_entities:
         return False, f"entity {entity_id} is muted"
     if category in _STATE.muted_categories:
         return False, f"category {category} is muted"
-
     if _habituated(_habit_key(entity_id, habit_key), urgency, category, entity_id):
         return False, f"{entity_id} is normal for this home (came up days running)"
 
-    # Rate limit — tightened by the adaptive interruption budget when enabled
-    # (a no-op multiplier of 1.0 keeps the base cap otherwise).
-    eff_max = max(1, int(round(max_per_hour * _budget_multiplier())))
-    recent = _recent_within(_STATE.history, 3600)
-    if len(recent) >= eff_max and urgency not in ("high",):
-        return False, f"rate limit ({len(recent)}/{eff_max}/hour)"
+    cap = max(1, int(round(max_per_hour * _budget_multiplier())))
+    spoken = len(_recent_within(_STATE.history, _HOUR))
+    if urgency != "high" and spoken >= cap:
+        return False, f"rate limit ({spoken}/{cap}/hour)"
 
-    # Dedup: is this message (or a substring) close to something recent?
-    # A request's own repeat label (dedup_key, 8.45.0) also counts as the
-    # same message, whatever its words.
-    dedup_cutoff = _now() - dedup_minutes * 60
-    for past in _STATE.recent_messages:
-        if past["timestamp"] < dedup_cutoff:
-            continue
-        if dedup_key and past.get("key") == dedup_key:
-            return False, "repeat of a recent message"
-        if _messages_similar(past["message"], message):
-            return False, "duplicate of recent message"
-
+    reason = _is_repeat(message, dedup_key, dedup_minutes)
+    if reason:
+        return False, reason
     return True, "ok"
-
-
-def _habit_key(entity_id: str, habit_key: Optional[str]) -> str:
-    """The habituation key: the request's own when given ("" for none: the
-    source counts its own days), else the entity."""
-    return entity_id if habit_key is None else habit_key
-
-
-def _habituated(key: str, urgency: str, category: str, entity_id: str = "") -> bool:
-    try:
-        from . import habituation
-        return bool(key) and (not habituation.exempt(urgency=urgency, kind=category,
-                                       entity_id=entity_id or key)
-                and habituation.is_quiet(key))
-    except Exception:
-        return False
 
 
 def habit_note(*, entity_id: str, category: str, urgency: str, message: str,
                habit_key: Optional[str] = None) -> str:
-    """The message to speak: with a closing line saying Nova will stop
-    mentioning it when this is the third day running (habituation.py)."""
+    """``message`` plus, on the third day running, a closing line saying Nova
+    will stop mentioning it (habituation.py). Exempt messages are unchanged."""
     try:
         from . import habituation
         if habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id):
             return message
         key = _habit_key(entity_id, habit_key)
-        return habituation.with_note(key, message) if key else message
-    except Exception:
+        if not key:
+            return message
+        return habituation.with_note(key, message)
+    except Exception:  # noqa: BLE001
         return message
 
 
 def record_announcement(
-    *,
-    entity_id: str,
-    category: str,
-    urgency: str,
-    message: str,
-    was_spoken: bool,
-    dedup_key: str = "",
-    habit_key: Optional[str] = None,
-    source: str = "observer",
-    pushed: bool = False,
-    outcome: str = "",
-    request_id: str = "",
+    *, entity_id: str, category: str, urgency: str, message: str, was_spoken: bool,
+    dedup_key: str = "", habit_key: Optional[str] = None, source: str = "observer",
+    pushed: bool = False, outcome: str = "", request_id: str = "",
 ) -> None:
-    """Log an announcement for history + dedup + future feedback learning.
-    The activity log row carries the delivery outcome (8.45.0)."""
-    ann = Announcement(
-        timestamp=_now(),
-        entity_id=entity_id,
-        category=category,
-        urgency=urgency,
-        message=message,
-        was_spoken=was_spoken,
-    )
-    _STATE.history.append(ann)
+    """Remember an announcement for the cap, repeats and status, count its day
+    for habituation when spoken, and add a row (with the delivery outcome) to
+    the activity log. Never raises."""
+    stamp = _now()
+    _STATE.history.append(Announcement(
+        timestamp=stamp, entity_id=entity_id, category=category, urgency=urgency,
+        message=message, was_spoken=was_spoken))
     if was_spoken:
-        _STATE.recent_messages.append({
-            "timestamp": _now(),
-            "message": message,
-            "key": dedup_key or "",
-        })
-        try:
-            from . import habituation
-            key = _habit_key(entity_id, habit_key)
-            if key and not habituation.exempt(urgency=urgency, kind=category,
-                                              entity_id=entity_id):
-                habituation.record(key, entity_id)
-        except Exception as exc:
-            _LOGGER.debug("habituation record failed: %s", exc)
-    # v5.4.8: persist to SQLite for panel activity log
+        _STATE.recent_messages.append(
+            {"timestamp": _now(), "message": message, "key": dedup_key or ""})
+        _count_habit_day(entity_id, category, urgency, habit_key)
     try:
         from .database import save_activity
-        save_activity(
-            entity_id=entity_id,
-            category=category,
-            urgency=urgency,
-            message=message,
-            was_spoken=was_spoken,
-            source=source,
-            pushed=pushed,
-            outcome=outcome,
-            request_id=request_id,
-        )
-    except Exception:
-        pass  # DB write failure is non-fatal
+        save_activity(entity_id=entity_id, category=category, urgency=urgency,
+                      message=message, was_spoken=was_spoken, source=source,
+                      pushed=pushed, outcome=outcome, request_id=request_id)
+    except Exception:  # noqa: BLE001 - the activity log is best effort
+        pass
 
 
-def shush(
-    entity_id: Optional[str] = None,
-    category: Optional[str] = None,
-    all: bool = False,
-) -> dict:
-    """
-    Mute an entity and/or category.
+def _count_habit_day(entity_id: str, category: str, urgency: str,
+                     habit_key: Optional[str]) -> None:
+    try:
+        from . import habituation
+        key = _habit_key(entity_id, habit_key)
+        exempt = habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id)
+        if key and not exempt:
+            habituation.record(key, entity_id)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("habituation record failed: %s", exc)
 
-    Arguments:
-      - entity_id: mute only this entity
-      - category: mute only this category
-      - all: mute every non-critical announcement until unshush is called;
-        critical safety announcements still pass
-      - (no args): mute the most recent announcement's entity (targeted)
-    """
-    result = {"muted_entities": [], "muted_categories": [], "all": False}
 
+def shush(entity_id: Optional[str] = None, category: Optional[str] = None,
+          all: bool = False) -> dict:
+    """Mute an entity, a category, or (``all``) every non critical
+    announcement until unshush. With no arguments, mutes the entity of the
+    last spoken announcement."""
+    result: dict = {"muted_entities": [], "muted_categories": [], "all": False}
     if all:
         _STATE.mute_all = True
         result["all"] = True
-        _LOGGER.warning(
-            "Nova BLANKET SHUSH engaged — non-critical announcements "
-            "suppressed until nova.unshush is called (survives a restart); "
-            "critical still pass"
-        )
+        _LOGGER.warning("Nova blanket shush on: non critical announcements are held "
+                        "until nova.unshush (kept over a restart); critical ones pass")
         return result
-
     if entity_id is None and category is None:
-        # Use the most recent spoken announcement
-        spoken = [a for a in _STATE.history if a.was_spoken]
-        if spoken:
-            last = spoken[-1]
+        last = next((ann for ann in reversed(_STATE.history) if ann.was_spoken), None)
+        if last is not None:
             entity_id = last.entity_id
-            _LOGGER.info("Shushing last announcement: %s (%s)", entity_id, last.category)
-
-    if entity_id:
-        _STATE.muted_entities.add(entity_id)
-        result["muted_entities"].append(entity_id)
-    if category:
-        _STATE.muted_categories.add(category)
-        result["muted_categories"].append(category)
-
+            _LOGGER.info("Shushing the last announcement: %s (%s)", entity_id, last.category)
+    for name, muted, listed in ((entity_id, _STATE.muted_entities, "muted_entities"),
+                                (category, _STATE.muted_categories, "muted_categories")):
+        if name:
+            muted.add(name)
+            result[listed].append(name)
     return result
 
 
 def unshush(entity_id: Optional[str] = None, category: Optional[str] = None) -> dict:
-    """Reverse a mute. If neither given, clear ALL mutes including blanket shush."""
+    """Lift one mute, or with no arguments every mute and the blanket shush."""
     if entity_id is None and category is None:
-        cleared_e = list(_STATE.muted_entities)
-        cleared_c = list(_STATE.muted_categories)
-        was_blanket = _STATE.mute_all
+        summary = {
+            "cleared_entities": list(_STATE.muted_entities),
+            "cleared_categories": list(_STATE.muted_categories),
+            "blanket_cleared": _STATE.mute_all,
+        }
         _STATE.muted_entities.clear()
         _STATE.muted_categories.clear()
         _STATE.mute_all = False
-        return {
-            "cleared_entities": cleared_e,
-            "cleared_categories": cleared_c,
-            "blanket_cleared": was_blanket,
-        }
-
-    result = {"cleared_entities": [], "cleared_categories": []}
-    if entity_id and entity_id in _STATE.muted_entities:
-        _STATE.muted_entities.discard(entity_id)
+        return summary
+    result: dict = {"cleared_entities": [], "cleared_categories": []}
+    if entity_id in _STATE.muted_entities:
+        _STATE.muted_entities.remove(entity_id)
         result["cleared_entities"].append(entity_id)
-    if category and category in _STATE.muted_categories:
-        _STATE.muted_categories.discard(category)
+    if category in _STATE.muted_categories:
+        _STATE.muted_categories.remove(category)
         result["cleared_categories"].append(category)
     return result
 
 
-# ─── Saved mutes ────────────────────────────────────────────────────────────
+# ─── Saved mutes ─────────────────────────────────────────────────────────────
 
 def _mutes_path() -> str:
     from . import paths
@@ -328,40 +271,40 @@ def _mutes_path() -> str:
 
 
 def _mutes_snapshot() -> dict:
-    return {
-        "entities": sorted(_STATE.muted_entities),
-        "categories": sorted(_STATE.muted_categories),
-        "all": bool(_STATE.mute_all),
-    }
+    return {"entities": sorted(_STATE.muted_entities),
+            "categories": sorted(_STATE.muted_categories),
+            "all": bool(_STATE.mute_all)}
+
+
+def _names(value) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str) and item}
 
 
 def load_mutes() -> None:
-    """Load saved mutes into the gate. Call once at setup, after
-    paths.configure(); never at import time. A missing, empty or corrupt
-    file never raises: the gate simply starts with no mutes."""
+    """Load the saved mutes. Called once at setup, after paths.configure(),
+    never on import. A missing, empty or unreadable file leaves the gate as
+    it is; never raises."""
     try:
         from .persistence.files import MISSING, OK, read_json
-        res = read_json(_mutes_path())
-        if res.status == MISSING:
+        read = read_json(_mutes_path())
+        if read.status == MISSING:
             _LOGGER.debug("output gate: no saved mutes")
             return
-        data = res.value
-        if res.status != OK or not isinstance(data, dict):
-            _LOGGER.debug("output gate: ignoring unreadable saved mutes (%s)",
-                          res.error or "not an object")
+        saved = read.value
+        if read.status != OK or not isinstance(saved, dict):
+            _LOGGER.debug("output gate: saved mutes unreadable (%s), ignored",
+                          read.error or "not an object")
             return
-        entities = data.get("entities")
-        categories = data.get("categories")
-        _STATE.muted_entities = {e for e in entities if isinstance(e, str) and e} \
-            if isinstance(entities, list) else set()
-        _STATE.muted_categories = {c for c in categories if isinstance(c, str) and c} \
-            if isinstance(categories, list) else set()
-        _STATE.mute_all = data.get("all") is True
-        _LOGGER.debug("output gate: loaded %d entity, %d category mutes, blanket=%s",
+        _STATE.muted_entities = _names(saved.get("entities"))
+        _STATE.muted_categories = _names(saved.get("categories"))
+        _STATE.mute_all = saved.get("all") is True
+        _LOGGER.debug("output gate: %d entity and %d category mutes loaded, blanket %s",
                       len(_STATE.muted_entities), len(_STATE.muted_categories),
                       _STATE.mute_all)
-    except Exception as exc:
-        _LOGGER.debug("output gate: could not load saved mutes: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("output gate: saved mutes not loaded: %s", exc)
 
 
 def _write_mutes(data: dict) -> None:
@@ -370,59 +313,51 @@ def _write_mutes(data: dict) -> None:
 
 
 async def async_save_mutes(hass) -> None:
-    """Save the current mutes without blocking the event loop. The snapshot
-    is taken under a lock just before the write, so concurrent saves can
-    never leave an older state on disk. Never raises."""
+    """Save the mutes off the event loop. The snapshot is taken inside the
+    lock, just before writing, so overlapping saves always end with the
+    newest state on disk. Never raises."""
     try:
         async with _SAVE_LOCK:
             await hass.async_add_executor_job(_write_mutes, _mutes_snapshot())
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("output gate: could not save mutes: %s", exc)
 
 
+# ─── Reporting ───────────────────────────────────────────────────────────────
+
 def status() -> dict:
-    """Return current gate state — for nova.observer_status service."""
-    recent = _recent_within(_STATE.history, 3600)
-    spoken = [a for a in recent if a.was_spoken]
-    suppressed = [a for a in recent if not a.was_spoken]
+    """The gate's state for the nova.observer_status service."""
+    last_hour = _recent_within(_STATE.history, _HOUR)
+    spoken = [ann for ann in last_hour if ann.was_spoken]
+    held = [ann for ann in last_hour if not ann.was_spoken]
+    latest = spoken[-1] if spoken else None
     return {
         "announcements_last_hour": len(spoken),
-        "suppressed_last_hour": len(suppressed),
+        "suppressed_last_hour": len(held),
         "muted_entities": sorted(_STATE.muted_entities),
         "muted_categories": sorted(_STATE.muted_categories),
         "mute_all": bool(_STATE.mute_all),
-        "last_announcement": (
-            {
-                "message": spoken[-1].message,
-                "seconds_ago": int(_now() - spoken[-1].timestamp),
-            } if spoken else None
-        ),
+        "last_announcement": None if latest is None else {
+            "message": latest.message,
+            "seconds_ago": int(_now() - latest.timestamp),
+        },
     }
 
 
 def recent_announcements(n: int = 5) -> list[str]:
-    """Return the last N spoken announcement messages — for reasoning dedup."""
-    spoken = [a.message for a in _STATE.history if a.was_spoken]
-    return spoken[-n:]
+    """The last ``n`` spoken messages, oldest first."""
+    return [ann.message for ann in _STATE.history if ann.was_spoken][-n:]
 
-
-# ─── Internal helpers ──────────────────────────────────────────────────────
 
 def _messages_similar(a: str, b: str, threshold: float = 0.7) -> bool:
-    """
-    Crude similarity check — two messages are "similar" if they share a
-    high fraction of their non-trivial words. No NLP, no dependencies.
-    """
-    def tokens(s: str) -> set[str]:
-        return {
-            w.lower().strip(".,!?:;")
-            for w in s.split()
-            if len(w) > 3  # ignore "the", "and", "is", etc.
-        }
+    """Whether two messages share at least ``threshold`` of the words of the
+    shorter one, counting only words longer than three letters (trailing
+    punctuation dropped, case ignored)."""
+    def words(text: str) -> set[str]:
+        return {word.lower().strip(".,!?:;") for word in text.split() if len(word) > 3}
 
-    ta, tb = tokens(a), tokens(b)
-    if not ta or not tb:
+    first, second = words(a), words(b)
+    if not first or not second:
         return False
-    overlap = len(ta & tb)
-    smaller = min(len(ta), len(tb))
-    return (overlap / smaller) >= threshold
+    shared = len(first & second)
+    return shared / min(len(first), len(second)) >= threshold
