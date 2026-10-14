@@ -185,10 +185,10 @@ def test_bad_timestamps_and_old_events_are_ignored(dbt):
     assert len(dbt.find_patterns(lookback_days=60)) == 1
 
 
-def test_a_null_timestamp_stops_all_mining(dbt):
-    """Preserved quirk: a record whose ts is null makes mining give up."""
+def test_a_null_timestamp_is_skipped(dbt):
+    """A record whose ts is null is skipped; it used to stop all mining."""
     _rows(dbt, [_ev(None)] + [_ev(_ago(d, 7)) for d in (1, 2, 3)])
-    assert dbt.find_patterns() == []
+    assert len(dbt.find_patterns()) == 1
 
 
 def test_a_lower_threshold_and_the_observed_day_cap(dbt):

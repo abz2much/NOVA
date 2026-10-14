@@ -683,6 +683,7 @@ async def _get_best_image(hass: HomeAssistant, entity_id: str) -> Optional[bytes
                         entity_id, len(_content(second)))
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("Nova: retry snapshot of %s failed: %s", entity_id, exc)
+        return placeholder
     return None
 
 
@@ -709,17 +710,19 @@ async def _capture_frame_sequence(hass: HomeAssistant, entity_id: str, count: in
                                   interval: float = 1.2,
                                   max_dim: int = 1024) -> list[bytes]:
     """Up to ``count`` usable, downscaled frames ``interval`` seconds apart,
-    after waking the stream once. Falls back to the single best image when
+    after waking the stream once. Frames come from the camera's override
+    source, as single snapshots do. Falls back to the single best image when
     none of the grabs is usable."""
+    source = resolve_camera_source(hass, entity_id)
     try:
-        await _prewarm_stream(hass, entity_id)
+        await _prewarm_stream(hass, source)
     except Exception:  # noqa: BLE001
         pass
     total = max(1, count)
     frames: list[bytes] = []
     for index in range(total):
         try:
-            body = _content(await camera_get_image(hass, entity_id, timeout=10))
+            body = _content(await camera_get_image(hass, source, timeout=10))
             if len(body) > MIN_IMAGE_SIZE and not _looks_blank(body):
                 frames.append(_downscale_jpeg(body, max_dim))
         except Exception as exc:  # noqa: BLE001
@@ -787,7 +790,7 @@ def _recognition_hint(hass: HomeAssistant, entity_id: str) -> str:
         return ""
     try:
         seen = last_seen_at(hass, entity_id)
-        if not seen or seen.get("is_confident", False) is False:
+        if not seen or seen.get("is_confident") is False:
             return ""
         name = seen.get("name", "")
         score = seen.get("confidence", 0)
