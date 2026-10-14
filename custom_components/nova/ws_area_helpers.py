@@ -335,12 +335,12 @@ def _get_onboarding_state(hass: HomeAssistant, entry, current_notify: str) -> di
     briefings = (bool(_saved("briefing_morning_enabled", False))
                  or bool(_saved("briefing_evening_enabled", False)))
     steps = [
-        {"id": "notify", "label": "Set an alert destination",
-         "hint": "Where Nova sends security alerts and notifications (your phone).",
-         "jump": "Notifications", "done": has_notify},
-        {"id": "cameras", "label": "Connect cameras (optional)",
-         "hint": "Nest/Frigate cameras enable doorbell analysis, package detection, the live floor plan.",
-         "jump": "Cameras", "done": has_cameras},
+        {"id": "notify", "done": has_notify, "jump": "Notifications",
+         "label": "Set an alert destination",
+         "hint": "Where Nova sends security alerts and notifications (your phone)."},
+        {"id": "cameras", "done": has_cameras, "jump": "Cameras",
+         "label": "Connect cameras (optional)",
+         "hint": "Nest/Frigate cameras enable doorbell analysis, package detection, the live floor plan."},
         {"id": "voice", "label": "Set up voice (optional)",
          "hint": "On HA OS/Supervised Nova installs the voice stack for you. Done when "
                  "an Assist pipeline uses Nova as its conversation agent "

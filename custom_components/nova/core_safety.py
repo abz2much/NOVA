@@ -1,12 +1,12 @@
-"""SafetyManager: pipe freeze warnings, the intrusion investigation and the
-nighttime lockdown sweep.
+"""The safety manager: pipe freeze warnings, the intrusion investigation and
+the night sweep that locks and closes up while the house sleeps.
 
-Moved out of cognitive_core.py unchanged in 8.7.17. cognitive_core.py
-still exports every name defined here, as the same object.
+cognitive_core.py exports every name defined here, as the same object.
 """
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import time
@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from . import core_common as _m_common
 from .core_bridge import _lockdown_exempt_locks, is_lockdown
 from .core_common import (
-    ALARM_ARMED_STATES,
+    ALARM_ARMED_STATES,  # noqa: F401 - cognitive_core re-exports it from here
     FREEZE_CRITICAL_TEMP_F,
     FREEZE_REMINDER_SECONDS,
     FREEZE_WARN_TEMP_F,
@@ -39,61 +39,115 @@ from .core_common import (
 
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
-# The night sweep's backstop (8.25.0): at most this many lock and close
+# The night sweep's backstop: never more than this many lock and close
 # commands in any hour, whatever else happens.
 SWEEP_MAX_COMMANDS_PER_HOUR = 12
 
+_FREEZE_COOLDOWN = 3600.0       # seconds between any two freeze alerts
+_FREEZE_EPISODE_ENDS = 5        # °F above the warning level that ends a cold spell
+_REPEAT_ALERT_GAP = 300.0       # seconds before a new intrusion alert may start
+_OPENING_SENSORS = ("door", "window", "garage_door", "opening")
+_OPENING_COVERS = ("door", "garage", "garage_door", "gate")
+_MOTION_CLASSES = ("motion", "occupancy", "presence")
+# How the vision model may answer a "is there a person?" question in free text.
+_NO_PERSON = ("no person", "not a person", "no one", "nobody", "empty", "no people",
+              "there is no", "cannot see a person", "don't see a person", "no human")
+_A_PERSON = ("a person", "person is", "someone is", "an intruder", "a man", "a woman",
+             "a human", "people are")
+_VISION_PROMPT = " ".join((
+    "Security check. Look at this indoor camera frame.",
+    "Is there a PERSON (a human being) actually present in the frame right now?",
+    "Answer strictly: reply 'PERSON: YES' if a real person is clearly visible,",
+    "or 'PERSON: NO' if there is no person (e.g. it is an empty room, a shadow,",
+    "a light, a reflection, a pet, or an object).",
+    "Do not guess — if you cannot clearly see a person, answer NO.",
+))
 
-# ── Safety Manager ──────────────────────────────────────────────────────────
+
+def _intrusion():
+    """intrusion.py, read at call time so tests and reloads see the live one."""
+    from . import intrusion
+    return intrusion
+
+
+def _best_effort(work, default=None):
+    """``work()``, or ``default`` if it raises. For the bookkeeping that must
+    never change what the safety code decides."""
+    try:
+        return work()
+    except Exception:
+        return default
+
+
+def _setting(config: dict, key: str, default, kind):
+    """A number from the config, or ``default`` when it is not one."""
+    try:
+        return kind(config.get(key, default))
+    except (ValueError, TypeError):
+        return default
+
+
+def _vision_verdict(text: str) -> Optional[bool]:
+    """Read the vision model's answer: True a person, False none, None when
+    it cannot be told. The explicit tag wins over the wording."""
+    if "person: yes" in text:
+        return True
+    if "person: no" in text:
+        return False
+    saw_none = any(phrase in text for phrase in _NO_PERSON)
+    saw_one = any(phrase in text for phrase in _A_PERSON)
+    if saw_none != saw_one:
+        return saw_one
+    return None
+
 
 class SafetyManager:
-    """Monitors for safety-critical conditions and acts."""
+    """Watches for safety critical situations and acts on them."""
 
     def __init__(self, hass: HomeAssistant, config: dict):
-        self.hass = hass
-        self.config = config
-        self._last_freeze_alert = 0.0
+        self.hass, self.config = hass, config
+        # When each kind of alert or check last went out (epoch seconds).
+        self._last_intrusion_alert = self._last_freeze_alert = 0.0
         self._last_lockdown_check = 0.0
-        self._last_intrusion_alert = 0.0
-        self._investigation = None   # active intrusion investigation, or None
+        self._investigation = None   # the intrusion investigation under way, if any
         self._freeze_warned = False
-        # A freeze is one episode (8.39.1): the critical alert is spoken once,
-        # later reminders go to the phones only, and the episode ends when it
-        # warms up again.
+        # One cold spell is one episode: the critical alert is spoken once,
+        # reminders after that go to the phones only, and the episode ends
+        # when it warms up again.
         self._freeze_critical_spoken = False
         self._automatic_generation = 0
-        # Seconds the night sweep waits before rereading what it locked and
-        # closed (8.24.0). Slow covers report late.
+        # How long the night sweep waits before checking what it secured;
+        # slow covers report late.
         self.sweep_verify_delay = LOCKDOWN_SECURE_VERIFY_DELAY
-        # The night sweep's memory of tonight (8.25.0): what it secured, what
-        # it is leaving alone until morning and why, and when it sent
-        # commands. A new night (noon to noon) starts it afresh.
+        # What the night sweep knows about tonight: what it secured, what it
+        # is leaving alone until morning and why, and when it sent commands.
+        # A new night (noon to noon) starts it afresh.
         self._sweep_night: dict = {}
-        # Saving to situations.py (8.24.0) is on only after
-        # restore_situations(), which the running core calls.
+        # Saving to situations.py starts only once restore_situations() has
+        # run, which the live core does.
         self._persist = False
         self._saved: tuple = (None, None)
-        # The household reading for the tick in progress (household.py), or
-        # None between ticks, when the helpers below read the house live.
+        # The household reading for the tick under way (household.py); None
+        # between ticks, when the helpers below read the house live.
         self._house = None
 
+    # ── surviving a restart ─────────────────────────────────────────────────
+
     def restore_situations(self) -> None:
-        """Pick up an intrusion investigation and the freeze warning from
-        situations.py after a restart or reload (8.24.0). Only the state is
-        restored; the investigation logic is unchanged. A stale or missing
-        saved state starts fresh. Never raises."""
+        """After a restart or reload, pick up the intrusion investigation and
+        the freeze state from situations.py. Only state comes back; the logic
+        is the same. Nothing saved, or a stale save, starts fresh. Never
+        raises."""
         try:
             from . import situations
             if not situations.started():
                 return
-            inv, last = situations.restore_intrusion()
-            if inv is not None:
-                self._investigation = inv
-                self._last_intrusion_alert = last
+            investigation, last_alert = situations.restore_intrusion()
+            if investigation is not None:
+                self._investigation = investigation
+                self._last_intrusion_alert = last_alert
                 _LOGGER.warning("intrusion: investigation restored after a restart")
-            warned, last_freeze = situations.restore_freeze()
-            self._freeze_warned = warned
-            self._last_freeze_alert = last_freeze
+            self._freeze_warned, self._last_freeze_alert = situations.restore_freeze()
             self._freeze_critical_spoken = situations.restore_freeze_critical()
             self._persist = True
             self._saved = self._situation_signature()
@@ -102,47 +156,52 @@ class SafetyManager:
 
     def _situation_signature(self) -> tuple:
         from . import situations
-        inv = situations._encode_investigation(self._investigation)
-        return (json.dumps([inv, self._last_intrusion_alert], sort_keys=True, default=str),
-                (self._freeze_warned, self._last_freeze_alert, self._freeze_critical_spoken))
+        encoded = situations._encode_investigation(self._investigation)
+        intrusion = json.dumps([encoded, self._last_intrusion_alert], sort_keys=True, default=str)
+        freeze = (self._freeze_warned, self._last_freeze_alert, self._freeze_critical_spoken)
+        return intrusion, freeze
 
     def _save_situations(self) -> None:
-        """Save the intrusion and freeze state when either changed. Never
-        raises: a failed save never affects the safety checks."""
+        """Save whichever of the intrusion and freeze state changed. Never
+        raises: a failed save must not touch the safety checks."""
         if not self._persist:
             return
         try:
             from . import situations
-            intrusion_sig, freeze_sig = self._situation_signature()
-            if intrusion_sig != self._saved[0]:
+            now = self._situation_signature()
+            if now[0] != self._saved[0]:
                 situations.save_intrusion(self._investigation, self._last_intrusion_alert)
-            if freeze_sig != self._saved[1]:
-                situations.save_freeze(self._freeze_warned, self._last_freeze_alert,
-                                       self._freeze_critical_spoken)
-            self._saved = (intrusion_sig, freeze_sig)
+            if now[1] != self._saved[1]:
+                situations.save_freeze(*now[1])
+            self._saved = now
         except Exception as exc:
             _LOGGER.debug("Safety: could not save situations: %s", exc)
+
+    # ── automatic lockdown switch ───────────────────────────────────────────
 
     def set_automatic_lockdown(self, enabled: bool) -> None:
         self.config["lockdown_auto_on_arm"] = enabled is True
         self._automatic_generation += 1
 
     def _automatic_operation_current(self, generation: int) -> bool:
+        """Whether a sweep started under ``generation`` may carry on: the
+        switch is still on and was not flipped since it started."""
         from . import safety_config
         return (generation == self._automatic_generation
                 and safety_config.automatic_lockdown_enabled(self.config))
 
-    async def tick(self, sleeping: bool, anyone_home: bool,
-                   house=None) -> list[dict]:
-        """Run all safety checks. Returns list of actions taken.
+    # ── the tick ────────────────────────────────────────────────────────────
 
-        Each stage (freeze, intrusion, nighttime sweep) is guarded on its own:
-        an error in one is logged and the others still run, and anything an
-        earlier stage already gathered is still returned, so a fault in the
-        safety code can never swallow an alert that was already raised.
+    async def tick(self, sleeping: bool, anyone_home: bool, house=None) -> list[dict]:
+        """Run every safety check and return the actions taken.
 
-        `house` is the tick's household reading (household.snapshot); when it
-        is not given, one is taken here. Every check in this tick uses it."""
+        Freeze, intrusion and the night sweep are each guarded on their own:
+        an error in one is logged, the others still run, and whatever was
+        already raised is still returned, so a fault here can never swallow
+        an alert.
+
+        ``house`` is this tick's household reading (household.snapshot); one
+        is taken here when it is not given, and every check uses it."""
         try:
             from . import household
             self._house = house or household.snapshot(self.hass, self.config)
@@ -156,130 +215,122 @@ class SafetyManager:
             self._save_situations()
 
     async def _tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
-        actions = []
-        now = time.time()
-
-        # ── Pipe freeze prevention ──────────────────────────────────
+        actions: list = []
         try:
-            freeze_action = await self._check_freeze()
-            if freeze_action:
-                actions.append(freeze_action)
+            freeze = await self._check_freeze()
+            if freeze:
+                actions.append(freeze)
         except Exception as exc:
             _LOGGER.warning("Safety tick: freeze check failed: %s", exc)
-
-        # ── Unauthorized entry detection ────────────────────────────
-        # Only when residents are CONFIDENTLY away (tracked away / armed-away) or
-        # asleep — never on the mere absence of occupancy, which falsely fires when
-        # someone is home but untracked.
-        # Opt in (intrusion_requires_confinement): confinement is the master
-        # switch instead. Monitoring runs only while a formal lockdown is
-        # engaged or the selected alarm is armed, and ending confinement stops
-        # it at once, dropping any investigation in progress.
         try:
-            from . import safety_config as _sc
-            if _sc.intrusion_requires_confinement(self.config):
-                # A triggered alarm is still confined: it must not drop the
-                # investigation at the moment it has the strongest evidence.
-                if is_lockdown() or self._alarm_armed() or self._alarm_triggered():
-                    intrusion = await self._check_intrusion(
-                        anyone_home, sleeping, confined=True)
-                    if intrusion:
-                        actions.append(intrusion)
-                else:
-                    self._investigation = None
-            else:
-                # The setting was turned off mid investigation: drop one that only
-                # existed because of confinement.
-                if (self._investigation is not None
-                        and self._investigation.get("trigger") == "confined"):
-                    self._investigation = None
-                if self._residents_away() or sleeping or self._investigation is not None:
-                    intrusion = await self._check_intrusion(anyone_home, sleeping)
-                    if intrusion:
-                        actions.append(intrusion)
+            intrusion = await self._intrusion_stage(sleeping, anyone_home)
+            if intrusion:
+                actions.append(intrusion)
         except Exception as exc:
             _LOGGER.warning("Safety tick: intrusion check failed: %s", exc)
-
-        # ── Nighttime lockdown ──────────────────────────────────────
-        # Skipped when a formal lockdown is already active (it handles securing).
         try:
-            from . import safety_config
-            if (safety_config.automatic_lockdown_enabled(self.config)
-                    and sleeping and not is_lockdown()
-                    and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
-                self._last_lockdown_check = now
-                generation = self._automatic_generation
-                # Runs in the background (8.24.0): the sweep waits to check
-                # what it secured, and must never hold up the safety loop.
-                # Its message goes to the phones, as a sleeping house's alerts
-                # always do; it is never spoken at night.
-                self.hass.async_create_task(self._sweep_and_report(generation))
+            self._maybe_start_sweep(sleeping)
         except Exception as exc:
             _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
-
         return actions
 
-    async def _check_freeze(self) -> Optional[dict]:
-        """Monitor outdoor temperature for pipe freeze risk.
+    async def _intrusion_stage(self, sleeping: bool, anyone_home: bool) -> Optional[dict]:
+        """Intrusion watching runs only when the residents are confidently
+        away (tracked away, or armed away) or asleep, never merely because no
+        one shows up as present, which happens with an untracked person home.
 
-        Unit-aware: the value read is in Home Assistant's configured unit (°C on
-        a metric install), so it is converted to °F for the threshold comparison
-        and the message is rendered in the user's own unit. A metric home no
-        longer false-fires a freeze warning on a mild 18°C day.
-        """
-        now = time.time()
-        if (now - self._last_freeze_alert) < 3600:  # 1hr cooldown
+        With intrusion_requires_confinement on, confinement is the master
+        switch instead: watching runs only while a lockdown is engaged or the
+        chosen alarm is armed, and ending confinement stops it at once,
+        dropping any investigation under way."""
+        from . import safety_config
+        if safety_config.intrusion_requires_confinement(self.config):
+            # A triggered alarm still counts as confined: that is the moment
+            # with the strongest evidence, not the moment to stop.
+            if is_lockdown() or self._alarm_armed() or self._alarm_triggered():
+                return await self._check_intrusion(anyone_home, sleeping, confined=True)
+            self._investigation = None
             return None
+        # Turned off mid investigation: drop one that existed only because
+        # of confinement.
+        if self._investigation is not None and self._investigation.get("trigger") == "confined":
+            self._investigation = None
+        if self._residents_away() or sleeping or self._investigation is not None:
+            return await self._check_intrusion(anyone_home, sleeping)
+        return None
 
+    def _maybe_start_sweep(self, sleeping: bool) -> None:
+        """Start the night sweep when automatic lockdown is on, the house is
+        asleep, no formal lockdown is doing the job already and the interval
+        has passed. It runs in the background, since it waits to check what
+        it secured and must never hold up the safety loop. Its message goes
+        to the phones, as a sleeping house's alerts do; it is never spoken."""
+        from . import safety_config
+        now = time.time()
+        if not (safety_config.automatic_lockdown_enabled(self.config) and sleeping
+                and not is_lockdown()
+                and now - self._last_lockdown_check > LOCKDOWN_CHECK_INTERVAL):
+            return
+        self._last_lockdown_check = now
+        self.hass.async_create_task(self._sweep_and_report(self._automatic_generation))
+
+    # ── freeze ──────────────────────────────────────────────────────────────
+
+    async def _check_freeze(self) -> Optional[dict]:
+        """Watch the outdoor temperature for frozen pipes.
+
+        The reading is in Home Assistant's own unit (°C on a metric install),
+        so it is compared in °F and reported in the household's unit; a mild
+        18 °C day never sounds like frost.
+
+        A cold spell is one episode. Once the critical alert has gone out,
+        a milder "freeze warning" is not sent as it warms slightly; only a
+        critical reminder, to the phones, every few hours while it stays
+        critical. The episode ends when it is clearly warmer again."""
+        now = time.time()
+        if now - self._last_freeze_alert < _FREEZE_COOLDOWN:
+            return None
         found = discover_outdoor_temp(self.hass)
         if found is None:
             return None
-        outdoor_temp, unit = found
-
-        temp_f = _temp_to_f(outdoor_temp, unit)
-        reading = _fmt_temp(outdoor_temp, unit)
-        honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
+        reading, unit = found
+        fahrenheit = _temp_to_f(reading, unit)
+        shown = _fmt_temp(reading, unit)
+        title = _persona().capitalise(_m_common._live_honorific(self.hass))
         lang = _m_common._hass_lang(self.hass)
 
-        if temp_f <= FREEZE_CRITICAL_TEMP_F:
+        if fahrenheit <= FREEZE_CRITICAL_TEMP_F:
             reminder = self._freeze_critical_spoken
-            if reminder and (now - self._last_freeze_alert) < FREEZE_REMINDER_SECONDS:
+            if reminder and now - self._last_freeze_alert < FREEZE_REMINDER_SECONDS:
                 return None
             self._last_freeze_alert = now
             self._freeze_critical_spoken = True
-            set_to = _fmt_temp(_f_to_unit(55, unit), unit, decimals=0)
             return {
                 "type": "freeze_critical",
-                # Spoken once per episode; after that a reminder goes to the
-                # phones only, every few hours, until it warms up.
+                # Spoken once a cold spell, then reminders to the phones.
                 "urgency": "high" if reminder else "critical",
                 "phone_only": reminder,
                 "message": _notify_i18n().message(
-                    "freeze_critical", lang, honorific=_persona().capitalise(honorific),
-                    reading=reading, set_to=set_to),
-                # Alert-only (fixed Sept 2026): this said auto_act=True and
-                # "act without approval", but nothing has ever consulted
-                # auto_act to actually do anything — Nova has no thermostat/
-                # plumbing actuator tied to this. The message itself already
-                # phrases it as a recommendation, which is the truth.
+                    "freeze_critical", lang, honorific=title, reading=shown,
+                    set_to=_fmt_temp(_f_to_unit(55, unit), unit, decimals=0)),
+                # Advice only: nothing acts on it (there is no heating or
+                # plumbing actuator behind it), and the message says so.
                 "auto_act": False,
             }
-        elif temp_f <= FREEZE_WARN_TEMP_F and not self._freeze_warned:
-            self._freeze_warned = True
-            self._last_freeze_alert = now
-            return {
-                "type": "freeze_warning",
-                "urgency": "high",
-                "message": _notify_i18n().message(
-                    "freeze_warning", lang, honorific=_persona().capitalise(honorific),
-                    reading=reading),
-                "auto_act": False,
-            }
-        elif temp_f > FREEZE_WARN_TEMP_F + 5:
+        if fahrenheit > FREEZE_WARN_TEMP_F + _FREEZE_EPISODE_ENDS:
             self._freeze_warned = False
             self._freeze_critical_spoken = False
-
+            return None
+        if (fahrenheit <= FREEZE_WARN_TEMP_F and not self._freeze_warned
+                and not self._freeze_critical_spoken):
+            self._last_freeze_alert, self._freeze_warned = now, True
+            text = _notify_i18n().message("freeze_warning", lang, honorific=title,
+                                          reading=shown)
+            return {"type": "freeze_warning", "urgency": "high", "message": text,
+                    "auto_act": False}
         return None
+
+    # ── reading the house ───────────────────────────────────────────────────
 
     def _household(self):
         """This tick's household reading, or a live one between ticks."""
@@ -292,306 +343,280 @@ class SafetyManager:
         return self._household().armed
 
     def _alarm_armed_away(self) -> bool:
-        """True only for the armed states that mean nobody is meant to be
-        moving about (away or vacation), not home or night."""
+        """Only the armed states that mean nobody should be moving about
+        (away, vacation), not home or night."""
         from . import household
         return self._household().posture == household.AWAY
 
     def _alarm_triggered(self) -> bool:
-        """The alarm itself has gone off, not merely armed."""
+        """The alarm has gone off, not merely been armed."""
         return self._household().triggered
 
     def _residents_home_guard(self, sleeping: bool) -> bool:
-        """Residents are home and the house is armed for people at home, or
-        asleep. Then a resident walking about looks just like an intruder
-        moving through the house, so motion alone must never confirm an
-        intrusion. The rule lives in household.Household.residents_home_guard."""
+        """Residents are home and armed for being home, or asleep. Then a
+        resident walking about looks just like an intruder moving through, so
+        motion alone must never confirm an intrusion. The rule itself is
+        household.Household.residents_home_guard."""
         return self._household().residents_home_guard(sleeping)
+
+    def _residents_away(self) -> bool:
+        """A confident "the residents are away", for intrusion only.
+
+        From household.py: a person, or a tracker linked to one, reading home
+        always wins; otherwise away when every person reads away, or the alarm
+        is armed away or on vacation. Never from motion, an unknown person is
+        never away, and a tracker linked to nobody (a TV, a hub) does not
+        count."""
+        return self._household().residents_away
 
     def _friendly(self, eid: Optional[str]) -> Optional[str]:
         if not eid:
             return None
-        st = self.hass.states.get(eid)
-        return ((st.attributes.get("friendly_name") if st else None) or eid)
+        state = self.hass.states.get(eid)
+        return (state.attributes.get("friendly_name") if state else None) or eid
 
     def _open_entry(self, areas: Optional[Iterable[str]] = None) -> Optional[str]:
-        """The entity_id of an exterior door/window that's currently open — the
-        breach point a real entry would come through. None if all are shut.
-        Property-perimeter openings (a driveway or side gate, a shed door) are
-        excluded: they aren't the house envelope, and an open yard gate must not
-        turn a curtain-flutter into a corroborated intrusion. The garage IS
-        envelope, so anything garage-named stays in.
+        """An open outside door or window, the way a real entry would come
+        in, or None when everything is shut.
 
-        `areas`, when given, restricts qualifying entries to that set of HA
-        area_ids (used to scope the sleeping-household check to the ground
-        floor — see `_ground_floor_open_entry`)."""
+        Only the house itself counts: a fridge or oven door, anything the user
+        excluded from Nova, or a driveway gate or shed door is never a way in
+        (household.is_way_in), so an open garden gate cannot turn a curtain
+        flutter into a corroborated intrusion. The garage is part of the house.
+        ``areas`` limits it to those areas (the ground floor check)."""
         from . import household
+        allowed = set(areas) if areas else None
 
-        area_filter = set(areas) if areas else None
+        def counts(state) -> bool:
+            return (household.is_way_in(self.hass, state)
+                    and (allowed is None or self._breach_area(state.entity_id) in allowed))
 
-        def _envelope(st) -> bool:
-            # A fridge or oven door, anything the user excluded from Nova, or
-            # an opening outside the house is never a way in (9 Oct 2026: a
-            # fridge door was taken for the point of entry). household.py.
-            return household.is_way_in(self.hass, st)
-
-        def _in_scope(st) -> bool:
-            return area_filter is None or self._breach_area(st.entity_id) in area_filter
-
-        for st in self.hass.states.async_all("binary_sensor"):
-            if (st.attributes.get("device_class") in ("door", "window", "garage_door", "opening")
-                    and st.state == "on" and _envelope(st) and _in_scope(st)):
-                return st.entity_id
-        for st in self.hass.states.async_all("cover"):
-            if (st.attributes.get("device_class") in ("door", "garage", "garage_door", "gate")
-                    and st.state in ("open", "opening") and _envelope(st) and _in_scope(st)):
-                return st.entity_id
+        for state in self.hass.states.async_all("binary_sensor"):
+            if (state.attributes.get("device_class") in _OPENING_SENSORS
+                    and state.state == "on" and counts(state)):
+                return state.entity_id
+        for state in self.hass.states.async_all("cover"):
+            if (state.attributes.get("device_class") in _OPENING_COVERS
+                    and state.state in ("open", "opening") and counts(state)):
+                return state.entity_id
         return None
 
     def _ground_floor_open_entry(self) -> tuple[Optional[str], bool]:
-        """Open exterior door/window, scoped to `ground_floor_areas` when the
-        user has configured any (v7.86.0). Returns (entity_id_or_None,
-        configured) — `configured` is False when ground_floor_areas is empty,
-        in which case every exterior door/window on every floor qualifies.
-        Unconfigured must never mean LESS protection than before."""
-        ground_areas = self.config.get("ground_floor_areas") or []
-        if not ground_areas:
+        """(an open outside door or window, whether ground floor areas are
+        set). With ground_floor_areas set, only those count; without, every
+        floor does, so leaving it unset never means less protection."""
+        ground = self.config.get("ground_floor_areas") or []
+        if not ground:
             return self._open_entry(), False
-        return self._open_entry(areas=ground_areas), True
+        return self._open_entry(areas=ground), True
 
     def _breach_area(self, entry_eid: Optional[str]) -> Optional[str]:
-        """The HA area of the breach entity — where the intruder would enter."""
-        if not entry_eid:
-            return None
-        try:
+        """The area of the way in, where an intruder would enter."""
+        def area():
             from . import audio_routing
             return audio_routing.entity_area(self.hass, entry_eid)
-        except Exception:
-            return None
+        return _best_effort(area) if entry_eid else None
 
     def _motion_key(self, eid: str) -> str:
-        """A stable 'zone' key for a motion sensor — its area if resolvable,
-        else the entity id. Distinct zones ⇒ movement across the home."""
+        """A motion sensor's zone: its area (its own or its device's), else
+        its entity id. Different zones mean movement across the home."""
         try:
-            from homeassistant.helpers import (
-                entity_registry as er, device_registry as dr,
-            )
-            ent = er.async_get(self.hass).async_get(eid)
-            if ent:
-                area = ent.area_id
-                if not area and ent.device_id:
-                    dev = dr.async_get(self.hass).async_get(ent.device_id)
-                    area = dev.area_id if dev else None
-                if area:
-                    return area
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
+            entry = er.async_get(self.hass).async_get(eid)
+            area = entry.area_id if entry else None
+            if entry and not area and entry.device_id:
+                device = dr.async_get(self.hass).async_get(entry.device_id)
+                area = device.area_id if device else None
         except Exception:
-            pass
-        return eid
+            area = None
+        return area or eid
 
     def _qualifying_motion(self, sleeping: bool) -> list:
-        """Active indoor motion sensors worth considering — skips outdoor
-        sensors and (while asleep) bedroom sensors. Returns [(entity_id, name)]."""
+        """Indoor motion sensors detecting now, as [(entity_id, name)].
+        While asleep, bedrooms are left out."""
         from . import household
-        out = []
-        bedroom_areas = self.config.get("bedroom_areas", []) if sleeping else []
+        bedrooms = self.config.get("bedroom_areas", []) if sleeping else []
+        found = []
         for state in self.hass.states.async_all("binary_sensor"):
-            if state.attributes.get("device_class", "") not in ("motion", "occupancy", "presence"):
+            if (state.attributes.get("device_class", "") not in _MOTION_CLASSES
+                    or state.state != "on"):
                 continue
-            if state.state != "on":
-                continue
-            eid = state.entity_id
-            fname = (state.attributes.get("friendly_name") or "")
-            # A camera's car, animal or package sensor (8.14.0), a sensor the
-            # user excluded from Nova (8.21.0) and outdoor motion never seed
-            # or spread an indoor intrusion. household.is_person_motion.
+            # A camera's car, animal or parcel sensor, a sensor the user
+            # excluded and outdoor motion never start or spread an intrusion.
             if not household.is_person_motion(self.hass, state):
                 continue
-            if sleeping and bedroom_areas and self._motion_key(eid) in bedroom_areas:
+            if sleeping and bedrooms and self._motion_key(state.entity_id) in bedrooms:
                 continue
-            out.append((eid, fname or eid))
-        return out
+            found.append((state.entity_id,
+                          state.attributes.get("friendly_name") or state.entity_id))
+        return found
 
     def _person_on_camera(self, indoor_only: bool = True) -> bool:
-        """Best-effort: a camera reports a person right now (e.g. Frigate's
-        binary_sensor.<cam>_person). With indoor_only (the default, and what
-        intrusion confirmation uses), OUTDOOR cameras are excluded — a delivery
-        driver on the driveway cam is a doorstep event, not proof someone is
-        inside the house."""
+        """A camera reports a person now (Frigate's binary_sensor.<cam>_person
+        and the like). Indoors only by default, which is what confirmation
+        uses: a courier on the driveway camera is a doorstep event, not proof
+        that someone is inside."""
         return self._person_camera_entity(indoor_only) is not None
 
     def _person_camera_entity(self, indoor_only: bool = True) -> Optional[str]:
-        """Like _person_on_camera, but returns the CAMERA entity_id backing the
-        person-detecting binary_sensor (so we can snapshot it), or None. Maps
-        binary_sensor.<cam>_person → camera.<cam> when such a camera exists,
-        else returns the sensor's entity_id as a fallback handle."""
+        """The camera behind a sensor that sees a person now, for a snapshot,
+        or None. binary_sensor.<cam>_person maps to camera.<cam> when that
+        exists, else to a camera sharing its first word; failing both, the
+        guessed camera id is returned anyway as a handle."""
         from . import outdoor
-        for st in self.hass.states.async_all("binary_sensor"):
-            if st.state != "on":
+        for state in self.hass.states.async_all("binary_sensor"):
+            if state.state != "on":
                 continue
-            fname = st.attributes.get("friendly_name") or ""
-            low = (st.entity_id + " " + fname).lower()
-            if "person" not in low:
+            shown = state.attributes.get("friendly_name") or ""
+            if "person" not in f"{state.entity_id} {shown}".lower():
                 continue
-            if st.attributes.get("device_class") not in (
-                    "occupancy", "motion", "presence", None):
+            if state.attributes.get("device_class") not in _MOTION_CLASSES + (None,):
                 continue
-            if indoor_only and outdoor.is_outdoor(self.hass, st.entity_id, fname):
+            if indoor_only and outdoor.is_outdoor(self.hass, state.entity_id, shown):
                 continue
-            # derive a camera entity from the sensor slug, e.g.
-            # binary_sensor.hallway_person → camera.hallway
-            slug = st.entity_id.split(".", 1)[-1]
+            slug = state.entity_id.split(".", 1)[-1]
             for suffix in ("_person", "_person_occupancy", "_occupancy"):
                 if slug.endswith(suffix):
                     slug = slug[: -len(suffix)]
                     break
-            cam = f"camera.{slug}"
-            if self.hass.states.get(cam) is not None:
-                return cam
-            # fall back: any camera whose name shares the area word
+            camera = f"camera.{slug}"
+            if self.hass.states.get(camera) is not None:
+                return camera
             from .camera import active_camera_states
-            for cst in active_camera_states(self.hass):
-                if slug.split("_")[0] in cst.entity_id:
-                    return cst.entity_id
-            return cam        # best-effort handle even if not yet resolvable
+            first_word = slug.split("_")[0]
+            for candidate in active_camera_states(self.hass):
+                if first_word in candidate.entity_id:
+                    return candidate.entity_id
+            return camera
         return None
 
+    # ── intrusion: starting an investigation ────────────────────────────────
+
     def _begin_investigation(self, *, now: float, trigger: str, presence: str,
-                              breach: Optional[str], breach_name: Optional[str],
-                              armed: bool, eid: str, where: str, honorific: str,
-                              reason: str) -> Optional[dict]:
-        """Shared investigation kickoff for both the away and sleeping
-        triggers (v7.86.0): computes breach adjacency/depth, seeds
-        self._investigation, logs the decision + intrusion event (with
-        learned damping), and returns the 'investigating' action — or None
-        if this exact location/time pattern is learned-benign."""
+                             breach: Optional[str], breach_name: Optional[str],
+                             armed: bool, eid: str, where: str, honorific: str,
+                             reason: str) -> Optional[dict]:
+        """Open an investigation (for the away, confined and sleeping cases
+        alike), record the decision and the event, and return the first
+        "investigating" alert, or None when this place and time has been
+        learned to be harmless (the investigation still runs underneath)."""
         breach_area = self._breach_area(breach)
-        # Anchor the search at the breach: the intruder enters there, so the
-        # breach room and the rooms adjacent to it are where a real entry
-        # first shows up. Motion elsewhere is still investigated, but not
-        # concluded to be an intrusion on its own — that discernment is what
-        # avoids false alarms.
+        # The search starts at the way in: the breach room and the rooms next
+        # to it are where a real entry shows up first. Motion elsewhere is
+        # still watched but never concluded to be an intrusion on its own,
+        # which is what keeps false alarms down.
         connected = {breach_area} if breach_area else set()
-        hops = {}
+        hops: dict = {}
         try:
             from . import residence_graph
-            connected |= residence_graph.adjacent_areas(
-                self.hass, self.config, breach_area)
-            # Depth of every room from the breach, so we can tell inward
-            # (entry → deeper) motion from motion that lingers at the entry.
-            hops = residence_graph.hops_from_breach(
-                self.hass, self.config, breach_area)
+            connected |= residence_graph.adjacent_areas(self.hass, self.config, breach_area)
+            # Every room's distance from the way in, to tell motion moving
+            # inward from motion lingering at the entry.
+            hops = residence_graph.hops_from_breach(self.hass, self.config, breach_area)
         except Exception:
             pass
         connected.discard(None)
-        start_zone = self._motion_key(eid)
-        # deepest room motion has reached so far (breach itself = 0)
-        start_depth = hops.get(start_zone, 0) if hops else 0
+        start = self._motion_key(eid)
+        depth = hops.get(start, 0) if hops else 0
         self._investigation = {
             "start": now, "last_motion": now,
-            "zones": {start_zone}, "path": [start_zone], "escalated": False,
-            "soft_notice": False,
-            "breach_area": breach_area, "breach_name": breach_name,
-            "connected": connected,
-            "hops": hops, "max_depth": start_depth,
-            "trigger": trigger,
+            "zones": {start}, "path": [start], "escalated": False, "soft_notice": False,
+            "breach_area": breach_area, "breach_name": breach_name, "connected": connected,
+            "hops": hops, "max_depth": depth, "trigger": trigger,
         }
-        _i18n = _notify_i18n()
-        _lang = _m_common._hass_lang(self.hass)
-        if breach_name:
-            ctx = _i18n.message("intrusion_ctx_open", _lang, name=breach_name)
-        elif armed:
-            ctx = _i18n.message("intrusion_ctx_armed", _lang)
-        else:
-            ctx = ""
-        msg_key = {"away": "intrusion_alert",
-                   "confined": "intrusion_alert_confined"}.get(
-                       trigger, "intrusion_alert_sleep")
-        msg = _i18n.message(
-            msg_key, _lang, honorific=_persona().capitalise(honorific),
-            where=where, ctx=ctx)
-        # Decision Record (v7.39.0): log the proactive intrusion judgement, in
-        # the shared safety format (alert_path, 8.23.0). Best-effort; a logging
-        # failure must never affect the alert. Written here, not at delivery,
-        # so a damped alert is recorded too and a call-off attaches to it.
-        _rid = None
-        try:
-            from . import alert_path
-            _rid = alert_path.record_decision(
-                "intrusion", source="intrusion", entity_id=eid, message=msg,
-                sit=alert_path.situation(self.hass, self.config,
-                                         sleeping=(trigger == "sleeping"),
-                                         house=self._household()),
-                facts={"location": where, "breach": breach_name,
-                       "alarm_armed": armed, "presence": presence, "trigger": trigger},
-                assessment="possible intrusion — investigating from the point of entry",
-                decision="raise initial intrusion alert and investigate silently",
-                reason=reason,
-            )
-            try:  # so a later call-off attaches to this exact record
-                from . import intrusion as _intr_rec
-                _intr_rec.set_last_decision_id(_rid)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        # Learned damping (v6.76.0): if this location/time pattern has been
-        # repeatedly labelled a false alarm, stay QUIET on this initial
-        # low-confidence ping. The investigation still runs underneath, so a
-        # real inward route still confirms and alarms — learning can only
-        # silence the weak alert, never a confirmed intrusion.
+        message = self._first_alert_text(trigger, breach_name, armed, honorific, where)
+        record_id = self._record_first_decision(trigger, eid, message, where, breach_name,
+                                                armed, presence, reason)
+        # A place and time repeatedly called a false alarm stays quiet on this
+        # first, weak alert. Learning can only silence the weak alert: a real
+        # route inward still confirms and raises the alarm.
         damped = False
         try:
-            from . import intrusion as _intr
-            damped = _intr.should_damp_weak_alert(breach_area, None)
-            _intr.record_event(
-                "investigating", reason=("damped (learned benign)" if damped
-                                         else reason),
-                breach=breach_name, breach_area=breach_area,
-                zones=[start_zone], max_depth=start_depth, decision_id=_rid)
+            intrusion = _intrusion()
+            damped = intrusion.should_damp_weak_alert(breach_area, None)
+            intrusion.record_event(
+                "investigating", reason="damped (learned benign)" if damped else reason,
+                breach=breach_name, breach_area=breach_area, zones=[start],
+                max_depth=depth, decision_id=record_id)
         except Exception:
-            pass
+            pass   # bookkeeping only; the investigation stands either way
         if damped:
-            _LOGGER.info("intrusion: initial alert damped for learned-benign "
-                         "pattern at %s (still investigating)", breach_area)
+            _LOGGER.info("intrusion: initial alert damped for learned-benign pattern "
+                         "at %s (still investigating)", breach_area)
             return None
-        action = {
-            "type": "intrusion_investigating", "urgency": "high",
-            "message": msg, "auto_act": True, "entity_id": eid,
-        }
-        # Residents home, armed home or night, or asleep: the first alert goes
-        # to phones only, not the speakers. Away cases and the confirmed alert
-        # are unchanged.
+        action = {"type": "intrusion_investigating", "urgency": "high",
+                  "message": message, "auto_act": True, "entity_id": eid}
+        # Residents home and armed for it, or asleep: the first alert goes to
+        # the phones only. The away case and the confirmed alert are spoken.
         if self._residents_home_guard(trigger == "sleeping"):
             action["phone_only"] = True
         return action
 
-    async def _face_stand_down(self, trigger: str, where: str) -> bool:
-        """Opt in (face_stand_down): True when a recognised household resident
-        should stop a NEW intrusion investigation from opening. Called only
-        where an investigation would be opened; it can never end one that is
-        already open, and nothing else (critical alerts, lockdown, freeze, the
-        mute rules) reads it. The rules are in face_roster.evaluate_stand_down.
-        Every stand down is written to the Action Audit Log first; if that
-        write fails, or anything else goes wrong, the alert goes ahead."""
+    def _first_alert_text(self, trigger: str, breach_name: Optional[str], armed: bool,
+                          honorific: str, where: str) -> str:
+        i18n = _notify_i18n()
+        lang = _m_common._hass_lang(self.hass)
+        if breach_name:
+            context = i18n.message("intrusion_ctx_open", lang, name=breach_name)
+        elif armed:
+            context = i18n.message("intrusion_ctx_armed", lang)
+        else:
+            context = ""
+        key = {"away": "intrusion_alert",
+               "confined": "intrusion_alert_confined"}.get(trigger, "intrusion_alert_sleep")
+        return i18n.message(key, lang, honorific=_persona().capitalise(honorific),
+                            where=where, ctx=context)
+
+    def _record_first_decision(self, trigger, eid, message, where, breach_name, armed,
+                               presence, reason):
+        """Write the decision record for a new investigation, in the shared
+        safety format, and return its id (None on failure). Written here
+        rather than at delivery, so a damped alert is recorded too and a call
+        off attaches to it."""
         try:
-            from . import safety_config as _sc
-            if not _sc.face_stand_down_enabled(self.config):
+            from . import alert_path
+            situation = alert_path.situation(self.hass, self.config,
+                                             sleeping=trigger == "sleeping",
+                                             house=self._household())
+            record_id = alert_path.record_decision(
+                "intrusion", source="intrusion", entity_id=eid, message=message,
+                sit=situation,
+                facts={"location": where, "breach": breach_name, "alarm_armed": armed,
+                       "presence": presence, "trigger": trigger},
+                assessment="possible intrusion — investigating from the point of entry",
+                decision="raise initial intrusion alert and investigate silently",
+                reason=reason)
+        except Exception:
+            return None
+        _best_effort(lambda: _intrusion().set_last_decision_id(record_id))
+        return record_id
+
+    async def _face_stand_down(self, trigger: str, where: str) -> bool:
+        """Opt in (face_stand_down): True when a recognised resident should
+        stop a new investigation from opening. Asked only where one would
+        open; it never ends one already open, and nothing else (critical
+        alerts, lockdown, freeze, the mute rules) reads it. The rules are
+        face_roster.evaluate_stand_down. Every stand down is written to the
+        action log first; if that fails, or anything else goes wrong, the
+        alert goes ahead."""
+        try:
+            from . import safety_config
+            if not safety_config.face_stand_down_enabled(self.config):
                 return False
             from . import action_log, face_roster
             decision = face_roster.evaluate_stand_down()
             if decision.get("stand_down") is not True:
                 return False
-            who, cam = decision["name"], decision["camera_entity"]
             reason = (f"{decision['reason']}. No {trigger} intrusion investigation "
                       f"was opened for motion at {where}. Opt in setting face_stand_down.")
-            row_id = await self.hass.async_add_executor_job(
+            logged = await self.hass.async_add_executor_job(
                 lambda: action_log.start(
                     action_log.new_request_id(), "intrusion_face_stand_down", "safety",
-                    requested_by_name=who, entity_id=cam,
-                    execution_result="accepted",
-                    reason_code="face_stand_down", reason_text=reason[:500])
-            )
-            if row_id is None:
+                    requested_by_name=decision["name"], entity_id=decision["camera_entity"],
+                    execution_result="accepted", reason_code="face_stand_down",
+                    reason_text=reason[:500]))
+            if logged is None:
                 _LOGGER.warning("intrusion: face stand down not recorded in the "
                                 "action log, so the alert goes ahead")
                 return False
@@ -602,484 +627,332 @@ class SafetyManager:
             return False
 
     async def _check_intrusion(self, anyone_home: bool, sleeping: bool,
-                                confined: bool = False) -> Optional[dict]:
-        """Detect unauthorized entry when away or asleep. Fires ONE alert, then
-        investigates silently until it's a confirmed intrusion (escalated to the
-        whole house + every device) or confirmed benign."""
+                               confined: bool = False) -> Optional[dict]:
+        """Spot an entry while away, asleep or confined. One alert goes out,
+        then the investigation continues silently until it is confirmed (the
+        whole house and every device are alerted) or found harmless."""
         now = time.time()
         away = self._residents_away()
-
-        # A recent user "false alarm" call-off suppresses new intrusion alerts.
-        try:
-            from . import intrusion as _intr
-            if _intr.is_called_off():
-                return None
-        except Exception:
-            pass
-
-        # Mid-investigation: keep watching, escalate at most once, stay quiet
-        # otherwise. This is what stops the stream of repeat "motion" alerts.
+        # A recent "it's a false alarm" holds off new alerts.
+        if _best_effort(lambda: _intrusion().is_called_off(), False):
+            return None
+        # During an investigation: keep watching, escalate once at most, and
+        # otherwise stay quiet. This is what stops repeated motion alerts.
         if self._investigation is not None:
             return await self._investigate_step(now, away, sleeping)
-
-        if (now - self._last_intrusion_alert) < 300:
+        if now - self._last_intrusion_alert < _REPEAT_ALERT_GAP:
             return None
-
         motion = self._qualifying_motion(sleeping)
         if not motion:
             return None
         eid, where = motion[0]
-        honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
+        honorific = _m_common._live_honorific(self.hass)
+        corroborate = self.config.get("intrusion_require_corroboration", True)
 
         if away:
-            armed = False
-            entry = None
-            if self.config.get("intrusion_require_corroboration", True):
-                armed = self._alarm_armed()
+            armed, entry = False, None
+            if corroborate:
+                armed, entry = self._alarm_armed(), self._open_entry()
+                if not (armed or entry):
+                    return None
+            plan = ("away", "away", entry, armed,
+                    "motion while away with corroborating breach (open entry or armed alarm)")
+        elif confined and not sleeping:
+            # Home, awake and confined (armed home or night, or a lockdown).
+            # Moving about is normal, so being armed is not corroboration: it
+            # takes an open way in, or an alarm armed away or on vacation.
+            armed, entry = self._alarm_armed_away(), None
+            if corroborate:
                 entry = self._open_entry()
                 if not (armed or entry):
                     return None
-            breach_name = self._friendly(entry) if entry else None
-            if await self._face_stand_down("away", where):
-                return None
-            self._last_intrusion_alert = now
-            return self._begin_investigation(
-                now=now, trigger="away", presence="away",
-                breach=entry, breach_name=breach_name, armed=armed,
-                eid=eid, where=where, honorific=honorific,
-                reason="motion while away with corroborating breach (open entry or armed alarm)",
-            )
-
-        if confined and not sleeping:
-            # Confined while residents are home and awake (armed home or night,
-            # or a lockdown). Movement is normal here, so the armed state alone
-            # is not corroboration: it takes an open entry, or an alarm armed
-            # away or on vacation.
-            armed = self._alarm_armed_away()
-            entry = None
-            if self.config.get("intrusion_require_corroboration", True):
-                entry = self._open_entry()
-                if not (armed or entry):
-                    return None
-            if await self._face_stand_down("confined", where):
-                return None
-            self._last_intrusion_alert = now
-            return self._begin_investigation(
-                now=now, trigger="confined", presence="home",
-                breach=entry, breach_name=self._friendly(entry) if entry else None,
-                armed=armed, eid=eid, where=where, honorific=honorific,
-                reason="motion while confined with a corroborating breach",
-            )
-
-        if sleeping:
-            # Require an actual breach — a ground-floor exterior door/window
-            # actually open — before alerting at all (v7.86.0). Plain
-            # movement in a sleeping household (someone up for water, the
-            # loo, a pet) is normal and produces zero notifications; only a
-            # real entry point being open starts the same silent, room-by-room
-            # investigation the away-branch already uses.
-            entry, _ = self._ground_floor_open_entry()
+            plan = ("confined", "home", entry, armed,
+                    "motion while confined with a corroborating breach")
+        elif sleeping:
+            # Asleep, it takes a real way in: an outside door or window on
+            # the ground floor actually open. Someone up for water, or a pet,
+            # makes no alert at all.
+            entry, _configured = self._ground_floor_open_entry()
             if not entry:
                 return None
-            breach_name = self._friendly(entry)
-            if await self._face_stand_down("sleeping", where):
-                return None
-            self._last_intrusion_alert = now
-            return self._begin_investigation(
-                now=now, trigger="sleeping", presence="asleep",
-                breach=entry, breach_name=breach_name, armed=False,
-                eid=eid, where=where, honorific=honorific,
-                reason="motion while asleep with a corroborating ground-floor breach",
-            )
+            plan = ("sleeping", "asleep", entry, False,
+                    "motion while asleep with a corroborating ground-floor breach")
+        else:
+            return None
 
-        return None
+        trigger, presence, entry, armed, reason = plan
+        breach_name = self._friendly(entry) if entry else None
+        if await self._face_stand_down(trigger, where):
+            return None
+        self._last_intrusion_alert = now
+        return self._begin_investigation(
+            now=now, trigger=trigger, presence=presence, breach=entry,
+            breach_name=breach_name, armed=armed, eid=eid, where=where,
+            honorific=honorific, reason=reason)
 
     async def _confirm_person_with_vision(self, cam_entity: str) -> Optional[bool]:
-        """Second opinion on Frigate's person detection (v6.73.0). Frigate's
-        person sensor is a good TRIGGER but false-positives (shadows, headlights,
-        reflections, pets), so before escalating to a full intrusion we snapshot
-        the camera and ask Nova's OWN vision model whether a person is actually
-        there. Returns:
-          True  — vision confirms a person (escalate)
-          False — vision says no person (Frigate false-positive; don't escalate)
-          None  — vision couldn't run/was inconclusive (fall back to prior
-                  behavior, so a broken vision path never SUPPRESSES a real alert)
-        """
+        """A second opinion on a camera's person detection. Frigate's person
+        sensor is a good trigger but is fooled by shadows, headlights,
+        reflections and pets, so before escalating Nova's own vision model
+        looks at a frame. True: a person is there. False: nobody (a false
+        detection). None: it could not tell or could not run, and the old
+        behaviour stands, so a broken vision path never hides a real alert."""
         if not cam_entity or not str(cam_entity).startswith("camera."):
             return None
-        # Respect a config kill-switch: some users may want Frigate-only.
         if not self.config.get("intrusion_vision_confirm", True):
-            return None
+            return None   # switched off: camera detection alone
         try:
-            from .camera import async_analyze_camera, _FakeCall
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            prompt = (
-                "Security check. Look at this indoor camera frame. Is there a "
-                "PERSON (a human being) actually present in the frame right now? "
-                "Answer strictly: reply 'PERSON: YES' if a real person is clearly "
-                "visible, or 'PERSON: NO' if there is no person (e.g. it is an "
-                "empty room, a shadow, a light, a reflection, a pet, or an "
-                "object). Do not guess — if you cannot clearly see a person, "
-                "answer NO."
-            )
-            # A yes/no probe, not a scene description: keep it out of scene
-            # memory, or "PERSON: NO" would be stored as a person sighting.
-            fc = _FakeCall({"entity_id": cam_entity, "prompt": prompt,
-                            "announce": False, "record_scene": False})
-            groq_client = getattr(self, "groq_client", None) or getattr(self, "_groq", None)
-            res = await async_analyze_camera(
-                self.hass, fc, groq_client, honorific, None, [], gate_announce=True)
+            from .camera import _FakeCall, async_analyze_camera
+            honorific = _m_common._live_honorific(self.hass)
+            # A yes or no question, not a scene description: kept out of scene
+            # memory, or "PERSON: NO" would be stored as a sighting.
+            call = _FakeCall({"entity_id": cam_entity, "prompt": _VISION_PROMPT,
+                              "announce": False, "record_scene": False})
+            client = getattr(self, "groq_client", None) or getattr(self, "_groq", None)
+            result = await async_analyze_camera(self.hass, call, client, honorific, None, [],
+                                                gate_announce=True)
             text = ""
-            if isinstance(res, dict):
-                text = (res.get("analysis") or res.get("description")
-                        or res.get("message") or "")
+            if isinstance(result, dict):
+                text = (result.get("analysis") or result.get("description")
+                        or result.get("message") or "")
             text = str(text).lower()
-            if not text:
-                return None                       # inconclusive → fall back
-            # explicit signal first
-            if "person: yes" in text:
-                return True
-            if "person: no" in text:
-                return False
-            # heuristic fallback on the free text
-            neg = any(p in text for p in (
-                "no person", "not a person", "no one", "nobody", "empty",
-                "no people", "there is no", "cannot see a person",
-                "don't see a person", "no human"))
-            pos = any(p in text for p in (
-                "a person", "person is", "someone is", "an intruder",
-                "a man", "a woman", "a human", "people are"))
-            if neg and not pos:
-                return False
-            if pos and not neg:
-                return True
-            return None                           # ambiguous → fall back
+            return _vision_verdict(text) if text else None
         except Exception as exc:
             _LOGGER.debug("intrusion: vision confirm failed: %s", exc)
-            return None                           # never suppress on error
-
-    async def _investigate_step(self, now: float, away: bool,
-                                sleeping: bool) -> Optional[dict]:
-        """One tick of an active investigation: confirm, clear, or keep watching
-        silently. Escalates only when activity forms a coherent route from the
-        breach point (or a camera confirms a person). Motion unrelated to the
-        entry is watched, not concluded — that discernment avoids false alarms.
-        Returns an escalation action only on confirmation (once)."""
-        inv = self._investigation
-
-        # Stand down once the situation that started this investigation no
-        # longer holds: residents came home (away-triggered), or the
-        # household woke up (sleeping-triggered, v7.86.0). Older investigation
-        # dicts have no "trigger" key — default to "away" so pre-existing
-        # away-branch behaviour is unchanged.
-        trigger = inv.get("trigger", "away")
-        if trigger == "confined":
-            # tick() already drops the investigation when confinement ends.
-            situation_active = True
-        else:
-            situation_active = away if trigger == "away" else sleeping
-        if not situation_active:
-            self._investigation = None
             return None
 
+    # ── intrusion: one step of an open investigation ────────────────────────
+
+    async def _investigate_step(self, now: float, away: bool, sleeping: bool) -> Optional[dict]:
+        """One tick of an open investigation: confirm, clear, or keep watching
+        quietly. It escalates only when activity forms a route inward from the
+        way in, or a camera confirms a person; motion unrelated to the entry is
+        watched, not concluded. Returns an alert only when it escalates."""
+        inv = self._investigation
+        # Stand down once the situation that opened it is over: the residents
+        # came home (away), or the house woke (sleeping). Old investigations
+        # have no trigger and count as away. Confinement ending is handled by
+        # the tick, which drops the investigation.
+        trigger = inv.get("trigger", "away")
+        if trigger != "confined" and not (away if trigger == "away" else sleeping):
+            self._investigation = None
+            return None
+        active = self._follow_motion(inv, now, sleeping)
+        camera = self._camera_for(inv)
+        confirmed, reason, vision = await self._judge(inv, active, now, camera, sleeping)
+        # "It's a false alarm": stand down, never escalate.
+        if _best_effort(lambda: _intrusion().is_called_off(), False):
+            self._investigation = None
+            return None
+        quiet_for = now - inv["last_motion"]
+        soft_done = inv.get("soft_notice", False)
+        if not inv["escalated"] and confirmed:
+            return await self._escalate(inv, reason, camera)
+        if not inv["escalated"] and not soft_done and self._went_unanswered(inv, now, quiet_for):
+            return await self._soft_notice(inv, camera, self._residents_home_guard(sleeping))
+        self._maybe_close(inv, now, quiet_for, soft_done)
+        return None
+
+    def _follow_motion(self, inv: dict, now: float, sleeping: bool) -> set:
+        """Add the zones moving now to the investigation's route, and note how
+        far inward from the way in motion has reached. A real intruder moves
+        from the entry to rooms further in; motion lingering at the entry
+        never raises the depth."""
         active = {self._motion_key(eid) for eid, _ in self._qualifying_motion(sleeping)}
-        if active:
-            inv["last_motion"] = now
-            for z in active:
-                if z not in inv["zones"]:
-                    inv["path"].append(z)         # record the route, in order
-            inv["zones"] |= active
-            # Track how far INWARD from the breach motion has reached. A real
-            # intruder's motion propagates entry → deeper rooms; motion that just
-            # lingers at the entry never increases this. (v6.74.0)
-            hops = inv.get("hops") or {}
-            if hops:
-                for z in active:
-                    d = hops.get(z)
-                    if d is not None and d > inv.get("max_depth", 0):
-                        inv["max_depth"] = d
-
-        spread_needed = self.config.get("intrusion_spread_zones", INTRUSION_SPREAD_ZONES)
-        connected = inv.get("connected") or set()
-        near_breach = bool(inv["zones"] & connected)
-        spread = len(inv["zones"]) >= spread_needed
-        sustained = bool(active) and (now - inv["start"]) >= INTRUSION_SUSTAINED_SECS
-
-        # Directional inward progression (v6.74.0): a real intruder enters at the
-        # breach and moves INWARD to progressively deeper rooms. Motion that
-        # merely lingers at/near the entry (an AC unit in the open window, a
-        # curtain) never propagates inward, so it must NOT confirm. We require
-        # motion to have reached a configurable depth of rooms FROM the breach.
-        try:
-            need_depth = int(self.config.get("intrusion_inward_depth",
-                                             INTRUSION_INWARD_DEPTH))
-        except (ValueError, TypeError):
-            need_depth = INTRUSION_INWARD_DEPTH
+        if not active:
+            return active
+        inv["last_motion"] = now
+        for zone in active:
+            if zone not in inv["zones"]:
+                inv["path"].append(zone)
+        inv["zones"] |= active
         hops = inv.get("hops") or {}
-        max_depth = inv.get("max_depth", 0)
-        # inward progression only means something if we have a room-depth map;
-        # when we do, require reaching need_depth rooms in. When we don't (no
-        # floor plan), fall back to the old spread+near_breach heuristic so a
-        # user without a mapped house still gets protection.
-        if hops:
-            inward = max_depth >= need_depth
-        else:
-            inward = spread and near_breach
+        for zone in active:
+            depth = hops.get(zone)
+            if depth is not None and depth > inv.get("max_depth", 0):
+                inv["max_depth"] = depth
+        return active
 
-        # Prefer a camera whose saved coverage actually sees the breach area — lets
-        # Nova confirm a person via a camera in an adjacent room with a sightline
-        # (e.g. the dining camera seeing the living room through the open staircase),
-        # not only a camera physically in that room (v7.20.0).
-        cam_entity = None
+    def _camera_for(self, inv: dict) -> Optional[str]:
+        """The camera to judge with: preferably one whose saved coverage sees
+        the breach area (a camera next door with a sightline counts), else
+        any indoor camera seeing a person now."""
+        camera = None
         try:
-            _ba = inv.get("breach_area") if isinstance(inv, dict) else None
-            if _ba:
-                from . import camera_coverage as _cc
-                cam_entity = _cc.camera_for_area(self.hass, _ba)
+            breach_area = inv.get("breach_area") if isinstance(inv, dict) else None
+            if breach_area:
+                from . import camera_coverage
+                camera = camera_coverage.camera_for_area(self.hass, breach_area)
         except Exception:
-            cam_entity = None
-        if not cam_entity:
-            cam_entity = self._person_camera_entity()
-        camera = cam_entity is not None
-        vision = None
-        quiet_house = "" if not self._residents_away() else " while no one is home"
+            camera = None
+        return camera or self._person_camera_entity()
 
-        if camera:
-            # Frigate flagged a person — but Frigate false-positives, so get a
-            # second opinion from Nova's OWN vision before escalating (v6.73.0).
-            vision = await self._confirm_person_with_vision(cam_entity)
+    async def _judge(self, inv: dict, active: set, now: float, camera: Optional[str],
+                     sleeping: bool) -> tuple:
+        """(confirmed, reason, vision verdict) for this step."""
+        spread = len(inv["zones"]) >= self.config.get("intrusion_spread_zones",
+                                                        INTRUSION_SPREAD_ZONES)
+        sustained = bool(active) and now - inv["start"] >= INTRUSION_SUSTAINED_SECS
+        # Inward progress: motion must reach a set number of rooms in from the
+        # way in. An air conditioner in an open window, or a curtain, never
+        # gets there. Without a room map, fall back to spread near the breach,
+        # so a house with no floor plan is still protected.
+        need = _setting(self.config, "intrusion_inward_depth", INTRUSION_INWARD_DEPTH, int)
+        if inv.get("hops") or {}:
+            inward = inv.get("max_depth", 0) >= need
+        else:
+            inward = spread and bool(inv["zones"] & (inv.get("connected") or set()))
+        while_out = " while no one is home" if self._residents_away() else ""
+        route = (inward, "someone is moving inward through the house from the point of entry")
+        movement = (spread and sustained, f"sustained movement through the house{while_out}")
+        fallback = route if inv.get("breach_area") else movement
+
+        vision = None
+        if camera is not None:
+            # A camera saw a person, but cameras are fooled, so Nova's own
+            # vision looks first.
+            vision = await self._confirm_person_with_vision(camera)
             if vision is True:
                 confirmed, reason = True, "a person is on camera (confirmed by vision)"
             elif vision is False:
-                # Frigate said person, Nova's eyes say no → false positive.
-                # Do NOT escalate on the camera signal; require a real inward
-                # route through the house instead (v6.74.0).
+                # The camera said person, vision says nobody: a false
+                # detection, so a real route through the house is needed.
                 _LOGGER.info("intrusion: Frigate person on %s NOT confirmed by "
-                             "vision — requiring inward motion route", cam_entity)
-                if inv.get("breach_area"):
-                    confirmed = inward
-                    reason = ("someone is moving inward through the house from "
-                              "the point of entry")
-                else:
-                    confirmed = spread and sustained
-                    reason = f"sustained movement through the house{quiet_house}"
+                             "vision — requiring inward motion route", camera)
+                confirmed, reason = fallback
             else:
-                # Vision inconclusive/unavailable → fall back to prior behavior
-                # (trust the camera) so a broken vision path never suppresses a
-                # real alert. Fail toward safety.
+                # Vision could not tell: trust the camera, so a broken vision
+                # path never hides a real alert.
                 confirmed, reason = True, "a person is on camera"
-        elif inv.get("breach_area"):
-            # Entry point known: require motion to have travelled INWARD from the
-            # breach (a genuine intrusion route), not merely lingered near it.
-            confirmed = inward
-            reason = ("someone is moving inward through the house from the "
-                      "point of entry")
         else:
-            # No location on the breach — be conservative: sustained multi-room
-            # movement, not a momentary blip.
-            confirmed = spread and sustained
-            reason = f"sustained movement through the house{quiet_house}"
+            # A known way in needs a route inward; with none, sustained motion
+            # across several rooms rather than a passing blip.
+            confirmed, reason = fallback
 
-        # Residents home, armed home or night, or asleep (9 Oct 2026): a
-        # resident walking from room to room is exactly what an inward route
-        # looks like, so that alone never confirms. It takes the alarm itself
-        # going off, or a person on camera that vision confirms; an
-        # inconclusive vision check does not count here.
+        # Residents home and armed for it, or asleep: a resident walking room
+        # to room is exactly what a route inward looks like, so that alone
+        # never confirms. It takes the alarm going off, or a person vision has
+        # confirmed; an unsure vision check does not count here.
         guard = self._residents_home_guard(sleeping)
         if confirmed and guard and vision is not True:
             confirmed = False
         if not confirmed and guard and self._alarm_triggered():
             confirmed, reason = True, "the alarm has gone off while residents are home"
+        return confirmed, reason, vision
 
-        # User called it off as a false alarm → stand down, don't escalate.
+    def _went_unanswered(self, inv: dict, now: float, quiet_for: float) -> bool:
+        """The first alert went unanswered (neither acknowledged nor called
+        off) for the response window while something is still moving. Motion
+        that has stopped still clears as harmless instead; only an ongoing
+        situation fails toward alerting. An acknowledgement holds it."""
+        acknowledged = _best_effort(lambda: _intrusion().is_acknowledged(), False)
+        window = _setting(self.config, "intrusion_response_timeout",
+                          INTRUSION_RESPONSE_TIMEOUT_SECS, float)
+        return (not acknowledged and quiet_for < INTRUSION_CLEAR_QUIET_SECS
+                and now - inv["start"] >= window)
+
+    async def _snapshot(self, camera: Optional[str]):
+        if not camera:
+            return None
         try:
-            from . import intrusion as _intr
-            if _intr.is_called_off():
-                self._investigation = None
-                return None
+            return await _intrusion().capture_snapshot(self.hass, camera)
         except Exception:
-            pass
+            return None
 
-        elapsed = now - inv["start"]
+    async def _attach_snapshot(self, action: dict, snap) -> Optional[str]:
+        """Put a snapshot on an alert; returns the notification image url."""
+        if not snap:
+            return None
+        try:
+            url = await _intrusion().get_notification_image_url(self.hass, snap.get("path"))
+        except Exception:
+            url = None
+        action["snapshot_url"] = url
+        action["snapshot_path"] = snap.get("path")
+        action["camera"] = snap.get("camera")
+        return url
 
-        # Response-timeout escalation (v6.69.0): the initial "investigating"
-        # alert went out to notifications + voice. If the user hasn't responded
-        # (neither acknowledged nor called it off) within the response window,
-        # the situation is STILL ACTIVE (motion hasn't gone quiet), and it hasn't
-        # otherwise cleared, escalate anyway — an unanswered *ongoing* possible
-        # break-in fails toward alerting. Motion that started and then stopped
-        # still clears as benign below (a curtain flutter shouldn't escalate just
-        # because no one answered); the timeout only bites while something is
-        # actively still happening. An acknowledgement ("I'm looking") holds it;
-        # a false-alarm call-off (handled above) stops it entirely.
-        quiet_for = now - inv["last_motion"]
-        timed_out = False
-        # The soft notice is tracked on its own ("soft_notice") so it can never
-        # use up the critical alert: "escalated" means the critical alert has
-        # gone out, "soft_notice" means the soft one has been dealt with.
-        soft_done = inv.get("soft_notice", False)
-        if not inv["escalated"] and not soft_done and not confirmed:
-            try:
-                from . import intrusion as _intr
-                acknowledged = _intr.is_acknowledged()
-            except Exception:
-                acknowledged = False
-            try:
-                resp_timeout = float(self.config.get(
-                    "intrusion_response_timeout", INTRUSION_RESPONSE_TIMEOUT_SECS))
-            except (ValueError, TypeError):
-                resp_timeout = INTRUSION_RESPONSE_TIMEOUT_SECS
-            still_active = quiet_for < INTRUSION_CLEAR_QUIET_SECS
-            if not acknowledged and still_active and elapsed >= resp_timeout:
-                timed_out = True
+    def _announce_event(self, name: str, reason: str, url, snap) -> None:
+        snap = snap or {}
+        _best_effort(lambda: self.hass.bus.async_fire(name, {
+            "reason": reason, "snapshot_url": url,
+            "snapshot_path": snap.get("path"), "camera": snap.get("camera")}))
 
-        # A confirmed intrusion (real inward route, or a person confirmed on
-        # camera) fires the full critical alarm. A timeout WITHOUT that evidence
-        # no longer masquerades as a confirmed intrusion — instead it sends a
-        # softer "couldn't reach you, please check" notice. This is the fix for
-        # false "intrusion confirmed" alerts firing on unanswered lingering
-        # motion with no real route through the house (v6.74.0).
-        if not inv["escalated"] and confirmed:
-            inv["escalated"] = True
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            snap = None
-            if cam_entity:
-                try:
-                    from . import intrusion as _intr
-                    snap = await _intr.capture_snapshot(self.hass, cam_entity)
-                except Exception:
-                    snap = None
-            snap_note = " A snapshot is available." if snap else ""
-            msg = _persona().lead_in(honorific,
-                   f"intrusion confirmed — {reason}.{snap_note} "
-                   f"Alerting the house and every device. Say 'it's a false alarm' "
-                   f"to call it off.")
-            action = {
-                "type": "intrusion_confirmed", "urgency": "critical",
-                "message": msg, "auto_act": True, "notify_all": True,
-                "can_dismiss": True,
-            }
-            notify_url = None
-            if snap:
-                try:
-                    from . import intrusion as _intr
-                    notify_url = await _intr.get_notification_image_url(
-                        self.hass, snap.get("path"))
-                except Exception:
-                    notify_url = None
-                action["snapshot_url"] = notify_url
-                action["snapshot_path"] = snap.get("path")
-                action["camera"] = snap.get("camera")
-            try:
-                self.hass.bus.async_fire("nova_intrusion_confirmed", {
-                    "reason": reason,
-                    "snapshot_url": notify_url,
-                    "snapshot_path": (snap or {}).get("path"),
-                    "camera": (snap or {}).get("camera"),
-                })
-            except Exception:
-                pass
-            # Log it for review/labeling. A CONFIRMED intrusion is never damped
-            # by learning — it always alerts (v6.76.0).
-            try:
-                from . import intrusion as _intr
-                _intr.record_event(
-                    "confirmed", reason=reason,
-                    breach=inv.get("breach_name"), breach_area=inv.get("breach_area"),
-                    camera=cam_entity, snapshot=snap,
-                    zones=sorted(inv.get("zones") or []),
-                    max_depth=inv.get("max_depth"))
-            except Exception:
-                pass
-            return action
+    def _log_outcome(self, kind: str, reason: str, inv: dict, camera, snap) -> None:
+        _best_effort(lambda: _intrusion().record_event(
+            kind, reason=reason, breach=inv.get("breach_name"),
+            breach_area=inv.get("breach_area"), camera=camera, snapshot=snap,
+            zones=sorted(inv.get("zones") or []), max_depth=inv.get("max_depth")))
 
-        if not inv["escalated"] and not soft_done and timed_out:
-            # Unanswered, still some motion, but NO confirming inward route.
-            # Don't cry "intrusion confirmed" — send a soft check-in instead.
-            # Only the soft notice is marked done here, so a route or a person
-            # confirmed later still raises the critical alert, once.
-            inv["soft_notice"] = True          # don't repeat this either
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            # Learned damping applies here too: this is a LOW-CONFIDENCE alert
-            # (nothing was confirmed), so a pattern repeatedly labelled a false
-            # alarm stays quiet (v6.76.0).
-            damped_soft = False
-            try:
-                from . import intrusion as _intr
-                damped_soft = _intr.should_damp_weak_alert(
-                    inv.get("breach_area"), cam_entity)
-            except Exception:
-                damped_soft = False
-            snap = None
-            if cam_entity:
-                try:
-                    from . import intrusion as _intr
-                    snap = await _intr.capture_snapshot(self.hass, cam_entity)
-                except Exception:
-                    snap = None
-            try:
-                from . import intrusion as _intr
-                _intr.record_event(
-                    "unresolved",
-                    reason=("damped (learned benign)" if damped_soft
-                            else "no response; unconfirmed activity"),
-                    breach=inv.get("breach_name"), breach_area=inv.get("breach_area"),
-                    camera=cam_entity, snapshot=snap,
-                    zones=sorted(inv.get("zones") or []),
-                    max_depth=inv.get("max_depth"))
-            except Exception:
-                pass
-            if damped_soft:
-                _LOGGER.info("intrusion: unresolved alert damped for "
-                             "learned-benign pattern at %s", inv.get("breach_area"))
-                return None
-            snap_note = " A snapshot is available." if snap else ""
-            where = inv.get("breach_name") or "the point of entry"
-            msg = _persona().lead_in(honorific,
-                   f"I flagged possible activity near {where} "
-                   f"and couldn't reach you, but I have not confirmed anyone moving "
-                   f"through the house.{snap_note} Please check when you can — say "
-                   f"'it's a false alarm' to clear it.")
-            action = {
-                "type": "intrusion_unresolved", "urgency": "high",
-                "message": msg, "auto_act": True, "notify_all": True,
-                "can_dismiss": True,
-            }
-            # Residents home, as for the first alert: phones only (8.21.0).
-            if guard:
-                action["phone_only"] = True
-            notify_url = None
-            if snap:
-                try:
-                    from . import intrusion as _intr
-                    notify_url = await _intr.get_notification_image_url(
-                        self.hass, snap.get("path"))
-                except Exception:
-                    notify_url = None
-                action["snapshot_url"] = notify_url
-                action["snapshot_path"] = snap.get("path")
-                action["camera"] = snap.get("camera")
-            try:
-                self.hass.bus.async_fire("nova_intrusion_unresolved", {
-                    "reason": "no response; unconfirmed activity",
-                    "snapshot_url": notify_url,
-                    "snapshot_path": (snap or {}).get("path"),
-                    "camera": (snap or {}).get("camera"),
-                })
-            except Exception:
-                pass
-            return action
+    async def _escalate(self, inv: dict, reason: str, camera: Optional[str]) -> dict:
+        """The confirmed alarm, to the whole house and every device, once. A
+        confirmed intrusion is never damped by learning."""
+        inv["escalated"] = True
+        honorific = _m_common._live_honorific(self.hass)
+        snap = await self._snapshot(camera)
+        note = " A snapshot is available." if snap else ""
+        action = {
+            "type": "intrusion_confirmed", "urgency": "critical",
+            "message": _persona().lead_in(
+                honorific, f"intrusion confirmed — {reason}.{note} Alerting the house "
+                           f"and every device. Say 'it's a false alarm' to call it off."),
+            "auto_act": True, "notify_all": True, "can_dismiss": True,
+        }
+        url = await self._attach_snapshot(action, snap)
+        self._announce_event("nova_intrusion_confirmed", reason, url, snap)
+        self._log_outcome("confirmed", reason, inv, camera, snap)
+        return action
 
-        if not inv["escalated"] and not soft_done and (
-                quiet_for > INTRUSION_CLEAR_QUIET_SECS
-                or elapsed > INTRUSION_MAX_INVESTIGATE_SECS):
-            self._investigation = None            # nothing of note
-        elif (inv["escalated"] or soft_done) and quiet_for > INTRUSION_CLEAR_QUIET_SECS:
-            self._investigation = None            # situation settled
-        return None
+    async def _soft_notice(self, inv: dict, camera: Optional[str], guard: bool) -> Optional[dict]:
+        """Unanswered, something still moving, but no confirmed route: rather
+        than claim "intrusion confirmed", a softer "please check". Only the
+        soft notice is marked done, so a route or a person confirmed later
+        still raises the critical alert, once. It is a weak alert, so a place
+        and time learned to be harmless stays quiet."""
+        inv["soft_notice"] = True
+        honorific = _m_common._live_honorific(self.hass)
+        damped = _best_effort(
+            lambda: _intrusion().should_damp_weak_alert(inv.get("breach_area"), camera), False)
+        snap = await self._snapshot(camera)
+        why = "no response; unconfirmed activity"
+        self._log_outcome("unresolved", "damped (learned benign)" if damped else why,
+                          inv, camera, snap)
+        if damped:
+            _LOGGER.info("intrusion: unresolved alert damped for "
+                         "learned-benign pattern at %s", inv.get("breach_area"))
+            return None
+        note = " A snapshot is available." if snap else ""
+        where = inv.get("breach_name") or "the point of entry"
+        action = {
+            "type": "intrusion_unresolved", "urgency": "high",
+            "message": _persona().lead_in(
+                honorific, f"I flagged possible activity near {where} and couldn't reach "
+                           f"you, but I have not confirmed anyone moving through the "
+                           f"house.{note} Please check when you can — say 'it's a false "
+                           f"alarm' to clear it."),
+            "auto_act": True, "notify_all": True, "can_dismiss": True,
+        }
+        if guard:
+            action["phone_only"] = True   # residents home: phones only, as at first
+        url = await self._attach_snapshot(action, snap)
+        self._announce_event("nova_intrusion_unresolved", why, url, snap)
+        return action
+
+    def _maybe_close(self, inv: dict, now: float, quiet_for: float, soft_done: bool) -> None:
+        """Close the investigation: harmless when nothing came of it and it
+        went quiet or ran too long; settled when an alert went out and it has
+        been quiet since."""
+        alerted = inv["escalated"] or soft_done
+        if not alerted and (quiet_for > INTRUSION_CLEAR_QUIET_SECS
+                            or now - inv["start"] > INTRUSION_MAX_INVESTIGATE_SECS):
+            self._investigation = None
+        elif alerted and quiet_for > INTRUSION_CLEAR_QUIET_SECS:
+            self._investigation = None
+
+    # ── the night sweep ─────────────────────────────────────────────────────
 
     async def _sweep_and_report(self, automatic_generation: int) -> None:
-        """Run the night sweep and deliver its message as a sleeping-house
+        """Run the night sweep and deliver what it says as a sleeping house's
         alert (phones only below critical). Never raises."""
         try:
             from .core_bridge import _emit_action
@@ -1089,273 +962,226 @@ class SafetyManager:
             _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
 
     def _sweep_memory(self, now: float) -> dict:
-        """Tonight's sweep memory, started afresh at the first sweep of a new
-        night. A night runs noon to noon, so one night's sleep is one night."""
-        import datetime as _dt
-        night = _dt.datetime.fromtimestamp(now - 12 * 3600).date().toordinal()
+        """Tonight's sweep memory, started afresh at a new night's first
+        sweep. A night runs noon to noon, so one night's sleep is one night."""
+        night = datetime.datetime.fromtimestamp(now - 12 * 3600).date().toordinal()
         if self._sweep_night.get("night") != night:
-            self._sweep_night = {"night": night, "secured": set(),
-                                 "left_alone": {}, "commands": []}
+            self._sweep_night = {"night": night, "secured": set(), "left_alone": {},
+                                 "commands": []}
         return self._sweep_night
 
     async def _nighttime_lockdown(self, automatic_generation: int) -> list[dict]:
-        """Check and secure all locks and doors during sleep.
+        """Lock what is unlocked and close what is open while the house
+        sleeps, then check it took.
 
-        Nova does not fight a person at the door (8.7.20), and since 8.25.0
-        the sweep follows that rule too: a device the sweep could not secure,
-        or one opened again after it secured it, is left alone until morning
-        and named once. An hourly cap on commands is the backstop."""
-        actions = []
-        honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
+        Nova never fights a person at the door, and the sweep follows that
+        too: anything it could not secure, or that was opened again after it
+        secured it, is left alone until morning and named once. An hourly
+        cap on commands is the backstop. Returns the report, or [] when the
+        automatic lockdown was switched off part way."""
+        from . import action_log
+        from .core_lockdown import unlocked_locks
+        title = _persona().capitalise(_m_common._live_honorific(self.hass))
         now = time.time()
         memory = self._sweep_memory(now)
-        left_alone: dict = memory["left_alone"]
-
-        # Action Audit Log (top-level boundary: this sweep decides which
-        # entities need securing — it owns one request_id for every target
-        # it touches this run; nothing it calls creates its own row).
-        from . import action_log
-        from .core_lockdown import NotSecured, secure_device, unlocked_locks
         request_id = action_log.new_request_id()
-        # The locks are picked the same way as the formal lockdown (8.23.0).
-        # Every open cover is closed, whatever its class: unlike the formal
-        # lockdown, which closes only door, garage, window and gate covers.
-        # That difference is kept on purpose (see the 8.23.0 notes).
-        lock_targets = unlocked_locks(self.hass, _lockdown_exempt_locks())
-        cover_targets = [st for st in self.hass.states.async_all("cover")
-                         if st.state == "open"]
+        # Locks are chosen as the formal lockdown chooses them. Every open
+        # cover is closed whatever its class, unlike the formal lockdown,
+        # which closes only doors, garages, windows and gates; kept so on
+        # purpose.
+        locks = unlocked_locks(self.hass, _lockdown_exempt_locks())
+        covers = [s for s in self.hass.states.async_all("cover") if s.state == "open"]
+        locks, covers, reopened = self._tonights_targets(memory, locks, covers)
+        locks, covers = self._within_hourly_cap(memory, now, locks, covers)
+        planned = ([(s.entity_id, "lock", "lock") for s in locks]
+                   + [(s.entity_id, "cover", "close_cover") for s in covers])
+        rows = await self.hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                request_id, "lockdown", "safety_routine",
+                [{"key": eid, "domain": domain, "service": service, "entity_id": eid}
+                 for eid, domain, service in planned])) if planned else {}
 
-        # Tonight's memory (8.25.0). Something already left alone gets no
-        # command and no second alert. Something the sweep secured earlier
-        # tonight that is open or unlocked again was opened on purpose, so it
-        # is left alone too, and named once.
+        sweep = {"locked": [], "closed": [], "failed": [], "failed_eids": [], "sent": []}
+        for states, domain in ((locks, "lock"), (covers, "cover")):
+            if not await self._secure_all(states, domain, rows, sweep, automatic_generation):
+                return []
+        if not self._automatic_operation_current(automatic_generation):
+            return []
+        not_secured: list = []
+        if sweep["sent"]:
+            # After a short wait each lock must read locked and each cover
+            # closed; only those count as secured, so the message never says
+            # "secured" before checking.
+            await asyncio.sleep(self.sweep_verify_delay)
+            if not self._automatic_operation_current(automatic_generation):
+                return []
+            not_secured = await self._verify(sweep, memory)
+            sweep["failed"] = not_secured + sweep["failed"]
+        # One try a night: what did not take is left alone until morning, so
+        # it is never commanded or named again tonight.
+        for eid in sweep["failed_eids"]:
+            memory["left_alone"].setdefault(eid, "did not secure")
+        if planned or reopened:
+            await self._record_sweep(sweep, not_secured, reopened, request_id if planned else None)
+        return self._sweep_report(sweep, reopened, title)
+
+    @staticmethod
+    def _tonights_targets(memory: dict, locks: list, covers: list) -> tuple:
+        """Leave out what the sweep already left alone tonight. Something it
+        secured earlier tonight that is open or unlocked again was opened on
+        purpose: it is left alone too, and named once."""
+        left_alone = memory["left_alone"]
         reopened: list = []
-        def _keep(st) -> bool:
-            eid = st.entity_id
+
+        def keep(state) -> bool:
+            eid = state.entity_id
             if eid in left_alone:
                 return False
             if eid in memory["secured"]:
                 left_alone[eid] = "opened again after the sweep secured it"
-                reopened.append(st.attributes.get("friendly_name", eid))
+                reopened.append(state.attributes.get("friendly_name", eid))
                 return False
             return True
-        lock_targets = [st for st in lock_targets if _keep(st)]
-        cover_targets = [st for st in cover_targets if _keep(st)]
+        return [s for s in locks if keep(s)], [s for s in covers if keep(s)], reopened
 
-        # The hourly backstop: never more than SWEEP_MAX_COMMANDS_PER_HOUR
-        # commands in any hour. What is over the cap waits for a later sweep.
+    @staticmethod
+    def _within_hourly_cap(memory: dict, now: float, locks: list, covers: list) -> tuple:
+        """Trim to what the hourly command cap allows; the rest waits for a
+        later sweep. The commands about to be sent are counted."""
         memory["commands"] = [t for t in memory["commands"] if now - t < 3600]
         room = max(0, SWEEP_MAX_COMMANDS_PER_HOUR - len(memory["commands"]))
-        if len(lock_targets) + len(cover_targets) > room:
+        wanted = len(locks) + len(covers)
+        if wanted > room:
             _LOGGER.warning("Cognitive lockdown: hourly command cap reached; "
-                            "%d device(s) wait for a later sweep",
-                            len(lock_targets) + len(cover_targets) - room)
-            lock_targets = lock_targets[:room]
-            cover_targets = cover_targets[:max(0, room - len(lock_targets))]
-        memory["commands"].extend([now] * (len(lock_targets) + len(cover_targets)))
-        candidates: list[tuple[str, str, str]] = (  # (entity_id, domain, service)
-            [(st.entity_id, "lock", "lock") for st in lock_targets]
-            + [(st.entity_id, "cover", "close_cover") for st in cover_targets])
-        row_ids = await self.hass.async_add_executor_job(
-            lambda: action_log.start_many(
-                request_id, "lockdown", "safety_routine",
-                [{"key": eid, "domain": d, "service": s, "entity_id": eid}
-                 for eid, d, s in candidates],
-            )
-        ) if candidates else {}
+                            "%d device(s) wait for a later sweep", wanted - room)
+            locks = locks[:room]
+            covers = covers[:max(0, room - len(locks))]
+        memory["commands"].extend([now] * (len(locks) + len(covers)))
+        return locks, covers
 
-        # Check locks
-        unlocked = []
-        failed = []   # friendly names of anything the sweep could not secure
-        failed_eids: list = []   # and their entity ids, to leave alone until morning
-        sent: list = []   # (entity_id, name, domain, row_id) of every command sent
-        for state in lock_targets:
-            if not self._automatic_operation_current(automatic_generation):
-                return []
-            if state.state == "unlocked":
-                eid = state.entity_id
-                fname = state.attributes.get("friendly_name", eid)
-                row_id = row_ids.get(eid)
-                # Auto-lock
-                try:
-                    result = await secure_device(self.hass, eid, "lock")
-                    if not self._automatic_operation_current(automatic_generation):
-                        return []
-                    if result == "already_secure":
-                        # Secured since the list was made (8.46.0): nothing sent.
-                        await self.hass.async_add_executor_job(
-                            lambda rid=row_id: action_log.set_execution(
-                                rid, "blocked", reason_code="already_secure"))
-                        continue
-                    unlocked.append(fname)
-                    sent.append((eid, fname, "lock", row_id))
-                    _LOGGER.info("Cognitive lockdown: locked %s", eid)
-                    await self.hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
-                    )
-                except Exception as exc:
-                    # Skipped by the live check (its door is open, or it
-                    # cannot be read, 8.46.0) or the command failed: named
-                    # in the report as not secured.
-                    skipped = isinstance(exc, NotSecured)
-                    _LOGGER.warning("Cognitive lockdown: %s %s: %s",
-                                    "skipped" if skipped else "failed to lock", eid, exc)
-                    failed.append(fname)
-                    failed_eids.append(eid)
-                    await self.hass.async_add_executor_job(
-                        lambda rid=row_id, code=(exc.code if skipped else "service_call_failed"):
-                        action_log.set_execution(rid, "blocked" if skipped else "failed",
-                                                 reason_code=code)
-                    )
+    async def _log_row(self, row_id, result: str, code: Optional[str] = None) -> None:
+        from . import action_log
+        if code is None:
+            await self.hass.async_add_executor_job(
+                lambda: action_log.set_execution(row_id, result))
+        else:
+            await self.hass.async_add_executor_job(
+                lambda: action_log.set_execution(row_id, result, reason_code=code))
 
-        # Check covers/garage
-        open_covers = []
-        for state in cover_targets:
-            if not self._automatic_operation_current(automatic_generation):
-                return []
-            if state.state == "open":
-                eid = state.entity_id
-                fname = state.attributes.get("friendly_name", eid)
-                row_id = row_ids.get(eid)
-                try:
-                    result = await secure_device(self.hass, eid, "cover")
-                    if not self._automatic_operation_current(automatic_generation):
-                        return []
-                    if result == "already_secure":
-                        # Secured since the list was made (8.46.0): nothing sent.
-                        await self.hass.async_add_executor_job(
-                            lambda rid=row_id: action_log.set_execution(
-                                rid, "blocked", reason_code="already_secure"))
-                        continue
-                    open_covers.append(fname)
-                    sent.append((eid, fname, "cover", row_id))
-                    _LOGGER.info("Cognitive lockdown: closed %s", eid)
-                    await self.hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
-                    )
-                except Exception as exc:
-                    # Skipped by the live check (its door is open, or it
-                    # cannot be read, 8.46.0) or the command failed: named
-                    # in the report as not secured.
-                    skipped = isinstance(exc, NotSecured)
-                    _LOGGER.warning("Cognitive lockdown: %s %s: %s",
-                                    "skipped" if skipped else "failed to close", eid, exc)
-                    failed.append(fname)
-                    failed_eids.append(eid)
-                    await self.hass.async_add_executor_job(
-                        lambda rid=row_id, code=(exc.code if skipped else "service_call_failed"):
-                        action_log.set_execution(rid, "blocked" if skipped else "failed",
-                                                 reason_code=code)
-                    )
+    async def _secure_all(self, states: list, domain: str, rows: dict, sweep: dict,
+                          generation: int) -> bool:
+        """Lock (or close) each one. False when the automatic lockdown was
+        switched off part way, which abandons the sweep."""
+        from .core_lockdown import NotSecured, secure_device
+        wanted = "unlocked" if domain == "lock" else "open"
+        done_list = sweep["locked"] if domain == "lock" else sweep["closed"]
+        verb = "lock" if domain == "lock" else "close"
+        for state in states:
+            if not self._automatic_operation_current(generation):
+                return False
+            if state.state != wanted:
+                continue
+            eid = state.entity_id
+            name = state.attributes.get("friendly_name", eid)
+            row_id = rows.get(eid)
+            try:
+                result = await secure_device(self.hass, eid, domain)
+                if not self._automatic_operation_current(generation):
+                    return False
+                if result == "already_secure":
+                    # Secured since the list was made: nothing was sent.
+                    await self._log_row(row_id, "blocked", "already_secure")
+                    continue
+                done_list.append(name)
+                sweep["sent"].append((eid, name, domain, row_id))
+                _LOGGER.info("Cognitive lockdown: %s %s", "locked" if domain == "lock"
+                             else "closed", eid)
+                await self._log_row(row_id, "accepted")
+            except Exception as exc:
+                # Skipped by the live check (its door is open, or it cannot
+                # be read) or the command failed: named as not secured.
+                skipped = isinstance(exc, NotSecured)
+                _LOGGER.warning("Cognitive lockdown: %s %s: %s",
+                                "skipped" if skipped else f"failed to {verb}", eid, exc)
+                sweep["failed"].append(name)
+                sweep["failed_eids"].append(eid)
+                await self._log_row(row_id, "blocked" if skipped else "failed",
+                                    exc.code if skipped else "service_call_failed")
+        return True
 
-        if not self._automatic_operation_current(automatic_generation):
-            return []
-
-        # Check what was sent (8.24.0): after a short wait, each lock must
-        # read locked and each cover closed. Only those count as secured; a
-        # device that reads anything else, or cannot be read, is named as
-        # not secured, so the message never says "secured" before checking.
+    async def _verify(self, sweep: dict, memory: dict) -> list:
+        """Read back everything a command was sent to. Returns the names that
+        did not read secured; the locked and closed lists keep only what did."""
+        from . import action_log, entity_verify
+        sweep["locked"], sweep["closed"] = [], []
         not_secured: list = []
-        if sent:
-            await asyncio.sleep(self.sweep_verify_delay)
-            if not self._automatic_operation_current(automatic_generation):
-                return []
-            from . import entity_verify
-            unlocked, open_covers = [], []
-            for eid, fname, dom, row_id in sent:
-                ok = entity_verify.check_state_once(
-                    self.hass, eid, "locked" if dom == "lock" else "closed")
-                (unlocked if dom == "lock" else open_covers).append(fname) if ok \
-                    else not_secured.append(fname)
-                if ok:
-                    memory["secured"].add(eid)
-                else:
-                    failed_eids.append(eid)
-                if row_id is not None:
-                    await self.hass.async_add_executor_job(
-                        lambda rid=row_id, good=ok: action_log.set_execution(
-                            rid, "verified" if good else "unverified",
-                            reason_code=None if good else "not_secure_after_check"))
-            failed = not_secured + failed
-        # One try a night: anything that did not take is left alone until
-        # morning, so it is never commanded or named again tonight (8.25.0).
-        for eid in failed_eids:
-            left_alone.setdefault(eid, "did not secure")
-        if candidates or reopened:
-            # The sweep's decision, in the shared safety format (8.23.0),
-            # written after the check so it carries what was confirmed.
-            from . import alert_path
-            await alert_path.async_record_decision(
-                self.hass, "lockdown_sweep", source="nighttime_sweep",
-                sit=alert_path.situation(self.hass, self.config, sleeping=True,
-                                         house=self._household()),
-                facts={"locked": unlocked, "closed": open_covers,
-                       "not_secured_after_check": not_secured,
-                       "failed": [f for f in failed if f not in not_secured],
-                       "left_alone_reopened": reopened},
-                request_ids=[request_id] if candidates else None,
-                assessment="household asleep with locks unlocked or covers open",
-                decision="lock and close, checked" + (
-                    ", some not secured" if failed else ""),
-                reason="automatic lockdown at night")
-        if unlocked or open_covers or failed or reopened:
-            i18n = _notify_i18n()
-            lang = _m_common._hass_lang(self.hass)
-            parts = []
-            if unlocked:
-                parts.append(i18n.message("lockdown_locked", lang,
-                                          names=i18n.join_names(unlocked, lang)))
-            if open_covers:
-                parts.append(i18n.message("lockdown_closed", lang,
-                                          names=i18n.join_names(open_covers, lang)))
-            if not failed and not reopened:
-                message = i18n.message(
-                    "lockdown_nighttime", lang,
-                    honorific=_persona().capitalise(honorific),
-                    body=i18n.join_names(parts, lang),
-                )
+        for eid, name, domain, row_id in sweep["sent"]:
+            secured = entity_verify.check_state_once(
+                self.hass, eid, "locked" if domain == "lock" else "closed")
+            if secured:
+                (sweep["locked"] if domain == "lock" else sweep["closed"]).append(name)
+                memory["secured"].add(eid)
             else:
-                # "The house is secured." is only said when nothing failed and
-                # nothing was left alone.
-                problems = []
-                if failed:
-                    problems.append(i18n.message("lockdown_secure_failed", lang,
-                                                 names=i18n.join_names(failed, lang)))
-                if reopened:
-                    problems.append(i18n.message("lockdown_left_alone", lang,
-                                                 names=i18n.join_names(reopened, lang)))
-                problem = "; ".join(problems)
-                if parts:
-                    message = i18n.message(
-                        "lockdown_nighttime_partial", lang,
-                        honorific=_persona().capitalise(honorific),
-                        body=i18n.join_names(parts, lang), failed=problem)
-                else:
-                    message = i18n.message(
-                        "lockdown_nighttime_failed_only", lang,
-                        honorific=_persona().capitalise(honorific), failed=problem)
-            actions.append({
-                "type": "lockdown",
-                # A failure to secure (the command failed, or the device did
-                # not read secured on the check) is high. The sweep runs while
-                # the house is asleep, so it goes to the phones, not spoken.
-                "urgency": "high" if (failed or reopened) else "low",
-                "message": message,
-                "auto_act": True,
-                # It reports what Nova changed, so it always reaches the
-                # phones, at night too (8.45.0).
-                "reports_change": True,
-            })
+                not_secured.append(name)
+                sweep["failed_eids"].append(eid)
+            if row_id is not None:
+                await self.hass.async_add_executor_job(
+                    lambda rid=row_id, ok=secured: action_log.set_execution(
+                        rid, "verified" if ok else "unverified",
+                        reason_code=None if ok else "not_secure_after_check"))
+        return not_secured
 
-        return actions
+    async def _record_sweep(self, sweep: dict, not_secured: list, reopened: list,
+                            request_id) -> None:
+        """The sweep's decision, in the shared safety format, written after
+        the check so it says what was confirmed."""
+        from . import alert_path
+        failed = sweep["failed"]
+        await alert_path.async_record_decision(
+            self.hass, "lockdown_sweep", source="nighttime_sweep",
+            sit=alert_path.situation(self.hass, self.config, sleeping=True,
+                                     house=self._household()),
+            facts={"locked": sweep["locked"], "closed": sweep["closed"],
+                   "not_secured_after_check": not_secured,
+                   "failed": [name for name in failed if name not in not_secured],
+                   "left_alone_reopened": reopened},
+            request_ids=[request_id] if request_id else None,
+            assessment="household asleep with locks unlocked or covers open",
+            decision="lock and close, checked" + (", some not secured" if failed else ""),
+            reason="automatic lockdown at night")
 
-    def _residents_away(self) -> bool:
-        """Confident 'the residents are away', for intrusion only.
-
-        From household.py: a person, or a device tracker linked to one,
-        reading home always wins. Otherwise away when every person reads away,
-        or when the alarm is armed away or on vacation. Never from motion, and
-        an unknown person is never away. A device tracker not linked to anyone
-        (a TV, a hub) does not count, so it can no longer switch off away
-        detection while the alarm is armed away."""
-        return self._household().residents_away
+    def _sweep_report(self, sweep: dict, reopened: list, title: str) -> list[dict]:
+        """The sweep's message, or nothing when it had nothing to say. "The
+        house is secured" is said only when nothing failed and nothing was
+        left alone. It reports what Nova changed, so it always reaches the
+        phones, at night too; trouble is high urgency."""
+        locked, closed, failed = sweep["locked"], sweep["closed"], sweep["failed"]
+        if not (locked or closed or failed or reopened):
+            return []
+        i18n = _notify_i18n()
+        lang = _m_common._hass_lang(self.hass)
+        done = []
+        if locked:
+            done.append(i18n.message("lockdown_locked", lang, names=i18n.join_names(locked, lang)))
+        if closed:
+            done.append(i18n.message("lockdown_closed", lang, names=i18n.join_names(closed, lang)))
+        if not failed and not reopened:
+            message = i18n.message("lockdown_nighttime", lang, honorific=title,
+                                   body=i18n.join_names(done, lang))
+        else:
+            trouble = []
+            if failed:
+                trouble.append(i18n.message("lockdown_secure_failed", lang,
+                                            names=i18n.join_names(failed, lang)))
+            if reopened:
+                trouble.append(i18n.message("lockdown_left_alone", lang,
+                                            names=i18n.join_names(reopened, lang)))
+            if done:
+                message = i18n.message("lockdown_nighttime_partial", lang, honorific=title,
+                                       body=i18n.join_names(done, lang),
+                                       failed="; ".join(trouble))
+            else:
+                message = i18n.message("lockdown_nighttime_failed_only", lang,
+                                       honorific=title, failed="; ".join(trouble))
+        return [{"type": "lockdown", "urgency": "high" if (failed or reopened) else "low",
+                 "message": message, "auto_act": True, "reports_change": True}]

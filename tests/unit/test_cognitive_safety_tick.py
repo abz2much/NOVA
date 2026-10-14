@@ -285,12 +285,21 @@ async def test_freeze_critical_is_spoken_once_then_a_phone_reminder_every_three_
     assert reminder["urgency"] == "high" and reminder["phone_only"] is True
 
 
-async def test_a_critical_alert_does_not_use_up_the_one_shot_warning(
+async def test_no_milder_warning_follows_a_critical_alert_in_one_cold_spell(
         safety, fake_hass, clock):
+    """8.49.34: after the critical alert, warming a little (still below the
+    warning level) sends no step down "freeze warning". Once it is clearly
+    warm again, the next cold spell warns as usual."""
     fake_hass.states.set("weather.home", "snowy", temperature=10)
     assert (await safety._check_freeze())["type"] == "freeze_critical"
     clock["now"] += 3600
     fake_hass.states.set("weather.home", "snowy", temperature=30)
+    assert await safety._check_freeze() is None
+    clock["now"] += 3600
+    fake_hass.states.set("weather.home", "cloudy", temperature=41)
+    assert await safety._check_freeze() is None                     # the spell ends
+    clock["now"] += 3600
+    fake_hass.states.set("weather.home", "cloudy", temperature=30)
     assert (await safety._check_freeze())["type"] == "freeze_warning"
 
 
