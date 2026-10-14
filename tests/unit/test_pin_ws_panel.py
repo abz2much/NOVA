@@ -58,6 +58,45 @@ def _safe(conn, code):
 async def test_panel_data_has_every_section(ws, load):
     conn = await _call(ws.ws_get_panel_data, _hass(_entry(load)))
     assert conn.errors == []
+
+
+async def test_panel_data_reads_its_databases_in_one_executor_job(ws, load, monkeypatch):
+    # 8.49.36: announcements, knowledge counts and the observer's 24 hour
+    # activity counts are SQLite reads; they run off the event loop together.
+    hass = _hass(_entry(load))
+    in_job = []
+    jobs = []
+    real_job = hass.async_add_executor_job
+
+    async def job(func, *args):
+        jobs.append(func)
+        in_job.append(True)
+        try:
+            return await real_job(func, *args)
+        finally:
+            in_job.pop()
+    hass.async_add_executor_job = job
+    seen = {}
+
+    def reader(name, value):
+        def read(*a):
+            seen.setdefault(name, []).append((bool(in_job), len(jobs)))
+            return value
+        return read
+    monkeypatch.setattr(ws, "_get_announcements_today", reader("announced", 3))
+    monkeypatch.setattr(ws, "_get_knowledge_stats", reader("knowledge", {"facts": 2}))
+    monkeypatch.setattr(ws, "_get_activity_counts", reader(
+        "activity", {"total": 900, "spoken": 1, "flagged": 2, "dropped": 3}))
+    conn = await _call(ws.ws_get_panel_data, hass)
+    assert conn.errors == []
+    assert set(seen) == {"announced", "knowledge", "activity"}
+    calls = [c for rows in seen.values() for c in rows]
+    assert all(inside for inside, _ in calls)
+    assert len({n for _, n in calls}) == 1
+    data = conn.results[0][1]
+    assert data["meta"]["announcements_today"] == 3
+    assert data["knowledge"] == {"facts": 2}
+    assert data["config"]["observer_stats"]["events_24h"] == 900
     res = conn.results[0][1]
     assert set(res) == {"status", "version", "meta", "dominant", "areas", "sleep_reason",
                         "doorbell_training", "lockdown", "intrusion", "knowledge",

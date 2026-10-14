@@ -1,17 +1,17 @@
-"""The stat helpers behind nova/get_panel_data.
+"""Read only helpers that fill in nova/get_panel_data.
 
-Moved verbatim out of websocket.py. They read Nova's own stores (knowledge,
-suggestions, goals, routines, reasoning and observer stats) and the recorder
-for the room sparklines, and they never raise. They import nothing from Home
-Assistant at import time.
-
-The logger keeps the name it had in websocket.py, so log lines are unchanged.
-websocket.py imports these names, so they stay reachable through it.
+Each one reads one of Nova's stores (knowledge, suggestions, goals,
+routines, reasoning, observer, appliance and mute state) or the recorder,
+and answers with a safe empty shape instead of raising, so one broken store
+never blanks the panel. Home Assistant modules are imported inside the
+functions that need them. websocket.py re-exports these names; the logger
+uses the websocket module's name so log filters still match.
 """
 from __future__ import annotations
 
 import logging
 import time
+from datetime import timedelta
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -20,23 +20,71 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(f"{__package__}.websocket")
 
 
-def _format_uptime(seconds: float) -> str:
-    """'2d 14h' / '14h 22m' / '42m 10s' format."""
-    seconds = int(seconds)
-    d, r = divmod(seconds, 86400)
-    h, r = divmod(r, 3600)
-    m, s = divmod(r, 60)
-    if d > 0:
-        return f"{d}d {h}h"
-    if h > 0:
-        return f"{h}h {m}m"
-    if m > 0:
-        return f"{m}m {s}s"
-    return f"{s}s"
+# ── small formatting helpers ────────────────────────────────────────────────
 
+def _format_uptime(seconds: float) -> str:
+    """The two largest units: '2d 14h', '14h 22m', '42m 10s' or '9s'."""
+    total = int(seconds)
+    days, rest = divmod(total, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    for big, big_unit, small, small_unit in (
+        (days, "d", hours, "h"),
+        (hours, "h", minutes, "m"),
+        (minutes, "m", secs, "s"),
+    ):
+        if big:
+            return f"{big}{big_unit} {small}{small_unit}"
+    return f"{secs}s"
+
+
+def _downsample(vals: list[float], n: int) -> list[float]:
+    """At most n evenly spread points, always ending on the newest reading,
+    so a sparkline keeps its shape and finishes at the current value."""
+    count = len(vals)
+    if n <= 0 or count <= n:
+        return vals
+    if n == 1:
+        return [vals[-1]]
+    stride = (count - 1) / (n - 1)
+    return [vals[int(i * stride + 0.5)] for i in range(n)]
+
+
+# ── names ───────────────────────────────────────────────────────────────────
+
+def _entity_names(hass: HomeAssistant) -> dict:
+    """entity_id to friendly name for every state, so stored text written
+    with entity ids can be shown with names. Runs on the event loop."""
+    try:
+        from .cognitive.naming import names_from_states
+        return names_from_states(hass.states.async_all())
+    except Exception:
+        return {}
+
+
+# Decision fields written for people; ids, kinds and outcomes stay as stored.
+_DECISION_TEXT_FIELDS = ("decision", "reason", "observation", "interpretation", "evidence")
+
+
+def _named_decision(rec, names: dict):
+    """A copy of one decision record with entity ids swapped for names."""
+    if not isinstance(rec, dict) or not names:
+        return rec
+    try:
+        from .cognitive.naming import humanize_record
+        shown = dict(rec)
+        for field in _DECISION_TEXT_FIELDS:
+            if field in shown:
+                shown[field] = humanize_record(shown[field], names)
+        return shown
+    except Exception:
+        return rec
+
+
+# ── stores read in the executor (SQLite and files) ──────────────────────────
 
 def _get_announcements_today() -> int:
-    """Get today's spoken announcement count from DB. Returns 0 on error."""
+    """How many announcements were spoken today (0 if the log can't be read)."""
     try:
         from .database import get_activity_count_today
         return get_activity_count_today()
@@ -44,16 +92,33 @@ def _get_announcements_today() -> int:
         return 0
 
 
-def _get_doorbell_training(hass: HomeAssistant) -> dict:
-    """Doorbell training-dataset stats + the most recent analysed events, for
-    the panel's Doorbell Training view. Does file I/O: run it in the
-    executor, never on the event loop. Never raises."""
+def _get_activity_counts() -> dict:
+    """The last 24 hours of the activity log, counted in the database."""
     try:
-        from . import doorbell_training
-        from datetime import timedelta as _timedelta
+        from .database import get_activity_counts
+        return get_activity_counts(hours=24)
+    except Exception:
+        return {"total": 0, "spoken": 0, "flagged": 0, "dropped": 0}
+
+
+def _get_knowledge_stats() -> dict:
+    """Counts of curated knowledge for the panel."""
+    try:
+        from . import knowledge
+        return knowledge.stats()
+    except Exception:
+        return {"total": 0, "by_kind": {}, "by_subject": {}}
+
+
+def _get_doorbell_training(hass: HomeAssistant) -> dict:
+    """The doorbell training set: stats, the latest analysed events and the
+    patterns found. Reads files, so call it in the executor."""
+    try:
         from homeassistant.util import dt as dt_util
+        from . import doorbell_training
         try:
-            offset = int((dt_util.now().utcoffset() or _timedelta()).total_seconds() // 60)
+            utc_offset = dt_util.now().utcoffset() or timedelta()
+            offset = int(utc_offset.total_seconds() // 60)
         except Exception:
             offset = 0
         return {
@@ -65,203 +130,154 @@ def _get_doorbell_training(hass: HomeAssistant) -> dict:
         return {"stats": {"total": 0}, "recent": [], "patterns": []}
 
 
-def _entity_names(hass: HomeAssistant) -> dict:
-    """entity_id -> friendly name for every state, read on the event loop.
-    Used to show text written with entity_ids (older rows, log lines,
-    decision records) with names. Never raises."""
-    try:
-        from .cognitive.naming import names_from_states
-        return names_from_states(hass.states.async_all())
-    except Exception:
-        return {}
-
-
-# Decision Record fields that are words for a person; ids, kinds and
-# outcomes are left exactly as stored.
-_DECISION_TEXT_FIELDS = ("decision", "reason", "observation",
-                         "interpretation", "evidence")
-
-
-def _named_decision(rec, names: dict):
-    """A display copy of one decision with entities named. Never raises."""
-    try:
-        from .cognitive.naming import humanize_record
-        if not isinstance(rec, dict) or not names:
-            return rec
-        out = dict(rec)
-        for field in _DECISION_TEXT_FIELDS:
-            if field in out:
-                out[field] = humanize_record(out[field], names)
-        return out
-    except Exception:
-        return rec
-
-
 def _get_suggestions(names: Optional[dict] = None) -> list[dict]:
-    """Pending automation suggestions from the pattern engine, panel-shaped.
-    Includes the EVIDENCE behind each one (v6.80.0) so review shows why.
-    Never raises."""
+    """Pending automation suggestions, with the evidence behind each one."""
     try:
         from .automation.api import panel_suggestion_items
         from .automation.patterns import get_analyzer
-        return panel_suggestion_items(get_analyzer().get_pending_suggestions(),
-                                      names)
-    except Exception:
-        return []
-
-
-def _get_goals() -> list[dict]:
-    """Active + recently closed goals, panel-shaped. Never raises."""
-    try:
-        from . import goals
-        out = []
-        for g in goals.recent(limit=20):
-            steps = g.get("steps") or []
-            done = sum(1 for s in steps if s.get("status") == "done")
-            out.append({
-                "id": g.get("id"),
-                "title": g.get("title", ""),
-                "outcome": g.get("outcome", ""),
-                "status": g.get("status", "active"),
-                "steps_done": done,
-                "steps_total": len(steps),
-                "steps": steps,
-                "next_check_ts": g.get("next_check_ts", ""),
-                "deadline_ts": g.get("deadline_ts"),
-                "last_result": g.get("last_result", ""),
-                "updated_ts": g.get("updated_ts", ""),
-            })
-        return out
+        pending = get_analyzer().get_pending_suggestions()
+        return panel_suggestion_items(pending, names)
     except Exception:
         return []
 
 
 def _get_filtered_suggestions(names: Optional[dict] = None) -> list[dict]:
-    """Suggestions the AI review turned down, panel-shaped. Never raises."""
+    """Suggestions the AI review turned down."""
     try:
         from .automation.api import panel_rejected_items
         from .automation.patterns import get_analyzer
-        return panel_rejected_items(get_analyzer().get_rejected_suggestions(),
-                                    names)
+        rejected = get_analyzer().get_rejected_suggestions()
+        return panel_rejected_items(rejected, names)
     except Exception:
         return []
 
 
 def _get_person_routines(names: Optional[dict] = None) -> dict:
-    """Per-person learned routines from the pattern engine, grouped by
-    person for the Memory panel. Descriptions stored with entity_ids by
-    older releases are shown with names. Never raises."""
+    """Learned routines grouped by person for the Memory tab. Older rows
+    stored with entity ids are shown with names."""
     try:
         from .automation.patterns import get_analyzer
         from .cognitive.naming import humanize_text
-        rows = get_analyzer().get_person_patterns()
         grouped: dict[str, list[dict]] = {}
-        for r in rows:
-            person = r.get("person", "")
-            if not person:
-                continue
-            grouped.setdefault(person, []).append({
-                "id": r.get("id"),
-                "pattern_type": r.get("pattern_type", ""),
-                "description": humanize_text(r.get("description", ""), names),
-                "confidence": round(float(r.get("confidence", 0) or 0), 2),
-                "occurrences": r.get("occurrences", 0),
-                "last_seen": r.get("last_seen", ""),
-            })
+        for row in get_analyzer().get_person_patterns():
+            person = row.get("person", "")
+            if person:
+                grouped.setdefault(person, []).append({
+                    "id": row.get("id"),
+                    "pattern_type": row.get("pattern_type", ""),
+                    "description": humanize_text(row.get("description", ""), names),
+                    "confidence": round(float(row.get("confidence", 0) or 0), 2),
+                    "occurrences": row.get("occurrences", 0),
+                    "last_seen": row.get("last_seen", ""),
+                })
         return grouped
     except Exception:
         return {}
 
 
-def _downsample(vals: list[float], n: int) -> list[float]:
-    """Evenly-spaced downsample to at most n points — a sparkline doesn't
-    need every recorder sample, just the shape."""
-    if len(vals) <= n or n <= 0:
-        return vals
-    step = len(vals) / n
-    return [vals[int(i * step)] for i in range(n)]
+def _goal_row(goal: dict) -> dict:
+    steps = goal.get("steps") or []
+    return {
+        "id": goal.get("id"),
+        "title": goal.get("title", ""),
+        "outcome": goal.get("outcome", ""),
+        "status": goal.get("status", "active"),
+        "steps_done": len([s for s in steps if s.get("status") == "done"]),
+        "steps_total": len(steps),
+        "steps": steps,
+        "next_check_ts": goal.get("next_check_ts", ""),
+        "deadline_ts": goal.get("deadline_ts"),
+        "last_result": goal.get("last_result", ""),
+        "updated_ts": goal.get("updated_ts", ""),
+    }
+
+
+def _get_goals() -> list[dict]:
+    """Active and recently closed goals."""
+    try:
+        from . import goals
+        return [_goal_row(g) for g in goals.recent(limit=20)]
+    except Exception:
+        return []
+
+
+# ── recorder sparklines ─────────────────────────────────────────────────────
+
+def _numeric_series(samples, points: int) -> list[float]:
+    """Numbers from recorder samples, thinned to `points`. A minimal
+    response mixes State objects with plain dicts; non numbers are skipped."""
+    values: list[float] = []
+    for sample in samples or []:
+        if isinstance(sample, dict):
+            raw = sample.get("state")
+        else:
+            raw = getattr(sample, "state", None)
+        try:
+            values.append(float(raw))
+        except (TypeError, ValueError):
+            pass
+    return _downsample(values, points)
 
 
 async def _get_area_sparklines(hass: HomeAssistant, entity_map: dict[str, dict[str, Optional[str]]],
                                 hours: float = 12.0, points: int = 20) -> dict:
-    """Compact recent history for area-tile sparklines, keyed by area_id:
-    {area_id: {"temp": [floats], "humidity": [floats]}}. entity_map is
-    {area_id: {"temp": entity_id_or_None, "humidity": entity_id_or_None}}.
+    """Recent temperature and humidity per area for the room tiles.
 
-    v6.43.0 — the first use of HA's recorder in this integration. Pattern
-    learning deliberately built its own telemetry (patterns.db) instead of
-    depending on recorder, but that store explicitly excludes sensor/
-    binary_sensor domains as noise — exactly the domains a temperature
-    sparkline needs. Recorder is the right tool for this one job. Read-only,
-    wrapped defensively throughout: recorder internals vary by HA version
-    and this integration has no other code path exercising them.
-    Never raises — an empty dict just means no sparklines this cycle.
+    entity_map is {area_id: {"temp": entity_id or None, "humidity": ...}};
+    the answer is {area_id: {"temp": [...], "humidity": [...]}} with empty
+    series left out. Nova's own pattern store skips sensors, so this reads
+    Home Assistant's recorder instead, read only. Recorder internals differ
+    between versions, so any failure just means no sparklines this time.
     """
-    entity_ids = sorted({eid for m in entity_map.values() for eid in m.values() if eid})
-    if not entity_ids:
+    wanted = sorted({eid for kinds in entity_map.values() for eid in kinds.values() if eid})
+    if not wanted:
         return {}
     try:
-        from datetime import timedelta
         from homeassistant.components.recorder import get_instance, history
         from homeassistant.util import dt as dt_util
     except Exception:
         return {}
-
     end = dt_util.utcnow()
-    start = end - timedelta(hours=hours)
+    window = (end - timedelta(hours=hours), end)
 
-    def _fetch() -> dict:
+    def _read() -> dict:
         return history.get_significant_states(
-            hass, start, end, entity_ids,
-            minimal_response=True, no_attributes=True)
+            hass, *window, wanted, minimal_response=True, no_attributes=True)
 
     try:
-        raw = await get_instance(hass).async_add_executor_job(_fetch)
+        history_rows = await get_instance(hass).async_add_executor_job(_read)
     except Exception as exc:
         _LOGGER.debug("sparkline history fetch failed: %s", exc)
         return {}
-    if not raw:
+    if not history_rows:
         return {}
 
-    def _series(eid: str) -> list[float]:
-        vals: list[float] = []
-        for s in (raw.get(eid) or []):
-            # minimal_response mixes full State objects (first/last entry)
-            # with plain {"state": ..., "last_changed": ...} dicts.
-            raw_state = getattr(s, "state", None) if not isinstance(s, dict) else s.get("state")
-            try:
-                vals.append(float(raw_state))
-            except (TypeError, ValueError):
-                continue
-        return _downsample(vals, points)
+    sparklines: dict = {}
+    for area_id, kinds in entity_map.items():
+        lines = {}
+        for kind in ("temp", "humidity"):
+            entity_id = kinds.get(kind)
+            series = _numeric_series(history_rows.get(entity_id), points) if entity_id else []
+            if series:
+                lines[kind] = series
+        if lines:
+            sparklines[area_id] = lines
+    return sparklines
 
-    out: dict = {}
-    for area_id, m in entity_map.items():
-        entry: dict = {}
-        if m.get("temp"):
-            v = _series(m["temp"])
-            if v:
-                entry["temp"] = v
-        if m.get("humidity"):
-            v = _series(m["humidity"])
-            if v:
-                entry["humidity"] = v
-        if entry:
-            out[area_id] = entry
-    return out
 
+# ── live state held in memory ───────────────────────────────────────────────
 
 def _get_sentinel_rules() -> list[dict]:
-    """Return list of sentinel rule IDs and descriptions."""
+    """Every built in sentinel rule: id and a short description."""
     try:
         from .sentinel import DEFAULT_RULES
-        return [{"id": r["id"], "desc": r.get("message", "")[:60]} for r in DEFAULT_RULES]
+        return [{"id": rule["id"], "desc": rule.get("message", "")[:60]} for rule in DEFAULT_RULES]
     except Exception:
         return []
 
 
 def _get_lockdown_status() -> dict:
-    """Formal lockdown state for the panel."""
+    """Formal lockdown state."""
     try:
         from . import cognitive_core
         return cognitive_core.lockdown_status()
@@ -269,8 +285,17 @@ def _get_lockdown_status() -> dict:
         return {"active": False, "since": 0.0, "reason": "", "auto": False, "exempt_windows": 0}
 
 
+def _get_intrusion_status() -> dict:
+    """The active intrusion investigation, if any (breach point and route)."""
+    try:
+        from . import cognitive_core
+        return cognitive_core.intrusion_status()
+    except Exception:
+        return {"active": False, "confirmed": False}
+
+
 def _get_alarm_panels(hass: HomeAssistant) -> list[dict]:
-    """Alarm choices for the public security source setting."""
+    """Alarm panels offered for the security source setting."""
     try:
         from . import alarm_source
         return alarm_source.available(hass)
@@ -278,13 +303,18 @@ def _get_alarm_panels(hass: HomeAssistant) -> list[dict]:
         return []
 
 
+def _voice_id_entity(entry):
+    """Nova's Voice ID entity for this entry, or None."""
+    from .runtime import lifecycle_runtime
+    runtime = lifecycle_runtime(entry) if entry is not None else None
+    return getattr(runtime, "voice_id", None) if runtime is not None else None
+
+
 def _get_voice_id_status(entry) -> dict:
-    """The Nova Voice ID card's status (8.35.0): not_set, checking,
-    connected (with the app's version and models) or unreachable."""
+    """Status for the Nova Voice ID card: not_set, checking, connected (with
+    the app's version and models) or unreachable."""
     try:
-        from .runtime import lifecycle_runtime
-        runtime = lifecycle_runtime(entry) if entry is not None else None
-        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+        entity = _voice_id_entity(entry)
         if entity is not None:
             return entity.status()
     except Exception:
@@ -294,169 +324,155 @@ def _get_voice_id_status(entry) -> dict:
 
 
 def _get_stt_entities(hass: HomeAssistant, entry) -> list[dict]:
-    """STT entities for the Voice ID fallback list, never Nova's own."""
+    """Speech to text entities offered as the Voice ID fallback, sorted by
+    name, leaving out Nova's own."""
     own: set[str] = set()
     try:
-        from .runtime import lifecycle_runtime
-        runtime = lifecycle_runtime(entry) if entry is not None else None
-        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+        entity = _voice_id_entity(entry)
         if entity is not None and entity.entity_id:
             own.add(entity.entity_id)
         if entry is not None:
             from homeassistant.helpers import entity_registry as er
-            own_id = er.async_get(hass).async_get_entity_id(
+            registered = er.async_get(hass).async_get_entity_id(
                 "stt", "nova", f"{entry.entry_id}-voice-id-stt")
-            if own_id:
-                own.add(own_id)
+            if registered:
+                own.add(registered)
     except Exception:
         pass
-    out = []
     try:
-        for state in hass.states.async_all("stt"):
-            if state.entity_id in own:
-                continue
-            name = (state.attributes or {}).get("friendly_name") or state.entity_id
-            out.append({"entity_id": state.entity_id, "name": str(name)})
+        choices = [
+            {"entity_id": state.entity_id,
+             "name": str((state.attributes or {}).get("friendly_name") or state.entity_id)}
+            for state in hass.states.async_all("stt")
+            if state.entity_id not in own
+        ]
     except Exception:
         return []
-    return sorted(out, key=lambda e: e["name"].lower())
-
-
-def _get_intrusion_status() -> dict:
-    """Active intrusion investigation (breach point + route) for the panel."""
-    try:
-        from . import cognitive_core
-        return cognitive_core.intrusion_status()
-    except Exception:
-        return {"active": False, "confirmed": False}
-
-
-def _get_knowledge_stats() -> dict:
-    """Curated-knowledge summary (counts) for the panel."""
-    try:
-        from . import knowledge
-        return knowledge.stats()
-    except Exception:
-        return {"total": 0, "by_kind": {}, "by_subject": {}}
+    choices.sort(key=lambda choice: choice["name"].lower())
+    return choices
 
 
 def _get_appliance_status() -> dict:
-    """Appliance monitor state — declared profile (with learned watts) and what
-    Nova is currently tracking — for the Settings → Appliances panel."""
+    """The appliance monitor for Settings, Appliances: the declared profile
+    (with learned watts), the sensors being tracked and native appliances."""
     try:
         from . import appliance_monitor
-        st = appliance_monitor.status()
+        status = appliance_monitor.status()
+        tracked = [
+            {"entity": eid,
+             "name": sensor.get("friendly_name", eid),
+             "appliance": sensor.get("appliance"),
+             "phase": sensor.get("phase"),
+             "power_w": round(sensor.get("power_w", 0) or 0),
+             "discovery": sensor.get("discovery")}
+            for eid, sensor in (status.get("sensors") or {}).items()
+        ]
+        native = [
+            {"entity": eid,
+             "name": device.get("device_name", eid),
+             "appliance": device.get("appliance"),
+             "state": device.get("current_state")}
+            for eid, device in (status.get("native_appliances") or {}).items()
+        ]
         return {
-            "running": st.get("running", False),
-            "profile": st.get("profile", []),
-            "tracked_sensors": [
-                {"entity": eid, "name": s.get("friendly_name", eid),
-                 "appliance": s.get("appliance"), "phase": s.get("phase"),
-                 "power_w": round(s.get("power_w", 0) or 0),
-                 "discovery": s.get("discovery")}
-                for eid, s in (st.get("sensors") or {}).items()
-            ],
-            "native": [
-                {"entity": eid, "name": n.get("device_name", eid),
-                 "appliance": n.get("appliance"), "state": n.get("current_state")}
-                for eid, n in (st.get("native_appliances") or {}).items()
-            ],
-            "whole_home": bool(st.get("whole_home_delta")),
+            "running": status.get("running", False),
+            "profile": status.get("profile", []),
+            "tracked_sensors": tracked,
+            "native": native,
+            "whole_home": bool(status.get("whole_home_delta")),
         }
     except Exception:
         return {"running": False, "profile": [], "tracked_sensors": [],
                 "native": [], "whole_home": False}
 
 
-def _get_reasoning_stats() -> dict:
-    """Learned-reasoning cache + connectivity breaker stats for the panel."""
-    out = {
-        "learned_patterns": 0, "cloud_calls": 0, "local_decisions": 0,
-        "local_rate": 0, "llm_breaker": "closed",
-    }
-    try:
-        from . import reasoning_cache
-        out.update(reasoning_cache.stats())
-    except Exception:
-        pass
-    try:
-        from . import connectivity
-        st = connectivity.status()
-        out["llm_breaker"] = st.get("state", "closed") if isinstance(st, dict) else "closed"
-    except Exception:
-        pass
-    return out
-
-
 def _get_output_mutes() -> dict:
-    """What Nova is muted on, for the panel's Muted card: the entity and
-    category mutes and the blanket shush (all three are saved across restarts)."""
+    """What Nova is muted on: entities, categories and the blanket mute."""
     try:
         from . import output_gate
-        st = output_gate.status()
+        status = output_gate.status()
         return {
-            "entities": list(st.get("muted_entities", [])),
-            "categories": list(st.get("muted_categories", [])),
-            "all": bool(st.get("mute_all", False)),
+            "entities": list(status.get("muted_entities", [])),
+            "categories": list(status.get("muted_categories", [])),
+            "all": bool(status.get("mute_all", False)),
         }
     except Exception:
         return {"entities": [], "categories": [], "all": False}
 
 
-def _get_observer_stats() -> dict:
-    """Return observer pipeline stats for the tuning dashboard."""
+_REASONING_DEFAULTS = {
+    "learned_patterns": 0, "cloud_calls": 0, "local_decisions": 0,
+    "local_rate": 0, "llm_breaker": "closed",
+}
+
+
+def _get_reasoning_stats() -> dict:
+    """The learned reasoning cache counters and the AI connection breaker."""
+    stats = dict(_REASONING_DEFAULTS)
+    try:
+        from . import reasoning_cache
+        stats.update(reasoning_cache.stats())
+    except Exception:
+        pass
+    try:
+        from . import connectivity
+        breaker = connectivity.status()
+        if isinstance(breaker, dict):
+            stats["llm_breaker"] = breaker.get("state", "closed")
+    except Exception:
+        pass
+    return stats
+
+
+_OBSERVER_FALLBACK = {
+    "running": False, "calls_last_hour": 0, "rate_limit": 30,
+    "events_24h": 0, "flagged_24h": 0, "dropped_24h": 0, "spoken_24h": 0,
+    "cognition_enabled": True, "cognition_threshold": 0.6,
+    "cog_entities": 0, "cog_events_seen": 0, "cog_escalated": 0,
+    "cog_predictable": 0, "cog_routines": 0, "cog_presence": 0,
+    "presence": [], **_REASONING_DEFAULTS,
+}
+
+
+def _get_observer_stats(activity: Optional[dict] = None) -> dict:
+    """The observer tuning card. `activity` is the 24 hour count from
+    _get_activity_counts, read in the executor; without it the count is
+    read here."""
     try:
         from . import observer as obs
-        from .database import get_recent_activity
         state = obs._STATE
-
-        # Classifier calls in last hour
-        now = time.time()
-        calls_last_hour = sum(1 for ts in state.classifier_timestamps if ts > now - 3600) if hasattr(state, 'classifier_timestamps') else 0
-
-        # Activity stats from DB
-        recent = get_recent_activity(hours=24, limit=500)
-        total_events = len(recent)
-        spoken = sum(1 for e in recent if e.get("was_spoken"))
-        flagged = sum(1 for e in recent if "flagged" in (e.get("message") or ""))
-        dropped = sum(1 for e in recent if "not worth" in (e.get("message") or ""))
-
+        counts = activity if activity is not None else _get_activity_counts()
+        hour_ago = time.time() - 3600
+        stamps = getattr(state, "classifier_timestamps", None) or []
         try:
-            from . import cognition as _cog
-            cog_stats = _cog.stats()
+            from . import cognition
+            cog = cognition.stats()
         except Exception:
-            cog_stats = {"entities_tracked": 0, "events_seen": 0, "anomalies_escalated": 0}
-
+            cog = {"entities_tracked": 0, "events_seen": 0, "anomalies_escalated": 0}
         try:
-            from . import cognition as _cog2
-            presence = _cog2.presence_status(state.hass) if getattr(state, "hass", None) else []
+            from . import cognition
+            hass = getattr(state, "hass", None)
+            presence = cognition.presence_status(hass) if hass else []
         except Exception:
             presence = []
-
         return {
             "running": state.running,
-            "calls_last_hour": calls_last_hour,
+            "calls_last_hour": len([ts for ts in stamps if ts > hour_ago]),
             "rate_limit": obs._effective_rate_limit(),
-            "events_24h": total_events,
-            "flagged_24h": flagged,
-            "dropped_24h": dropped,
-            "spoken_24h": spoken,
+            "events_24h": counts.get("total", 0),
+            "flagged_24h": counts.get("flagged", 0),
+            "dropped_24h": counts.get("dropped", 0),
+            "spoken_24h": counts.get("spoken", 0),
             "cognition_enabled": obs._cognition_enabled(),
             "cognition_threshold": obs._cognition_threshold(),
-            "cog_entities": cog_stats.get("entities_tracked", 0),
-            "cog_events_seen": cog_stats.get("events_seen", 0),
-            "cog_escalated": cog_stats.get("anomalies_escalated", 0),
-            "cog_predictable": cog_stats.get("predictable", 0),
-            "cog_routines": cog_stats.get("routines", 0),
-            "cog_presence": cog_stats.get("presence_routines", 0),
+            "cog_entities": cog.get("entities_tracked", 0),
+            "cog_events_seen": cog.get("events_seen", 0),
+            "cog_escalated": cog.get("anomalies_escalated", 0),
+            "cog_predictable": cog.get("predictable", 0),
+            "cog_routines": cog.get("routines", 0),
+            "cog_presence": cog.get("presence_routines", 0),
             "presence": presence,
             **_get_reasoning_stats(),
         }
     except Exception:
-        return {"running": False, "calls_last_hour": 0, "rate_limit": 30,
-                "events_24h": 0, "flagged_24h": 0, "dropped_24h": 0, "spoken_24h": 0,
-                "cognition_enabled": True, "cognition_threshold": 0.6,
-                "cog_entities": 0, "cog_events_seen": 0, "cog_escalated": 0,
-                "cog_predictable": 0, "cog_routines": 0, "cog_presence": 0,
-                "presence": [], "learned_patterns": 0, "cloud_calls": 0,
-                "local_decisions": 0, "local_rate": 0, "llm_breaker": "closed"}
+        return dict(_OBSERVER_FALLBACK)

@@ -161,11 +161,28 @@ def env(cc, fake_hass, clock, monkeypatch):
         return list(e.goals)
     _stub(monkeypatch, "followups", async_process_due=fu)
     _stub(monkeypatch, "goals", async_process_due=gl)
-    return e
+    yield e
+    # Background jobs a test never ran (8.49.36).
+    fake_hass.close_pending()
 
 
 def _types(env):
     return [a["type"] for a, _ in env.emitted]
+
+
+async def _tick_and_finish_ai_work(cc, env):
+    """A tick, then the background job it started (8.49.36: pattern
+    analysis, follow ups and goals no longer run inside the tick)."""
+    await cc._tick()
+    await env.hass.drain()
+
+
+async def _deliver_ai_work(cc, env):
+    """Run one tick and its background job, then the tick that delivers
+    what the job found; only that second tick's output is kept."""
+    await _tick_and_finish_ai_work(cc, env)
+    env.emitted.clear()
+    await cc._tick()
 
 
 async def test_tick_counts_itself_and_records_when(cc, env, clock):
@@ -242,7 +259,9 @@ async def test_actions_are_emitted_in_a_fixed_order(cc, env):
     env.cog.presence = [{"type": "presence_prediction", "message": "x"}]
     env.followups = [{"type": "followup_result"}]
     env.goals = [{"type": "goal_result"}]
-    await cc._tick()
+    # 8.49.36: follow up and goal reports come from the background job and
+    # are delivered by the next tick, still after anticipation.
+    await _deliver_ai_work(cc, env)
     assert _types(env) == ["lockdown_engaged", "freeze_critical", "intrusion_investigating",
                            "proactive_lights", "energy_offer", "presence_prediction",
                            "followup_result", "goal_result"]
@@ -275,7 +294,7 @@ async def test_a_safety_tick_error_is_logged_and_the_gathered_actions_and_the_re
     env.energy_offer = {"type": "energy_offer"}
     env.followups = [{"type": "followup_result"}]
     with caplog.at_level("WARNING"):
-        await cc._tick()
+        await _deliver_ai_work(cc, env)
     assert _types(env) == ["lockdown_engaged", "proactive_lights", "energy_offer", "followup_result"]
     assert "Cognitive safety tick error: safety broke" in caplog.text
 
@@ -423,7 +442,7 @@ async def _run_analysis(cc, env, patterns, pending=()):
         return patterns
     env.analyzer.analyze = analyze
     env.analyzer.get_pending_suggestions = lambda: list(pending)
-    await cc._tick()
+    await _tick_and_finish_ai_work(cc, env)
 
 
 async def test_a_due_analysis_uses_the_default_thresholds_and_logs_what_it_found(cc, env):
@@ -437,9 +456,9 @@ async def test_analysis_thresholds_come_from_config_and_bad_values_fall_back(cc,
     cc._CORE.config = {"pattern_min_occurrences": "6", "pattern_confidence": "0.7"}
     await _run_analysis(cc, env, [])
     cc._CORE.config = {"pattern_min_occurrences": "many", "pattern_confidence": "high"}
-    await cc._tick()
+    await _tick_and_finish_ai_work(cc, env)
     cc._CORE.config = {"pattern_min_occurrences": 0, "pattern_confidence": 0}
-    await cc._tick()
+    await _tick_and_finish_ai_work(cc, env)
     assert env.analyzer.thresholds == [(6, 0.7), (4, 0.55), (4, 0.55)]
 
 
@@ -545,11 +564,12 @@ async def test_followup_and_goal_errors_are_swallowed_independently(cc, env, mon
         return [{"type": "goal_result"}]
     _stub(monkeypatch, "followups", async_process_due=boom)
     _stub(monkeypatch, "goals", async_process_due=goals)
-    await cc._tick()
+    await _deliver_ai_work(cc, env)
     assert _types(env) == ["goal_result"]
-    env.emitted.clear()
     _stub(monkeypatch, "followups", async_process_due=lambda hass, config, runner=None: _list([{"type": "fu"}]))
     _stub(monkeypatch, "goals", async_process_due=boom)
+    await env.hass.drain()
+    env.emitted.clear()
     await cc._tick()
     assert _types(env) == ["fu"]
 
@@ -1466,3 +1486,63 @@ async def test_an_information_only_alert_is_spoken_but_never_the_pending_offer(c
     assert [a["offer_key"] for a, _ in env.emitted] == ["hvac:climate.main"]
     assert cc._CORE.pending_offer is None and cc._CORE.offers_made == 0
     assert cc._CORE.proactive_mgr.marked == ["hvac:climate.main"]
+
+
+# ── 8.49.36: slow AI work runs beside the tick, and one bad action ─────────
+#    no longer loses the rest
+
+async def test_a_slow_ai_provider_does_not_hold_up_the_safety_tick(cc, env):
+    never = asyncio.Event()
+
+    async def stuck(hass, **kw):
+        await never.wait()
+    env.analyzer.analysis_running = False
+    env.analyzer.should_analyze = lambda: True
+    env.analyzer.analyze = stuck
+    env.safety.actions = [{"type": "freeze_critical"}]
+    await asyncio.wait_for(cc._tick(), 1)
+    assert _types(env) == ["freeze_critical"]
+
+
+async def test_only_one_background_job_runs_at_a_time(cc, env):
+    await cc._tick()
+    await cc._tick()
+    assert len(env.hass._tasks) == 1
+    await env.hass.drain()
+    await cc._tick()
+    assert len(env.hass._tasks) == 1
+
+
+async def test_one_failing_delivery_does_not_lose_the_other_actions(cc, env, monkeypatch, caplog):
+    sent = []
+
+    async def emit(hass, config, action, sleeping):
+        if action["type"] == "bad":
+            raise RuntimeError("speaker gone")
+        sent.append(action["type"])
+    monkeypatch.setattr(cc, "_emit_action", emit)
+    cc._CORE.lockdown_mgr = _Lockdown([{"type": "bad"}])
+    env.safety.actions = [{"type": "freeze_critical"}, {"type": "intrusion_confirmed"}]
+    with caplog.at_level("WARNING"):
+        await cc._tick()
+    assert sent == ["freeze_critical", "intrusion_confirmed"]
+    assert "Cognitive action delivery error (bad): speaker gone" in caplog.text
+
+
+async def test_stop_cancels_the_background_job_and_drops_its_reports(cc, env, monkeypatch):
+    started = asyncio.Event()
+
+    async def slow(hass, config, runner=None):
+        started.set()
+        await asyncio.sleep(3600)
+        return [{"type": "late"}]
+    _stub(monkeypatch, "followups", async_process_due=slow)
+    loop = asyncio.get_running_loop()
+    env.hass.async_create_background_task = lambda coro, name=None: loop.create_task(coro)
+    cc._CORE.running = True
+    await asyncio.wait_for(cc._tick(), 1)
+    job = cc._CORE.ai_task
+    await asyncio.wait_for(started.wait(), 1)
+    await cc.stop()
+    assert job.cancelled()
+    assert cc._CORE.ai_actions == [] and cc._CORE.ai_busy is False

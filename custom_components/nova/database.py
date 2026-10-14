@@ -276,3 +276,27 @@ def get_activity_count_today() -> int:
             return row[0] if row else 0
     except Exception:
         return 0
+
+
+def get_activity_counts(hours: int = 24) -> dict:
+    """Counts over the activity log for the last `hours`, worked out in the
+    database so a busy home is not capped at a page of rows: every row,
+    spoken ones, and ones whose message mentions "flagged" or "not worth"."""
+    empty = {"total": 0, "spoken": 0, "flagged": 0, "dropped": 0}
+    try:
+        since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*),"
+                " SUM(CASE WHEN was_spoken THEN 1 ELSE 0 END),"
+                " SUM(CASE WHEN instr(COALESCE(message, ''), 'flagged') > 0 THEN 1 ELSE 0 END),"
+                " SUM(CASE WHEN instr(COALESCE(message, ''), 'not worth') > 0 THEN 1 ELSE 0 END)"
+                " FROM activity_log WHERE timestamp > ?",
+                (since,),
+            ).fetchone()
+        if not row:
+            return empty
+        return {key: int(value or 0) for key, value in zip(empty, row)}
+    except Exception as exc:
+        _LOGGER.warning("Nova activity log count error: %s", exc)
+        return empty
