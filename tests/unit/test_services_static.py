@@ -37,7 +37,8 @@ INIT = COMP / "__init__.py"
 
 SERVICE_ERROR_KEYS = {"no_entry", "not_loaded", "reloading", "setup_failed",
                       "multiple_entries"}
-SCHEMA_LESS_WITH_FIELDS = {"lockdown", "remember", "forget", "create_automation"}
+# 8.49.35: lockdown, remember and forget now validate their fields.
+SCHEMA_LESS_WITH_FIELDS = {"create_automation"}
 RESOLVER = "async_resolve_loaded"
 
 _SERVICES_TREE = ast.parse(SERVICES.read_text(encoding="utf-8"))
@@ -155,7 +156,9 @@ def test_proactive_audio_neither_registers_nor_removes_services():
 
 # Exact source of every registered schema, taken from the pre-Phase-4
 # registrations (__init__.py and proactive_audio.py at f4d1091). Any
-# change to a field, default, validator or range fails here.
+# change to a field, default, validator or range fails here. 8.49.35 gave
+# lockdown, remember and forget the schemas services.yaml documents, and
+# capped train_doorbell_backlog's limit at 1 to 500 (agreed fixes).
 PINNED_SCHEMAS = {
     'add_reminder': "vol.Schema({vol.Required('label'): cv.string, vol.Required('trigger_at'): cv.string, vol.Optional('repeat'): vol.In(['daily', 'weekly', 'hourly']), vol.Optional('require_home', default=True): cv.boolean, vol.Optional('respect_quiet', default=True): cv.boolean})",
     'analyze_camera': "vol.Schema({vol.Required('entity_id'): cv.entity_id, vol.Optional('prompt'): cv.string, vol.Optional('announce', default=True): cv.boolean, vol.Optional('frames'): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)), vol.Optional('interval'): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5))})",
@@ -168,14 +171,14 @@ PINNED_SCHEMAS = {
     'database_purge': "vol.Schema({vol.Optional('days', default=30): vol.All(int, vol.Range(min=1, max=365))})",
     'database_stats': None,
     'diagnose_doorbell': None,
-    'forget': None,
-    'lockdown': None,
+    'forget': "vol.Schema({vol.Optional('id'): vol.All(vol.Coerce(int), vol.Range(min=0)), vol.Optional('key'): cv.string, vol.Optional('subject'): cv.string})",
+    'lockdown': "vol.Schema({vol.Required('state'): vol.Any(cv.boolean, vol.In(['engage', 'lock', 'lift', 'unlock'])), vol.Optional('reason'): cv.string})",
     'nap': "vol.Schema({vol.Optional('duration_minutes', default=30): vol.All(int, vol.Range(min=1, max=480))})",
     'observer_start': None,
     'observer_status': None,
     'observer_stop': None,
     'process_intent': 'PROCESS_INTENT_SCHEMA',
-    'remember': None,
+    'remember': "vol.Schema({vol.Required('key'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Required('value'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Optional('subject'): cv.string, vol.Optional('kind'): vol.In(['fact', 'preference', 'event', 'profile']), vol.Optional('ttl_seconds'): vol.All(vol.Coerce(float), vol.Range(min=0, max=31536000))})",
     'replay_policy': "vol.Schema({vol.Required('kind'): str, vol.Optional('min_samples'): vol.All(int, vol.Range(min=1, max=100000))})",
     'restore': "vol.Schema({vol.Optional('archive'): str})",
     'routine': "vol.Schema({vol.Required('name'): cv.string})",
@@ -187,7 +190,7 @@ PINNED_SCHEMAS = {
     'test_notify': None,
     'test_routing': None,
     'test_tts': None,
-    'train_doorbell_backlog': "vol.Schema({vol.Optional('limit', default=40): vol.Coerce(int)})",
+    'train_doorbell_backlog': "vol.Schema({vol.Optional('limit', default=40): vol.All(vol.Coerce(int), vol.Range(min=1, max=500))})",
     'unshush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string})",
 }
 PINNED_PROACTIVE_SCHEMAS = {
@@ -222,7 +225,7 @@ def test_speak_and_process_intent_keep_their_schemas():
     assert ast.unparse(regs["process_intent"]) == "PROCESS_INTENT_SCHEMA"
 
 
-def test_four_documented_services_stay_schema_less():
+def test_create_automation_stays_schema_less():
     regs = dict(ce.service_registrations())
     documented = ce.services_contract()
     for name in SCHEMA_LESS_WITH_FIELDS:

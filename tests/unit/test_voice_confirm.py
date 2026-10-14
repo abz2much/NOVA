@@ -262,3 +262,67 @@ def test_yes_no_sentence_sets_are_disjoint(vc):
     assert not (set(vc._YES) & set(vc._NO))       # no overlap
     assert "yes" in vc._YES and "no" in vc._NO
     assert "unlock it" in vc._YES and "cancel" in vc._NO
+
+
+# ── 8.49.35 fixes ────────────────────────────────────────────────────────────
+
+async def test_native_confirm_expires_when_the_satellite_never_answers(vc):
+    """Fixed: the native path ignored the answer time limit, so a satellite
+    that never answered held the protected action open forever."""
+    import asyncio
+    hass = _Hass()
+
+    async def _never(*a, **k):
+        await asyncio.sleep(3600)
+    hass.services.async_call = _never
+    result = await asyncio.wait_for(
+        vc._confirm_native(hass, "assist_satellite.hall", "Unlock?", 0.05), 2)
+    assert result == "expired"
+
+
+async def test_native_confirm_still_reads_a_quick_answer(vc):
+    hass = _Hass()
+    hass._call_result = {"assist_satellite.hall": {"id": "confirm"}}
+    assert await vc._confirm_native(hass, "assist_satellite.hall", "Unlock?", 5) == "approved"
+    hass._call_result = {"id": "deny"}
+    assert await vc._confirm_native(hass, "assist_satellite.hall", "Unlock?", 5) == "rejected"
+    hass._call_result = {"something": "else"}
+    assert await vc._confirm_native(hass, "assist_satellite.hall", "Unlock?", 5) is None
+
+
+async def test_phone_tap_during_the_send_is_not_missed(vc):
+    """Fixed: Nova started listening for the tap only after sending, so a
+    tap that came back while the push was still going out was lost."""
+    hass = _HassWithNotify()
+    send = type(hass.services).async_call
+
+    async def _send_and_tap(self, dom, name, data, **kw):
+        await send(self, dom, name, data, **kw)
+        if hass._bus_listener is not None:
+            hass.fire(data["data"]["actions"][0]["action"])
+    type(hass.services).async_call = _send_and_tap
+    assert await vc._confirm_via_notification(hass, "Unlock the door?", timeout=0.05) == "approved"
+
+
+async def test_followup_without_a_speaker_reports_failure_and_leaves_the_mic(vc, monkeypatch):
+    """Fixed: with no speaker the question was skipped but the mic still
+    opened and the call said ok."""
+    monkeypatch.setattr(vc, "_cfg", _cfg_map({"voice_confirm_mode": "gated"}))
+    monkeypatch.setattr(vc, "_satellite_for_entity", lambda h, e: "assist_satellite.hall")
+    monkeypatch.setattr(vc, "_speaker_for_satellite", lambda h, s: ("tts.piper", []))
+    opened = []
+
+    async def _start(h, s):
+        opened.append(s)
+        return True
+    monkeypatch.setattr(vc, "_start_listening", _start)
+    result = await vc.ask_followup(_Hass(), "Which one?")
+    assert result["ok"] is False and result["satellite"] == "assist_satellite.hall"
+    assert opened == []
+
+
+async def test_announce_test_note_names_no_particular_speaker(vc):
+    """Fixed: the note named one brand of speaker."""
+    result = await vc.announce_test(_Hass(), "assist_satellite.hall")
+    assert result["ok"] is True
+    assert "Nest" not in result["note"] and "your speaker" in result["note"]

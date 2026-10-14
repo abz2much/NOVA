@@ -1,47 +1,30 @@
-"""
-Nova — Voice confirmation & interactive follow-up (v6.67.0).
+"""Spoken confirmation before sensitive actions, and spoken follow up questions.
 
-Two capabilities, both opt-in via config:
+Both are opt in through the panel settings.
 
-  1. Voice-confirm sensitive actions (lock/unlock, garage, alarm disarm): before
-     Nova acts on a protected entity, it asks out loud and waits for a spoken
-     yes/no — the "unlock the door, you sure?" pattern HA built for exactly this.
+confirm() asks a yes or no question before Nova acts on a protected entity
+(unlocking, opening a garage, disarming). It picks a channel in this order:
 
-  2. Open-ended follow-up: Nova asks a question aloud and listens for a free
-     answer, feeding it back so a bare "yes" or "the blue one" is understood.
+* no assist satellite anywhere: an actionable Confirm / Deny push to the
+  household's phones, first tap wins (_confirm_via_notification);
+* native (voice_confirm_mode "native", or "auto" when the satellite is known
+  to have its own audio out): assist_satellite.ask_question, which speaks,
+  waits for playback and listens by itself;
+* gated (everything else, and native when it cannot run): the question is
+  spoken on the speaker paired with the satellite, Nova waits for playback to
+  end, then reopens the satellite's mic. The answer arrives later as an
+  ordinary conversation turn, so this path never approves anything itself.
 
-Two delivery paths, chosen by `voice_confirm_mode`:
+ask_followup() asks an open question the same two ways and lets the answer
+come back as a normal turn.
 
-  - "native"  — uses HA's assist_satellite.ask_question / start_conversation,
-     which sequence announce → wait-for-playback → listen internally. This
-     "just works" ONLY if the assist_satellite's own audio output routes to a
-     real speaker (here, the Nest). Nova's satellites are ears-only, so this
-     depends on the satellite output being pointed at the Nest at the HA level.
-
-  - "gated"   — the fallback that fits Nova's ears/mouth routing: speak the
-     question via the normal announce path (to the Nest media_player), wait for
-     that media_player to finish playing, then re-open listening on the
-     satellite via its ESPHome voice_assistant.start action. No dependency on
-     satellite audio output.
-
-  - "auto"    — try native; if the satellite has no usable audio output
-     configured, fall back to gated.
-
-When there is no assist_satellite at all (the owner's current setup — zero paired),
-`confirm()` falls back further still: it pushes an actionable Confirm/Deny
-notification to every phone with the HA companion app (notify.mobile_app_*),
-and waits up to `_NOTIFY_CONFIRM_TIMEOUT` for a tap from either household
-member — same "first response wins" pattern as Nova's other household-wide
-alerts. This is what actually lets a protected action complete right now,
-rather than being denied outright.
-
-Everything here is defensive and never raises to the caller — a failed
-confirmation is treated as "not confirmed" (fail safe: the protected action does
-NOT run).
+Nothing here raises to a caller. Any failure reads as "not confirmed", so the
+protected action does not run.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Optional, Sequence
@@ -52,212 +35,185 @@ from .answers import NO as _SHARED_NO, YES as _SHARED_YES
 
 _LOGGER = logging.getLogger(__name__)
 
-# Domains/actions we treat as sensitive enough to voice-confirm by default.
-# (Only consulted when voice-confirm is enabled AND the action is protected.)
+# (domain, service) pairs that need a confirmation once the feature is on.
+# Covers expose both open and open_cover; switch.turn_off only counts for
+# switches whose id looks security related (see action_is_protected).
 _SENSITIVE = {
     ("lock", "unlock"),
-    ("cover", "open"),             # some cover integrations use this name
-    ("cover", "open_cover"),       # the actual HA service name (garage doors are covers)
+    ("cover", "open"),
+    ("cover", "open_cover"),
     ("alarm_control_panel", "alarm_disarm"),
-    ("switch", "turn_off"),        # only when the switch is flagged security-ish
+    ("switch", "turn_off"),
 }
 
-# Indirection domains (audit, Sept 2026): a scene/script/automation can itself
-# unlock, disarm, or open something, and there's no cheap way to inspect one
-# before running it. Domain-level, not a (domain, service) tuple in
-# _SENSITIVE — HA gives every script its own dynamic per-object service
-# (script.<object_id>) as an alternative to script.turn_on, so a tuple list
-# would repeat the exact cover.open_cover naming-gap this module already fixed
-# once. Keep this set and policy._INDIRECTION_DOMAINS in sync.
+# A scene, script or automation can unlock or open something itself and can't
+# be inspected first, so the whole domain counts, except the services that
+# only stop or reload one. Domain level on purpose: every script also gets its
+# own script.<name> service. Must match policy._INDIRECTION_DOMAINS.
 _INDIRECTION_DOMAINS = {"scene", "script", "automation"}
 _INDIRECTION_SAFE = {"", "reload", "turn_off", "stop"}
 
-# The shared yes/no words (answers.py, 8.49.0), plus this channel's own:
-# here the question names the action, so "unlock it" and "open it" answer
-# it. Home Assistant matches these sentences itself, so the contractions
-# are listed as spoken.
+# The household yes/no words from answers.py plus this channel's own. The
+# question names the action, so "unlock it" or "open it" answers it. Home
+# Assistant does the matching, hence the spoken contractions.
 _YES = sorted(_SHARED_YES | {"unlock it", "open it"})
 _NO = sorted(_SHARED_NO | {"don't", "don't do it"})
 
-# How long to wait for a spoken answer / playback, before giving up (fail-safe).
-_ANSWER_TIMEOUT = 30.0
-_PLAYBACK_TIMEOUT = 20.0
-# How long to wait for a phone tap when falling back to notification-based
-# confirmation (no assist_satellite paired) — longer than the spoken timeouts
-# since it depends on someone noticing and reaching their phone.
-_NOTIFY_CONFIRM_TIMEOUT = 120.0
+_ANSWER_TIMEOUT = 30.0              # seconds for a spoken answer
+_PLAYBACK_TIMEOUT = 20.0            # seconds for the prompt to finish playing
+_NOTIFY_CONFIRM_TIMEOUT = 120.0     # seconds for a phone tap (someone must find it)
+
+# The five outcomes, written straight into an action's approval_result:
+#   approved / rejected  a real answer: a matched spoken reply or a phone tap
+#   expired              a timed wait (spoken or phone) ended with no answer
+#   deferred             gated: asked aloud, the answer can only come later
+#                        as a normal turn, so nothing is decided now
+#   error                the question could not be asked at all
+# confirm() and confirm_via_phone_only() are the bool views: approved or not.
+ConfirmResult = str
 
 
 def _cfg(hass, key: str, default=None):
     try:
         from . import nova_config
-        v = nova_config.get(key, default)
-        return v if v is not None else default
+        value = nova_config.get(key, default)
     except Exception:
         return default
+    return default if value is None else value
 
 
 def is_enabled(hass) -> bool:
-    """Voice confirmation is opt-in."""
+    """Voice confirmation is off unless the user turns it on."""
     return bool(_cfg(hass, "voice_confirm_enabled", False))
 
 
 def _mode(hass) -> str:
-    m = str(_cfg(hass, "voice_confirm_mode", "auto") or "auto").lower()
-    return m if m in ("native", "gated", "auto") else "auto"
+    mode = str(_cfg(hass, "voice_confirm_mode", "auto") or "auto").lower()
+    return mode if mode in {"native", "gated", "auto"} else "auto"
 
 
 def action_is_protected(hass, domain: str, service: str, entity_id: str = "") -> bool:
-    """Whether this action should be voice-confirmed. Sensitive by domain/action,
-    with a user override list (`voice_confirm_entities`) that can add or, prefixed
-    with '!', exempt specific entities."""
+    """Whether this call needs a confirmation first.
+
+    voice_confirm_entities can add an entity, or exempt one with a leading
+    "!"; an exemption wins over everything else."""
     if not is_enabled(hass):
         return False
     overrides = _cfg(hass, "voice_confirm_entities", [])
-    if isinstance(overrides, list):
-        if entity_id and f"!{entity_id}" in overrides:
-            return False                       # explicit exemption
-        if entity_id and entity_id in overrides:
-            return True                        # explicit inclusion
-    # switch.turn_off is only sensitive for security-ish switches
-    if (domain, service) == ("switch", "turn_off"):
-        hay = entity_id.lower()
-        return any(t in hay for t in ("alarm", "security", "camera", "lock"))
-    if domain in _INDIRECTION_DOMAINS and (service or "").lower() not in _INDIRECTION_SAFE:
-        return True
+    if entity_id and isinstance(overrides, list):
+        if "!" + entity_id in overrides:
+            return False
+        if entity_id in overrides:
+            return True
+    if domain == "switch" and service == "turn_off":
+        lowered = entity_id.lower()
+        return any(word in lowered for word in ("alarm", "security", "camera", "lock"))
+    if domain in _INDIRECTION_DOMAINS:
+        return (service or "").lower() not in _INDIRECTION_SAFE
     return (domain, service) in _SENSITIVE
 
 
-# ── satellite discovery ──────────────────────────────────────────────────────
+# ── Satellites and speakers ─────────────────────────────────────────────────
 
 def _satellite_for_entity(hass, entity_id: str) -> Optional[str]:
-    """Best assist_satellite to ask through — the one nearest the target entity's
-    area, else any available satellite."""
+    """The satellite to ask through: one in the target entity's area if
+    there is one, else the first satellite that is up. None if neither."""
     try:
         from . import audio_routing
-        # target area
-        area = None
+        area_id = None
         try:
-            from homeassistant.helpers import entity_registry as er, area_registry as ar  # noqa
-            reg = er.async_get(hass)
-            ent = reg.async_get(entity_id)
-            if ent and ent.area_id:
-                area = ent.area_id
+            from homeassistant.helpers import entity_registry as er
+            reg_entry = er.async_get(hass).async_get(entity_id)
+            area_id = reg_entry.area_id if reg_entry else None
         except Exception:
-            pass
-        if area:
-            sats = audio_routing.satellites_in_area(hass, area)
-            if sats:
-                return sats[0]
-        # any satellite
-        for e in hass.states.async_all("assist_satellite"):
-            if e.state not in ("unavailable", "unknown"):
-                return e.entity_id
+            area_id = None
+        if area_id:
+            in_area = audio_routing.satellites_in_area(hass, area_id)
+            if in_area:
+                return in_area[0]
+        for state in hass.states.async_all("assist_satellite"):
+            if state.state not in ("unavailable", "unknown"):
+                return state.entity_id
     except Exception:
         pass
     return None
 
 
 def _satellite_pairings(hass) -> Optional[dict]:
-    """The panel's Satellite → Speaker pairings, read the way conversation.py
-    reads them: the live runtime_config, a dict or its JSON text. None when
-    unset or unreadable."""
+    """The panel's satellite to speaker pairings from the live runtime
+    config (a dict, or JSON text of one). None when unset or unreadable."""
     try:
-        import json as _json
         from .runtime import domain_runtime_config
         raw = domain_runtime_config(hass).get("satellite_pairings")
         if not raw:
             return None
-        parsed = _json.loads(raw) if isinstance(raw, str) else raw
-        return parsed if isinstance(parsed, dict) and parsed else None
+        pairs = json.loads(raw) if isinstance(raw, str) else raw
     except Exception:
         return None
+    return pairs if isinstance(pairs, dict) and pairs else None
 
 
 def _speaker_for_satellite(hass, satellite: str) -> tuple[Optional[str], list]:
-    """(tts_entity, [media_players]) to speak through for the gated path: the
-    same speaker a reply from this satellite uses (8.33.0): its Satellite →
-    Speaker pairing, else the speaker assigned to its room, else the general
-    speaker (audio_routing.reply_target). Never the satellite itself."""
+    """(tts entity, [media players]) for the gated path.
+
+    The speaker is the one a reply from this satellite would use
+    (audio_routing.reply_target: its pairing, its room's speaker, or the
+    general one) and is never the satellite itself."""
     try:
         from . import audio_routing, tts_helper
-        assigned = audio_routing.reply_target(
+        target = audio_routing.reply_target(
             hass, satellite_entity_id=satellite,
             satellite_pairings=_satellite_pairings(hass))
-        if assigned and assigned.startswith("assist_satellite."):
-            assigned = None
-        speakers = [assigned] if assigned else []
-        # resolve the Nova TTS entity: prefer the configured one, else best
+        if target and target.startswith("assist_satellite."):
+            target = None
         configured = _cfg(hass, "tts_engine", "") or ""
-        tts_entity = None
         try:
-            tts_entity = tts_helper.resolve_tts_entity(hass, configured)
+            engine = tts_helper.resolve_tts_entity(hass, configured)
         except Exception:
-            pass
-        if not tts_entity:
+            engine = None
+        if not engine:
             try:
-                tts_entity = tts_helper.find_best_tts_entity(hass)
+                engine = tts_helper.find_best_tts_entity(hass)
             except Exception:
-                tts_entity = configured or None
-        return tts_entity, speakers
+                engine = configured or None
+        return engine, [target] if target else []
     except Exception:
         return None, []
 
 
 def _satellite_has_audio_out(hass, satellite: str) -> bool:
-    """Heuristic: does this assist_satellite have its own audio output configured
-    (so native announce would actually be heard)? We can't fully introspect the
-    pipeline, so we look for a configured hint and otherwise assume not (Nova
-    satellites are ears-only)."""
+    """Whether native prompts on this satellite would be heard. The pipeline
+    can't be inspected, so this only trusts the satellite_audio_out setting
+    (a bool, or a per satellite dict) and otherwise says no."""
     hint = _cfg(hass, "satellite_audio_out", None)
-    if isinstance(hint, dict):
-        return bool(hint.get(satellite, False))
     if isinstance(hint, bool):
         return hint
+    if isinstance(hint, dict):
+        return bool(hint.get(satellite, False))
     return False
 
 
-# ── public: confirm a yes/no ─────────────────────────────────────────────────
+def _use_native(hass, satellite: str) -> bool:
+    mode = _mode(hass)
+    return mode == "native" or (mode == "auto" and _satellite_has_audio_out(hass, satellite))
 
-# ── Typed confirmation results (Action Audit Log) ────────────────────────────
-# ConfirmResult values and their EXACT meaning — used to populate an action
-# row's approval_result directly, never derived by parsing `note` text:
-#   "approved" / "rejected" — a real yes/no was captured (spoken match, or an
-#       explicit phone Confirm/Deny tap).
-#   "expired"  — a genuine bounded wait (the phone-notification timeout) ran
-#       out with no tap at all.
-#   "deferred" — the gated voice path asked the question but cannot capture a
-#       synchronous answer by design (see _confirm_gated docstring): NOT a
-#       timeout (no timer ran out) and NOT a rejection (nothing was denied).
-#       If the user answers, it arrives as an ordinary later conversation
-#       turn with no code-level link back to this attempt — see the design
-#       report for why that link isn't fabricated here.
-#   "error"    — an internal failure (no notify target found, an exception
-#       anywhere in the cascade) prevented ever asking at all.
-#
-# confirm()/confirm_via_phone_only() keep their existing bool contract and
-# every existing caller/test untouched: each is now a one-line wrapper over
-# its *_typed() counterpart, `== "approved"`. Nothing about their timeout,
-# fallback order, or fail-safe behavior changes.
-ConfirmResult = str  # Literal["approved", "rejected", "expired", "deferred", "error"]
 
+# ── Yes or no ───────────────────────────────────────────────────────────────
 
 async def confirm_typed(hass, question: str, *, entity_id: str = "",
                         timeout: float = _ANSWER_TIMEOUT) -> ConfirmResult:
-    """Typed counterpart of confirm() — see ConfirmResult above. Never raises;
-    an internal failure returns "error", never propagates."""
+    """Ask `question` and return one of the ConfirmResult values. Never
+    raises: an unexpected failure is "error"."""
     try:
         satellite = _satellite_for_entity(hass, entity_id)
         if not satellite:
             _LOGGER.info("voice_confirm: no assist_satellite available; "
-                        "falling back to phone confirmation")
+                         "falling back to phone confirmation")
             return await _confirm_via_notification(hass, question)
-        mode = _mode(hass)
-        if mode == "native" or (mode == "auto" and _satellite_has_audio_out(hass, satellite)):
-            result = await _confirm_native(hass, satellite, question, timeout)
-            if result is not None:
-                return result
-            # native failed to run → fall through to gated
+        if _use_native(hass, satellite):
+            outcome = await _confirm_native(hass, satellite, question, timeout)
+            if outcome is not None:
+                return outcome
         return await _confirm_gated(hass, satellite, question, timeout)
     except Exception as exc:
         _LOGGER.warning("voice_confirm.confirm failed (treating as error): %s", exc)
@@ -266,28 +222,19 @@ async def confirm_typed(hass, question: str, *, entity_id: str = "",
 
 async def confirm(hass, question: str, *, entity_id: str = "",
                   timeout: float = _ANSWER_TIMEOUT) -> bool:
-    """Ask `question` aloud and return True only on an affirmative spoken answer.
-    Fail-safe: any error, timeout, or negative → False (the protected action does
-    NOT run). Chooses native vs gated per config. Never raises.
-
-    A thin bool wrapper over confirm_typed() — behavior, timeout, and
-    fallback order are unchanged; only confirm_typed() exposes the finer
-    approved/rejected/expired/deferred/error distinction."""
-    return (await confirm_typed(hass, question, entity_id=entity_id,
-                                timeout=timeout)) == "approved"
+    """True only when the answer was a clear yes; see confirm_typed()."""
+    outcome = await confirm_typed(hass, question, entity_id=entity_id, timeout=timeout)
+    return outcome == "approved"
 
 
 def is_voice_satellite_device(hass, device_id: str, *, strict: bool = False) -> bool:
-    """True if device_id belongs to a device with a paired assist_satellite
-    entity (v7.87.0) — Nova's signal that a request was spoken, not typed.
-    Used to require a non-voice (phone) confirmation for actions where a
-    spoken confirmation would be exactly as spoofable as the spoken request
-    itself (unlock/open — see policy.py's voice-blocked-opening gate).
+    """Whether device_id is the device of an assist satellite, which means
+    the request was spoken rather than typed.
 
-    By default a failed lookup reads as False, which is fine for callers that
-    only label a request (action log source). strict=True raises instead, so
-    the authorization boundary (policy._voice_satellite_request) can tell a
-    confirmed non-satellite from an origin it couldn't check, and fail closed."""
+    Opening and unlocking asked for by voice need a phone tap instead of a
+    spoken yes, since a spoken yes is as easy to fake as the request. A
+    failed lookup reads as False, unless strict=True, where it raises so the
+    policy gate can fail closed on an origin it could not check."""
     if not device_id:
         return False
     try:
@@ -295,43 +242,43 @@ def is_voice_satellite_device(hass, device_id: str, *, strict: bool = False) -> 
         reg = er.async_get(hass)
         if reg is None:
             raise RuntimeError("entity registry unavailable")
-        for st in hass.states.async_all("assist_satellite"):
-            ent = reg.async_get(st.entity_id)
-            if ent and ent.device_id == device_id:
-                return True
+        return any(
+            (reg_entry := reg.async_get(state.entity_id)) is not None
+            and reg_entry.device_id == device_id
+            for state in hass.states.async_all("assist_satellite"))
     except Exception as exc:
         if strict:
             raise
         _LOGGER.debug("voice_confirm.is_voice_satellite_device check failed: %s", exc)
-    return False
+        return False
 
 
 def phone_services_for_user(hass, user_id: str) -> list[str]:
-    """The notify.mobile_app_* services of the phones that belong to this Home
-    Assistant user (8.31.0): the mobile_app trackers of the person whose
-    user_id it is. Empty when the user has no person, or the person has no
-    phone. Never raises; an unreadable registry reads as no phone."""
+    """notify.mobile_app_* services of the phones tracked by the person
+    linked to this Home Assistant user. Empty when there is no such person
+    or phone; never raises."""
     if not user_id:
         return []
     try:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
         reg = er.async_get(hass)
-        services = hass.services.async_services().get("notify", {})
-        out: list[str] = []
-        for st in hass.states.async_all("person"):
-            if st.attributes.get("user_id") != user_id:
-                continue
-            for tracker in st.attributes.get("device_trackers") or []:
-                ent = reg.async_get(tracker) if reg is not None else None
-                if not ent or ent.platform != "mobile_app" or not ent.config_entry_id:
+        available = hass.services.async_services().get("notify", {})
+        found: list[str] = []
+        people = [p for p in hass.states.async_all("person")
+                  if p.attributes.get("user_id") == user_id]
+        for person in people:
+            for tracker in person.attributes.get("device_trackers") or []:
+                reg_entry = reg.async_get(tracker) if reg is not None else None
+                if (reg_entry is None or reg_entry.platform != "mobile_app"
+                        or not reg_entry.config_entry_id):
                     continue
-                entry = hass.config_entries.async_get_entry(ent.config_entry_id)
-                device_name = (entry.data.get("device_name") if entry else "") or ""
-                name = f"mobile_app_{slugify(device_name)}"
-                if device_name and name in services and name not in out:
-                    out.append(name)
-        return out
+                app_entry = hass.config_entries.async_get_entry(reg_entry.config_entry_id)
+                device_name = (app_entry.data.get("device_name") if app_entry else "") or ""
+                service = "mobile_app_" + slugify(device_name)
+                if device_name and service in available and service not in found:
+                    found.append(service)
+        return found
     except Exception as exc:
         _LOGGER.debug("voice_confirm.phone_services_for_user failed: %s", exc)
         return []
@@ -340,10 +287,9 @@ def phone_services_for_user(hass, user_id: str) -> list[str]:
 async def confirm_via_phone_only_typed(hass, question: str, *,
                                        timeout: float = _NOTIFY_CONFIRM_TIMEOUT,
                                        services: Optional[Sequence[str]] = None) -> ConfirmResult:
-    """Typed counterpart of confirm_via_phone_only() — see ConfirmResult
-    above. Never raises; an internal failure returns "error". `services`
-    limits the push to those notify.mobile_app_* services (a Chat turn asks
-    only the requesting user's own phones); None asks every phone."""
+    """Ask on phones only, never by voice. `services` limits the push to
+    those notify.mobile_app_* services (a chat turn asks only the user's own
+    phones); None asks every phone. Never raises."""
     try:
         if services is None:
             return await _confirm_via_notification(hass, question, timeout)
@@ -355,287 +301,242 @@ async def confirm_via_phone_only_typed(hass, question: str, *,
 
 async def confirm_via_phone_only(hass, question: str, *,
                                  timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> bool:
-    """Like confirm(), but NEVER uses a voice channel — always the phone
-    push-notification tier, even when a satellite is available (v7.87.0).
-    For actions where asking "did you say yes" by voice again would just
-    repeat the exact weakness a non-voice confirmation exists to close.
+    """Bool view of confirm_via_phone_only_typed(), used where a spoken yes
+    would be no safer than the spoken request it confirms."""
+    outcome = await confirm_via_phone_only_typed(hass, question, timeout=timeout)
+    return outcome == "approved"
 
-    A thin bool wrapper over confirm_via_phone_only_typed() — unchanged
-    behavior/timeout; only the typed variant exposes approved/rejected/
-    expired/error."""
-    return (await confirm_via_phone_only_typed(hass, question, timeout=timeout)) == "approved"
+
+def _answer_id(response) -> Optional[str]:
+    """The matched answer id from ask_question's response, which is either
+    {"id": ...} or {satellite: {"id": ...}}."""
+    if not isinstance(response, dict):
+        return None
+    if "id" in response:
+        return response.get("id")
+    return next((v["id"] for v in response.values()
+                 if isinstance(v, dict) and "id" in v), None)
 
 
 async def _confirm_native(hass, satellite: str, question: str,
                           timeout: float) -> Optional[ConfirmResult]:
-    """Use assist_satellite.ask_question with yes/no sentence sets. Returns
-    "approved"/"rejected" on a matched answer, or None if the action
-    couldn't run at all (so the caller falls back to gated) — None is an
-    internal fall-through signal only, never a terminal ConfirmResult on
-    its own."""
+    """assist_satellite.ask_question with the yes and no sentences.
+
+    "approved" or "rejected" on a matched answer, "expired" when nothing is
+    answered within `timeout`, and None when the call can't run or its reply
+    can't be read, which tells the caller to try the gated path instead."""
+    answers = [{"id": "confirm", "sentences": _YES}, {"id": "deny", "sentences": _NO}]
+    request = {"entity_id": satellite, "question": question,
+               "preannounce": False, "answers": answers}
     try:
-        result = await hass.services.async_call(
-            "assist_satellite", "ask_question",
-            {
-                "entity_id": satellite,
-                "question": question,
-                "preannounce": False,
-                "answers": [
-                    {"id": "confirm", "sentences": _YES},
-                    {"id": "deny", "sentences": _NO},
-                ],
-            },
-            blocking=True, return_response=True,
-        )
-        # HA returns {satellite: {"id": ...}} or {"id": ...} depending on version
-        ans = None
-        if isinstance(result, dict):
-            if "id" in result:
-                ans = result.get("id")
-            else:
-                for v in result.values():
-                    if isinstance(v, dict) and "id" in v:
-                        ans = v["id"]
-                        break
-        if ans is None:
-            return None                        # couldn't parse → fall back
-        return "approved" if ans == "confirm" else "rejected"
+        response = await asyncio.wait_for(
+            hass.services.async_call("assist_satellite", "ask_question", request,
+                                     blocking=True, return_response=True),
+            timeout=timeout)
+    except asyncio.TimeoutError:
+        _LOGGER.info("voice_confirm: no spoken answer within %.0fs; expiring", timeout)
+        return "expired"
     except Exception as exc:
         _LOGGER.debug("voice_confirm native path unavailable: %s", exc)
         return None
+    answer = _answer_id(response)
+    if answer is None:
+        return None
+    return "approved" if answer == "confirm" else "rejected"
 
 
 async def _confirm_gated(hass, satellite: str, question: str,
                          timeout: float) -> ConfirmResult:
-    """Fallback: speak via the normal announce path (to the Nest), wait for
-    playback to finish, then open listening on the satellite and interpret the
-    reply. Since we can't synchronously capture the STT result here without deep
-    pipeline hooks, the gated path asks and re-opens the mic; the answer arrives
-    as a normal Nova conversation turn that the caller's follow-up handles.
+    """Speak the question on the satellite's speaker, wait for it to finish
+    (so the mic doesn't hear the prompt), then reopen the satellite's mic.
 
-    For a *blocking* yes/no we do the safe thing: speak the question, open the
-    mic, and return "deferred" unless the pipeline round-trip confirms — i.e.
-    gated confirm never auto-approves a protected action on its own. This
-    keeps the fail-safe property (the caller treats anything but "approved"
-    as "don't run the action now") while still voicing the prompt and
-    listening.
-
-    "deferred", not "expired" or "rejected": no timer ran out here, and
-    nothing was explicitly denied — the question was asked and no
-    synchronous answer was captured by design. If the user does answer, it
-    arrives as an ordinary later conversation turn with no code-level link
-    back to this attempt (no correlation id exists for that hand-off
-    today)."""
+    The spoken reply can't be captured here; it comes back as a normal
+    conversation turn, where the agent sees the pending confirmation and
+    finishes the action. So this returns "deferred", which callers treat as
+    "don't act now", and never approves on its own. No speaker is "error"."""
     from . import tts_helper
-    tts_entity, speakers = _speaker_for_satellite(hass, satellite)
-    if tts_entity and speakers:
-        try:
-            await tts_helper.async_announce(hass, question, tts_entity, speakers,
-                                            context="confirm")
-        except Exception as exc:
-            _LOGGER.debug("voice_confirm gated announce failed: %s", exc)
-    else:
+    engine, speakers = _speaker_for_satellite(hass, satellite)
+    if not (engine and speakers):
         _LOGGER.warning("voice_confirm gated: no speaker for %s; cannot voice prompt",
                         satellite)
         return "error"
-
-    # Wait for playback to finish so we don't capture our own prompt (echo).
+    try:
+        await tts_helper.async_announce(hass, question, engine, speakers, context="confirm")
+    except Exception as exc:
+        _LOGGER.debug("voice_confirm gated announce failed: %s", exc)
     await _wait_for_playback(hass, speakers)
-
-    # Re-open the mic on the satellite so the user can answer.
-    started = await _start_listening(hass, satellite)
-    if not started:
+    if not await _start_listening(hass, satellite):
         _LOGGER.debug("voice_confirm gated: couldn't reopen mic on %s", satellite)
-    # We deliberately return "deferred" here: the gated path cannot itself
-    # capture the STT result synchronously, so it never auto-approves. The
-    # spoken answer comes back as a normal conversation turn; the agent,
-    # seeing a pending confirmation in context, completes the action then.
-    # (Fail-safe: the caller treats this exactly like a decline for the
-    # purpose of "does the action run right now" — it does not.)
     return "deferred"
 
 
 async def _confirm_via_notification(hass, question: str,
                                     timeout: float = _NOTIFY_CONFIRM_TIMEOUT,
                                     services: Optional[Sequence[str]] = None) -> ConfirmResult:
-    """Fallback when no assist_satellite is available at all: push an
-    actionable notification (Confirm / Deny) to every registered phone —
-    every `notify.mobile_app_*` service, same enumeration Nova's other
-    household-wide alerts use — and act on whichever household member
-    answers first. Fail-safe: no tap within `timeout` → "expired" (a real
-    timeout genuinely occurred), an explicit Deny tap → "rejected", no
-    notify target found at all → "error" — same fail-safe guarantee as the
-    voice paths above (the caller treats anything but "approved" as
-    "don't run the action")."""
-    req_id = uuid.uuid4().hex[:8]
-    confirm_action = f"NOVA_CONFIRM_{req_id}"
-    deny_action = f"NOVA_DENY_{req_id}"
+    """Push a Confirm / Deny notification to the household's phones (every
+    notify.mobile_app_* service, or only `services`) and take the first tap.
 
-    sent = 0
-    try:
-        notify_services = hass.services.async_services().get("notify", {})
-        for name in list(notify_services):
-            if not name.startswith("mobile_app_"):
-                continue
-            if services is not None and name not in services:
-                continue
-            try:
-                await hass.services.async_call(
-                    "notify", name,
-                    {
-                        "title": "Nova needs your OK",
-                        "message": question,
-                        "data": {
-                            "actions": [
-                                {"action": confirm_action, "title": "Confirm"},
-                                {"action": deny_action, "title": "Deny"},
-                            ],
-                            "push": {"interruption-level": "time-sensitive"},
-                        },
-                    },
-                    blocking=False,
-                )
-                sent += 1
-            except Exception as exc:
-                _LOGGER.debug("voice_confirm notify.%s failed: %s", name, exc)
-    except Exception as exc:
-        _LOGGER.warning("voice_confirm: enumerate notify services failed: %s", exc)
-
-    if sent == 0:
-        _LOGGER.warning("voice_confirm: no notify.mobile_app_* service found; cannot confirm")
-        return "error"
-
-    loop = asyncio.get_event_loop()
-    fut: asyncio.Future = loop.create_future()
+    The tap listener is in place before anything is sent, so a very quick
+    tap is never missed. A tap gives "approved" or "rejected", no tap within
+    `timeout` gives "expired", and no phone to ask gives "error"."""
+    tag = uuid.uuid4().hex[:8]
+    yes_action, no_action = f"NOVA_CONFIRM_{tag}", f"NOVA_DENY_{tag}"
+    answer: asyncio.Future = asyncio.get_running_loop().create_future()
 
     @callback
     def _on_action(event) -> None:
-        action = event.data.get("action")
-        if fut.done():
+        if answer.done():
             return
-        if action == confirm_action:
-            fut.set_result("approved")
-        elif action == deny_action:
-            fut.set_result("rejected")
+        action = event.data.get("action")
+        if action == yes_action:
+            answer.set_result("approved")
+        elif action == no_action:
+            answer.set_result("rejected")
 
     unsub = hass.bus.async_listen("mobile_app_notification_action", _on_action)
     try:
-        return await asyncio.wait_for(fut, timeout=timeout)
-    except asyncio.TimeoutError:
-        _LOGGER.info("voice_confirm: no phone response within %.0fs; expiring", timeout)
-        return "expired"
+        payload = {
+            "title": "Nova needs your OK",
+            "message": question,
+            "data": {
+                "actions": [
+                    {"action": yes_action, "title": "Confirm"},
+                    {"action": no_action, "title": "Deny"},
+                ],
+                "push": {"interruption-level": "time-sensitive"},
+            },
+        }
+        pushed = 0
+        try:
+            for name in list(hass.services.async_services().get("notify", {})):
+                if not name.startswith("mobile_app_"):
+                    continue
+                if services is not None and name not in services:
+                    continue
+                try:
+                    await hass.services.async_call("notify", name, payload, blocking=False)
+                except Exception as exc:
+                    _LOGGER.debug("voice_confirm notify.%s failed: %s", name, exc)
+                else:
+                    pushed += 1
+        except Exception as exc:
+            _LOGGER.warning("voice_confirm: enumerate notify services failed: %s", exc)
+        if not pushed:
+            _LOGGER.warning("voice_confirm: no notify.mobile_app_* service found; cannot confirm")
+            return "error"
+        try:
+            return await asyncio.wait_for(answer, timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.info("voice_confirm: no phone response within %.0fs; expiring", timeout)
+            return "expired"
     finally:
         unsub()
 
 
 async def _wait_for_playback(hass, speakers: Sequence[str],
                              timeout: float = _PLAYBACK_TIMEOUT) -> None:
-    """Wait until the given media_players leave 'playing' (best-effort)."""
+    """Best effort: return once none of `speakers` is playing, or at the
+    timeout. A short first pause lets them switch to playing."""
     if not speakers:
         return
-    deadline = asyncio.get_event_loop().time() + timeout
-    # small settle so state flips to 'playing' first
+    loop = asyncio.get_running_loop()
+    give_up_at = loop.time() + timeout
     await asyncio.sleep(0.6)
-    while asyncio.get_event_loop().time() < deadline:
+
+    def _any_playing() -> bool:
         try:
-            playing = any(
-                (hass.states.get(s) and hass.states.get(s).state == "playing")
-                for s in speakers)
+            for speaker in speakers:
+                state = hass.states.get(speaker)
+                if state and state.state == "playing":
+                    return True
         except Exception:
-            playing = False
-        if not playing:
-            return
+            pass
+        return False
+
+    while loop.time() < give_up_at and _any_playing():
         await asyncio.sleep(0.4)
 
 
 async def _start_listening(hass, satellite: str) -> bool:
-    """Open the satellite's mic. Prefer assist_satellite.start_conversation with
-    an empty prompt; fall back to the ESPHome voice_assistant.start action if a
-    mapping is configured."""
+    """Reopen the satellite's mic: assist_satellite.start_conversation with
+    no prompt, else the ESPHome action mapped to it in satellite_start_action
+    (for example "esphome.kitchen_start_va")."""
     try:
         await hass.services.async_call(
             "assist_satellite", "start_conversation",
-            {"entity_id": satellite, "preannounce": False},
-            blocking=False,
-        )
+            {"entity_id": satellite, "preannounce": False}, blocking=False)
         return True
     except Exception:
         pass
-    # ESPHome fallback: user maps satellite → esphome start action entity
-    esph = _cfg(hass, "satellite_start_action", {})
-    if isinstance(esph, dict) and satellite in esph:
-        try:
-            svc = esph[satellite]  # e.g. "esphome.basement_start_va"
-            dom, _, name = svc.partition(".")
-            await hass.services.async_call(dom, name, {}, blocking=False)
-            return True
-        except Exception as exc:
-            _LOGGER.debug("voice_confirm ESPHome start failed: %s", exc)
-    return False
+    mapping = _cfg(hass, "satellite_start_action", {})
+    if not (isinstance(mapping, dict) and satellite in mapping):
+        return False
+    try:
+        domain, _, service = mapping[satellite].partition(".")
+        await hass.services.async_call(domain, service, {}, blocking=False)
+        return True
+    except Exception as exc:
+        _LOGGER.debug("voice_confirm ESPHome start failed: %s", exc)
+        return False
 
 
-# ── public: open-ended follow-up ─────────────────────────────────────────────
+# ── Open follow up ──────────────────────────────────────────────────────────
 
 async def ask_followup(hass, question: str, *, turn_context: str = "",
                        entity_id: str = "") -> dict:
-    """Ask an open-ended question aloud and open the mic for a free answer. Uses
-    native start_conversation when available (which passes extra_system_prompt so
-    a bare 'yes' is understood), else the gated speak→wait→listen path. Returns
-    {ok, mode, satellite}. The user's answer returns as a normal conversation
-    turn. Never raises."""
+    """Ask an open question aloud and reopen the mic for the answer, which
+    comes back as a normal turn. Native start_conversation passes
+    `turn_context` as extra_system_prompt so a bare "yes" makes sense.
+
+    Returns {ok, mode, satellite}, or {ok: False, error} when the question
+    could not be asked (no satellite, or no speaker on the gated path, in
+    which case the mic is left alone). Never raises."""
     try:
         satellite = _satellite_for_entity(hass, entity_id)
         if not satellite:
             return {"ok": False, "error": "no assist_satellite available"}
-        mode = _mode(hass)
-        if mode == "native" or (mode == "auto" and _satellite_has_audio_out(hass, satellite)):
+        if _use_native(hass, satellite):
             try:
                 await hass.services.async_call(
                     "assist_satellite", "start_conversation",
-                    {
-                        "entity_id": satellite,
-                        "start_message": question,
-                        "extra_system_prompt": turn_context or "",
-                        "preannounce": False,
-                    },
-                    blocking=True,
-                )
+                    {"entity_id": satellite, "start_message": question,
+                     "extra_system_prompt": turn_context or "", "preannounce": False},
+                    blocking=True)
                 return {"ok": True, "mode": "native", "satellite": satellite}
             except Exception as exc:
                 _LOGGER.debug("voice_confirm followup native failed: %s", exc)
-                # fall through to gated
-        # gated
-        tts_entity, speakers = _speaker_for_satellite(hass, satellite)
-        if tts_entity and speakers:
-            from . import tts_helper
-            await tts_helper.async_announce(hass, question, tts_entity, speakers,
-                                            context="followup")
-            await _wait_for_playback(hass, speakers)
+        engine, speakers = _speaker_for_satellite(hass, satellite)
+        if not (engine and speakers):
+            _LOGGER.warning("voice_confirm followup: no speaker for %s; not asking", satellite)
+            return {"ok": False, "mode": "gated", "satellite": satellite,
+                    "error": "no speaker for the satellite"}
+        from . import tts_helper
+        await tts_helper.async_announce(hass, question, engine, speakers, context="followup")
+        await _wait_for_playback(hass, speakers)
         await _start_listening(hass, satellite)
-        return {"ok": True, "mode": "gated", "satellite": satellite}
     except Exception as exc:
         _LOGGER.warning("voice_confirm.ask_followup failed: %s", exc)
         return {"ok": False, "error": str(exc)}
+    return {"ok": True, "mode": "gated", "satellite": satellite}
 
 
-# ── diagnostic (for the panel test button) ───────────────────────────────────
+# ── Panel test button ───────────────────────────────────────────────────────
 
 async def announce_test(hass, satellite: Optional[str] = None) -> dict:
-    """Fire a bare assist_satellite.announce at a satellite and report — the
-    'does it come out the Nest?' test the whole native path depends on. Returns
-    {ok, satellite, note}. Never raises."""
+    """Play a short assist_satellite.announce so the user can hear whether
+    the satellite's own audio reaches a speaker, which native mode needs.
+    Returns {ok, satellite, note}. Never raises."""
     try:
-        sat = satellite or _satellite_for_entity(hass, "")
-        if not sat:
+        target = satellite or _satellite_for_entity(hass, "")
+        if not target:
             return {"ok": False, "note": "no assist_satellite found"}
         await hass.services.async_call(
             "assist_satellite", "announce",
-            {"entity_id": sat, "message": "Nova voice output test."},
-            blocking=True,
-        )
-        return {"ok": True, "satellite": sat,
-                "note": "Announce fired. If you heard it on the Nest, native "
-                        "mode works — otherwise use gated mode."}
+            {"entity_id": target, "message": "Nova voice output test."},
+            blocking=True)
     except Exception as exc:
         return {"ok": False, "error": str(exc),
                 "note": "assist_satellite.announce failed — use gated mode."}
+    return {"ok": True, "satellite": target,
+            "note": "Announce fired. If you heard it on your speaker, native "
+                    "mode works — otherwise use gated mode."}

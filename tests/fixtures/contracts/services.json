@@ -474,15 +474,28 @@
     },
     "database_stats": null,
     "diagnose_doorbell": null,
-    "forget": null,
-    "lockdown": null,
+    "forget": {
+      "id": "optional",
+      "key": "optional",
+      "subject": "optional"
+    },
+    "lockdown": {
+      "reason": "optional",
+      "state": "required"
+    },
     "nap": {
       "duration_minutes": "optional"
     },
     "observer_start": null,
     "observer_status": null,
     "observer_stop": null,
-    "remember": null,
+    "remember": {
+      "key": "required",
+      "kind": "optional",
+      "subject": "optional",
+      "ttl_seconds": "optional",
+      "value": "required"
+    },
     "replay_policy": {
       "kind": "required",
       "min_samples": "optional"
