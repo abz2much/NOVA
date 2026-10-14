@@ -53,7 +53,7 @@ def store(load, monkeypatch):
     monkeypatch.setattr(nc, "set_many", lambda values: calls.append(("set_many", dict(values)))
                         or data.update(values) or True)
     monkeypatch.setattr(nc, "delete", lambda key: calls.append(("delete", key))
-                        or data.pop(key, None))
+                        or data.pop(key, None) or state.ok)
     monkeypatch.setattr(nc, "get", lambda key, default=None: data.get(key, default))
     return state
 
@@ -172,13 +172,12 @@ def test_runtime_json_walks_live_then_config_then_entry(ws, load, store, monkeyp
     assert ws._get_runtime_json(None, None, "e", "dflt") == "dflt"
 
 
-def test_bad_json_in_config_json_comes_back_as_the_raw_text(ws, load, store):
-    # Looks wrong (bugs.md): bad JSON in the live value or the entry options
-    # falls through to the next layer, but bad JSON in config.json is
-    # returned as the raw string, not the default.
+def test_bad_json_in_config_json_is_skipped(ws, load, store):
+    # Fixed (bugs.md #16): bad JSON in config.json falls through to the next
+    # layer, like bad JSON in the live value or the entry options.
     entry = _entry(load, runtime_config={"b": "{bad"})
     store.data["b"] = "not json"
-    assert ws._get_runtime_json(None, entry, "b", {"d": 1}) == "not json"
+    assert ws._get_runtime_json(None, entry, "b", {"d": 1}) == {"d": 1}
 
 
 def test_runtime_json_skips_a_config_store_that_fails(ws, load, monkeypatch):
@@ -437,10 +436,12 @@ async def test_panel_config_fallbacks(ws, load):
     assert cfg["self_hosted_endpoints_migrated"] is False
 
 
-async def test_a_saved_zero_movie_dim_shows_as_the_default(ws, load):
-    # Looks wrong (bugs.md): movie_dim_pct is read with `value or 15`, so a
-    # saved 0 shows as 15, where home_context_max_entities keeps its 0.
+async def test_a_saved_zero_movie_dim_stays_zero(ws, load):
+    # Fixed (bugs.md #15): a saved 0 shows as 0; only blank reads as 15.
     entry = _entry(load, runtime_config={"movie_dim_pct": 0})
+    cfg = (await _call(ws.ws_get_panel_data, _hass(entry))).results[0][1]["config"]
+    assert cfg["movie_dim_pct"] == 0
+    entry = _entry(load, runtime_config={"movie_dim_pct": ""})
     cfg = (await _call(ws.ws_get_panel_data, _hass(entry))).results[0][1]["config"]
     assert cfg["movie_dim_pct"] == 15
 
@@ -600,6 +601,14 @@ async def test_clearing_one_coordinate_with_none_saved_deletes_both(ws, load, st
     assert entry.runtime_data.runtime_config == {}
 
 
+async def test_clearing_a_coordinate_reports_a_failed_save(ws, load, store):
+    # Fixed (bugs.md #17): a failed write is reported, not always "saved".
+    store.ok = False
+    entry = _entry(load, runtime_config={"hazard_lat": 1.0, "hazard_lon": 2.0})
+    conn = await _update(ws, _hass(entry), "hazard_lat", "")
+    assert conn.results == [(1, {"key": "hazard_lat", "value": "", "persisted": False})]
+
+
 async def test_a_coordinate_pairs_with_the_saved_other_one(ws, load, store):
     entry = _entry(load, runtime_config={"hazard_lon": -8.0})
     conn = await _update(ws, _hass(entry), "hazard_lat", 52)
@@ -697,7 +706,23 @@ async def test_semantic_status_reads_the_saved_switch(ws, load, store, monkeypat
     monkeypatch.setattr(e, "_model", lambda: "m")
     monkeypatch.setattr(e, "vector_count", lambda: 0)
     store.data["semantic_search"] = 1
-    conn = await _call(ws.ws_semantic_search, _hass(_entry(load)), action="status")
+    # Fixed (bugs.md #18): every status read happens off the event loop.
+    hass, off_loop = _hass(_entry(load)), []
+    orig_get = load("nova_config").get
+
+    async def _executor(func, *args):
+        off_loop.append(True)
+        try:
+            return func(*args)
+        finally:
+            off_loop.pop()
+    hass.async_add_executor_job = _executor
+
+    def _get(key, default=None):
+        assert off_loop, "config read on the event loop"
+        return orig_get(key, default)
+    monkeypatch.setattr(load("nova_config"), "get", _get)
+    conn = await _call(ws.ws_semantic_search, hass, action="status")
     assert conn.results == [(3, {"enabled": True, "ollama_configured": True,
                                  "base": "http://10.0.0.2:11434", "model": "m",
                                  "vector_count": 0})]

@@ -793,6 +793,17 @@ async def test_failed_platform_unload_keeps_the_runtime(env):
     assert "observer.stop" not in env.world.names()
 
 
+async def test_failed_observer_stop_is_not_shown_as_running(env):
+    """Fixed (bugs.md #14): a failing observer stop on unload still clears
+    the running flag."""
+    env.world.eff["observer_enabled"] = True
+    await _setup(env)
+    env.world.fail["observer.stop"] = RuntimeError("stuck")
+    env.world.unload_ok = False
+    await env.nova.async_unload_entry(env.hass, env.entry)
+    assert env.entry.runtime_data.observer_running is False
+
+
 async def test_unload_without_runtime_still_tears_down_the_domain(env):
     assert await env.nova.async_unload_entry(env.hass, env.entry) is True
     assert env.world.names() == [
@@ -916,9 +927,10 @@ async def test_frigate_detection_rules(env, monkeypatch):
                    ("tts.camera", "camera.yard", "Motion detected", {"doorbell": False})]
 
 
-async def test_frigate_and_nest_share_a_camera_cooldown(env, monkeypatch):
-    """Quirk: one per-camera cooldown dict serves Frigate detections, Nest
-    person events and Eufy strangers, so one silences the others."""
+async def test_frigate_and_nest_keep_their_own_camera_cooldown(env, monkeypatch):
+    """Fixed (bugs.md #12): Frigate detections, Nest person events and Eufy
+    strangers each have their own per-camera cooldown, so one never silences
+    the others."""
     env.hass.states.set("camera.door", "idle")
     env.world.nest_map = {"d1": "camera.door"}
     await _setup(env)
@@ -928,7 +940,7 @@ async def test_frigate_and_nest_share_a_camera_cooldown(env, monkeypatch):
         env.hass.listeners["nest_event"](_event({"device_id": "d1", "type": "person"}))
     await env.hass.drain()
     assert len(env.world.calls("auto_analyze")) == 1
-    assert env.world.calls("visitor_observation") == []
+    assert len(env.world.calls("visitor_observation")) == 1
 
 
 # ── Eufy ────────────────────────────────────────────────────────────────────
@@ -1250,7 +1262,8 @@ async def test_morning_briefing_content(env, caplog):
     with caplog.at_level(logging.INFO):
         await _briefing_cb(env.world, 7)(None)
     (args, _k), = env.world.calls("async_briefing")
-    assert args[2:] == (env.entry.runtime_data.client, "chief", "tts.briefing",
+    # Fixed (bugs.md #13): the presence aware honorific, not the configured one.
+    assert args[2:] == (env.entry.runtime_data.client, "boss", "tts.briefing",
                         ["media_player.one"])
     assert args[1].data == {"announce": True, "include_weather": True,
                             "include_calendar": True, "include_presence": True,
@@ -1303,15 +1316,18 @@ async def test_briefing_config_errors_fall_back_to_defaults(env):
     assert not env.world.calls("async_briefing")   # enabled falls back to False
 
 
-async def test_briefing_text_false_counts_as_enabled(env):
-    """Pinned bug (bugs.md #1): briefing settings go through bool(), so a
-    text "false" or "off" reads as on, unlike the camera flags."""
-    env.world.cfg.update({"briefing_morning_enabled": "false",
-                          "briefing_include_weather": "off"})
+async def test_briefing_text_false_counts_as_off(env):
+    """Fixed (bugs.md #11): briefing settings are read like the camera flags,
+    so a text "false" or "off" is off and "on" is on."""
+    env.world.cfg.update({"briefing_morning_enabled": "false"})
     await _setup(env)
     await _briefing_cb(env.world, 7)(None)
+    assert not env.world.calls("async_briefing")
+    env.world.cfg.update({"briefing_morning_enabled": "on",
+                          "briefing_include_weather": "off"})
+    await _briefing_cb(env.world, 7)(None)
     (args, _k), = env.world.calls("async_briefing")
-    assert args[1].data["include_weather"] is True
+    assert args[1].data["include_weather"] is False
 
 
 # ── Automation probation ────────────────────────────────────────────────────

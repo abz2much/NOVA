@@ -295,10 +295,11 @@ class _Entries:
         self.reloaded.append(entry_id)
 
 
-async def test_failed_reload_is_skipped_and_not_counted(bs, caplog):
+async def test_failed_reload_is_skipped_then_raised(bs, caplog):
     entries = _Entries(["w1", "w2", "w3"], failing={"w2"})
-    with caplog.at_level(logging.INFO, logger=bs.__name__):
-        assert await bs._reload_wyoming(SimpleNamespace(config_entries=entries)) == 2
+    with caplog.at_level(logging.INFO, logger=bs.__name__), \
+            pytest.raises(RuntimeError, match="1 Wyoming reload"):
+        await bs._reload_wyoming(SimpleNamespace(config_entries=entries))
     assert entries.reloaded == ["w1", "w3"]
     assert "reloaded 2 Wyoming entries" in caplog.text
 
@@ -706,24 +707,23 @@ async def test_skip_recheck_never_raises(bs, run, fake_hass, load, monkeypatch):
     assert run.notices.calls == []
 
 
-async def test_wyoming_counts_as_ok_even_when_every_reload_fails(bs, run, fake_hass,
-                                                                  monkeypatch):
-    """Pinned quirk (bugs.md): failing reloads are swallowed one by one, so
-    "Wyoming" is only ever reported when listing the entries itself fails."""
+async def test_failed_wyoming_reloads_are_reported(bs, run, fake_hass, monkeypatch):
+    """Fixed (bugs.md #19): a failing reload marks Wyoming as not ok."""
     monkeypatch.setattr(bs, "_reload_wyoming", run.real_reload)
-    fake_hass.config_entries = _Entries(["w1", "w2"], failing={"w1", "w2"})
+    fake_hass.config_entries = _Entries(["w1", "w2"], failing={"w2"})
     status = await bs.async_run_bootstrap(fake_hass)
-    assert status["wyoming_ok"] is True
-    assert run.notices.calls[-1] == ("clear",)
+    assert status["wyoming_ok"] is False
+    assert run.notices.calls[-1] != ("clear",)
 
 
-async def test_non_object_marker_makes_the_run_raise(bs, run, fake_hass):
-    """Pinned bug (bugs.md): a marker file holding valid JSON that is not an
-    object is returned as is, and the gate's .get() then raises."""
+async def test_non_object_marker_reads_as_no_marker(bs, run, fake_hass):
+    """Fixed (bugs.md #20): a marker file holding valid JSON that is not an
+    object reads as no marker, so the run goes ahead."""
     bs.MARKER_PATH.parent.mkdir(parents=True)
     bs.MARKER_PATH.write_text("[1, 2]")
-    with pytest.raises(AttributeError):
-        await bs.async_run_bootstrap(fake_hass)
+    assert bs._read_marker() == {}
+    status = await bs.async_run_bootstrap(fake_hass)
+    assert status["addons_ok"] is True and not status.get("skipped")
 
 
 # ── async_ensure_pipeline_agent ─────────────────────────────────────────────
@@ -780,7 +780,7 @@ async def test_repair_matches_name_or_voice_and_skips_the_rest(bs, agent_wait, f
                             ("nova two", {"conversation_engine": "conversation.nova"})]
     assert pipes[0].conversation_engine == "conversation.home"
     assert ("Nova: set pipeline 'Kitchen' conversation agent -> conversation.nova "
-            "(was conversation.nova)") in caplog.text
+            "(was conversation.home)") in caplog.text   # fixed (bugs.md #21)
 
 
 async def test_repair_error_moves_on_to_the_next(bs, agent_wait, fake_hass, caplog):

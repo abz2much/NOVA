@@ -104,6 +104,23 @@ def _find_config(config_path: str) -> dict | None:
     return None
 
 
+def _import_plan(import_data: dict[str, Any]) -> tuple[str, str, str] | None:
+    """(key, provider, address) for importing `import_data`, or None when it
+    holds neither a cloud key nor a working local endpoint."""
+    from .llm_provider import resolve_provider_endpoint
+
+    key = str(import_data.get(CONF_API_KEY) or import_data.get("groq_api_key") or "").strip()
+    provider = str(import_data.get("llm_provider", "groq") or "").strip().lower()
+    try:
+        address = resolve_provider_endpoint(import_data, provider) or ""
+    except ValueError:
+        address = ""
+    local = provider in ("ollama", "custom") and bool(address)
+    if not (key or local):
+        return None
+    return key, provider, address
+
+
 def _saved_keys() -> dict[str, str]:
     """Cloud keys already in secrets.yaml (an earlier install), by provider.
     Reads a file, so call it through the executor."""
@@ -112,9 +129,9 @@ def _saved_keys() -> dict[str, str]:
     keys: dict[str, str] = {}
     for provider in setup_roles.CLOUD:
         name = ha_secrets.secret_key_for(PROVIDER_API_KEY_FIELDS[provider])
-        stored = ha_secrets.get_secret_sync(name, None)
+        stored = str(ha_secrets.get_secret_sync(name, None) or "").strip()
         if stored:
-            keys[provider] = str(stored).strip()
+            keys[provider] = stored
     return keys
 
 
@@ -183,7 +200,7 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         leftover = await self.hass.async_add_executor_job(
             _find_config, self.hass.config.path("nova", "config.json"))
-        if leftover:
+        if leftover and _import_plan(leftover) is not None:
             return await self.async_step_import(leftover)
 
         saved = await self.hass.async_add_executor_job(_saved_keys)
@@ -503,19 +520,11 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_import(self, import_data: dict[str, Any]) -> dict:
         """Create the entry from the config.json an earlier install left."""
-        from .llm_provider import resolve_provider_endpoint
-
-        key = (import_data.get(CONF_API_KEY) or import_data.get("groq_api_key", "")).strip()
-        provider = import_data.get("llm_provider", "groq")
-        try:
-            address = resolve_provider_endpoint(import_data, provider) or ""
-        except ValueError:
-            address = ""
-        local = provider in ("ollama", "custom") and bool(address)
-        # A cloud key or a working local endpoint will do; one is required.
-        if not (key or local):
+        plan = _import_plan(import_data)
+        if plan is None:
             _LOGGER.warning("Nova: config found but no API key and no local LLM")
             return self.async_abort(reason="import_failed")
+        key, provider, address = plan
 
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured(updates={CONF_API_KEY: key})

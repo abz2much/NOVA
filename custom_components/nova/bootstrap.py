@@ -156,19 +156,25 @@ def _legacy_voice_present(voice: str) -> bool:
 
 async def _reload_wyoming(hass: HomeAssistant) -> int:
     """Reload every Wyoming entry so Home Assistant reconnects to the voice
-    add-ons. An entry that fails to reload is skipped. Returns how many did."""
+    add-ons. An entry that fails to reload is skipped, and once the rest are
+    done any failure is raised so the run reports Wyoming. Returns how many
+    reloaded."""
     entries = hass.config_entries
     done = 0
+    failed = 0
     for entry in entries.async_entries("wyoming"):
         try:
             await entries.async_reload(entry.entry_id)
         except Exception as exc:
             _LOGGER.debug("%s wyoming reload %s failed: %s", _PREFIX, entry.entry_id, exc)
+            failed += 1
             continue
         done += 1
     if done > 0:
         noun = "entry" if done == 1 else "entries"
         _LOGGER.info("%s reloaded %d Wyoming %s", _PREFIX, done, noun)
+    if failed:
+        raise RuntimeError(f"{failed} Wyoming reload(s) failed")
     return done
 
 
@@ -339,9 +345,10 @@ def _read_marker() -> dict:
         target = _marker_file()
         if not target.exists():
             return {}
-        return json.loads(target.read_text())
+        found = json.loads(target.read_text())
     except Exception:
         return {}
+    return found if isinstance(found, dict) else {}
 
 
 def _write_marker(version: str, status: dict) -> None:
@@ -492,10 +499,11 @@ async def async_ensure_pipeline_agent(hass: HomeAssistant) -> None:
         if getattr(pipe, "conversation_engine", None) == agent:
             continue
         title = _name_of(pipe)
+        was = getattr(pipe, "conversation_engine", None)
         try:
             await assist_pipeline.async_update_pipeline(hass, pipe, conversation_engine=agent)
             _LOGGER.info("Nova: set pipeline '%s' conversation agent -> %s (was %s)",
-                         title, agent, getattr(pipe, "conversation_engine", None))
+                         title, agent, was)
         except Exception as exc:
             _LOGGER.warning("Nova: couldn't set pipeline '%s' conversation agent: %s",
                             title, exc)

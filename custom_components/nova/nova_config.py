@@ -432,14 +432,14 @@ def set_many_atomic(updates: dict) -> bool:
     return True
 
 
-def delete(key: str) -> None:
-    """Remove a config key."""
+def delete(key: str) -> bool:
+    """Remove a config key. Returns whether the save to disk succeeded."""
     global _loaded
     if not _loaded:
         load()
     with _lock:
         _cache_dict().pop(key, None)
-    save()
+    return save()
 
 
 def init_from_entry(entry_data: dict, entry_options: dict) -> None:

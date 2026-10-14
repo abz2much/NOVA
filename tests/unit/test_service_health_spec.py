@@ -247,16 +247,16 @@ async def test_llm_resolver_value_error_counts_as_no_endpoint(sh, monkeypatch):
     assert out["detail"] == "no ollama endpoint configured"
 
 
-async def test_llm_endpoint_lookup_passes_only_the_three_url_fields(sh, monkeypatch):
-    """Pinned (bugs.md #4): the migration flag is not handed on, so the legacy
-    llm_base_url stays a fallback even after an installation has migrated."""
+async def test_llm_endpoint_lookup_hands_on_the_migration_flag(sh, monkeypatch):
+    """Fixed (bugs.md #4): the migration flag is handed on, so the legacy
+    llm_base_url is no longer a fallback once an installation has migrated."""
     seen = _llm_world(monkeypatch, sh, "custom", base="http://u:p@gpu:8000/v1",
                       breaker={"state": "CLOSED"})
     sh.settings.update(custom_base_url="http://gpu:8000/v1",
                        self_hosted_endpoints_migrated=True)
     out = await sh.mod._check_llm(None)
     assert seen["config"] == {"ollama_base_url": "", "custom_base_url": "http://gpu:8000/v1",
-                              "llm_base_url": ""}
+                              "llm_base_url": "", "self_hosted_endpoints_migrated": True}
     assert seen["provider"] == "custom"
     assert out == {"name": "LLM", "key": "llm", "status": "ok",
                    "detail": "custom provider — no recent failures",
@@ -310,20 +310,23 @@ async def test_llm_ollama_ping_miss_with_recent_use_is_ok(sh, monkeypatch, http,
     assert out["detail"] == "working (recent agent call succeeded; ping missed)"
 
 
-async def test_llm_provider_name_is_case_sensitive(sh, monkeypatch):
-    """Pinned (bugs.md #5): 'Ollama' is not 'ollama', so it is treated as a
-    cloud provider and never pinged."""
+async def test_llm_provider_name_ignores_case(sh, monkeypatch, http, no_sleep):
+    """Fixed (bugs.md #5): 'Ollama' is read as 'ollama' and pinged."""
     _llm_world(monkeypatch, sh, "Ollama", base="http://gpu:11434")
+    http.session = _Session([_Resp(200, {"models": [{}]})])
     out = await sh.mod._check_llm(None)
-    assert out["detail"] == "Ollama provider — no recent failures"
+    assert out["status"] == "ok" and out["detail"] == "reachable — 1 model(s) available"
 
 
-async def test_ping_detail_keeps_the_credentials(sh, http):
-    """Pinned (bugs.md #2): the row's `base` is redacted but a non-200 detail
-    repeats the endpoint, credentials and all."""
+async def test_ping_detail_never_shows_the_credentials(sh, http):
+    """Fixed (bugs.md #2): a failed ping names the endpoint without its
+    user:password@ part, whether the server answered or not."""
     http.session = _Session([_Resp(401)])
     ok, detail = await sh.mod._ping_ollama(None, "http://u:p@gpu:11434/")
-    assert ok is False and detail == "HTTP 401 from http://u:p@gpu:11434"
+    assert ok is False and detail == "HTTP 401 from http://gpu:11434"
+    http.session = _Session([OSError("cannot reach http://u:p@gpu:11434/api/tags")])
+    ok, detail = await sh.mod._ping_ollama(None, "http://u:p@gpu:11434")
+    assert ok is False and detail == "unreachable: cannot reach http://gpu:11434/api/tags"
 
 
 async def test_ping_unparseable_body_is_still_reachable(sh, http):
@@ -556,12 +559,16 @@ def test_database_module_unimportable_is_off(sh, monkeypatch):
 
 # ── Voice ID and scheduler (both read the entry's runtime) ──────────────────
 
+class _NoRuntime(RuntimeError):
+    """Stands in for runtime.NovaRuntimeUnavailable."""
+
+
 def _runtime(monkeypatch, runtime=None, exc=None):
     def _dr(hass):
         if exc:
             raise exc
         return runtime
-    _fake(monkeypatch, "runtime", domain_runtime=_dr)
+    _fake(monkeypatch, "runtime", domain_runtime=_dr, NovaRuntimeUnavailable=_NoRuntime)
 
 
 def _voice(monkeypatch, status):
@@ -587,13 +594,16 @@ def test_voice_id_details(sh, monkeypatch):
     assert sh.mod._check_voice_id(None)["detail"] == "checking the app"
 
 
-def test_voice_id_recent_use_reads_connected_while_unreachable(sh, monkeypatch):
-    """Pinned (bugs.md #6): a recent successful request outranks the app's own
-    'unreachable' state and the row says 'app connected'."""
+def test_voice_id_unreachable_outranks_recent_use(sh, monkeypatch):
+    """Fixed (bugs.md #6): the app's own 'unreachable' state wins over a
+    recent successful request, so the row no longer says 'app connected'."""
     _voice(monkeypatch, {"state": "unreachable"})
     sh.mod.record_usage("voice_id", True)
     out = sh.mod._check_voice_id(None)
-    assert out["status"] == "ok" and out["detail"] == "app connected"
+    assert out["status"] == "idle"
+    assert out["detail"] == "app not reachable at the last check; the fallback is used"
+    _voice(monkeypatch, {"state": "checking"})
+    assert sh.mod._check_voice_id(None)["detail"] == "app connected"
 
 
 def test_voice_id_real_failure_detail(sh, monkeypatch):
@@ -628,22 +638,24 @@ def test_scheduler_outcomes(sh, monkeypatch):
         "1 periodic task(s) scheduled"
 
 
-async def test_runtime_lookup_error_turns_the_row_down(sh, monkeypatch):
-    """Pinned (bugs.md #3): Voice ID and the scheduler do not guard the
-    runtime lookup, so a broken lookup surfaces as a DOWN row from the
-    roll-up, unlike the other checks where a broken check reads IDLE."""
-    _runtime(monkeypatch, exc=RuntimeError("entry has no runtime"))
-    with pytest.raises(RuntimeError):
+async def test_runtime_lookup_error_reads_idle(sh, monkeypatch):
+    """Fixed (bugs.md #3): a broken runtime lookup in Voice ID or the
+    scheduler reads IDLE, as a broken check does everywhere else. A loaded
+    entry without a runtime still raises, so the roll-up shows it DOWN."""
+    _runtime(monkeypatch, exc=_NoRuntime("lost"))
+    with pytest.raises(_NoRuntime):
         sh.mod._check_voice_id(None)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(_NoRuntime):
         sh.mod._check_scheduler(None)
+    _runtime(monkeypatch, exc=RuntimeError("entry has no runtime"))
     _quiet_all(sh, monkeypatch, keep=("_check_voice_id", "_check_scheduler"))
     res = await sh.mod.run_service_health(None)
     rows = {s["key"]: s for s in res["services"]}
-    assert rows["voice_id"] == {"name": "Voice ID", "key": "voice_id", "status": "down",
-                                "detail": "entry has no runtime"}
-    assert rows["scheduler"]["status"] == "down"
-    assert res["overall"] == "down"
+    assert rows["voice_id"] == {"name": "Voice ID", "key": "voice_id", "status": "idle",
+                                "detail": "health check could not verify: entry has no runtime"}
+    assert rows["scheduler"] == {"name": "Scheduler", "key": "scheduler", "status": "idle",
+                                 "detail": "health check could not verify: entry has no runtime"}
+    assert res["overall"] != "down"
 
 
 # ── host health ─────────────────────────────────────────────────────────────
@@ -747,13 +759,13 @@ async def test_rollup_all_healthy_summary(sh, monkeypatch):
     assert res["summary"] == "all 2 core services healthy"
 
 
-async def test_rollup_warn_rows_still_read_all_healthy(sh, monkeypatch):
-    """Pinned (bugs.md #1): with a WARN row and nothing down or idle, the
-    overall state is warn but the summary still says every service is healthy."""
-    _quiet_all(sh, monkeypatch, {"llm": "ok", "cameras": "warn"})
+async def test_rollup_warn_rows_are_named_in_the_summary(sh, monkeypatch):
+    """Fixed (bugs.md #1): with a WARN row and nothing down, the summary no
+    longer says every service is healthy."""
+    _quiet_all(sh, monkeypatch, {"llm": "ok", "cameras": "warn", "tts": "idle"})
     res = await sh.mod.run_service_health(None)
     assert res["overall"] == "warn"
-    assert res["summary"] == "all 2 core services healthy"
+    assert res["summary"] == "1 service(s) need a look — 1/3 healthy"
 
 
 async def test_rollup_runs_the_real_checks_without_raising(sh, monkeypatch, fake_hass):
