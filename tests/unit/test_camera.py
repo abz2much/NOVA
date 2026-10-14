@@ -339,6 +339,8 @@ async def test_best_image_tiny_kept_when_retry_no_better(cam, grab, fake_hass):
     grab(_img(BIGGER_TINY), _img(TINY))
     assert await cam._get_best_image(fake_hass, "camera.a") == BIGGER_TINY
     grab(_img(TINY), RuntimeError("down"))
+    assert await cam._get_best_image(fake_hass, "camera.a") == TINY      # kept on a failed retry
+    grab(RuntimeError("no"), RuntimeError("down"))
     assert await cam._get_best_image(fake_hass, "camera.a") is None
 
 
@@ -365,6 +367,19 @@ async def test_frame_sequence(cam, grab, monkeypatch, fake_hass):
                                                max_dim=640)
     assert frames == [GOOD[:4] + b"|640"]
     assert sleeps == [0.5, 0.5] and grab.woke == ["camera.a"]
+
+
+async def test_frame_sequence_uses_the_override_source(cam, grab, monkeypatch, fake_hass):
+    async def nap(s):
+        return None
+    monkeypatch.setattr(cam.asyncio, "sleep", nap)
+    monkeypatch.setattr(cam, "_downscale_jpeg", lambda b, m=1024: b"small")
+    monkeypatch.setattr(cam, "resolve_camera_source",
+                        lambda h, e: "camera.twin" if e == "camera.nest" else e)
+    snaps = grab(_img(GOOD), _img(GOOD))
+    assert await cam._capture_frame_sequence(fake_hass, "camera.nest", count=2) == [b"small"] * 2
+    assert [c[0] for c in snaps.calls] == ["camera.twin", "camera.twin"]
+    assert grab.woke == ["camera.twin"]
 
 
 async def test_frame_sequence_falls_back_to_best(cam, grab, monkeypatch, fake_hass):
@@ -896,10 +911,9 @@ async def test_analyse_recognition_hint(cam, env, monkeypatch):
     env.hass.close_pending()
 
 
-async def test_preserved_quirk_recognition_hint_needs_is_confident(cam, env, load,
-                                                                   monkeypatch):
-    """recognition.last_seen_at never sets is_confident, so a real cache entry
-    never produces the hint."""
+async def test_recognition_hint_from_a_real_cache_entry(cam, env, load, monkeypatch):
+    """recognition.last_seen_at sets no is_confident, and a confident, recent
+    entry still names the person (it used to be ignored)."""
     rec = load("recognition")
     rec._RECOGNITION_CACHE.clear()
     rec.remember_recognition("porch", "Sam", 95.0)
@@ -908,7 +922,8 @@ async def test_preserved_quirk_recognition_hint_needs_is_confident(cam, env, loa
     await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
     rec._RECOGNITION_CACHE.clear()
     rec._FACE_LOG.clear()
-    assert "IMPORTANT" not in env.chat.calls[0]["messages"][0]["content"]
+    assert "identified the person in frame as 'Sam' (confidence 95%)" in \
+        env.chat.calls[0]["messages"][0]["content"]
     env.hass.close_pending()
 
 

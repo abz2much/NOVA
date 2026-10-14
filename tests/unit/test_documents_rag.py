@@ -436,7 +436,9 @@ async def test_search_prefers_semantic_hits(docs, emb, tmp_path):
     hits = await docs.search_documents_async(_Hass(), "boiler")
     assert [h["engine"] for h in hits] == ["keyword"] and hits[0]["source"] == "a.txt"
     emb["enabled"] = False
-    assert (await docs.search_documents_async(_Hass(), "boiler"))[0]["engine"] == "keyword"
+    hass = _Hass()
+    assert (await docs.search_documents_async(hass, "boiler"))[0]["engine"] == "keyword"
+    assert hass.jobs == ["search_documents"]                # the query runs off the loop
 
 
 # ── automatic pick-up ───────────────────────────────────────────────────────
@@ -502,10 +504,11 @@ async def test_watch_folders_copy_new_files_into_the_library(docs, tmp_path, mon
     res = await docs.scan_watch_folders(_Hass())
     assert res["ok"] is True and res["watched"] == 2 and res["new_files"] == 1
     assert (Path(docs._documents_dir()) / "Manual (2).txt").exists()
-    # a file that failed to ingest is still remembered, so it is not retried
-    assert set(docs._read_seen()) == {str(watch / "Manual (2).txt"), str(watch / "blank.txt")}
+    # a file that failed to ingest is not remembered, so the next scan retries it
+    assert set(docs._read_seen()) == {str(watch / "Manual (2).txt")}
     again = await docs.scan_watch_folders(_Hass())
-    assert again["new_files"] == 0 and again["files"] == []
+    assert again["new_files"] == 0
+    assert [f["source"] for f in again["files"]] == ["blank.txt"]
 
 
 async def test_watch_scan_without_folders(docs, monkeypatch):

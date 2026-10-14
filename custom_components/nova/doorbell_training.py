@@ -146,7 +146,7 @@ def _parse_ts(ts: str) -> Optional[datetime]:
     """A logged UTC stamp as a naive datetime, or None when unreadable."""
     try:
         return datetime.fromisoformat(ts[:-1] if ts.endswith("Z") else ts)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return None
 
 

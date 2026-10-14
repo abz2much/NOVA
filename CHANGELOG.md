@@ -1,3 +1,15 @@
+## [8.49.24] — Six camera, document and doorbell fixes
+
+Fixes for six bugs found while rewriting the camera, document and doorbell learning modules. Each fix has a test that fails without it. Nothing else changes.
+
+### Fixed
+- **Face recognition never reached the camera description.** When a face was recognised confidently in the last minute, the vision model was meant to be told the person's name, but a check on a field recognition never sets always blocked it. The name now reaches the model.
+- **Doorbell and motion clips ignored camera overrides.** A camera set to take its frames from a restream used the restream for single snapshots but not for the three frame clips. Clips now use it too.
+- **A usable frame was thrown away when a stream wake failed.** If the retry after waking a stream raised an error, the small but usable first frame was dropped and the analysis failed. It is now kept.
+- **A watch folder file that failed to load was never tried again.** It was remembered as done either way. It is now remembered only once it loads, so the next scan retries it.
+- **Keyword document search ran on Home Assistant's main loop.** Its database query now runs in the background like the rest of the document code.
+- **One doorbell log record with no time stopped all visitor patterns.** That record is now skipped.
+
 ## [8.49.23] — Cameras, faces, documents and doorbell learning rewritten from scratch
 
 Phase 7a rewrites four modules from empty files, each from a behaviour spec with fresh tests: camera analysis, face recognition, the document library and doorbell learning. Nothing Nova does changes: the same frames are fetched, the same prompts reach the models, the same events fire and the same files and tables are written.

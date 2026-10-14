@@ -466,7 +466,7 @@ async def search_documents_async(hass, query: str, k: int = 4) -> list[dict]:
                 for hit in hits:
                     hit["engine"] = "semantic"
                 return hits
-    hits = search_documents(query, k)
+    hits = await hass.async_add_executor_job(search_documents, query, k)
     for hit in hits:
         hit["engine"] = "keyword"
     return hits
@@ -624,7 +624,8 @@ async def auto_ingest_new(hass) -> dict:
 
 async def scan_watch_folders(hass) -> dict:
     """Copy new files from the watch folders into the library and index
-    them. A copied file is remembered whether or not it indexed."""
+    them. A file is remembered only once it indexed, so a failure is tried
+    again on the next scan."""
     folders = _watch_folders()
     if not folders:
         return {"ok": True, "watched": 0, "new_files": 0,
@@ -641,7 +642,8 @@ async def scan_watch_folders(hass) -> dict:
                     continue
                 outcome = await save_and_ingest_upload_from_path(hass, copied["path"])
                 results.append({"source": name, **outcome})
-                await hass.async_add_executor_job(_mark_seen, key, mtime)
+                if outcome.get("ok"):
+                    await hass.async_add_executor_job(_mark_seen, key, mtime)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("watch scan of %s failed: %s", folder, err)
     return {"ok": True, "watched": len(folders),
