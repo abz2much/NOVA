@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from homeassistant.core import HomeAssistant
 
+from .. import presentation
 from . import context as _context
 from . import delegation as _delegation
 from . import dispatcher as _dispatcher
@@ -397,6 +398,7 @@ class _Exchange:
         self.provider_name = provider_name
         self.model = model
         self.slimmed = False   # the one slim retry after a 413 has been used
+        self.tools_used: set[str] = set()   # tools that ran without error this turn
 
     async def ask(self, tools, max_tokens: int = 1024):
         """One provider round trip, recorded as activity."""
@@ -539,6 +541,8 @@ async def _run_tool_calls(hass, tool_calls, exchange: _Exchange, *, grant, ctx,
             # ToolResult.to_message is the one place untrusted text gets
             # fenced; anything else reaching the model would be a bug.
             raise TypeError("tool dispatch must produce a ToolResult")
+        if not outcome.is_error and outcome.code is None:
+            exchange.tools_used.add(call.name)
         exchange.working.append(outcome.to_message(call.id, call.name))
     return None
 
@@ -605,6 +609,8 @@ async def _run_agent_turn(
             continue
         tool_calls = list(result.tool_calls)
         if not tool_calls:
+            if depth == 0:
+                await presentation.present_turn(hass, exchange.tools_used)
             return result.text
         _LOGGER.info(
             "Agent iteration %d: %d tool call(s): %s",
@@ -623,9 +629,12 @@ async def _run_agent_turn(
 
     exchange.working.append({"role": "user", "content": "Summarize what you've done briefly."})
     try:
-        return (await exchange.ask(None, 512)).text
+        text = (await exchange.ask(None, 512)).text
     except Exception:
         # Never claim it was done: the round limit was hit and nothing could
         # report what actually happened.
         return ("I couldn't finish that. I ran out of steps before I could check "
                 "what was done, so please check before relying on it.")
+    if depth == 0:
+        await presentation.present_turn(hass, exchange.tools_used)
+    return text

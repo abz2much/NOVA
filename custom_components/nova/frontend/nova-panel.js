@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.50.0
+ * v8.51.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.50.0 ",
+      console.log("%c Nova Panel %c v8.51.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -103,6 +103,8 @@ class NovaPanel extends HTMLElement {
       const old = this.shadowRoot.getElementById("core");
       if (old) { old.replaceWith(old.cloneNode(false)); this._initCore(); }
     }
+    // Leaving the page closed the card subscription; start it again.
+    if (this._renderedOnce && this._currentTab === "dashboard") this._presentStart();
   }
 
   disconnectedCallback() {
@@ -111,6 +113,7 @@ class NovaPanel extends HTMLElement {
     if (this._cameraInterval) clearInterval(this._cameraInterval);
     this._holoResume = !!this._holo;
     this._holoStop();
+    this._presentStop();
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
     if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }
@@ -224,6 +227,7 @@ class NovaPanel extends HTMLElement {
     // time someone switches tabs. Stop it before _initCore() starts a
     // fresh one.
     this._holoStop();
+    this._presentStop();
     if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
     if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
     this._ctx = null;
@@ -236,6 +240,7 @@ class NovaPanel extends HTMLElement {
     this._wire();
     this._initCore();
     this._renderData();
+    if (this._currentTab === "dashboard") this._presentStart();
   }
 
   // Panel translations are keyed by exact English source strings. Dynamic
@@ -384,14 +389,14 @@ class NovaPanel extends HTMLElement {
     return `
         <div id="onboardingMount"></div>
         <div class="hero">
-          <div class="hero-stage">
-            <div class="hero-marquee" aria-hidden="true"><span id="heroMarquee"></span></div>
+          <div class="hero-stage" id="heroStage">
             <canvas class="core" id="core"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>
               <div class="state-sub" id="stateSub">—</div>
             </div>
+            <div class="present-card" id="presentCard" role="button" tabindex="0" title="Dismiss"></div>
           </div>
           <div class="chips" id="chips"></div>
         </div>
@@ -6281,11 +6286,9 @@ ${this._htmlDashboardBody()}`;
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
-    const marqueeEl = root.getElementById("heroMarquee");
-    const marquee = `${words[state].replace(/[.…]/g, "").toUpperCase()} · `.repeat(8);
-    if (marqueeEl && marqueeEl.textContent !== marquee) this._setText(marqueeEl, marquee);
     this._typeHeroWord(words[state]);
-    this._targetCoreState(state);
+    // A card on show keeps the head turned towards it, unless the house sleeps.
+    this._targetCoreState(this._presenting && state !== "asleep" ? "presenting" : state);
 
     // status chips
     const chipDefs = [
@@ -6689,6 +6692,11 @@ ${this._htmlDashboardBody()}`;
 
   _wire() {
     const root = this.shadowRoot;
+    const presentCard = root.getElementById("presentCard");
+    if (presentCard) {
+      presentCard.addEventListener("click", () => this._presentEnd());
+      presentCard.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") this._presentEnd(); });
+    }
     const camToggle = root.getElementById("camToggle");
     if (camToggle) {
       camToggle.addEventListener("click", () => {
@@ -7589,8 +7597,8 @@ ${this._htmlDashboardBody()}`;
       c += (texture(t, uv + dir * 4.).rgb + texture(t, uv - dir * 4.).rgb) * 0.016216;
       o = vec4(c, 1.);
     }`;
-    // The canvas is transparent, so the hero's own background and marquee
-    // show through; the light is written premultiplied.
+    // The canvas is transparent, so the hero's own background
+    // shows through; the light is written premultiplied.
     const compose = `#version 300 es
     precision highp float; in vec2 uv; out vec4 o;
     uniform sampler2D scene, bloom; uniform vec2 uRes, uC, uF; uniform float uDpr, uR, uGlow, uWarm, uBloomK, uS; uniform vec3 cA, cW;
@@ -8235,6 +8243,93 @@ ${this._htmlDashboardBody()}`;
       this._heroTypeTimer = setTimeout(tick, target.startsWith(node.textContent) ? 85 : 35);
     };
     tick();
+  }
+  // ─── Presenting ───────────────────────────────────────────────────────
+  // When Nova answers an energy question it publishes a small card of the
+  // real figures (nova/subscribe_presentation). The head turns towards the
+  // card and the hero copy gives way to it; after the card expires, or when
+  // it is tapped, the hero goes back to whatever _coreState() says. Asleep
+  // wins: the head stays asleep, though the card can still be read.
+  _presentStart() {
+    const conn = this._hass?.connection;
+    if (this._presentUnsub || this._presentPending || !conn || typeof conn.subscribeMessage !== "function") return;
+    const token = this._presentToken = (this._presentToken || 0) + 1;
+    this._presentPending = true;
+    Promise.resolve(conn.subscribeMessage((card) => this._onPresentCard(card), { type: "nova/subscribe_presentation" }))
+      .then((unsub) => {
+        this._presentPending = false;
+        if (this._presentToken === token) this._presentUnsub = unsub;
+        else if (typeof unsub === "function") unsub();   // torn down while connecting
+      })
+      .catch(() => { this._presentPending = false; });   // the card is optional
+  }
+
+  _presentStop() {
+    this._presentToken = (this._presentToken || 0) + 1;
+    const unsub = this._presentUnsub;
+    this._presentUnsub = null;
+    if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already closed */ } }
+    if (this._presenting) this._presentEnd();
+  }
+
+  _onPresentCard(card) {
+    if (!card || card.v !== 1 || card.kind !== "energy" || !card.data) return;
+    if (card.id && card.id === this._presentId) return;   // the same card twice
+    const ttl = Math.max(0, (Number(card.expires) - Number(card.created)) * 1000) || 30000;
+    let left = Number(card.expires) * 1000 - Date.now();
+    if (!(left > 0)) return;                 // already expired
+    if (left > ttl) left = ttl;              // this clock runs behind the server's
+    const html = this._presentHtml(card.data);
+    if (!html) return;
+    const root = this.shadowRoot, el = root.getElementById("presentCard");
+    if (!el) return;
+    this._presentId = card.id || null;
+    this._setHtml(el, html);
+    root.getElementById("heroStage")?.classList.add("presenting");
+    this._presenting = true;
+    if (this._coreState() !== "asleep") this._targetCoreState("presenting");
+    if (this._presentTimer) clearTimeout(this._presentTimer);
+    this._presentTimer = setTimeout(() => this._presentEnd(), left);
+  }
+
+  _presentEnd() {
+    if (this._presentTimer) { clearTimeout(this._presentTimer); this._presentTimer = null; }
+    if (!this._presenting) return;
+    this._presenting = false;
+    this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
+    this._targetCoreState(this._coreState());
+  }
+
+  _presentNum(v, digits) {
+    try {
+      return Number(v).toLocaleString(this._resolveUiLang(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    } catch (_) {
+      return Number(v).toFixed(digits);
+    }
+  }
+
+  // The card's markup, or "" when none of its figures can be shown. A
+  // figure Nova could not read is null and its row is left out.
+  _presentHtml(d) {
+    const has = (v) => typeof v === "number" && isFinite(v);
+    const n = (v, dp) => this._esc(this._presentNum(v, dp));
+    const rows = [
+      has(d.battery_pct) ? ["Battery", `${n(d.battery_pct, 0)}%`] : null,
+      has(d.export_kwh) ? ["Sold to grid", `${n(d.export_kwh, 1)} kWh`] : null,
+      has(d.home_kwh) ? ["Home used", `${n(d.home_kwh, 1)} kWh`] : null,
+    ].filter(Boolean);
+    const big = has(d.solar_today_kwh);
+    if (!big && !rows.length && !has(d.solar_w)) return "";
+    const curve = Array.isArray(d.curve) ? d.curve.filter(has) : [];
+    let svg = "";
+    if (curve.length >= 2) {
+      const max = Math.max(...curve, 0.001);
+      const pts = curve.map((v, i) => `${(i / (curve.length - 1) * 120).toFixed(1)},${(26 - v / max * 24).toFixed(1)}`).join(" ");
+      svg = `<svg class="pc-curve" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+    }
+    const now = has(d.solar_w) ? `<div class="pc-now"><span>Now</span> <span>· ${n(d.solar_w, 0)} W</span></div>` : "";
+    return `${big ? `<div class="pc-cap">Solar made</div><div class="pc-big"><span class="pc-fig" data-unit="kWh">${n(d.solar_today_kwh, 1)}</span></div>` : ""}${now}${svg}`
+      + (rows.length ? `<div class="pc-rows">${rows.map(([label, value]) => `<div class="pc-row"><span>${label}</span><b>${value}</b></div>`).join("")}</div>` : "");
   }
   // ─── Floor Plan Editor: rooms only (v7.101.16) ──────────────────────────
   // Ported from Classic's _renderFloorPlanEditor/_renderEditableSVG/
@@ -9593,11 +9688,20 @@ ${this._htmlDashboardBody()}`;
         border:1px solid var(--line-soft);border-radius:22px;overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(300px,36cqw,440px)}
-      .hero-marquee{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);overflow:hidden;pointer-events:none;
-        font-family:var(--font-display);font-weight:600;font-size:clamp(110px,20cqw,240px);line-height:1;white-space:nowrap;
-        color:#f4b8600d;letter-spacing:-.02em}
-      .hero-marquee span{display:inline-block;animation:hero-marquee 60s linear infinite}
-      @keyframes hero-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+      .present-card{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;
+        padding:14px 18px;border:1px solid var(--line-soft);border-radius:16px;background:var(--surface-2);cursor:pointer;text-align:left}
+      .hero-stage.presenting .present-card{display:flex}
+      .hero-stage.presenting .hero-copy{display:none}
+      .pc-cap{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+      .pc-big{font-family:var(--font-display);font-weight:500;line-height:1}
+      .pc-fig{font-size:clamp(44px,8cqw,84px);letter-spacing:-.02em;
+        background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent}
+      .pc-fig::after{content:" " attr(data-unit);font-size:clamp(16px,2.4cqw,22px);letter-spacing:0;-webkit-text-fill-color:var(--gold-pale)}
+      .pc-now{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;color:var(--ink-faint)}
+      .pc-curve{width:100%;height:28px;display:block}
+      .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
+      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint)}
+      .pc-row b{font-weight:500;color:var(--gold-pale)}
       canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
       canvas.core:active{cursor:grabbing}
       .hero-copy{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);pointer-events:none;
@@ -9612,10 +9716,11 @@ ${this._htmlDashboardBody()}`;
       @container (max-width:639px){
         .hero-stage{height:auto;display:flex;flex-direction:column}
         canvas.core{position:relative;height:300px}
-        .hero-marquee{top:150px}
+        .present-card{position:relative;left:auto;right:auto;top:auto;transform:none;margin:0 16px 20px;align-items:center;text-align:center}
+        .pc-row{width:100%}
         .hero-copy{position:relative;left:auto;right:auto;top:auto;transform:none;align-items:center;text-align:center;padding:0 16px 20px}
       }
-      @media (prefers-reduced-motion: reduce){.hero-marquee span,.hero-caret{animation:none}}
+      @media (prefers-reduced-motion: reduce){.hero-caret{animation:none}}
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--surface-2);
         font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);border:1px solid var(--line-soft)}

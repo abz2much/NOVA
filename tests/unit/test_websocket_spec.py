@@ -83,7 +83,7 @@ def test_every_handler_is_registered_once(ws, monkeypatch):
                         lambda hass, handler: seen.append(handler))
     ws.async_register(FakeHass())
     names = _registered_names()
-    assert len(seen) == len(names) == 79 and len(set(names)) == 79
+    assert len(seen) == len(names) == 80 and len(set(names)) == 80
     assert seen == [getattr(ws, n) for n in names]
     for local in ("ws_get_panel_data", "ws_get_activity_log", "ws_update_config",
                   "ws_reload_appliances", "ws_get_debug_log", "ws_get_area_sparklines",

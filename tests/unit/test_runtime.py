@@ -29,7 +29,7 @@ FIELDS = [
     "scheduler", "resources", "automation_contexts", "automation_inventory",
     "providers", "runtime_config", "schema_version", "observer_running",
     "intent_router", "state_ledger", "entity_locks", "alert_buffer",
-    "audit_running", "provider_holds", "voice_id",
+    "audit_running", "provider_holds", "voice_id", "presentation",
 ]
 
 

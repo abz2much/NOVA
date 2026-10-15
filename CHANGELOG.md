@@ -1,3 +1,15 @@
+## [8.51.0] — Nova shows an energy card, and the scrolling word is gone
+
+When you ask Nova about energy, the Command Center now shows a card of the real figures next to the hologram, and the head turns towards it.
+
+### Added
+- **An energy card.** After a reply that used one of Nova's energy tools, the card shows solar made today, with the live solar power, then battery, sold to grid and home used. It comes from Nova's own readings, the same ones as the Energy tab, never from the words of the reply. A figure Nova cannot read is left out, and with none readable there is no card.
+- **A live subscription for it**, `nova/subscribe_presentation`: read only, open to any signed in user. The panel gets the latest card at once if it opens inside its 30 seconds. The card is kept in memory only.
+
+### Changed
+- **The head goes back to normal** after about 30 seconds, or when you tap the card. If the house is asleep the head stays asleep, and the card can still be read. On a narrow screen the card sits under the head.
+- **The big scrolling word behind the hologram** ("HELLO", "THINKING", "GOODNIGHT") is removed. The word typed next to the head stays.
+
 ## [8.50.0] — A new hologram for the Command Center
 
 The head on the Command Center is now a hologram: a head, neck and shoulders drawn as glowing gold contour lines with a soft bloom, in Nova's own colours.

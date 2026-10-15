@@ -1,10 +1,11 @@
 """Panel commands for modes, intrusion, hazards, energy, solar and wellbeing.
 
 nova/mode, nova/intrusion, nova/hazard, nova/energy, nova/energy_flow,
-nova/energy_outlook, nova/solar and nova/biometrics. websocket.py imports
-each handler by name to register it. The logger keeps websocket.py's name.
+nova/energy_outlook, nova/subscribe_presentation, nova/solar and
+nova/biometrics. websocket.py imports each handler by name to register it.
+The logger keeps websocket.py's name.
 
-Commands that only read (solar, energy flow and outlook, hazard) are open
+Commands that only read (solar, energy flow and outlook, presentation, hazard) are open
 to any panel user, like the other read only panel data; anything that
 changes a setting or an alert needs an admin.
 """
@@ -125,6 +126,37 @@ async def ws_energy_flow(hass: HomeAssistant, connection: websocket_api.ActiveCo
         connection.send_result(msg["id"], result)
     except Exception as exc:
         connection.send_error(msg["id"], "energy_flow_failed", _log_failure("ws_energy_flow", exc))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/subscribe_presentation",
+})
+@websocket_api.async_response
+async def ws_subscribe_presentation(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                                    msg: dict) -> None:
+    """Push the card Nova shows beside the hologram while presenting. The
+    latest unexpired card is sent on subscribe, new ones as they are made.
+    Read only; the subscription ends through Home Assistant's own
+    unsubscribe."""
+    try:
+        from .runtime import domain_runtime
+        runtime = domain_runtime(hass)
+        if runtime is None:
+            connection.send_error(msg["id"], "not_loaded", "Nova is not loaded")
+            return
+        store = runtime.presentation
+
+        def forward(card: dict) -> None:
+            connection.send_message(websocket_api.event_message(msg["id"], card))
+
+        connection.subscriptions[msg["id"]] = store.subscribe(forward)
+        connection.send_result(msg["id"])
+        card = store.current()
+        if card is not None:
+            forward(card)
+    except Exception as exc:
+        connection.send_error(msg["id"], "presentation_failed",
+                              _log_failure("ws_subscribe_presentation", exc))
 
 
 @websocket_api.websocket_command({
