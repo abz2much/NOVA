@@ -16,6 +16,21 @@ from .home import area_entity_ids
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
+# What each control_device action calls; None means the entity's own domain.
+_CONTROL_SERVICES = {
+    "turn_on": (None, "turn_on"), "turn_off": (None, "turn_off"),
+    "toggle": (None, "toggle"),
+    "lock": ("lock", "lock"), "unlock": ("lock", "unlock"),
+    "open": ("cover", "open_cover"), "close": ("cover", "close_cover"),
+    "media_play": ("media_player", "media_play"),
+    "media_pause": ("media_player", "media_pause"),
+    "media_next": ("media_player", "media_next_track"),
+    "volume_up": ("media_player", "volume_up"),
+    "volume_down": ("media_player", "volume_down"),
+}
+# What runs each kind of runnable entity.
+_RUNNABLE = {"scene": "turn_on", "script": "turn_on", "automation": "trigger"}
+
 
 # ── Tool execution ──────────────────────────────────────────────────────────
 
@@ -70,20 +85,8 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
     )
 
     try:
-        action_map = {
-            "turn_on":  (domain, "turn_on"),
-            "turn_off": (domain, "turn_off"),
-            "toggle":   (domain, "toggle"),
-            "lock":     ("lock", "lock"),
-            "unlock":   ("lock", "unlock"),
-            "open":     ("cover", "open_cover"),
-            "close":    ("cover", "close_cover"),
-            "media_play":  ("media_player", "media_play"),
-            "media_pause": ("media_player", "media_pause"),
-            "media_next":  ("media_player", "media_next_track"),
-            "volume_up":   ("media_player", "volume_up"),
-            "volume_down": ("media_player", "volume_down"),
-        }
+        action_map = {name: (svc_dom or domain, svc)
+                      for name, (svc_dom, svc) in _CONTROL_SERVICES.items()}
 
         status = "accepted"
         message: Optional[str] = None
@@ -313,16 +316,15 @@ def _hold_for_spoken_yes(hass, device_id: Optional[str], approval: str) -> bool:
         return False
 
 
-async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+async def _exec_run_scene_script(hass: HomeAssistant, args: dict,
+                                 device_id: Optional[str] = None,
                                  user_id: Optional[str] = None) -> str:
-    """Activate a scene or script."""
+    """Run a scene or script, or trigger an automation."""
     entity_id = args.get("entity_id", "")
-    domain = entity_id.split(".")[0] if "." in entity_id else ""
-
-    if domain not in ("scene", "script", "automation"):
+    domain = entity_id.partition(".")[0] if "." in entity_id else ""
+    if domain not in _RUNNABLE:
         return json.dumps({"error": f"Not a scene/script/automation: {entity_id}"})
-
-    svc = "turn_on" if domain in ("scene", "script") else "trigger"
+    svc = _RUNNABLE[domain]
 
     # Authorization gate (audit fix, Sept 2026): a scene/script/automation's
     # contents are opaque to this tool — it could unlock a door, disarm the
@@ -455,27 +457,27 @@ async def _exec_run_voice_phrase(hass: HomeAssistant, args: dict, device_id: Opt
                        "success": False, "phrase_id": pid})
 
 
-async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
-                             user_id: Optional[str] = None) -> str:
-    """Control multiple devices in a domain/area."""
-    domain = args.get("domain", "")
-    action = args.get("action", "")
-    area_name = args.get("area_name")
+def _reads(hass: HomeAssistant, entity_id: str) -> str:
+    st = hass.states.get(entity_id)
+    return st.state if st is not None else ""
 
-    entities = []
+
+async def _exec_bulk_control(hass: HomeAssistant, args: dict,
+                             device_id: Optional[str] = None,
+                             user_id: Optional[str] = None) -> str:
+    """One action on every entity of a domain, in one room or everywhere."""
+    domain, action = args.get("domain", ""), args.get("action", "")
+    area_name = args.get("area_name")
     if area_name:
         # Every entity of the domain in that room, not just the first page.
         entities = area_entity_ids(hass, area_name, domain)
     else:
-        entities = [
-            s.entity_id for s in hass.states.async_all(domain)
-        ]
-
-    # Filter based on action (don't turn off already-off things)
-    if action == "turn_off":
-        entities = [e for e in entities if (hass.states.get(e) or type("", (), {"state": ""})()).state == "on"]
-    elif action in ("lock",):
-        entities = [e for e in entities if (hass.states.get(e) or type("", (), {"state": ""})()).state == "unlocked"]
+        entities = [st.entity_id for st in hass.states.async_all(domain)]
+    # Only what would change: nothing already off is turned off, nothing
+    # already locked is locked.
+    only_if = {"turn_off": "on", "lock": "unlocked"}.get(action)
+    if only_if:
+        entities = [eid for eid in entities if _reads(hass, eid) == only_if]
 
     from ... import policy, action_log
     from ...voice_confirm import is_voice_satellite_device
@@ -775,11 +777,8 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
             continue
 
         try:
-            await hass.services.async_call(
-                domain, service,
-                {"entity_id": entity_id, **extra},
-                blocking=True,
-            )
+            await hass.services.async_call(domain, service, {"entity_id": entity_id, **extra},
+                                           blocking=True)
             succeeded += 1
             # No reliable final state for a generic plan step (this is also
             # the only reachable path to alarm_control_panel — the existing
@@ -815,43 +814,33 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
     })
 
 
-# ── Verify-after-act (v6.38) ─────────────────────────────────────────────────
-# Fire-and-forget control is not agentic: after a deterministic action, Nova
-# checks the device actually reached the target, retries once if it didn't, and
-# logs honestly if it still hasn't. Silent on success; visible on failure.
+# ── checking an action landed ───────────────────────────────────────────────
+# After a deterministic action Nova looks again: did the device get there?
+# One retry if not, and an honest record if it still has not. Quiet when it
+# worked, visible when it did not.
 
 VERIFY_DELAY_SECS = 4.0
+_VERIFY_SLEEP = asyncio.sleep    # tests swap this to skip the wait
 
-
-_VERIFY_SLEEP = asyncio.sleep    # module-level seam so tests can fast-forward
-
-
-# action -> acceptable end states (transitional states get one extra wait)
-_EXPECTED_STATES = {
-    "turn_on":  ("on",),
-    "turn_off": ("off",),
-    "lock":     ("locked",),
-    "unlock":   ("unlocked",),
-    "open":     ("open",),
-    "close":    ("closed",),
-}
-
-
+# The end state each action should reach. A device still moving gets one
+# more wait before it is judged.
+_EXPECTED_STATES = {action: (state,) for action, state in (
+    ("turn_on", "on"), ("turn_off", "off"), ("lock", "locked"),
+    ("unlock", "unlocked"), ("open", "open"), ("close", "closed"),
+)}
 _TRANSITIONAL = ("opening", "closing", "locking", "unlocking")
-
-
-# Actions that drop a guard: never retried by the verifier (8.7.20).
+# Lowering a guard is never retried by the checker (8.7.20).
 _NO_RETRY_ACTIONS = ("unlock", "open")
 
 
 def _state_ok(hass: HomeAssistant, entity_id: str, expected: tuple) -> Optional[bool]:
+    """True or False once the device has settled; None while it is still
+    moving or cannot be read."""
     st = hass.states.get(entity_id)
-    if st is None:
+    reading = str(st.state).lower() if st is not None else None
+    if reading is None or reading in _TRANSITIONAL:
         return None
-    s = str(st.state).lower()
-    if s in _TRANSITIONAL:
-        return None            # still moving — check again
-    return s in expected
+    return reading in expected
 
 
 async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
@@ -875,11 +864,12 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
         return
     from ... import action_log
     try:
-        await _VERIFY_SLEEP(VERIFY_DELAY_SECS)
-        ok = _state_ok(hass, entity_id, expected)
-        if ok is None:                       # transitional / unknown — grace period
+        ok = None
+        for _wait in range(2):   # a device still moving gets a second look
             await _VERIFY_SLEEP(VERIFY_DELAY_SECS)
             ok = _state_ok(hass, entity_id, expected)
+            if ok is not None:
+                break
         if ok:
             await hass.async_add_executor_job(
                 lambda: action_log.set_execution(action_id, "verified")
@@ -919,8 +909,7 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
             return
         _LOGGER.info("verify: %s not %s after %s — retrying once",
                      entity_id, "/".join(expected), action)
-        await hass.services.async_call(svc_domain, svc_name, dict(svc_data),
-                                       blocking=True)
+        await hass.services.async_call(svc_domain, svc_name, dict(svc_data), blocking=True)
         await _VERIFY_SLEEP(VERIFY_DELAY_SECS)
         ok = _state_ok(hass, entity_id, expected)
         from ... import database

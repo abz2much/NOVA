@@ -35,11 +35,10 @@ async def _exec_wellbeing_context(hass: HomeAssistant, args: dict) -> str:
 
 
 async def _exec_energy_status(hass: HomeAssistant, args: dict) -> str:
-    """Report whole-home power draw + energy advice (v6.62.0)."""
+    """The whole home's power draw with energy advice."""
     try:
         from ... import energy
-        res = await hass.async_add_executor_job(energy.power_status, hass)
-        return json.dumps(res)
+        return json.dumps(await hass.async_add_executor_job(energy.power_status, hass))
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
@@ -85,86 +84,80 @@ async def _exec_energy_outlook(hass: HomeAssistant, args: dict) -> str:
 
 
 async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
-    """Live nearby hazard scan — earthquakes, severe weather, disasters (v6.71.0),
-    and weather warnings for the chosen counties or areas under "warnings"
-    (8.8.0: county, type, level, from, to, headline as published)."""
+    """A live scan for hazards nearby: earthquakes, severe weather and
+    disasters, plus the weather warnings for the chosen counties or areas
+    under "warnings" (county, type, level, from, to and the headline as
+    published)."""
     try:
         from ... import hazard_monitor
-        res = await hazard_monitor.scan_now(hass)
-        return json.dumps(res)
+        return json.dumps(await hazard_monitor.scan_now(hass))
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
 
+_FORECAST_KINDS = ("hourly", "daily", "twice_daily")
+_FORECAST_LIMIT = 24
+# Fields not every weather integration gives; passed on when present.
+_FORECAST_EXTRAS = ("precipitation", "precipitation_probability", "templow",
+                    "wind_speed", "humidity")
+_FORECAST_NOTE = ("Each entry's 'datetime' is when that forecast period begins; "
+                  "use condition/precipitation to say WHEN rain is expected.")
+
+
+async def _forecast(hass, entity_id: str, kind: str):
+    return await hass.services.async_call(
+        "weather", "get_forecasts", {"entity_id": entity_id, "type": kind},
+        blocking=True, return_response=True)
+
+
+def _forecast_entries(reply, entity_id: str) -> list[dict]:
+    periods = ((reply or {}).get(entity_id, {}).get("forecast") or [])[:_FORECAST_LIMIT]
+    entries = []
+    for period in periods:
+        entry = {key: period.get(key) for key in ("datetime", "condition", "temperature")}
+        entry.update({key: period.get(key) for key in _FORECAST_EXTRAS
+                      if period.get(key) is not None})
+        entries.append(entry)
+    return entries
+
+
 async def _exec_weather_forecast(hass: HomeAssistant, args: dict) -> str:
-    """Hourly/daily forecast from a HA weather entity (v6.75.0). Nova could
-    previously only see CURRENT conditions, so 'what time is it supposed to
-    rain?' had no real answer and the model fell back to HA's clock intent.
-    This exposes the actual forecast."""
+    """The forecast from a Home Assistant weather entity: hourly by default,
+    daily or twice daily on request. With only current conditions, "what
+    time is it supposed to rain?" had no answer and the model fell back to
+    the clock. An entity that cannot give the type asked for is tried for
+    daily instead."""
     try:
         kind = str(args.get("kind", "hourly") or "hourly").lower()
-        if kind not in ("hourly", "daily", "twice_daily"):
+        if kind not in _FORECAST_KINDS:
             kind = "hourly"
-        # pick the requested entity, else the first weather.* entity
-        eid = args.get("entity_id")
-        if not eid:
-            for s in hass.states.async_all("weather"):
-                eid = s.entity_id
-                break
-        if not eid:
+        entity_id = args.get("entity_id") or next(
+            (st.entity_id for st in hass.states.async_all("weather")), None)
+        if not entity_id:
             return json.dumps({"error": "no weather entity is configured in "
                                         "Home Assistant"})
         try:
-            res = await hass.services.async_call(
-                "weather", "get_forecasts",
-                {"entity_id": eid, "type": kind},
-                blocking=True, return_response=True,
-            )
+            reply = await _forecast(hass, entity_id, kind)
         except Exception as exc:
-            # some entities don't support every forecast type
-            if kind != "daily":
-                try:
-                    res = await hass.services.async_call(
-                        "weather", "get_forecasts",
-                        {"entity_id": eid, "type": "daily"},
-                        blocking=True, return_response=True,
-                    )
-                    kind = "daily"
-                except Exception:
-                    return json.dumps({"error": f"forecast unavailable: {exc}"})
-            else:
+            if kind == "daily":
                 return json.dumps({"error": f"forecast unavailable: {exc}"})
-
-        entries = []
+            try:
+                reply = await _forecast(hass, entity_id, "daily")
+            except Exception:
+                return json.dumps({"error": f"forecast unavailable: {exc}"})
+            kind = "daily"
         try:
-            data = (res or {}).get(eid, {})
-            for f in (data.get("forecast") or [])[:24]:
-                entry = {
-                    "datetime": f.get("datetime"),
-                    "condition": f.get("condition"),
-                    "temperature": f.get("temperature"),
-                }
-                # precipitation fields vary by integration — include what exists
-                for k in ("precipitation", "precipitation_probability",
-                          "templow", "wind_speed", "humidity"):
-                    if f.get(k) is not None:
-                        entry[k] = f.get(k)
-                entries.append(entry)
+            entries = _forecast_entries(reply, entity_id)
         except Exception as exc:
             return json.dumps({"error": f"could not read forecast: {exc}"})
-
-        cur = hass.states.get(eid)
+        now = hass.states.get(entity_id)
         return json.dumps({
-            "entity_id": eid,
+            "entity_id": entity_id,
             "type": kind,
-            "current": {
-                "condition": cur.state if cur else None,
-                "temperature": (cur.attributes.get("temperature") if cur else None),
-            },
+            "current": {"condition": now.state if now else None,
+                        "temperature": now.attributes.get("temperature") if now else None},
             "forecast": entries,
-            "note": ("Each entry's 'datetime' is when that forecast period "
-                     "begins; use condition/precipitation to say WHEN rain is "
-                     "expected."),
+            "note": _FORECAST_NOTE,
         })
     except Exception as exc:
         return json.dumps({"error": str(exc)})
