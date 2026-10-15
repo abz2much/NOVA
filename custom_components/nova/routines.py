@@ -1,97 +1,129 @@
-"""
-Nova — House routines (sleep / wake / away / home).
+"""House routines: goodnight, good morning, leaving and arriving.
 
-Each routine is a sequence of service calls that Nova orchestrates and
-narrates. Configurable at runtime — users can override any step via
-/config/nova_routines.yaml.
+Each routine is a list of steps, each a service call, something to say, or
+both, run and narrated in order. A nova_routines.yaml in Home Assistant's
+config folder can replace any routine or add new ones.
 """
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from .tts_helper import async_announce
 from . import paths
-from typing import Optional
+from .tts_helper import async_announce
 
 _LOGGER = logging.getLogger(__name__)
 
-ROUTINE_FILE: Optional[str] = None  # override; None resolves via paths.py
+ROUTINE_FILE: Optional[str] = None   # set to use another file; None asks paths.py
 
 
 def _routine_file() -> str:
     return ROUTINE_FILE or paths.config_path("nova_routines.yaml")
 
-# Sensible defaults — user can override by creating /config/nova_routines.yaml
+
+def _step(service: str = "", *, announce: str = "", optional: bool = False,
+          target: Optional[dict] = None, data: Optional[dict] = None) -> dict:
+    """One routine step, written the way a user's YAML would hold it."""
+    step: dict[str, Any] = {}
+    if service:
+        step["service"] = service
+    if target is not None:
+        step["target"] = dict(target)
+    if data is not None:
+        step["data"] = dict(data)
+    if optional:
+        step["optional"] = True
+    if announce:
+        step["announce"] = announce
+    return step
+
+
+_EVERY_ENTITY = {"entity_id": "all"}
+_EVERY_AREA = {"area_id": "all"}
+_SHADES = {"device_class": "shade"}
+
+# The routines a home gets with no nova_routines.yaml. The scenes are
+# optional: a home that has scene.nighttime, scene.morning or scene.welcome
+# gets it applied.
 DEFAULT_ROUTINES: dict[str, list[dict]] = {
     "goodnight": [
-        {"service": "light.turn_off", "target": {"entity_id": "all"}, "announce": "Turning off lights, {honorific}."},
-        {"service": "lock.lock",      "target": {"area_id": "all"},   "announce": "Locking up."},
-        {"service": "cover.close_cover", "target": {"device_class": "shade"}, "announce": "Closing the shades."},
-        # Scene for final state — users should define scene.nighttime or similar
-        {"service": "scene.turn_on",  "data": {"entity_id": "scene.nighttime"}, "optional": True},
-        {"announce": "Goodnight, {honorific}."},
+        _step("light.turn_off", target=_EVERY_ENTITY,
+              announce="Turning off lights, {honorific}."),
+        _step("lock.lock", target=_EVERY_AREA, announce="Locking up."),
+        _step("cover.close_cover", target=_SHADES, announce="Closing the shades."),
+        _step("scene.turn_on", data={"entity_id": "scene.nighttime"}, optional=True),
+        _step(announce="Goodnight, {honorific}."),
     ],
     "goodmorning": [
-        {"service": "cover.open_cover", "target": {"device_class": "shade"}, "announce": "Opening the shades, {honorific}."},
-        {"service": "scene.turn_on",    "data": {"entity_id": "scene.morning"}, "optional": True},
-        {"announce": "Good morning, {honorific}. I hope you slept well."},
+        _step("cover.open_cover", target=_SHADES,
+              announce="Opening the shades, {honorific}."),
+        _step("scene.turn_on", data={"entity_id": "scene.morning"}, optional=True),
+        _step(announce="Good morning, {honorific}. I hope you slept well."),
     ],
     "leaving": [
-        {"service": "light.turn_off",  "target": {"entity_id": "all"}, "announce": "Shutting everything down, {honorific}."},
-        {"service": "climate.set_preset_mode", "data": {"preset_mode": "eco"}, "target": {"entity_id": "all"}, "optional": True},
-        {"service": "lock.lock",       "target": {"area_id": "all"}},
-        {"announce": "Locked up. Have a good one, {honorific}."},
+        _step("light.turn_off", target=_EVERY_ENTITY,
+              announce="Shutting everything down, {honorific}."),
+        _step("climate.set_preset_mode", data={"preset_mode": "eco"},
+              target=_EVERY_ENTITY, optional=True),
+        _step("lock.lock", target=_EVERY_AREA),
+        _step(announce="Locked up. Have a good one, {honorific}."),
     ],
     "arriving": [
-        {"service": "scene.turn_on",  "data": {"entity_id": "scene.welcome"}, "optional": True, "announce": "Welcome home, {honorific}."},
-        {"service": "climate.set_preset_mode", "data": {"preset_mode": "home"}, "target": {"entity_id": "all"}, "optional": True},
+        _step("scene.turn_on", data={"entity_id": "scene.welcome"}, optional=True,
+              announce="Welcome home, {honorific}."),
+        _step("climate.set_preset_mode", data={"preset_mode": "home"},
+              target=_EVERY_ENTITY, optional=True),
     ],
 }
 
 
 def _load_routines() -> dict[str, list[dict]]:
-    """Load user routines from file if present, else use defaults."""
-    if os.path.exists(_routine_file()):
-        try:
-            with open(_routine_file()) as f:
-                user_routines = yaml.safe_load(f) or {}
-            if isinstance(user_routines, dict):
-                merged = {**DEFAULT_ROUTINES, **user_routines}
-                _LOGGER.debug("Nova: loaded %d user routines", len(user_routines))
-                return merged
-        except Exception as exc:
-            _LOGGER.warning("Nova: could not parse %s: %s", _routine_file(), exc)
-    return DEFAULT_ROUTINES
+    """The defaults with the user's nova_routines.yaml laid over them; the
+    defaults alone when there is no file or it cannot be read."""
+    path = _routine_file()
+    if not os.path.exists(path):
+        return DEFAULT_ROUTINES
+    try:
+        with open(path) as fh:
+            mine = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        _LOGGER.warning("Nova: could not parse %s: %s", path, exc)
+        return DEFAULT_ROUTINES
+    if not isinstance(mine, dict):
+        return DEFAULT_ROUTINES
+    _LOGGER.debug("Nova: loaded %d user routines", len(mine))
+    return {**DEFAULT_ROUTINES, **mine}
 
 
-async def async_run_routine(
-    hass: HomeAssistant,
-    call: ServiceCall,
-    honorific: str,
-    tts_entity: str | None,
-    speakers: list[str],
-) -> dict:
-    """
-    Service: nova.routine
-    Run a named routine by iterating through its steps.
-    """
+def _audit_targets(steps: list[dict]) -> list[dict]:
+    """One Actions log row per step that calls a service; speech only steps
+    are not actions."""
+    rows = []
+    for index, step in enumerate(steps):
+        service = step.get("service")
+        if not service:
+            continue
+        domain, name = service.split(".", 1) if "." in service else ("", service)
+        rows.append({"key": index, "domain": domain or None, "service": name or None})
+    return rows
+
+
+async def async_run_routine(hass: HomeAssistant, call: ServiceCall, honorific: str,
+                            tts_entity: str | None, speakers: list[str]) -> dict:
+    """The nova.routine service: run the named routine step by step."""
     name: str = call.data["name"].lower().strip()
     routines = _load_routines()
-
     if name not in routines:
         _LOGGER.warning("Nova: unknown routine '%s'", name)
-        # honorific may be "" once nobody specific is home to address (see
-        # honorific.py) — addr collapses the trailing ", {honorific}" to
-        # nothing rather than a dangling comma.
+        # With no honorific (nobody in particular home) there is no ", sir".
         addr = f", {honorific}" if honorific else ""
-        msg = f"I don't know a routine called {name}{addr}."
-        await async_announce(hass, msg, tts_entity, speakers)
+        await async_announce(hass, f"I don't know a routine called {name}{addr}.",
+                             tts_entity, speakers)
         return {"success": False, "error": "unknown_routine"}
 
     steps = routines[name]
@@ -99,127 +131,108 @@ async def async_run_routine(
 
     from . import action_log
     request_id = action_log.new_request_id()
-    requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
-    # Only steps with a service call are audited targets — an announce-only
-    # step is pure speech, out of scope for this log. Placeholder rows for
-    # the whole routine run are created in one batch (v3 correction), then
-    # each step updates its own row as it's processed.
-    service_step_indices = [i for i, s in enumerate(steps) if s.get("service")]
-    step_targets = []
-    for i in service_step_indices:
-        s = steps[i]
-        svc = s.get("service", "")
-        d, sv = svc.split(".", 1) if "." in svc else ("", svc)
-        step_targets.append({"key": i, "domain": d or None, "service": sv or None})
-    row_ids = await hass.async_add_executor_job(
-        lambda: action_log.start_many(
-            request_id, f"routine:{name}", "routine", step_targets,
-            requested_by_user_id=requested_by_user_id,
-        )
-    )
+    user_id = getattr(getattr(call, "context", None), "user_id", None)
+    # All the rows for this run in one write, each then updated by its step.
+    targets = _audit_targets(steps)
+    row_ids = await hass.async_add_executor_job(lambda: action_log.start_many(
+        request_id, f"routine:{name}", "routine", targets,
+        requested_by_user_id=user_id))
 
-    errors = []
+    errors: list[str] = []
     executed = 0
-    for step_i, step in enumerate(steps):
-        row_id = row_ids.get(step_i)
+    for index, step in enumerate(steps):
         try:
-            # Announce, if present
-            announce_text = step.get("announce")
-            if announce_text:
-                from .directive_helper import fill_honorific
-                text = fill_honorific(announce_text, honorific)
-                await async_announce(
-                    hass, text, tts_entity, speakers,
-                    context="welcome" if name == "arriving" else "routine",
-                )
-
-            # Service call, if present
-            service = step.get("service")
-            if service:
-                domain, svc = service.split(".", 1)
-                data = step.get("data", {})
-                target = step.get("target") or None
-
-                # Authorization gate (audit fix, Sept 2026): a routine step can
-                # be just as sensitive as a direct control_device call (the
-                # default "goodmorning" routine opens covers; a custom routine
-                # could just as easily unlock or disarm, or activate a scene/
-                # script/automation whose contents this module can't inspect).
-                # Steps aren't always scoped to one entity_id (target can be an
-                # area/device_class), so this gates at the step level — one
-                # confirmation for whatever the step touches, using the first
-                # entity named in its data (if any) for the voice prompt.
-                step_entity = (data or {}).get("entity_id", "") if isinstance(data, dict) else ""
-                if isinstance(step_entity, list):
-                    step_entity = step_entity[0] if step_entity else ""
-                from . import policy
-                request = policy.AuthorityRequest(
-                    domain, svc, step_entity, label=service.replace(".", " "))
-                if not policy.authorize_now(hass, request).allowed:
-                    await hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.mark_awaiting_approval(rid)
-                    )
-                    decision = await policy.authorize(hass, request)
-                    ok_gate, gate_note, approval_result = (
-                        decision.allowed, decision.note, decision.approval)
-                    await hass.async_add_executor_job(
-                        lambda rid=row_id, ar=approval_result: action_log.set_approval(
-                            rid, ar, approval_required=(ar != "not_required"))
-                    )
-                    if not ok_gate and decision.already_secure:
-                        # Already locked, closed or armed (8.46.0): nothing sent.
-                        await hass.async_add_executor_job(
-                            lambda rid=row_id: action_log.set_execution(
-                                rid, "blocked", reason_code="already_secure")
-                        )
-                        continue
-                    if not ok_gate:
-                        if step.get("optional"):
-                            _LOGGER.debug(
-                                "Nova: optional step '%s' needs confirmation, skipped: %s",
-                                service, gate_note)
-                        else:
-                            _LOGGER.warning(
-                                "Nova: step '%s' needs confirmation, not run: %s",
-                                service, gate_note)
-                            errors.append(f"{service}: {gate_note or 'confirmation required'}")
-                        await hass.async_add_executor_job(
-                            lambda rid=row_id, code=(decision.code or "confirmation_not_approved"):
-                            action_log.set_execution(rid, "blocked", reason_code=code)
-                        )
-                        continue
-
-                try:
-                    await hass.services.async_call(domain, svc, data, target=target, blocking=True)
-                    executed += 1
-                    await hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
-                    )
-                    if domain in ("scene", "script", "automation"):
-                        await hass.async_add_executor_job(
-                            lambda rid=row_id: action_log.mark_not_checkable(rid))
-                except Exception as exc:
-                    if step.get("optional"):
-                        _LOGGER.debug("Nova: optional step '%s' skipped: %s", service, exc)
-                    else:
-                        _LOGGER.warning("Nova: step '%s' failed: %s", service, exc)
-                        errors.append(f"{service}: {exc}")
-                    await hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(
-                            rid, "failed", reason_code="service_call_failed")
-                    )
+            ran = await _run_step(hass, step, name, index, row_ids.get(index), honorific,
+                                  tts_entity, speakers, errors)
+            executed += ran
         except Exception as exc:
             _LOGGER.warning("Nova: routine step error: %s", exc)
             errors.append(str(exc))
+    return {"success": not errors, "routine": name, "steps_executed": executed,
+            "errors": errors}
 
-    return {
-        "success": not errors,
-        "routine": name,
-        "steps_executed": executed,
-        "errors": errors,
-    }
+
+def _step_entity(data) -> str:
+    """The first entity a step names, for the confirmation question."""
+    named = data.get("entity_id", "") if isinstance(data, dict) else ""
+    if isinstance(named, list):
+        return named[0] if named else ""
+    return named
+
+
+async def _log(hass, call) -> None:
+    await hass.async_add_executor_job(call)
+
+
+async def _run_step(hass, step: dict, routine: str, index: int, row_id, honorific: str,
+                    tts_entity, speakers, errors: list) -> int:
+    """Say and do one step; 1 when its service call went out. Problems are
+    added to ``errors`` unless the step is optional."""
+    from . import action_log, policy
+
+    said = step.get("announce")
+    if said:
+        from .directive_helper import fill_honorific
+        await async_announce(hass, fill_honorific(said, honorific), tts_entity, speakers,
+                             context="welcome" if routine == "arriving" else "routine")
+
+    service = step.get("service")
+    if not service:
+        return 0
+    domain, svc = service.split(".", 1)
+    data = step.get("data", {})
+    target = step.get("target") or None
+    optional = step.get("optional")
+
+    # A step can be as sensitive as any direct command (good morning opens
+    # covers; a user's routine could unlock, disarm, or run a scene or
+    # script nobody can see into), so each step goes through the gate. A step
+    # may target an area or a class rather than one entity, so it is one
+    # confirmation per step, named after the first entity in its data.
+    request = policy.AuthorityRequest(domain, svc, _step_entity(data),
+                                      label=service.replace(".", " "))
+    if not policy.authorize_now(hass, request).allowed:
+        await _log(hass, lambda: action_log.mark_awaiting_approval(row_id))
+        decision = await policy.authorize(hass, request)
+        approval = decision.approval
+        await _log(hass, lambda: action_log.set_approval(
+            row_id, approval, approval_required=(approval != "not_required")))
+        if not decision.allowed and decision.already_secure:
+            # Already locked, closed or armed (8.46.0): nothing to send.
+            await _log(hass, lambda: action_log.set_execution(
+                row_id, "blocked", reason_code="already_secure"))
+            return 0
+        if not decision.allowed:
+            note = decision.note
+            if optional:
+                _LOGGER.debug("Nova: optional step '%s' needs confirmation, skipped: %s",
+                              service, note)
+            else:
+                _LOGGER.warning("Nova: step '%s' needs confirmation, not run: %s",
+                                service, note)
+                errors.append(f"{service}: {note or 'confirmation required'}")
+            code = decision.code or "confirmation_not_approved"
+            await _log(hass, lambda: action_log.set_execution(row_id, "blocked",
+                                                              reason_code=code))
+            return 0
+
+    try:
+        await hass.services.async_call(domain, svc, data, target=target, blocking=True)
+    except Exception as exc:
+        if optional:
+            _LOGGER.debug("Nova: optional step '%s' skipped: %s", service, exc)
+        else:
+            _LOGGER.warning("Nova: step '%s' failed: %s", service, exc)
+            errors.append(f"{service}: {exc}")
+        await _log(hass, lambda: action_log.set_execution(
+            row_id, "failed", reason_code="service_call_failed"))
+        return 0
+    await _log(hass, lambda: action_log.set_execution(row_id, "accepted"))
+    if domain in ("scene", "script", "automation"):
+        await _log(hass, lambda: action_log.mark_not_checkable(row_id))
+    return 1
 
 
 def list_routines() -> list[str]:
-    """Return names of available routines."""
-    return list(_load_routines().keys())
+    """The names of every routine available."""
+    return list(_load_routines())

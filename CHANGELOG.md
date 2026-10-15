@@ -1,3 +1,10 @@
+## [8.49.42] — Copied code out of the control, camera, environment and routine tools
+
+Phase 8 continues, now prioritised: the files with the most copied code left are rewritten with their copied text removed and nothing else changed. This batch covers the agent's control, camera and environment tools, the ignore rules, entity exclusions, house routines, the panel's debug log and the diagnostics download.
+
+### Changed
+- **control, camera and environment tools, ignore rules, entity exclusions, routines, the debug log and diagnostics rewritten**, keeping every public name, message, stored value and behaviour. The default routines are laid out differently with identical steps. No user facing change.
+
 ## [8.49.41] — A garage door that can't be toggled open by voice, a truer Memory tab
 
 Phase 8 continues with the authorisation policy, the infrastructure audit, the Memory tab commands, the suggestion and goal commands and the agent's planning tools, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
