@@ -1,74 +1,73 @@
-"""
-Nova whole-house energy management (v6.62.0).
+"""Whole house energy: how much the home is drawing and what to say about it.
 
-The appliance monitor already SENSES power — it finds the whole-home meter,
-fingerprints appliances by wattage, and tracks what's running. This module is
-the MANAGEMENT layer on top: it reads current draw, understands what's drawing,
-and helps run the house efficiently — surfacing high-draw situations, warning
-before a configured peak, and (at higher agency levels) deferring or staggering
-high-draw loads.
+appliance_monitor.py finds the whole home meter and learns appliances by
+their wattage. This module reads the live draw against a peak the user sets,
+lists which declared appliances are running, and offers advice when the
+house is over peak with loads that could be staggered. It also passes on
+the energy outlook's advice (energy_outlook.py) through the same tick.
 
-Configurable agency ladder (energy_agency config key):
-  - "advisory"  (default) — only surfaces insights; never touches a load.
-  - "opt_in"              — may propose deferring/staggering a load; acts only
-                            after approval (routed through the normal suggestion
-                            path — no new approval UI).
-  - "autonomous"          — may auto-defer high-draw loads when over the peak
-                            threshold, within user-set limits.
+Nothing here switches a load. Appliance profiles hold a power sensor, never
+something Nova can control, so every offer is information only at every
+agency level. The agency setting (``energy_agency``: advisory, opt_in or
+autonomous, optionally raised one step by a mode listed in
+``energy_mode_bump``) only changes how the offer is worded. Loads whose name
+suggests they are critical (medical, fridge, network, heating and so on) are
+never suggested for holding.
 
-Mode-aware: the active operational mode can raise the effective agency — e.g.
-"away" enables more aggressive saving than the household would want while home.
-A mode never RAISES agency past what the user configured as their ceiling; it
-can only be as aggressive as `energy_agency` permits. Safety is never touched:
-this module never sheds a load tagged critical (medical, security, network) and
-never acts on anything not explicitly an appliance/high-draw device.
-
-Nothing here raises to the caller; every entry point returns a status dict.
+No public function raises.
 """
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-AGENCY_ADVISORY = "advisory"
-AGENCY_OPT_IN = "opt_in"
-AGENCY_AUTONOMOUS = "autonomous"
+# How far Nova may go, lowest first. Today every level only words the offer.
+AGENCY_ADVISORY, AGENCY_OPT_IN, AGENCY_AUTONOMOUS = "advisory", "opt_in", "autonomous"
 _AGENCY_ORDER = {AGENCY_ADVISORY: 0, AGENCY_OPT_IN: 1, AGENCY_AUTONOMOUS: 2}
 
-# Default peak threshold (watts) above which the home is "drawing heavily".
 _DEFAULT_PEAK_W = 8000.0
+_RUNNING_W = 50.0   # an appliance drawing more than this counts as running
 
-# Loads we never shed regardless of agency — matched against entity_id/name.
+# Words in an entity id or name that mark a load as never to be held.
 _NEVER_SHED = ("medical", "cpap", "oxygen", "fridge", "freezer", "refrigerator",
                "security", "alarm", "network", "router", "modem", "server",
                "sump", "well_pump", "furnace", "boiler", "heat")
+
+# Friendly name fragments that identify a whole home meter when the
+# appliance monitor found none.
+_METER_NAMES = ("electric consumption", "home consumption", "home energy",
+                "total consumption", "main power", "whole house",
+                "grid consumption", "mains power")
+
+# Set when the over peak offer has been made, cleared by the next reading
+# under peak, so one long high draw evening is mentioned once (8.49.37).
+_peak_spell_offered = False
 
 
 def _cfg(key: str, default=None):
     try:
         from . import nova_config
-        v = nova_config.get(key, default)
-        return v if v is not None else default
+        value = nova_config.get(key, default)
     except Exception:
         return default
+    return default if value is None else value
 
 
 def _configured_agency() -> str:
-    a = str(_cfg("energy_agency", AGENCY_ADVISORY) or AGENCY_ADVISORY).lower()
-    return a if a in _AGENCY_ORDER else AGENCY_ADVISORY
+    agency = str(_cfg("energy_agency", AGENCY_ADVISORY) or AGENCY_ADVISORY).lower()
+    return agency if agency in _AGENCY_ORDER else AGENCY_ADVISORY
 
 
 def _mode_agency_bonus() -> int:
-    """A mode may nudge agency up by one step (e.g. 'away'). Returns 0 or 1.
-    Never lets the effective level exceed the user's configured ceiling."""
+    """1 while the active mode is listed in ``energy_mode_bump``, else 0. The
+    list is empty by default, so modes change nothing unless the user asks."""
     try:
         from . import modes
-        # Which modes are allowed to bump energy agency — configurable, with a
-        # sensible default (away/focus lean toward saving).
-        bump_modes = _cfg("energy_mode_bump", [])  # opt-in: empty = mode never changes agency
-        if isinstance(bump_modes, list) and modes.active_mode() in bump_modes:
+        bump = _cfg("energy_mode_bump", [])
+        if isinstance(bump, list) and modes.active_mode() in bump:
             return 1
     except Exception:
         pass
@@ -76,226 +75,192 @@ def _mode_agency_bonus() -> int:
 
 
 def effective_agency() -> str:
-    """The agency level in force right now.
-
-    Baseline is exactly what the user configured in `energy_agency` — no
-    surprises: choose 'autonomous' and you get autonomy, choose 'advisory' and
-    Nova only ever advises. Separately, a mode listed in `energy_mode_bump`
-    (e.g. 'away') can raise the level ONE step for the duration of that mode —
-    letting the house save more aggressively while you're out. The bump is
-    additive and purely opt-in (empty bump list → mode never changes agency),
-    and it's capped at 'autonomous'. A user who wants zero mode influence simply
-    leaves `energy_mode_bump` empty.
-    """
-    base_rank = _AGENCY_ORDER[_configured_agency()]
-    effective_rank = min(base_rank + _mode_agency_bonus(), _AGENCY_ORDER[AGENCY_AUTONOMOUS])
-    for name, rank in _AGENCY_ORDER.items():
-        if rank == effective_rank:
+    """The configured agency, one step higher while a bump mode is active,
+    never above autonomous."""
+    rank = min(_AGENCY_ORDER[_configured_agency()] + _mode_agency_bonus(),
+               _AGENCY_ORDER[AGENCY_AUTONOMOUS])
+    for name, level in _AGENCY_ORDER.items():
+        if level == rank:
             return name
     return _configured_agency()
 
 
 def _peak_threshold() -> float:
+    """``energy_peak_watts``, or 8 kW when it is unset or not a number."""
+    setting = _cfg("energy_peak_watts", _DEFAULT_PEAK_W) or _DEFAULT_PEAK_W
     try:
-        return float(_cfg("energy_peak_watts", _DEFAULT_PEAK_W) or _DEFAULT_PEAK_W)
+        return float(setting)
     except (ValueError, TypeError):
         return _DEFAULT_PEAK_W
 
 
 def _never_shed(entity_id: str, name: str) -> bool:
-    hay = f"{entity_id} {name}".lower()
-    return any(tok in hay for tok in _NEVER_SHED)
+    text = f"{entity_id} {name}".lower()
+    return any(word in text for word in _NEVER_SHED)
 
 
-# ── current power picture (reuses appliance_monitor's meter discovery) ───────
+def _watts(state) -> float:
+    """A power reading in watts; raises ValueError or TypeError when the
+    state is not a number."""
+    value = float(state.state)
+    if (state.attributes.get("unit_of_measurement") or "").lower() == "kw":
+        value *= 1000.0
+    return value
+
+
+# ── the live picture ─────────────────────────────────────────────────────────
 
 def _read_whole_home_watts(hass) -> tuple[Optional[float], str]:
-    """Current whole-home draw in watts, plus the source entity. Reuses the
-    appliance monitor's meter-discovery heuristics. (None, '') if not found."""
+    """(watts, meter entity). The meter is the one the appliance monitor
+    found, else one recognised by name. (None, '') when there is no meter and
+    (None, meter) when it exists but gives no number."""
+    meter = None
     try:
         from . import appliance_monitor
-        tracker = appliance_monitor._discover_whole_home_meter(hass)
-        # tracker exposes the entity; re-read its live value for freshness
-        eid = getattr(tracker, "entity_id", None) if tracker else None
+        found = appliance_monitor._discover_whole_home_meter(hass)
+        meter = getattr(found, "entity_id", None) if found else None
     except Exception:
-        eid = None
-
-    if not eid:
-        # fallback: scan for a plausible whole-home meter directly
-        eid = _fallback_meter(hass)
-    if not eid:
+        meter = None
+    meter = meter or _fallback_meter(hass)
+    if not meter:
         return None, ""
-
-    st = hass.states.get(eid)
-    if st is None:
-        return None, eid
+    state = hass.states.get(meter)
+    if state is None:
+        return None, meter
     try:
-        val = float(st.state)
-        unit = (st.attributes.get("unit_of_measurement") or "").lower()
-        if unit == "kw":
-            val *= 1000.0
-        return val, eid
+        return _watts(state), meter
     except (ValueError, TypeError):
-        return None, eid
+        return None, meter
 
 
 def _fallback_meter(hass) -> Optional[str]:
     for state in hass.states.async_all("sensor"):
-        dc = state.attributes.get("device_class", "")
         unit = (state.attributes.get("unit_of_measurement") or "").lower()
-        fname = (state.attributes.get("friendly_name") or "").lower()
-        if dc != "power" and unit not in ("w", "kw"):
+        if state.attributes.get("device_class", "") != "power" and unit not in ("w", "kw"):
             continue
-        for kw in ("electric consumption", "home consumption", "home energy",
-                   "total consumption", "main power", "whole house",
-                   "grid consumption", "mains power"):
-            if kw in fname:
-                return state.entity_id
+        name = (state.attributes.get("friendly_name") or "").lower()
+        if any(fragment in name for fragment in _METER_NAMES):
+            return state.entity_id
     return None
 
 
 def _running_appliances(hass) -> list[dict]:
-    """Declared appliances currently drawing power, from config + live sensors.
-    Each: {name, entity, watts, shed_ok}."""
-    out = []
-    profile = _cfg("appliances", [])
-    if not isinstance(profile, list):
-        return out
-    for ap in profile:
-        if not isinstance(ap, dict):
+    """Declared appliances (the ``appliances`` setting) drawing power now,
+    biggest first. Each is {name, entity, watts, shed_ok}."""
+    declared = _cfg("appliances", [])
+    if not isinstance(declared, list):
+        return []
+    running = []
+    for appliance in declared:
+        if not isinstance(appliance, dict):
             continue
-        name = str(ap.get("name", "") or "")
-        eid = str(ap.get("entity", "") or "")
-        watts = 0.0
-        running = False
-        if eid:
-            st = hass.states.get(eid)
-            if st is not None:
-                try:
-                    watts = float(st.state)
-                    unit = (st.attributes.get("unit_of_measurement") or "").lower()
-                    if unit == "kw":
-                        watts *= 1000.0
-                    running = watts > 50.0     # drawing meaningfully
-                except (ValueError, TypeError):
-                    pass
-        if running:
-            out.append({
-                "name": name, "entity": eid, "watts": round(watts),
-                "shed_ok": not _never_shed(eid, name),
-            })
-    out.sort(key=lambda a: -a["watts"])
-    return out
+        name = str(appliance.get("name", "") or "")
+        eid = str(appliance.get("entity", "") or "")
+        state = hass.states.get(eid) if eid else None
+        if state is None:
+            continue
+        try:
+            watts = _watts(state)
+        except (ValueError, TypeError):
+            continue
+        if watts > _RUNNING_W:
+            running.append({"name": name, "entity": eid, "watts": round(watts),
+                            "shed_ok": not _never_shed(eid, name)})
+    running.sort(key=lambda item: -item["watts"])
+    return running
 
 
-# ── public: status + advice ──────────────────────────────────────────────────
+def _advice_line(watts: Optional[float], meter: str, peak: float, running: list) -> str:
+    kw, peak_kw = (watts or 0.0) / 1000, peak / 1000
+    if watts is None and meter:
+        return ("The whole home power meter isn't reporting right now, so the "
+                "current draw is unknown.")
+    if watts is None:
+        return ("No whole-home power meter found — set one up (an Electric "
+                "Consumption [W] sensor) to enable energy management.")
+    if watts < peak:
+        return f"Drawing {kw:.1f} kW — within the {peak_kw:.1f} kW comfort range."
+    movable = [item for item in running if item["shed_ok"]]
+    if len(movable) < 2:
+        return f"Drawing {kw:.1f} kW, above the {peak_kw:.1f} kW peak."
+    names = " + ".join(item["name"] for item in movable[:3] if item["name"])
+    return (f"Drawing {kw:.1f} kW (over the {peak_kw:.1f} kW peak) — "
+            f"{names or 'multiple loads'} running at once. Staggering them "
+            f"would cut the peak.")
+
 
 def power_status(hass) -> dict:
-    """The current energy picture for the panel/agent. Never raises."""
+    """The energy picture for the panel and the agent."""
     watts, meter = _read_whole_home_watts(hass)
     peak = _peak_threshold()
     running = _running_appliances(hass)
-    over = watts is not None and watts >= peak
-
-    advice = []
-    if watts is None:
-        advice.append("No whole-home power meter found — set one up (an Electric "
-                      "Consumption [W] sensor) to enable energy management.")
-    elif over:
-        big = [a for a in running if a["shed_ok"]]
-        if len(big) >= 2:
-            names = " + ".join(a["name"] for a in big[:3] if a["name"])
-            advice.append(f"Drawing {watts/1000:.1f} kW (over the "
-                          f"{peak/1000:.1f} kW peak) — {names or 'multiple loads'} "
-                          f"running at once. Staggering them would cut the peak.")
-        else:
-            advice.append(f"Drawing {watts/1000:.1f} kW, above the "
-                          f"{peak/1000:.1f} kW peak.")
-    else:
-        if watts is not None:
-            advice.append(f"Drawing {watts/1000:.1f} kW — within the "
-                          f"{peak/1000:.1f} kW comfort range.")
-
     return {
-        "watts": round(watts) if watts is not None else None,
-        "kw": round(watts / 1000, 2) if watts is not None else None,
+        "watts": None if watts is None else round(watts),
+        "kw": None if watts is None else round(watts / 1000, 2),
         "meter": meter,
         "peak_watts": round(peak),
-        "over_peak": over,
+        "over_peak": watts is not None and watts >= peak,
         "agency": effective_agency(),
         "configured_agency": _configured_agency(),
         "running": running,
-        "advice": advice,
+        "advice": [_advice_line(watts, meter, peak, running)],
     }
+
+
+def _peak_offer(agency: str, kw: float, names: str, held: dict) -> dict:
+    """The over peak offer in the wording for ``agency``. None of them acts:
+    auto_act is always False (see the module note)."""
+    if agency == AGENCY_AUTONOMOUS:
+        return {"type": "energy_shed", "urgency": "low", "auto_act": False,
+                "entity_id": held["entity"],
+                "message": f"{names} are both running at {kw:.1f} kW, over your "
+                           f"peak. I'd normally ease that by holding "
+                           f"{held['name']}, but I don't have a way to actually "
+                           f"control it yet.",
+                "energy": True}
+    if agency == AGENCY_OPT_IN:
+        return {"type": "energy_shed_offer", "urgency": "low", "auto_act": False,
+                "entity_id": held["entity"],
+                "message": f"{names} are drawing {kw:.1f} kW together, over your "
+                           f"peak. Holding {held['name']} until the load drops "
+                           f"would help.",
+                "energy": True}
+    return {"type": "energy_advice", "urgency": "low", "auto_act": False,
+            "message": f"Heads up — {names} are running at {kw:.1f} kW, over your "
+                       f"peak. Staggering them would help.",
+            "energy": True}
 
 
 def evaluate_for_proactive(hass) -> Optional[dict]:
-    """Called by the cognitive loop: returns a proactive offer dict when the
-    home is over peak with sheddable loads, shaped by the effective agency —
-    advisory just informs; opt_in proposes an action; autonomous flags auto.
-    Returns None when nothing warrants surfacing. Never raises."""
+    """The proactive tick's over peak offer, or None. One offer per over
+    peak spell, and only when at least two loads that may be held are running
+    (one big load cannot be staggered)."""
+    global _peak_spell_offered
     try:
-        st = power_status(hass)
+        status = power_status(hass)
     except Exception:
         return None
-    if not st.get("over_peak"):
+    if not status.get("over_peak"):
+        if status.get("watts") is not None:
+            _peak_spell_offered = False
         return None
-    sheddable = [a for a in st["running"] if a["shed_ok"]]
-    if len(sheddable) < 2:
-        return None      # a single big load isn't a staggering opportunity
-
-    agency = st["agency"]
-    kw = st["kw"]
-    names = " and ".join(a["name"] for a in sheddable[:2] if a["name"]) or "two high-draw loads"
-    defer = sheddable[0]  # highest-draw sheddable load
-
-    if agency == AGENCY_AUTONOMOUS:
-        # NOTE (audit, Sept 2026): this used to say auto_act=True and claim
-        # "I'll ease the peak by holding X" — but appliance profiles only ever
-        # capture a power SENSOR per appliance (for wattage), never a
-        # controllable switch/entity to shed with. Nothing here has ever
-        # actually called a service; it just said it did. Being honest about
-        # that until appliance profiles capture a real controllable entity.
-        return {
-            "type": "energy_shed", "urgency": "low", "auto_act": False,
-            "entity_id": defer["entity"],
-            "message": f"{names} are both running at {kw:.1f} kW, over your "
-                       f"peak. I'd normally ease that by holding "
-                       f"{defer['name']}, but I don't have a way to actually "
-                       f"control it yet.",
-            "energy": True,
-        }
-    if agency == AGENCY_OPT_IN:
-        # 8.14.0: this used to ask "Want me to hold X until the load drops?",
-        # but appliance profiles only hold a power sensor, never something
-        # Nova can switch, and a "yes" had nothing to act on. Information only
-        # until a profile captures a real controllable entity.
-        return {
-            "type": "energy_shed_offer", "urgency": "low", "auto_act": False,
-            "entity_id": defer["entity"],
-            "message": f"{names} are drawing {kw:.1f} kW together, over your "
-                       f"peak. Holding {defer['name']} until the load drops "
-                       f"would help.",
-            "energy": True,
-        }
-    # advisory
-    return {
-        "type": "energy_advice", "urgency": "low", "auto_act": False,
-        "message": f"Heads up — {names} are running at {kw:.1f} kW, over your "
-                   f"peak. Staggering them would help.",
-        "energy": True,
-    }
+    if _peak_spell_offered:
+        return None
+    movable = [item for item in status["running"] if item["shed_ok"]]
+    if len(movable) < 2:
+        return None
+    names = " and ".join(item["name"] for item in movable[:2] if item["name"])
+    _peak_spell_offered = True
+    return _peak_offer(status["agency"], status["kw"],
+                       names or "two high-draw loads", movable[0])
 
 
-# ── energy outlook (8.12.0) ──────────────────────────────────────────────────
-# The outlook's advice (energy_outlook.py) offered through the same proactive
-# tick and delivery as the offers above. Cooldowns live in memory only, keyed
-# like the proactive manager's _offer_cooldowns (key -> time.time()). Each
-# advice key already carries its kind and the local date.
+# ── energy outlook advice (8.12.0) ───────────────────────────────────────────
+# Offered through the same tick. Each advice key already holds its kind and
+# the local date; the time it was last offered is kept in memory only.
 OUTLOOK_COOLDOWN_S = 6 * 3600
 _outlook_offered: dict[str, float] = {}
-# Kinds offered at most once per key, so once a day, not every 6 hours.
-_ONCE_A_DAY = ("cheap_topup",)
+_ONCE_A_DAY = ("cheap_topup",)   # offered once per key, not every six hours
 _OUTLOOK_KINDS = ("battery_hold", "cheap_topup", "high_use_today")
 
 
@@ -306,50 +271,52 @@ def _outlook_due(key: str, kind: str, now: float) -> bool:
     return kind not in _ONCE_A_DAY and now - last >= OUTLOOK_COOLDOWN_S
 
 
-async def evaluate_outlook_for_proactive(hass) -> Optional[dict]:
-    """One offer from the energy outlook's advice, or None. Never raises.
+def _forget_old_outlook_keys(now: float) -> None:
+    for key in [k for k, at in _outlook_offered.items() if now - at > 2 * 86400]:
+        _outlook_offered.pop(key, None)
 
-    Advice only. The agency ladder (energy_agency) does not apply here: at
-    every level the offer only informs, auto_act is False and it carries no
-    action_data, so nothing can act on a device. The caller gates it exactly
-    as evaluate_for_proactive (kill switch and mode) and delivers it through
-    the normal cognitive action path (quiet hours, urgency routing). The
-    output gate (mutes, rate limit, dedup) is checked here, the way
-    host_health does, since that path does not check it. A gated offer
-    still uses up its cooldown, so it is not retried every tick."""
+
+async def evaluate_outlook_for_proactive(hass) -> Optional[dict]:
+    """One piece of outlook advice, or None.
+
+    Advice only at every agency level: auto_act is False and there is no
+    action_data. The caller applies the kill switch and mode gate as for the
+    over peak offer, and delivery handles quiet hours and urgency. The output
+    gate (mutes, rate limit, duplicates) is checked here, because that
+    delivery path does not check it. An offer the gate stops still uses its
+    cooldown, so it is not retried every tick."""
     try:
-        import time
         from . import energy_outlook
-        out = await energy_outlook.energy_outlook_status(hass)
-        if out.get("error") or not out.get("configured"):
+        outlook = await energy_outlook.energy_outlook_status(hass)
+        if outlook.get("error") or not outlook.get("configured"):
             return None
         now = time.time()
-        for key in [k for k, t in _outlook_offered.items() if now - t > 2 * 86400]:
-            _outlook_offered.pop(key, None)
-        for advice in out.get("advice") or []:
+        _forget_old_outlook_keys(now)
+        for advice in outlook.get("advice") or []:
             kind, key = advice.get("kind"), advice.get("key")
             if kind not in _OUTLOOK_KINDS or not key or not _outlook_due(key, kind, now):
                 continue
             _outlook_offered[key] = now
-            message = advice.get("message") or ""
-            from . import output_gate
-            allowed, reason = output_gate.can_announce(
-                entity_id="energy_outlook", category="energy", urgency="low", message=message)
-            output_gate.record_announcement(
-                entity_id="energy_outlook", category="energy", urgency="low",
-                message=message, was_spoken=allowed)
-            if not allowed:
-                _LOGGER.debug("energy outlook offer suppressed: %s", reason)
-                return None
-            try:
-                from .core_common import _live_honorific, _persona
-                message = _persona().lead_in(_live_honorific(hass), message[:1].lower() + message[1:])
-            except Exception:
-                pass
-            return {
-                "type": "energy_outlook_advice", "urgency": "low", "auto_act": False,
-                "message": message, "energy": True,
-            }
+            return _gated_outlook_offer(hass, advice.get("message") or "")
     except Exception as exc:
         _LOGGER.debug("energy outlook offer failed: %s", exc)
     return None
+
+
+def _gated_outlook_offer(hass, message: str) -> Optional[dict]:
+    from . import output_gate
+    allowed, reason = output_gate.can_announce(
+        entity_id="energy_outlook", category="energy", urgency="low", message=message)
+    output_gate.record_announcement(
+        entity_id="energy_outlook", category="energy", urgency="low",
+        message=message, was_spoken=allowed)
+    if not allowed:
+        _LOGGER.debug("energy outlook offer suppressed: %s", reason)
+        return None
+    try:
+        from .core_common import _live_honorific, _persona
+        message = _persona().lead_in(_live_honorific(hass), message[:1].lower() + message[1:])
+    except Exception:
+        pass
+    return {"type": "energy_outlook_advice", "urgency": "low", "auto_act": False,
+            "message": message, "energy": True}

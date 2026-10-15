@@ -132,6 +132,19 @@ def test_prompt_block_output_is_fenced(knowledge):
     assert "trash day: Tuesday" in block
 
 
+def test_stats_count_confirmed_facts_and_pending_apart(knowledge):
+    """8.49.37: the panel count is what Nova uses; pending facts are counted
+    on their own."""
+    knowledge.remember("a", "1", now=1000.0)
+    knowledge.remember("b", "2", kind="preference", subject="primary",
+                       status="pending", now=1000.0)
+    s = knowledge.stats(now=1000.0)
+    assert s["total"] == 1
+    assert s["by_kind"] == {"fact": 1}
+    assert s["by_subject"] == {"household": 1}
+    assert s["pending"] == 1
+
+
 def test_stats_counts_live_only(knowledge):
     knowledge.remember("a", "1", kind="fact", now=1000.0)
     knowledge.remember("b", "2", kind="preference", subject="primary", now=1000.0)

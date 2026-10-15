@@ -5,6 +5,8 @@ bounded, and the store methods must round-trip. This is what lets backfill impor
 past behavior without reintroducing the flood or double-counting.
 """
 import sqlite3
+import sys
+import types
 from datetime import datetime, timedelta
 
 import pytest
@@ -62,3 +64,43 @@ def test_bulk_insert_and_distinct(cc, tmp_path, monkeypatch):
                        "WHERE entity_id='binary_sensor.bay_occupancy'").fetchone()
     conn.close()
     assert row[0] == 18 and row[1] == "history"
+
+
+async def test_backfill_follows_live_logging_domain_rules(load, fake_hass, monkeypatch):
+    """8.49.37: Analyze Now imports scenes (live logging keeps them for
+    "button then scene") and imports button presses only when button
+    learning is on."""
+    core = load("cognitive_core")
+    jc = load("nova_config")
+    store = {}
+    monkeypatch.setattr(jc, "get", lambda k, d=None: store.get(k, d))
+    for eid in ("scene.evening", "event.hall_button", "light.hall", "automation.night"):
+        fake_hass.states.set(eid, "on")
+    asked = []
+
+    class _Recorder:
+        async def async_add_executor_job(self, func):
+            return func()
+
+    def _states(hass, start, end, ids, **kw):
+        asked.extend(ids)
+        return {}
+
+    recorder = types.ModuleType("homeassistant.components.recorder")
+    recorder.get_instance = lambda hass: _Recorder()
+    recorder.history = types.SimpleNamespace(get_significant_states=_states)
+    monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", recorder)
+
+    class _Logger:
+        def distinct_logged_entities(self):
+            return set()
+
+    monkeypatch.setattr(core._CORE, "state_logger", _Logger())
+    await core.backfill_from_history(fake_hass)
+    assert "scene.evening" in asked and "light.hall" in asked
+    assert "event.hall_button" not in asked and "automation.night" not in asked
+
+    store["pattern_learn_buttons"] = True
+    asked.clear()
+    await core.backfill_from_history(fake_hass)
+    assert "event.hall_button" in asked

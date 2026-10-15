@@ -92,5 +92,6 @@ def test_nighttime_wrapper_french(i18n):
 
 
 def test_unknown_language_falls_back_to_english(i18n):
-    out = i18n.message("lockdown_did", "xx", honorific="Sir", did="locked X")
-    assert out == "Sir, lockdown engaged — I locked X. The home is secure."
+    out = i18n.message("lockdown_did_pending", "xx", honorific="Sir", did="lock X")
+    assert out == ("Sir, lockdown engaged. I sent commands to lock X. "
+                   "I will alert you if anything does not secure.")

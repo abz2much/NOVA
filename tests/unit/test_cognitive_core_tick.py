@@ -1117,15 +1117,15 @@ def test_the_opt_in_toggles(cc, pattern_cfg):
     assert cc._pattern_opted_in("light.x") is False
 
 
-def test_current_behaviour_learning_doors_switches_off_motion_learning(cc, pattern_cfg):
-    """The doors branch returns before the motion branch is reached, so with
-    both opt ins on only door, window and opening classes are learned and
-    motion and occupancy sensors are not."""
+def test_learning_doors_and_motion_together(cc, pattern_cfg):
+    """Agreed fix in 8.49.37: this pinned the doors toggle hiding motion
+    sensors. Each toggle is now checked on its own."""
     pattern_cfg["pattern_learn_doors"] = True
     pattern_cfg["pattern_learn_motion"] = True
     assert cc._pattern_opted_in("binary_sensor.d", "door") is True
-    assert cc._pattern_opted_in("binary_sensor.m", "motion") is False
-    assert cc._pattern_opted_in("binary_sensor.o", "occupancy") is False
+    assert cc._pattern_opted_in("binary_sensor.m", "motion") is True
+    assert cc._pattern_opted_in("binary_sensor.o", "occupancy") is True
+    assert cc._pattern_opted_in("binary_sensor.t", "temperature") is False
 
 
 def test_the_opt_in_never_raises(cc, load, monkeypatch):

@@ -64,3 +64,16 @@ def test_motion_opt_in(cc, load, monkeypatch):
     assert cc._pattern_opted_in("binary_sensor.hall_motion", "motion") is True
     assert cc._pattern_opted_in("binary_sensor.den", "occupancy") is True
     assert cc._pattern_opted_in("binary_sensor.temp", "temperature") is False
+
+
+def test_doors_and_motion_both_learned_when_both_on(cc, load, monkeypatch):
+    """8.49.37: the doors toggle no longer hides motion sensors."""
+    jc = load("nova_config")
+    store = {"pattern_learn_doors": True, "pattern_learn_motion": True}
+    monkeypatch.setattr(jc, "get", lambda k, d=None: store.get(k, d))
+    assert cc._pattern_opted_in("binary_sensor.front_door", "door") is True
+    assert cc._pattern_opted_in("binary_sensor.hall_motion", "motion") is True
+    assert cc._pattern_opted_in("binary_sensor.temp", "temperature") is False
+    store["pattern_learn_doors"] = False
+    assert cc._pattern_opted_in("binary_sensor.front_door", "door") is False
+    assert cc._pattern_opted_in("binary_sensor.hall_motion", "motion") is True

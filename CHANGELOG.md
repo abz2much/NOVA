@@ -1,3 +1,18 @@
+## [8.49.37] — Learning toggles that work together, quieter energy advice
+
+Phase 8 continues with the knowledge store, energy, learning entry points, constants and notification translations, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **Turning on door learning stopped motion learning.** With both "learn doors" and "learn motion" on, motion and occupancy sensors were never learned. Each toggle now works on its own, so routines like "motion then light" can be found.
+- **Analyze Now's history import didn't match live learning.** It skipped scenes, which live learning keeps for "button then scene", and imported button presses even with button learning off. It now uses exactly the same rules as live learning.
+- **Peak load advice repeated on a long high draw evening.** It could be offered every 30 seconds while the house stayed over peak. It is now offered once per over peak spell, and again only after the draw has fallen back under peak.
+- **An offline power meter was reported as missing.** When the whole home meter was found but not reporting, the energy card said no meter was found and asked you to set one up. It now says the meter isn't reporting.
+- **The panel's knowledge count included unconfirmed facts.** The count now shows only confirmed facts, the ones Nova uses, with pending facts counted separately.
+
+### Changed
+- **The knowledge store, energy, learning entry points, constants and notification translations rewritten from empty files**, keeping every public name, message and value. The prompt texts and translations are laid out differently with identical wording, and the translations are now grouped by language.
+- **Unused leftovers removed:** 11 constants nothing read and 4 translation entries nothing used.
+
 ## [8.49.36] — Safety checks never wait on AI, truer panel numbers
 
 Phase 8 continues with the cognitive core's runtime, the camera commands and the panel's stat helpers, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
