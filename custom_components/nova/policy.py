@@ -1,21 +1,14 @@
-"""Action authorization policy — the single gate every actuation routes through.
+"""Who may change what: the one gate in front of every state changing call.
 
-Before Nova calls a Home Assistant service that changes state, the request
-passes through here. Two questions are answered:
+Each request is rated (low, medium, high or critical) and then either let
+through, held for a confirmation, or refused. The confirming itself is
+voice_confirm's job, still only when ``voice_confirm_enabled`` is on. What
+this module adds is that authority fails closed: if a protected action needs
+a confirmation and asking for it breaks, the action is refused, never let
+through. Convenience (lights, heating, media) is low risk and never asks.
 
-  * how risky is the action (low / medium / high / critical), and
-  * may it proceed right now, or must it be confirmed first?
-
-Confirmation itself is delegated to :mod:`voice_confirm` (unchanged mechanism
-and unchanged opt-in: it only ever asks when ``voice_confirm_enabled`` is on).
-The guarantee this layer adds is **fail-closed for authority**: if a protected
-action needs confirmation and the confirmation path errors, the action is
-DENIED rather than allowed through. Convenience actions (lights, climate,
-media) are classified LOW and never gain friction.
-
-This also closes a gap where ``bulk_control`` and ``execute_plan`` could
-actuate locks / covers / alarms with no confirmation at all — they now route
-through the same gate.
+bulk_control and execute_plan go through the same gate, so neither can reach
+a lock, cover or alarm without the checks a single command gets.
 """
 from __future__ import annotations
 
@@ -27,125 +20,165 @@ from typing import Iterator, Optional, Tuple
 
 _LOGGER = logging.getLogger(__name__)
 
-# Precise, high-signal (domain, service) pairs. The capability net below catches
-# novel/unenumerated services so a new one can't default to LOW just because it
-# isn't listed here.
-_CRITICAL = {
-    ("alarm_control_panel", "alarm_disarm"),
+# ── the ratings ─────────────────────────────────────────────────────────────
+# Exact pairs first. Behind them, rules by domain catch services nobody listed,
+# so a new service on a lock or alarm can never come out as low by omission.
+
+_CRITICAL = {("alarm_control_panel", "alarm_disarm")}
+_HIGH = {("lock", "unlock")}
+# Anything that can open a cover (garage doors and gates are covers):
+# opening it, flipping it, or setting its position.
+_COVER_OPENING = {
+    ("cover", "open_cover"), ("cover", "open"),
+    ("cover", "toggle"), ("cover", "set_cover_position"),
 }
-_HIGH = {
-    ("lock", "unlock"),
-}
-_MEDIUM = {
-    ("cover", "open_cover"),                # garage doors are covers
-    ("cover", "open"),
+_MEDIUM = _COVER_OPENING | {
     ("alarm_control_panel", "alarm_arm_away"),
     ("alarm_control_panel", "alarm_arm_home"),
     ("alarm_control_panel", "alarm_arm_night"),
-    ("lock", "open"),                       # some locks support latch/open
+    ("lock", "open"),                   # a latch release on some locks
 }
 
-# Domains that are security-relevant by their very nature: an actuating service
-# on them is escalated even when we haven't enumerated it, so a future service
-# (e.g. lock.unlatch) can't slip through as LOW convenience.
+# Domains that are security by nature: any service on them that does
+# something is rated up, listed or not (a future lock.unlatch, say).
 _SECURITY_DOMAINS = {"lock", "alarm_control_panel"}
-
-# Domains whose *contents* are opaque to this gate: a scene/script/automation
-# can itself unlock a door, disarm the alarm, or open a cover, and there is no
-# cheap way to look inside one before it runs. This has to be domain-level,
-# not a (domain, service) tuple — HA auto-registers a dynamic per-object
-# service for every script (script.<object_id>) as an alternative to
-# script.turn_on, and enumerating tuples here would repeat the exact
-# cover.open_cover naming-gap bug this module was already patched for.
-_INDIRECTION_DOMAINS = {"scene", "script", "automation"}
-# Non-actuating / stopping calls on those domains carry no indirection risk —
-# they can't newly trigger whatever the scene/script/automation contains.
-_INDIRECTION_SAFE = {"reload", "turn_off", "stop"}
-# Actuating verbs (as substrings) that DROP a guard → the high end.
+# Words in a service name that lower a guard: the high end.
 _OPENING = ("unlock", "disarm", "open", "unlatch", "unbolt")
-# Known-safe actuating services on a security domain (raising a guard) stay
-# frictionless — locking/closing is safe; arming is already MEDIUM above.
+# Services on a security domain that raise a guard instead (arming is rated
+# above), so they stay free of questions.
 _SECURITY_SAFE = {"lock", "close", "close_cover"}
-# Non-actuating services carry no risk regardless of entity.
+# Services that change nothing at all.
 _READ_ONLY = {"", "update", "reload"}
 
-# Substrings that make an otherwise-neutral switch security-relevant.
-_SECURITY_HINTS = ("alarm", "security", "camera", "lock", "garage", "gate", "door")
+# Scenes, scripts and automations can unlock, disarm or open things inside
+# themselves, and the gate cannot look in first. This works on the whole
+# domain, not on (domain, service) pairs: every script also gets its own
+# script.<object_id> service, and listing pairs would repeat the naming gap
+# once found with cover.open_cover. Must match voice_confirm's copy.
+_INDIRECTION_DOMAINS = {"scene", "script", "automation"}
+# Stopping or reloading one cannot set off what it contains.
+_INDIRECTION_SAFE = {"reload", "turn_off", "stop"}
 
-# Actions that grant physical access and must never be authorized by voice
-# alone (v7.87.0): a spoken "unlock the front door" could be a deepfake of
-# the owner's voice. Independent of voice_confirm_enabled — this always
-# applies when the request came from a voice satellite, and always requires
-# a PHONE tap, never a spoken confirmation (which would repeat the exact
-# weakness this exists to close). Locking/closing carries no such risk and
-# stays frictionless, matching _SECURITY_SAFE above. Known gap: a scene or
-# script that itself unlocks a door bypasses this — its contents are opaque
-# to this gate (see _INDIRECTION_DOMAINS); not solved here.
-_VOICE_BLOCKED_OPENING = {
+# Words that make a plain switch a security one, for turning it off.
+_SECURITY_HINTS = ("alarm", "security", "camera", "lock", "garage", "gate", "door")
+# Flipping a switch can turn it off, so it is rated like turning it off.
+_SWITCH_OFF_SERVICES = ("turn_off", "toggle")
+
+# Actions that let someone in, so a voice alone never authorises them: a
+# voice can be imitated. From a voice satellite (or a Chat turn) they always
+# need a phone tap, never a spoken yes, whatever voice_confirm_enabled says.
+# Locking and closing carry no such risk. Known gap: a scene or script that
+# unlocks a door inside itself is not seen here (see _INDIRECTION_DOMAINS).
+_VOICE_BLOCKED_OPENING = _COVER_OPENING | {
     ("lock", "unlock"),
-    ("cover", "open"),
-    ("cover", "open_cover"),
-    # Disarming by voice needs a phone tap too (8.24.0): a voice that can be
-    # imitated must not be able to switch the alarm off on its own.
+    # 8.24.0: an imitated voice must not switch the alarm off either.
     ("alarm_control_panel", "alarm_disarm"),
 }
 
+# Standing down Nova's own intrusion response lowers the home's guard as much
+# as a disarm. Always confirmed, and asked by voice only with a phone tap.
+# "nova" names Nova's own action, not a Home Assistant service.
+_SECURITY_STANDDOWN = {("nova", "dismiss_intrusion")}
 
-# The Chat tab (8.31.0). Tools build their requests with only a device_id and
-# user_id, so the gate cannot tell a typed Chat turn from any other typed
-# request. The conversation sets this for the length of a Chat turn, and the
-# gate then treats the turn like voice for the actions in
-# _VOICE_BLOCKED_OPENING and for standing down an intrusion: they always need
-# a phone tap, whatever voice_confirm_enabled says. It only ever makes the gate
-# stricter. A context variable follows the turn into the tasks and executor
-# jobs it starts, and is reset when the turn ends.
+
+def _guard_lowering(domain: str, service: str) -> bool:
+    """Unlock, open, disarm or standing down: the actions that only a phone
+    tap may allow when asked by voice or in Chat."""
+    pair = (domain, service)
+    return pair in _VOICE_BLOCKED_OPENING or pair in _SECURITY_STANDDOWN
+
+
+def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
+    """``(risk, reason)`` for one call; risk is low, medium, high or critical.
+
+    Pure: no ``hass``, no I/O, so it is safe anywhere, logging included.
+    Exact pairs come first; then any service on a lock or alarm that does
+    something is rated up (a guard lowering word to high, anything else not
+    known safe to medium); then anything that sets off a scene, script or
+    automation is medium. Locking, arming and closing stay low.
+    """
+    dom, svc = domain or "", service or ""
+    pair = (dom, svc)
+    if pair in _CRITICAL:
+        return "critical", f"{dom}.{svc} disarms security"
+    if pair in _SECURITY_STANDDOWN:
+        return "critical", f"{dom}.{svc} stands down an active security response"
+    if pair in _HIGH:
+        return "high", f"{dom}.{svc} unlocks a door"
+    if pair in _MEDIUM:
+        return "medium", f"{dom}.{svc} opens a physical barrier"
+
+    lowered = svc.lower()
+    if dom in _SECURITY_DOMAINS and lowered not in _READ_ONLY:
+        if any(word in lowered for word in _OPENING):
+            return "high", f"{dom}.{svc} opens a security device"
+        if lowered not in _SECURITY_SAFE:
+            return "medium", f"unrecognized {dom} action on a security device"
+    if (dom in _INDIRECTION_DOMAINS and lowered not in _READ_ONLY
+            and lowered not in _INDIRECTION_SAFE):
+        return "medium", f"{dom}.{svc} activates a {dom} whose contents aren't visible to this gate"
+    if dom == "switch" and svc in _SWITCH_OFF_SERVICES:
+        target = (entity_id or "").lower()
+        if any(hint in target for hint in _SECURITY_HINTS):
+            return "high", "turning off a security switch"
+    return "low", ""
+
+
+# ── who is asking: context set for the length of one turn ───────────────────
+
+# A Chat tab turn (8.31.0). Tools only pass a device_id and user_id, which
+# cannot tell typed Chat from other typed requests, so the conversation marks
+# the turn here. The gate then treats it like voice for guard lowering actions
+# and standing down: always a phone tap. It only ever makes the gate
+# stricter, follows the turn into its tasks and executor jobs, and is reset
+# when the turn ends.
 CHAT_ID_PREFIX = "nova_chat_"
 _CHAT_USER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "nova_chat_user", default=None)
 
 
 def chat_conversation_id(user_id: str) -> str:
-    """The one conversation id a user's Chat tab thread uses."""
+    """The conversation id of one user's Chat tab thread."""
     return f"{CHAT_ID_PREFIX}{user_id}"
 
 
 @contextlib.contextmanager
 def chat_turn(conversation_id: Optional[str], user_id: Optional[str]) -> Iterator[bool]:
-    """Mark the code run inside as a Chat turn when the conversation id is a
-    Chat id. Yields whether it is one. An empty user id still marks the turn;
-    the gate then finds no phone and refuses."""
-    active = str(conversation_id or "").startswith(CHAT_ID_PREFIX)
-    token = _CHAT_USER.set(str(user_id or "")) if active else None
+    """Inside the block, a Chat conversation id marks the turn as Chat; yields
+    whether it did. An empty user id still marks it, and the gate then finds
+    no phone and refuses."""
+    is_chat = str(conversation_id or "").startswith(CHAT_ID_PREFIX)
+    token = _CHAT_USER.set(str(user_id or "")) if is_chat else None
     try:
-        yield active
+        yield is_chat
     finally:
         if token is not None:
             _CHAT_USER.reset(token)
 
 
 def _chat_user() -> Optional[str]:
-    """The user of the Chat turn being run, "" if it has none, or None when
-    this is not a Chat turn."""
+    """The Chat turn's user ("" if it has none), or None outside Chat."""
     return _CHAT_USER.get()
 
 
-# A spoken yes to a held request (8.33.0). When a voice turn needed a
-# confirmation, Nova asks in its own reply and keeps the mic open; the user's
-# "yes" on the same satellite replays the request inside this scope. The
-# gate honours it only for that device and those exact targets, and only
-# after the phone tap rules, so unlock, open, disarm and standing down still
-# need the phone. Set only by the conversation's answer handling, for one
-# replay; reset when it ends.
+# A spoken yes to a held request (8.33.0). The reply asked, the mic stayed
+# open, and the user's yes on the same satellite replays the request inside
+# this scope. Honoured only for that device and those exact targets, and
+# only after the phone tap rules, so guard lowering actions still need the
+# phone. Set by the conversation's answer handling for one replay.
 _APPROVED: contextvars.ContextVar[Optional[Tuple[str, frozenset]]] = contextvars.ContextVar(
     "nova_approved_confirmation", default=None)
 
 
+def _target_set(targets) -> frozenset:
+    return frozenset((str(d), str(s), str(e or "")) for d, s, e in targets)
+
+
 @contextlib.contextmanager
 def approved_confirmation(device_id: str, targets) -> Iterator[None]:
-    """Treat confirmation as given for these (domain, service, entity_id)
-    targets, asked from this device, inside the block."""
-    allowed = frozenset((str(d), str(s), str(e or "")) for d, s, e in targets)
-    token = _APPROVED.set((str(device_id or ""), allowed))
+    """Inside the block, these (domain, service, entity_id) targets asked from
+    this device count as confirmed."""
+    token = _APPROVED.set((str(device_id or ""), _target_set(targets)))
     try:
         yield
     finally:
@@ -156,25 +189,23 @@ def _approved(domain: str, service: str, entity_id: str, device_id: str) -> bool
     held = _APPROVED.get()
     if not held or not device_id:
         return False
-    dev, targets = held
-    return dev == device_id and (domain, service, entity_id or "") in targets
+    device, targets = held
+    return device == device_id and (domain, service, entity_id or "") in targets
 
 
-# The user's own words matched one of their voice phrases exactly (8.34.0).
-# Saying a phrase word for word is the confirmation, so its own targets run
-# without a further question, on voice or Chat. Set only by
-# voice_phrase_runner.try_phrase around that one run. Checked after the phone
-# tap rules, and never for unlock, open, disarm, standing down or any other
-# high or critical risk action, on any channel.
+# A voice phrase said word for word (8.34.0) is its own confirmation, on
+# voice or Chat. Set by voice_phrase_runner.try_phrase for that one run,
+# checked after the phone tap rules, and never for guard lowering, standing
+# down or anything else high or critical.
 _EXACT: contextvars.ContextVar[Optional[frozenset]] = contextvars.ContextVar(
     "nova_exact_phrase", default=None)
 
 
 @contextlib.contextmanager
 def exact_phrase_approval(targets) -> Iterator[None]:
-    """Treat these (domain, service, entity_id) targets as confirmed inside
-    the block: the phrase that runs them was said exactly."""
-    token = _EXACT.set(frozenset((str(d), str(s), str(e or "")) for d, s, e in targets))
+    """Inside the block these (domain, service, entity_id) targets count as
+    confirmed: the phrase that runs them was said exactly."""
+    token = _EXACT.set(_target_set(targets))
     try:
         yield
     finally:
@@ -185,9 +216,9 @@ def _exact_approved(domain: str, service: str, entity_id: str) -> bool:
     targets = _EXACT.get()
     if not targets or (domain, service, entity_id or "") not in targets:
         return False
-    # Never unlock, open, disarm or stand down, whatever their risk rating
-    # (a garage door opening rates medium): those keep every question.
-    if (domain, service) in _VOICE_BLOCKED_OPENING or (domain, service) in _SECURITY_STANDDOWN:
+    # Guard lowering keeps every question, whatever its rating (a garage door
+    # opening is only medium).
+    if _guard_lowering(domain, service):
         return False
     try:
         risk, _ = classify(domain, service, entity_id)
@@ -197,289 +228,205 @@ def _exact_approved(domain: str, service: str, entity_id: str) -> bool:
 
 
 def _voice_satellite_request(hass, device_id: str) -> bool:
+    """Whether the request came from a voice satellite. A lookup that fails
+    counts as yes: an unknown origin fails closed."""
     if not device_id:
         return False
     try:
         from . import voice_confirm
-        # strict: a lookup that can't be completed raises (below) rather than
-        # reading as "not a satellite", so an unknown origin fails closed.
         return bool(voice_confirm.is_voice_satellite_device(hass, device_id, strict=True))
     except Exception as exc:
         _LOGGER.warning("policy: voice-satellite check failed (%s); treating as voice "
                         "for safety", exc)
-        return True  # fail closed: an unknown answer is treated as "could be voice"
+        return True
 
 
-# Standing down Nova's own intrusion response lowers the home's security
-# posture as surely as disarming the alarm. It is always confirmed —
-# whatever voice_confirm_enabled says — and, when asked for by voice, only by
-# a phone tap, exactly like _VOICE_BLOCKED_OPENING. (domain "nova" names
-# Nova's own action; it is not a Home Assistant service.)
-_SECURITY_STANDDOWN = {
-    ("nova", "dismiss_intrusion"),
-}
-
-
-def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
-    """Return ``(risk, reason)`` for an action.
-
-    Pure — takes no ``hass`` and performs no I/O, so it is safe to call from
-    anywhere (including logging / telemetry paths). ``risk`` is one of
-    ``"low"``, ``"medium"``, ``"high"``, ``"critical"``.
-
-    Classification is capability-based rather than a bare service allowlist:
-    known high-signal pairs match exactly, then any actuating service on an
-    inherently security domain is escalated — a guard-dropping verb (unlock,
-    disarm, open, unlatch) to HIGH, any other unrecognized actuating service to
-    MEDIUM — so a service that isn't enumerated here cannot silently be LOW on a
-    lock or alarm. Safe directions (lock, arm, close) keep their low friction.
-    """
-    dom = domain or ""
-    svc = service or ""
-    key = (dom, svc)
-    hay = (entity_id or "").lower()
-
-    if key in _CRITICAL:
-        return "critical", f"{dom}.{svc} disarms security"
-    if key in _SECURITY_STANDDOWN:
-        return "critical", f"{dom}.{svc} stands down an active security response"
-    if key in _HIGH:
-        return "high", f"{dom}.{svc} unlocks a door"
-    if key in _MEDIUM:
-        return "medium", f"{dom}.{svc} opens a physical barrier"
-
-    svc_l = svc.lower()
-    # Capability net for inherently security domains (lock, alarm).
-    if dom in _SECURITY_DOMAINS and svc_l not in _READ_ONLY:
-        if any(w in svc_l for w in _OPENING):
-            return "high", f"{dom}.{svc} opens a security device"
-        if svc_l not in _SECURITY_SAFE:
-            return "medium", f"unrecognized {dom} action on a security device"
-
-    # Capability net for indirection domains (scene/script/automation) — any
-    # actuating call, by any service name, including a script's own dynamic
-    # per-object service, not just turn_on.
-    if dom in _INDIRECTION_DOMAINS and svc_l not in _READ_ONLY and svc_l not in _INDIRECTION_SAFE:
-        return "medium", f"{dom}.{svc} activates a {dom} whose contents aren't visible to this gate"
-
-    if key == ("switch", "turn_off"):
-        if any(t in hay for t in _SECURITY_HINTS):
-            return "high", "turning off a security switch"
-    return "low", ""
-
+# ── confirming ──────────────────────────────────────────────────────────────
 
 def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
                           device_id: str = "", *, voice: bool = False) -> bool:
-    """Whether this action must be confirmed before it runs.
+    """Whether this call must be confirmed before it runs.
 
-    Delegates to ``voice_confirm.action_is_protected`` (which honours the
-    ``voice_confirm_enabled`` opt-in and the per-entity override list). If the
-    confirmation module can't be consulted, fail closed for anything above LOW
-    risk and allow LOW-risk convenience through.
-
-    Independent of that opt-in: a voice-blocked-opening action (v7.87.0)
-    requested from a voice satellite always needs confirmation, so a caller
-    like bulk_control (which can't meaningfully confirm per-device and just
-    skips protected actions) skips it too — not just when the general
-    confirmation toggle happens to be on.
+    Guard lowering from voice or Chat, and standing down, always must,
+    whatever ``voice_confirm_enabled`` says, so a caller that cannot ask
+    (bulk control) skips them. A phrase said exactly needs nothing more.
+    Otherwise voice_confirm.action_is_protected decides (the opt in and the
+    per entity list); if it cannot be asked, low risk passes and anything
+    higher must be confirmed.
     """
-    if (domain, service) in _VOICE_BLOCKED_OPENING and (
-            voice or _chat_user() is not None
-            or _voice_satellite_request(hass, device_id)):
+    pair = (domain, service)
+    if pair in _VOICE_BLOCKED_OPENING and (
+            voice or _chat_user() is not None or _voice_satellite_request(hass, device_id)):
         return True
-    if (domain, service) in _SECURITY_STANDDOWN:
+    if pair in _SECURITY_STANDDOWN:
         return True
     if _exact_approved(domain, service, entity_id):
-        return False      # said word for word (8.34.0); after the phone tap rules
+        return False
     try:
         from . import voice_confirm
         return bool(voice_confirm.action_is_protected(hass, domain, service, entity_id))
-    except Exception as exc:  # module unavailable / errored
-        risk, _ = classify(domain, service, entity_id)
-        if risk == "low":
-            return False
-        _LOGGER.warning(
-            "policy: could not consult voice_confirm for %s.%s (%s); "
-            "requiring confirmation for %s-risk action", domain, service, exc, risk)
-        return True
+    except Exception as exc:
+        failure = exc
+    risk = classify(domain, service, entity_id)[0]
+    if risk != "low":
+        _LOGGER.warning("policy: could not consult voice_confirm for %s.%s (%s); "
+                        "requiring confirmation for %s-risk action",
+                        domain, service, failure, risk)
+    return risk != "low"
+
+
+def _blocked_reason(standdown: bool, domain: str) -> str:
+    if standdown:
+        return "stand down a security alert"
+    if domain == "alarm_control_panel":
+        return "disarm the alarm"
+    return "unlock or open this"
 
 
 async def _confirm_from_chat(hass, label: str, ent: str, user_id: str,
                              standdown: bool, domain: str) -> Tuple[bool, str, str]:
-    """A Chat turn asked to unlock, open, disarm or stand down: only a tap on
-    that user's own phone can allow it, as for voice. No phone found for the
-    user refuses the action and says why; a refused, unanswered or failed tap
-    denies it."""
+    """Guard lowering asked in Chat: only a tap on that user's own phone
+    allows it. No phone for the user refuses and says why; a refused,
+    unanswered or failed tap denies it."""
+    unavailable = (False, "phone confirmation unavailable, so this was not done", "error")
     try:
         from . import voice_confirm
         phones = voice_confirm.phone_services_for_user(hass, user_id)
     except Exception as exc:
         _LOGGER.warning("policy: chat phone lookup failed (%s); denying", exc)
-        return False, "phone confirmation unavailable, so this was not done", "error"
-    what = (f"{label} {ent}").strip()
+        return unavailable
+    what = f"{label} {ent}".strip()
     if not phones:
         return False, (f"{what} needs a tap on your phone to confirm, and no phone is "
-                       f"registered for your Home Assistant account, so it was not done"), "denied"
-    if standdown:
-        why = "stand down a security alert"
-    elif domain == "alarm_control_panel":
-        why = "disarm the alarm"
-    else:
-        why = "unlock or open this"
-    question = f"{what} was requested from Nova chat. Confirm on your phone to proceed. Chat alone can't {why}."
+                       "registered for your Home Assistant account, so it was not done"), "denied"
+    question = (f"{what} was requested from Nova chat. Confirm on your phone to proceed. "
+                f"Chat alone can't {_blocked_reason(standdown, domain)}.")
     try:
-        result = await voice_confirm.confirm_via_phone_only_typed(
-            hass, question, services=phones)
+        result = await voice_confirm.confirm_via_phone_only_typed(hass, question, services=phones)
     except Exception as exc:
         _LOGGER.warning("policy: chat phone-confirm failed for %s (%s); denying", what, exc)
-        return False, "phone confirmation unavailable, so this was not done", "error"
+        return unavailable
     if result == "approved":
         return True, "", "approved"
     return False, (f"{what} was requested from chat. A request was sent to your phone and "
-                   f"was not approved, so it was not done"), result
+                   "was not approved, so it was not done"), result
 
 
-async def confirm_gate(
-    hass,
-    domain: str,
-    service: str,
-    entity_id: str = "",
-    action_label: str = "",
-    device_id: str = "",
-    target_name: str = "",
-    *,
-    voice: bool = False,
-    warning: str = "",
-) -> Tuple[bool, str, str]:
-    """May this action proceed now? Returns ``(allowed, note, approval_result)``.
+async def _confirm_from_voice(hass, label: str, ent: str, standdown: bool,
+                              domain: str, service: str) -> Tuple[bool, str, str]:
+    """Guard lowering asked by voice: a phone tap only, never a spoken yes."""
+    try:
+        from . import voice_confirm
+        question = (f"{label} {ent} was requested by voice — confirm on your phone "
+                    f"to proceed. Voice alone can't {_blocked_reason(standdown, domain)}.").strip()
+        result = await voice_confirm.confirm_via_phone_only_typed(hass, question)
+    except Exception as exc:
+        _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
+                        domain, service, exc)
+        return False, "phone confirmation unavailable — action denied for safety", "error"
+    if result == "approved":
+        return True, "", "approved"
+    return False, (f"{label} {ent} was requested by voice; voice alone can't authorize "
+                   "this, and phone confirmation wasn't received"), result
 
-    ``approval_result`` is the EXACT typed outcome (see voice_confirm.py's
-    ConfirmResult) — never a generic reason_code, never something a caller
-    derives by parsing ``note``'s text. One of:
-      "not_required" — not a protected action, or the confirmation subsystem
-                        couldn't be consulted at all but the action's own
-                        risk is low enough to proceed anyway.
-      "approved"     — a real yes was captured.
-      "rejected"     — a real, explicit no was captured.
-      "expired"      — a genuine bounded wait (phone-notification timeout)
-                        ran out with no answer.
-      "deferred"     — the gated voice path asked but cannot capture a
-                        synchronous answer by design; not a timeout, not a
-                        decline.
-      "error"        — an internal failure (import, protection-check, or
-                        the confirmation call itself raised) denied the
-                        action for safety, unrelated to what the user said.
 
-    ``allowed`` is False for every value except "not_required"/"approved" —
-    the fail-closed guarantee: an error anywhere in the confirmation
-    subsystem can never let a protected action through.
+def _low_risk_passes(domain: str, service: str, entity_id: str, warning: str) -> bool:
+    risk, _ = classify(domain, service, entity_id)
+    return risk == "low" and not warning
 
-    ``target_name`` is only for the question a person hears or reads; it
-    never takes part in the decision.
 
-    ``warning`` (8.46.0): what the live check found (an open door, open
-    zones). The action is then always asked, and the question starts with it.
+async def confirm_gate(hass, domain: str, service: str, entity_id: str = "",
+                       action_label: str = "", device_id: str = "", target_name: str = "",
+                       *, voice: bool = False, warning: str = "") -> Tuple[bool, str, str]:
+    """May this action go ahead now? ``(allowed, note, approval_result)``.
 
-    ``device_id`` (v7.87.0): when given and it's a voice satellite, an
-    unlock/open action is ALWAYS gated behind a phone tap — never a spoken
-    confirmation — regardless of ``voice_confirm_enabled``. See
-    _VOICE_BLOCKED_OPENING above for why.
+    ``approval_result`` is the exact typed outcome (voice_confirm's
+    ConfirmResult), never something worked out from ``note``:
+
+    * not_required: nothing to confirm, or the confirmation subsystem could
+      not be asked but the action is low risk anyway;
+    * approved: a real yes;
+    * rejected: a real no;
+    * expired: a bounded wait (the phone tap) ran out unanswered;
+    * deferred: the voice path asked and the answer can only come as a
+      later turn, not a timeout or a no;
+    * error: something inside failed and the action was denied for safety.
+
+    Only not_required and approved allow it: no failure in the subsystem can
+    let a protected action through. ``target_name`` only words the question;
+    the decision uses ``entity_id``. ``warning`` is what the live check
+    found (an open door, open zones): the action is then always asked, and
+    the question opens with it. Guard lowering from a voice satellite
+    (``device_id``) always takes a phone tap.
     """
     label = (action_label or service.replace("_", " ")).strip()
-    # The question names the entity the way a person knows it (the caller's
-    # friendly name); the decision itself only ever uses entity_id.
-    ent = (str(target_name).strip() if target_name else
-           (entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""))
+    if target_name:
+        ent = str(target_name).strip()
+    else:
+        ent = entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""
     standdown = (domain, service) in _SECURITY_STANDDOWN
-    chat_user = _chat_user()
-    if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
-            and chat_user is not None):
-        return await _confirm_from_chat(hass, label, ent, chat_user, standdown, domain)
-    if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
-            and (voice or _voice_satellite_request(hass, device_id))):
-        try:
-            from . import voice_confirm
-            if standdown:
-                what = "stand down a security alert"
-            elif domain == "alarm_control_panel":
-                what = "disarm the alarm"
-            else:
-                what = "unlock or open this"
-            question = (f"{label} {ent} was requested by voice — confirm on your phone "
-                        f"to proceed. Voice alone can't {what}.").strip()
-            result = await voice_confirm.confirm_via_phone_only_typed(hass, question)
-        except Exception as exc:
-            _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
-                            domain, service, exc)
-            return False, "phone confirmation unavailable — action denied for safety", "error"
-        if result == "approved":
-            return True, "", "approved"
-        return False, (f"{label} {ent} was requested by voice; voice alone can't authorize "
-                       f"this, and phone confirmation wasn't received"), result
+    if _guard_lowering(domain, service):
+        chat_user = _chat_user()
+        if chat_user is not None:
+            return await _confirm_from_chat(hass, label, ent, chat_user, standdown, domain)
+        if voice or _voice_satellite_request(hass, device_id):
+            return await _confirm_from_voice(hass, label, ent, standdown, domain, service)
 
-    # Resolve the confirmation module. If it's missing, LOW-risk proceeds and
-    # anything higher is denied (fail closed for authority).
     try:
         from . import voice_confirm
     except Exception as exc:
-        risk, _ = classify(domain, service, entity_id)
-        if risk == "low" and not warning:
+        if _low_risk_passes(domain, service, entity_id, warning):
             return True, "", "not_required"
         _LOGGER.warning("policy: voice_confirm import failed for %s.%s (%s); denying",
                         domain, service, exc)
         return False, "confirmation unavailable — action denied for safety", "error"
 
-    # Does this action need confirmation at all?
     try:
         protected = standdown or bool(warning) or bool(
             voice_confirm.action_is_protected(hass, domain, service, entity_id))
     except Exception as exc:
-        risk, _ = classify(domain, service, entity_id)
-        if risk == "low" and not warning:
+        if _low_risk_passes(domain, service, entity_id, warning):
             return True, "", "not_required"
         _LOGGER.warning("policy: protection check failed for %s.%s (%s); denying",
                         domain, service, exc)
         return False, "confirmation check failed — action denied for safety", "error"
-
     if not protected:
         return True, "", "not_required"
 
-    # A spoken yes the user already gave, on the same satellite, for exactly
-    # this target (8.33.0). Checked after the phone tap rules above.
+    # The user already said yes on this satellite for exactly this (8.33.0).
     if _approved(domain, service, entity_id, device_id):
         return True, "", "approved"
 
-    # Asked from a voice satellite (8.33.0): never ask separately. Playing a
-    # question elsewhere, or calling ask_question / start_conversation on the
-    # satellite the user spoke to, would cancel the user's own running
-    # request. Nova's reply asks instead, and the conversation keeps the mic
-    # open on that satellite for the answer (pending_confirm.py).
+    # From a voice satellite, never ask separately (8.33.0): a question played
+    # elsewhere, or ask_question on that satellite, would cancel the user's
+    # running request. Nova's reply asks and the mic stays open for the answer
+    # (pending_confirm.py).
     if _voice_satellite_request(hass, device_id):
         return False, (f"{warning} {label} {ent} needs a spoken yes first; "
                        "ask the user in your reply").strip(), "deferred"
 
-    # Confirmation required — ask. ANY failure here denies (fail closed).
-    question = (f"{warning} {label} {ent} anyway — are you sure?" if warning
-                else f"{label} {ent} — are you sure?").strip()
+    if warning:
+        question = f"{warning} {label} {ent} anyway — are you sure?".strip()
+    else:
+        question = f"{label} {ent} — are you sure?".strip()
     try:
         result = await voice_confirm.confirm_typed(hass, question, entity_id=entity_id)
     except Exception as exc:
         _LOGGER.warning("policy: confirmation errored for %s.%s (%s); denying",
                         domain, service, exc)
         return False, "confirmation unavailable — action denied for safety", "error"
-
     if result == "approved":
         return True, "", "approved"
     return False, (f"asked for spoken confirmation before {label} "
                    f"on {ent or entity_id}; not yet confirmed"), result
 
 
-# ── authorize: the one authority check (8.24.0) ─────────────────────────────
+# ── authorize: the one entry point (8.24.0) ─────────────────────────────────
 # Every call that can change a lock, cover, alarm, scene or script goes
-# through authorize() (or authorize_now() where nothing may be asked). A test
-# scans the package and fails if one does not, and fails if anything outside
-# this module calls confirm_gate() or requires_confirmation() directly: those
-# two are the confirmation mechanism authorize() uses, not entry points.
+# through authorize(), or authorize_now() where nothing may be asked. A test
+# scans the package for calls that skip it, and for anything outside this
+# module calling confirm_gate() or requires_confirmation(): those are how
+# authorize() confirms, not entry points.
 
 SOURCE_VOICE = "voice"          # a voice satellite, or Nova's voice reply window
 SOURCE_CHAT = "chat"            # the chat, the app or an automation
@@ -512,15 +459,23 @@ class AuthorityDecision:
 
     @property
     def already_secure(self) -> bool:
-        """Nothing was sent because the device is already locked, closed or
-        armed (8.46.0)."""
+        """Nothing was sent: the device is already locked, closed or armed
+        (8.46.0)."""
         from .safety_check import ALREADY_SECURE
         return self.code == ALREADY_SECURE
 
 
-def _live(hass, request: "AuthorityRequest", source: str):
-    """The live check (safety_check.py, 8.46.0) for a lock, cover or alarm
-    command, or None when it does not apply."""
+def _rated(request: AuthorityRequest) -> str:
+    try:
+        risk, _ = classify(request.domain, request.service, request.entity_id)
+    except Exception:
+        risk = "critical"
+    return risk
+
+
+def _live(hass, request: AuthorityRequest, source: str):
+    """The live check (safety_check.py, 8.46.0) of a lock, cover or alarm
+    command, or None where it does not apply."""
     from . import safety_check
     if not safety_check.applies(request.domain, request.service, request.entity_id):
         return None
@@ -528,25 +483,25 @@ def _live(hass, request: "AuthorityRequest", source: str):
                               automatic=source == SOURCE_AUTOMATIC)
 
 
-def _stopped(check, risk: str, source: str) -> "AuthorityDecision":
-    """The decision when the live check stops a command before the policy."""
+def _stopped(check, risk: str, source: str) -> AuthorityDecision:
+    """The live check stopped the command before the policy was asked."""
     return AuthorityDecision(False, "not_required", check.note, risk, source, check.code)
 
 
 def _automatic(req: AuthorityRequest, risk: str) -> AuthorityDecision:
-    """Nova acting on its own may only do low risk things: lock, close,
-    lights, heating. Never unlock, open, disarm or run a scene or script."""
+    """Nova on its own may only do low risk things (lock, close, lights,
+    heating), never unlock, open, disarm or run a scene or script."""
     if risk == "low":
         return AuthorityDecision(True, "not_required", "", risk, SOURCE_AUTOMATIC)
-    return AuthorityDecision(
-        False, "denied",
-        f"Nova never does {req.domain}.{req.service} on its own", risk, SOURCE_AUTOMATIC)
+    return AuthorityDecision(False, "denied",
+                             f"Nova never does {req.domain}.{req.service} on its own",
+                             risk, SOURCE_AUTOMATIC)
 
 
 def _kwargs(request: AuthorityRequest, *, with_target: bool) -> dict:
-    """Only what was given, so the gate sees exactly the call it always did.
-    voice is passed only when the source says so; otherwise the gate works
-    it out from device_id, as before."""
+    """Only what the request carries, so the gate sees the same call it
+    always did. ``voice`` only when the source says so; otherwise the gate
+    works it out from device_id."""
     kw: dict = {}
     if request.device_id:
         kw["device_id"] = request.device_id
@@ -558,17 +513,14 @@ def _kwargs(request: AuthorityRequest, *, with_target: bool) -> dict:
 
 
 def authorize_now(hass, request: AuthorityRequest, *, live: bool = True) -> AuthorityDecision:
-    """The decision without asking anyone: allowed, or held because it would
-    need a confirmation (approval "deferred"). For paths that cannot ask
-    (bulk control, the local fast path). Fails closed above low risk.
+    """The decision without asking anyone: allowed, or held ("deferred")
+    because it would need a confirmation. For paths that cannot ask (bulk
+    control, the local fast path). Fails closed above low risk.
 
-    A lock, cover or alarm command is checked live first (8.46.0). `live`
+    A lock, cover or alarm command is checked live first (8.46.0); ``live``
     False skips that, only for questions that send nothing (would a saved
-    phrase need a confirmation)."""
-    try:
-        risk, _ = classify(request.domain, request.service, request.entity_id)
-    except Exception:
-        risk = "critical"
+    phrase need a confirmation?)."""
+    risk = _rated(request)
     source = request.source or SOURCE_CHAT
     check = _live(hass, request, source) if live else None
     if check is not None and check.verdict != "go":
@@ -591,19 +543,15 @@ def authorize_now(hass, request: AuthorityRequest, *, live: bool = True) -> Auth
 
 
 async def authorize(hass, request: AuthorityRequest) -> AuthorityDecision:
-    """May this action run now? Asks for confirmation when it must (a
-    spoken yes, or a phone tap for unlock, open, disarm and standing down an
-    intrusion when asked by voice). Fails closed: any error denies anything
-    above low risk.
+    """May this action run now? Asks when it must (a spoken yes, or a phone
+    tap for guard lowering and standing down asked by voice). Fails closed:
+    any error refuses anything above low risk.
 
     A lock, cover or alarm command is checked live first (8.46.0): an
-    unreadable device is refused, one already secure gets nothing, and an
-    open door or open zones are named in the question. After a yes it is
+    unreadable device is refused, one already secure gets nothing sent, and
+    an open door or open zones are named in the question. After a yes it is
     checked again, since the answer can take a while."""
-    try:
-        risk, _ = classify(request.domain, request.service, request.entity_id)
-    except Exception:
-        risk = "critical"
+    risk = _rated(request)
     source = request.source or SOURCE_CHAT
     check = _live(hass, request, source)
     if check is not None and check.verdict not in ("go", "ask"):
@@ -616,21 +564,19 @@ async def authorize(hass, request: AuthorityRequest) -> AuthorityDecision:
         if warning:
             kw["warning"] = warning
         ok, note, approval = await confirm_gate(
-            hass, request.domain, request.service, request.entity_id,
-            request.label, **kw)
+            hass, request.domain, request.service, request.entity_id, request.label, **kw)
         if ok and check is not None and approval == "approved":
             from . import safety_check
             again = safety_check.after_yes(hass, request.domain, request.service,
                                            request.entity_id, check)
             if again.verdict != "go":
                 return AuthorityDecision(False, approval, again.note, risk, source, again.code)
-        return AuthorityDecision(bool(ok), approval, note, risk, source,
-                                 "" if ok or not warning else check.code)
+        code = "" if ok or not warning else check.code
+        return AuthorityDecision(bool(ok), approval, note, risk, source, code)
     except Exception as exc:
         _LOGGER.warning("policy: authorize failed for %s.%s (%s)",
                         request.domain, request.service, exc)
         if risk == "low" and not warning:
             return AuthorityDecision(True, "not_required", "", risk, source)
-        return AuthorityDecision(False, "error",
-                                 "authorization failed — action denied for safety",
+        return AuthorityDecision(False, "error", "authorization failed — action denied for safety",
                                  risk, source)

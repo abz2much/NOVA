@@ -36,12 +36,15 @@ from .answers import NO as _SHARED_NO, YES as _SHARED_YES
 _LOGGER = logging.getLogger(__name__)
 
 # (domain, service) pairs that need a confirmation once the feature is on.
-# Covers expose both open and open_cover; switch.turn_off only counts for
+# Anything that can open a cover counts (open, open_cover, toggle and a set
+# position, 8.49.41); switch.turn_off and switch.toggle only count for
 # switches whose id looks security related (see action_is_protected).
 _SENSITIVE = {
     ("lock", "unlock"),
     ("cover", "open"),
     ("cover", "open_cover"),
+    ("cover", "toggle"),
+    ("cover", "set_cover_position"),
     ("alarm_control_panel", "alarm_disarm"),
     ("switch", "turn_off"),
 }
@@ -105,7 +108,7 @@ def action_is_protected(hass, domain: str, service: str, entity_id: str = "") ->
             return False
         if entity_id in overrides:
             return True
-    if domain == "switch" and service == "turn_off":
+    if domain == "switch" and service in ("turn_off", "toggle"):
         lowered = entity_id.lower()
         return any(word in lowered for word in ("alarm", "security", "camera", "lock"))
     if domain in _INDIRECTION_DOMAINS:
