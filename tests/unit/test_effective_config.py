@@ -1,95 +1,88 @@
-"""Tests for nova_config.effective_config (v6.82.0).
+"""nova_config.effective_config: which value a run actually uses.
 
-The single source of truth resolver: the panel config (config.json) wins over
-stale entry data/options, but only on non-empty values — so a blank panel field
-can't wipe a real credential carried on the entry. This is what keeps the boot
-client, conversation, and agent from diverging on which LLM to run.
+The entry's data, then options, then config.json on top, with only real
+config.json values counting, so a blank panel field leaves a key the entry
+carries alone. After the staged AI setup has split the self hosted
+endpoints, a blank endpoint in config.json is a deliberate clear and wins.
 """
+from types import SimpleNamespace
+
 import pytest
 
 
 @pytest.fixture
-def jc(load):
+def nc(load):
     return load("nova_config")
 
 
-class _Entry:
-    def __init__(self, data=None, options=None):
-        self.data = data
-        self.options = options
+def _entry(data=None, options=None):
+    return SimpleNamespace(data=data, options=options)
 
 
-def test_panel_wins_over_entry(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all",
-                        lambda: {"llm_provider": "ollama", "model": "gemma4:26b"})
-    e = _Entry(data={"llm_provider": "gemini", "api_key": "K"},
-               options={"llm_provider": "gemini", "model": "gemini-2.5-pro"})
-    eff = jc.effective_config(e)
-    assert eff["llm_provider"] == "ollama"      # panel wins over both entry layers
-    assert eff["model"] == "gemma4:26b"         # panel wins over entry.options
-    assert eff["api_key"] == "K"                # entry-only value preserved
+def _panel(nc, monkeypatch, values):
+    monkeypatch.setattr(nc, "get_all", lambda: dict(values))
 
 
-def test_blank_panel_value_does_not_clobber_entry(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all",
-                        lambda: {"api_key": "", "llm_base_url": None, "llm_provider": "ollama"})
-    e = _Entry(data={"api_key": "REALKEY", "llm_base_url": "http://x:11434"})
-    eff = jc.effective_config(e)
-    assert eff["api_key"] == "REALKEY"           # blank panel string didn't wipe it
-    assert eff["llm_base_url"] == "http://x:11434"  # None panel value didn't wipe it
-    assert eff["llm_provider"] == "ollama"
+def test_config_json_beats_both_entry_layers(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"llm_provider": "anthropic", "model": "m-panel"})
+    got = nc.effective_config(_entry(
+        data={"llm_provider": "groq", "groq_api_key": "G"},
+        options={"llm_provider": "openai", "model": "m-options"}))
+    assert (got["llm_provider"], got["model"]) == ("anthropic", "m-panel")
+    assert got["groq_api_key"] == "G"
 
 
-def test_migrated_blank_endpoint_does_clear_stale_entry_value(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all", lambda: {
-        "self_hosted_endpoints_migrated": True,
-        "ollama_base_url": "http://new-ollama:11434",
-        "custom_base_url": "",
-    })
-    e = _Entry(data={
-        "ollama_base_url": "http://old-ollama:11434",
-        "custom_base_url": "https://old-custom.example/v1",
-    })
-
-    eff = jc.effective_config(e)
-
-    assert eff["ollama_base_url"] == "http://new-ollama:11434"
-    assert eff["custom_base_url"] == ""
+@pytest.mark.parametrize("blank", ["", None])
+def test_a_blank_config_json_value_keeps_the_entry_value(nc, monkeypatch, blank):
+    _panel(nc, monkeypatch, {"api_key": blank, "ollama_url": blank})
+    got = nc.effective_config(_entry(data={"api_key": "SECRET",
+                                           "ollama_url": "http://box:11434"}))
+    assert got["api_key"] == "SECRET"
+    assert got["ollama_url"] == "http://box:11434"
 
 
-def test_runtime_get_honours_migrated_blank_endpoint(jc, monkeypatch):
-    values = {
-        "self_hosted_endpoints_migrated": True,
-        "custom_base_url": "",
-    }
-    monkeypatch.setattr(jc, "get", lambda key, default=None: values.get(key, default))
-    monkeypatch.setattr(jc, "get_all", lambda: dict(values))
-    e = _Entry(data={"custom_base_url": "https://old-custom.example/v1"})
-
-    assert jc.runtime_get(None, e, "custom_base_url", None) == ""
-
-
-def test_options_win_over_data_when_panel_silent(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all", lambda: {})
-    e = _Entry(data={"x": "from_data"}, options={"x": "from_options"})
-    assert jc.effective_config(e)["x"] == "from_options"
+def test_after_the_split_a_blank_endpoint_clears_the_old_one(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"self_hosted_endpoints_migrated": True,
+                             "ollama_base_url": "http://now:11434",
+                             "custom_base_url": ""})
+    got = nc.effective_config(_entry(options={
+        "ollama_base_url": "http://then:11434",
+        "custom_base_url": "https://then.example/v1"}))
+    assert got["ollama_base_url"] == "http://now:11434"
+    assert got["custom_base_url"] == ""
 
 
-def test_entry_only_key_survives(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all", lambda: {"model": "gemma4:26b"})
-    e = _Entry(data={"honorific": "Sir"})
-    eff = jc.effective_config(e)
-    assert eff["honorific"] == "Sir"
-    assert eff["model"] == "gemma4:26b"
+def test_before_the_split_a_blank_endpoint_is_just_blank(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"custom_base_url": ""})
+    got = nc.effective_config(_entry(data={"custom_base_url": "https://kept.example"}))
+    assert got["custom_base_url"] == "https://kept.example"
 
 
-def test_no_entry_returns_panel_only(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all", lambda: {"a": "1", "b": ""})
-    eff = jc.effective_config(None)
-    assert eff["a"] == "1"
-    assert "b" not in eff                        # blank panel value skipped
+def test_runtime_get_also_treats_a_split_blank_endpoint_as_cleared(nc, monkeypatch):
+    stored = {"self_hosted_endpoints_migrated": True, "custom_base_url": ""}
+    monkeypatch.setattr(nc, "get", lambda key, default=None: stored.get(key, default))
+    _panel(nc, monkeypatch, stored)
+    entry = _entry(data={"custom_base_url": "https://then.example/v1"})
+    assert nc.runtime_get(None, entry, "custom_base_url", "dflt") == ""
 
 
-def test_none_entry_layers_tolerated(jc, monkeypatch):
-    monkeypatch.setattr(jc, "get_all", lambda: {"a": "1"})
-    assert jc.effective_config(_Entry(data=None, options=None)) == {"a": "1"}
+def test_options_beat_data_when_config_json_is_silent(nc, monkeypatch):
+    _panel(nc, monkeypatch, {})
+    got = nc.effective_config(_entry(data={"k": "data"}, options={"k": "options"}))
+    assert got["k"] == "options"
+
+
+def test_keys_from_each_source_all_arrive(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"model": "m-panel"})
+    got = nc.effective_config(_entry(data={"honorific": "madam"}))
+    assert got["honorific"] == "madam" and got["model"] == "m-panel"
+
+
+def test_without_an_entry_only_real_config_json_values_come_back(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"kept": "yes", "dropped": ""})
+    assert nc.effective_config(None) == {"kept": "yes"}
+
+
+def test_an_entry_with_no_data_or_options_is_fine(nc, monkeypatch):
+    _panel(nc, monkeypatch, {"kept": "yes"})
+    assert nc.effective_config(_entry()) == {"kept": "yes"}

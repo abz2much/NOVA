@@ -1,44 +1,33 @@
-"""effective_config_with_runtime — the accessor subsystem restarts now use.
+"""nova_config.effective_config_with_runtime, used when a subsystem starts.
 
-The point of Option A: a subsystem (re)started from config must see config.json
-settings even on a panel install (empty entry.data/options), with live panel
-runtime_config on top. The old `{**entry.data, **entry.options}` dropped every
-config.json value — this pins that it no longer does.
+A panel install has empty entry data and options, so merging only those
+loses every config.json setting. This view keeps the entry, config.json and
+the panel's live values, live ones on top and blanks ignored at each layer.
 """
+from types import SimpleNamespace
+
 import pytest
 
 
 @pytest.fixture
-def jc(load):
+def nc(load, monkeypatch):
+    monkeypatch.setattr(load("ha_secrets"), "overlay_credentials", lambda d: d)
     return load("nova_config")
 
 
-class _Entry:
-    def __init__(self, data=None, options=None):
-        self.data = data or {}
-        self.options = options or {}
+def test_every_layer_arrives_with_live_values_on_top(nc, monkeypatch):
+    monkeypatch.setattr(nc, "get_all", lambda: {
+        "llm_provider": "anthropic", "model": "m-file", "file_blank": ""})
+    entry = SimpleNamespace(data={"honorific": "madam"}, options={"model": "m-opt"})
+    got = nc.effective_config_with_runtime(
+        entry, {"model": "m-live", "live_blank": "", "live_none": None})
+    assert got == {"honorific": "madam", "llm_provider": "anthropic",
+                   "model": "m-live"}
 
 
-def _passthrough_secrets(jc, load, monkeypatch):
-    hs = load("ha_secrets")
-    monkeypatch.setattr(hs, "overlay_credentials", lambda d: d)
-
-
-def test_includes_configjson_and_runtime_precedence(jc, load, monkeypatch):
-    _passthrough_secrets(jc, load, monkeypatch)
-    monkeypatch.setattr(jc, "get_all",
-                        lambda: {"llm_provider": "groq", "model": "x", "blank": ""})
-    entry = _Entry(data={"honorific": "sir"}, options={"model": "opt-model"})
-    cfg = jc.effective_config_with_runtime(entry, {"model": "rt-model", "empty": ""})
-    assert cfg["honorific"] == "sir"          # entry.data
-    assert cfg["llm_provider"] == "groq"      # config.json — the value the old merge dropped
-    assert cfg["model"] == "rt-model"         # runtime_config wins
-    assert "blank" not in cfg                 # blank config.json value is skipped
-    assert "empty" not in cfg                 # blank runtime value doesn't add/clobber
-
-
-def test_no_runtime_equals_effective_config(jc, load, monkeypatch):
-    _passthrough_secrets(jc, load, monkeypatch)
-    monkeypatch.setattr(jc, "get_all", lambda: {"a": "1"})
-    entry = _Entry(options={"b": "2"})
-    assert jc.effective_config_with_runtime(entry, None) == {"a": "1", "b": "2"}
+@pytest.mark.parametrize("live", [None, {}])
+def test_no_live_values_is_the_plain_effective_config(nc, monkeypatch, live):
+    monkeypatch.setattr(nc, "get_all", lambda: {"x": "1"})
+    entry = SimpleNamespace(data={}, options={"y": "2"})
+    assert nc.effective_config_with_runtime(entry, live) == nc.effective_config(entry)
+    assert nc.effective_config_with_runtime(entry, live) == {"x": "1", "y": "2"}

@@ -1,15 +1,14 @@
-"""nova_config.runtime_get — the canonical per-key config resolver.
+"""nova_config.runtime_get: one setting, in effective_config order.
 
-Precedence must match effective_config: runtime_config (panel-live) → config.json
-→ entry.options → entry.data → default. The bug this fixes: on a panel-configured
-install entry.options/data are empty, so a direct read silently returns the
-default for anything set via the panel/config.json — runtime_get consults
-config.json so those values are honoured.
+The order is the panel's live value, config.json, entry.options, entry.data,
+then the default. A panel install has empty options and data, so reading
+the entry directly gave the default for every panel setting; runtime_get
+reads config.json too.
 
-Phase 3B: runtime_config is the entry's NovaRuntime.runtime_config, never the
-hass.data bridge. A bridge that is missing, damaged or out of step has no
-effect; an entry that is not loaded reads the lower layers; a loaded entry
-without its runtime raises instead of answering from defaults.
+The live values come from the entry's own NovaRuntime and never from the
+old hass.data bridge, whatever state that bridge is in. An entry that is
+not loaded answers from the lower layers; a loaded entry with no runtime
+raises rather than answer from defaults.
 """
 import types
 
@@ -17,11 +16,11 @@ import pytest
 
 
 @pytest.fixture
-def jc(load):
-    m = load("nova_config")
-    m._loaded = True
-    m._cache = {}
-    return m
+def jc(load, monkeypatch):
+    mod = load("nova_config")
+    monkeypatch.setattr(mod, "_loaded", True)
+    monkeypatch.setattr(mod, "_cache", {})
+    return mod
 
 
 @pytest.fixture
@@ -87,64 +86,55 @@ def test_runtime_config_wins_over_config_json(jc, const, rt, states):
     assert jc.runtime_get(_hass(const), entry, "vision_model", "d") == "from_panel_live"
 
 
-def test_config_json_wins_over_entry(jc, const):
-    # config.json overrides the entry (matches effective_config precedence)
-    jc._cache = {"honorific": "monsieur"}
-    entry = _Entry(options={"honorific": "sir"}, data={})
-    assert jc.runtime_get(_hass(const), entry, "honorific", "d") == "monsieur"
+def test_config_json_beats_the_entry(jc, const):
+    jc._cache = {"honorific": "madam"}
+    entry = _Entry(options={"honorific": "sir"}, data={"honorific": "sir"})
+    assert jc.runtime_get(_hass(const), entry, "honorific", "d") == "madam"
 
 
-def test_entry_used_on_yaml_install(jc, const):
-    # nothing in runtime_config or config.json → options, then data
-    jc._cache = {}
-    entry = _Entry(options={"notify_service": "notify.opts"}, data={})
-    assert jc.runtime_get(_hass(const), entry, "notify_service", "d") == "notify.opts"
-    entry2 = _Entry(options={}, data={"notify_service": "notify.data"})
-    assert jc.runtime_get(_hass(const), entry2, "notify_service", "d") == "notify.data"
+@pytest.mark.parametrize("layer", ["options", "data"])
+def test_an_install_without_the_panel_reads_the_entry(jc, const, layer):
+    entry = _Entry(**{layer: {"notify_service": f"notify.{layer}"}})
+    assert jc.runtime_get(_hass(const), entry, "notify_service", "d") == f"notify.{layer}"
 
 
-def test_full_precedence_order(jc, const, rt, states):
-    """Each layer only answers when every higher one is silent."""
-    key = "k"
-    layers = {"runtime": "R", "json": "J", "options": "O", "data": "D"}
-
-    def read(active):
-        jc._cache = {key: layers["json"]} if "json" in active else {}
-        entry = _loaded(
-            rt, states, {key: layers["runtime"]} if "runtime" in active else {},
-            options={key: layers["options"]} if "options" in active else {},
-            data={key: layers["data"]} if "data" in active else {})
-        return jc.runtime_get(_hass(const), entry, key, "default")
-
-    assert read({"runtime", "json", "options", "data"}) == "R"
-    assert read({"json", "options", "data"}) == "J"
-    assert read({"options", "data"}) == "O"
-    assert read({"data"}) == "D"
-    assert read(set()) == "default"
+@pytest.mark.parametrize("present, expected", [
+    (("live", "file", "options", "data"), "L"),
+    (("file", "options", "data"), "F"),
+    (("options", "data"), "O"),
+    (("data",), "D"),
+    ((), "fallback"),
+])
+def test_each_layer_answers_only_when_those_above_are_silent(
+        jc, const, rt, states, present, expected):
+    def maybe(name, value):
+        return {"k": value} if name in present else {}
+    jc._cache = maybe("file", "F")
+    entry = _loaded(rt, states, maybe("live", "L"),
+                    options=maybe("options", "O"), data=maybe("data", "D"))
+    assert jc.runtime_get(_hass(const), entry, "k", "fallback") == expected
 
 
-def test_default_when_nowhere(jc, const):
-    jc._cache = {}
-    assert jc.runtime_get(_hass(const), _Entry(), "missing", "fallback") == "fallback"
+def test_nothing_anywhere_gives_the_default(jc, const):
+    assert jc.runtime_get(_hass(const), _Entry(), "absent", "fallback") == "fallback"
 
 
-def test_empty_values_do_not_win(jc, const):
-    # a blank config.json value must not clobber a real entry value
+def test_a_blank_config_json_value_does_not_hide_the_entry(jc, const):
     jc._cache = {"broadcast_group": ""}
-    entry = _Entry(options={"broadcast_group": "media_player.home"}, data={})
-    assert jc.runtime_get(_hass(const), entry, "broadcast_group", "d") == "media_player.home"
+    entry = _Entry(options={"broadcast_group": "media_player.everywhere"})
+    assert jc.runtime_get(_hass(const), entry, "broadcast_group", "d") \
+        == "media_player.everywhere"
 
 
-def test_false_is_preserved(jc, const):
-    # boolean False from config.json must be returned, not treated as "unset"
+def test_false_in_config_json_is_an_answer(jc, const):
     jc._cache = {"sentinel_enabled": False}
     assert jc.runtime_get(_hass(const), _Entry(), "sentinel_enabled", True) is False
 
 
-def test_tolerates_missing_hass_and_entry(jc, const):
+def test_no_hass_and_no_entry_still_reads_config_json(jc):
     jc._cache = {"honorific": "madam"}
-    assert jc.runtime_get(None, None, "honorific", "d") == "madam"   # config.json still consulted
-    assert jc.runtime_get(None, None, "missing", "d") == "d"
+    assert jc.runtime_get(None, None, "honorific", "d") == "madam"
+    assert jc.runtime_get(None, None, "absent", "d") == "d"
 
 
 # ── runtime_config comes from NovaRuntime ────────────────────────────────────
