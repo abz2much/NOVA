@@ -94,22 +94,22 @@ def summary_new_state(evt: str):
     return m.group(1) if m else None
 
 
+_NAME_PART = re.compile(r"(.+?)\s*\(")
+_ID_PART = re.compile(r"\(([\w.]+)\)")
+_CHANGE_PART = re.compile(r"changed from (\S+) to (\S+)")
+
+
 def parse_summary(evt: str):
-    """Best-effort structured fields from 'FNAME (entity_id) ... from X to Y'."""
-    friendly = ""
-    m = re.match(r"(.+?)\s*\(", evt)
-    if m:
-        friendly = m.group(1).strip()
-    entity_id = ""
-    m = re.search(r"\(([\w.]+)\)", evt)
-    if m:
-        entity_id = m.group(1)
-    domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
-    from_s = to_s = ""
-    m = re.search(r"changed from (\S+) to (\S+)", evt)
-    if m:
-        from_s, to_s = m.group(1), m.group(2)
-    return friendly, entity_id, domain, from_s, to_s
+    """(friendly name, entity_id, domain, from, to) read from an event summary
+    shaped "NAME (entity_id) ... changed from X to Y"; "" for any part that
+    is not there."""
+    name = _NAME_PART.match(evt)
+    ident = _ID_PART.search(evt)
+    change = _CHANGE_PART.search(evt)
+    entity_id = ident.group(1) if ident else ""
+    domain = entity_id.partition(".")[0] if "." in entity_id else ""
+    before, after = change.groups() if change else ("", "")
+    return (name.group(1).strip() if name else ""), entity_id, domain, before, after
 
 
 def _device_from_summary(evt: str, default: str) -> str:
@@ -485,19 +485,15 @@ OPENING_STATES = frozenset({"on", "open", "opening", "unlocked", "detected", "tr
 
 
 def is_duplicate(friendly_name: str, entity_id: str, recent_announcements) -> bool:
-    """Have we already told the user about this device very recently?"""
-    needles = set()
-    if friendly_name:
-        needles.add(friendly_name.lower())
+    """Whether one of the last six announcements already named this device,
+    by its friendly name or its entity id read as words."""
+    names = {friendly_name.lower()} if friendly_name else set()
     if entity_id and "." in entity_id:
-        needles.add(entity_id.split(".", 1)[1].replace("_", " ").lower())
-    if not needles:
+        names.add(entity_id.partition(".")[2].replace("_", " ").lower())
+    if not names:
         return False
-    for ann in list(recent_announcements or [])[-6:]:
-        a = str(ann).lower()
-        if any(n in a for n in needles):
-            return True
-    return False
+    recent = [str(said).lower() for said in list(recent_announcements or [])[-6:]]
+    return any(name in said for said in recent for name in names)
 
 
 def security_relevant(domain: str, device_class: str, to_state: str, entity_id: str) -> bool:
@@ -557,29 +553,27 @@ def evaluate_local_mind(s: EventSnapshot, *, history: dict, prior: tuple[int, in
                         escalated=True)
     if urgency == "high":
         return decision(True, "high", f"high urgency ({grade})", escalated=True)
-    if urgency == "medium":
-        # Case-based memory first — actual past provider judgments outrank heuristics.
-        if silent_n >= 2 and speak_n == 0:
-            return decision(False, "medium",
-                            f"{silent_n} similar past events judged routine (case memory)")
-        if speak_n >= 2 and silent_n == 0:
-            return decision(True, "medium",
-                            f"{speak_n} similar past events voiced (case memory)")
-        if grade == "novel":
-            return decision(True, "medium", "novel event — never observed before")
-        if grade == "unusual_hour":
-            return decision(True, "medium",
-                            f"out of hourly pattern (seen {history.get('total', 0)}× "
-                            f"overall, never near this hour)")
-        if grade in ("routine", "common"):
-            return decision(False, "medium",
-                            f"{grade} at this hour "
-                            f"(~{history.get('at_hour', 0)}× in {history.get('days', 0)}d)")
-        # occasional / unknown: quiet at home, surfaced when away (routes to push).
-        if away:
-            return decision(True, "medium", f"{grade} while away — surfaced")
-        return decision(False, "medium", f"{grade} while home — not worth voicing")
-    return decision(False, "low", "low urgency — silent")
+    if urgency != "medium":
+        return decision(False, "low", "low urgency — silent")
+    # What the provider actually said about similar events beats any rule.
+    if speak_n == 0 and silent_n >= 2:
+        return decision(False, "medium",
+                        f"{silent_n} similar past events judged routine (case memory)")
+    if silent_n == 0 and speak_n >= 2:
+        return decision(True, "medium", f"{speak_n} similar past events voiced (case memory)")
+    if grade == "novel":
+        return decision(True, "medium", "novel event — never observed before")
+    if grade == "unusual_hour":
+        seen = history.get("total", 0)
+        return decision(True, "medium",
+                        f"out of hourly pattern (seen {seen}× overall, never near this hour)")
+    if grade in ("routine", "common"):
+        at_hour, days = history.get("at_hour", 0), history.get("days", 0)
+        return decision(False, "medium", f"{grade} at this hour (~{at_hour}× in {days}d)")
+    # Occasional or unknown: kept quiet at home, raised (by push) when away.
+    if away:
+        return decision(True, "medium", f"{grade} while away — surfaced")
+    return decision(False, "medium", f"{grade} while home — not worth voicing")
 
 
 # ── 7. Learned-cache replay and the last-ditch fallback ────────────────────
