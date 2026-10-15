@@ -1,3 +1,13 @@
+## [8.55.0] — A next event card and a reminders card
+
+Two more cards join the rotation on the Command Center.
+
+### Added
+- **A next event card.** The soonest event across your Home Assistant calendars, within the next week: its time in big figures, with the day and the title under it. An event already under way shows Now, an all day event shows the day in words, and with nothing coming up there is no card. The day names come from the browser's own date names, so they follow the panel's language.
+- **A reminders card.** The reminders Nova still has to give you, due now or in the next 24 hours: the next one's time in big figures, then up to four with their times, and Now for one that is due. It is skipped when there are none.
+- **A new read only command, `nova/get_reminders`,** open to any signed in user, because Nova's reminders live in a store the panel cannot read on its own. It sends only each reminder's label, time and whether it is due.
+- No new panel words, so no new translations.
+
 ## [8.54.0] — A clock card and a who's home card, and a shorter gap between cards
 
 Two more cards join the rotation on the Command Center, and the cards now come round faster.

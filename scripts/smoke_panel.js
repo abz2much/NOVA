@@ -1047,6 +1047,50 @@ if (require.main === module) setTimeout(async () => {
           && hh.indexOf("Ay") < hh.indexOf("Bee")]);
         elNew._hass.states = { "lock.a": { state: "locked", attributes: {} } };
         checks.push(["home: with nobody set up there is no card to show", elNew._presentHomeData() === null]);
+        // Next event, from the calendars' own current-or-next event.
+        const pad = (n) => String(n).padStart(2, "0");
+        const fmt = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`; };
+        const HR = 3600000, nowMs = Date.now();
+        const C = (state, title, startMs, endMs, allDay = false) => ({ state, attributes: { message: title, start_time: fmt(startMs), end_time: fmt(endMs), all_day: allDay } });
+        elNew._hass.states = {
+          "calendar.far": C("off", "Far away", nowMs + 9 * 24 * HR, nowMs + 9 * 24 * HR + HR),
+          "calendar.soon": C("off", "Dentist", nowMs + 3 * HR, nowMs + 4 * HR),
+          "calendar.later": C("off", "Later one", nowMs + 30 * HR, nowMs + 31 * HR),
+          "calendar.gone": C("unavailable", "Unavailable", nowMs + HR, nowMs + 2 * HR),
+          "calendar.ended": C("off", "Over", nowMs - 5 * HR, nowMs - 4 * HR),
+        };
+        let cd = elNew._presentCalendarData();
+        let ch = elNew._presentCalendarHtml(cd);
+        checks.push(["calendar: picks the soonest event across calendars, skipping ended, unavailable and far off ones",
+          cd && cd.title === "Dentist" && ch.includes("Calendar") && ch.includes("Dentist") && ch.includes("pc-big")]);
+        elNew._hass.states = { "calendar.now": C("on", "In progress", nowMs - HR, nowMs + HR), "calendar.soon": C("off", "Dentist", nowMs + 3 * HR, nowMs + 4 * HR) };
+        ch = elNew._presentCalendarHtml(elNew._presentCalendarData());
+        checks.push(["calendar: an event that has started shows Now and its title", ch.includes("Now") && ch.includes("In progress")]);
+        const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(0, 0, 0, 0);
+        elNew._hass.states = { "calendar.b": C("off", "Birthday", tomorrow.getTime(), tomorrow.getTime() + 24 * HR, true) };
+        ch = elNew._presentCalendarHtml(elNew._presentCalendarData());
+        checks.push(["calendar: an all day event shows the day in words, not a time", /Tomorrow/i.test(ch) && ch.includes("Birthday") && !/\d\d:\d\d/.test(ch)]);
+        elNew._hass.states = { "calendar.x": { state: "off", attributes: {} }, "lock.a": { state: "locked", attributes: {} } };
+        checks.push(["calendar: with no upcoming event there is no card", elNew._presentCalendarData() === null]);
+        // Reminders still to come, from Nova's own store.
+        const realWS2 = elNew._hass.callWS;
+        let remRes = { items: [
+          { label: "Take medicine", at: new Date(nowMs - 60000).toISOString().slice(0, 19), due: true },
+          { label: "Call back", at: new Date(nowMs + 2 * HR).toISOString().slice(0, 19), due: false },
+          { label: "Three", at: new Date(nowMs + 3 * HR).toISOString().slice(0, 19), due: false },
+          { label: "Four", at: new Date(nowMs + 4 * HR).toISOString().slice(0, 19), due: false },
+          { label: "Five", at: new Date(nowMs + 5 * HR).toISOString().slice(0, 19), due: false }] };
+        elNew._hass.callWS = async (m) => (m.type === "nova/get_reminders" ? remRes : realWS2(m));
+        const rd = await elNew._presentRemindersData();
+        const rh = elNew._presentRemindersHtml(rd);
+        checks.push(["reminders: shows the next one big, up to four rows, and Now for one that is due",
+          rd.items.length === 5 && rh.includes("Reminder") && rh.includes("Take medicine") && rh.includes("Four")
+          && !rh.includes("Five") && rh.includes("Now") && (rh.match(/class="pc-row"/g) || []).length === 4]);
+        remRes = { items: [] };
+        checks.push(["reminders: with none to come there is no card", (await elNew._presentRemindersData()) === null]);
+        remRes = null;
+        checks.push(["reminders: a failed or empty answer is no card, not an error", (await elNew._presentRemindersData()) === null]);
+        elNew._hass.callWS = realWS2;
         elNew._hass.states = saved;
         // A card that has a refresh redraws while it is on show, and stops when it goes.
         let ticks = 0;

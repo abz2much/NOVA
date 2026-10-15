@@ -98,6 +98,41 @@ def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
         return []
 
 
+_SELECT_PENDING = (
+    "SELECT label, trigger_at FROM reminders "
+    "WHERE acknowledged = 0 AND (last_fired IS NULL OR last_fired < trigger_at) "
+    "ORDER BY trigger_at LIMIT 50"
+)
+
+
+def pending_reminders(now: Optional[datetime] = None, hours: int = 24, limit: int = 5) -> list[dict]:
+    """What is still to come, for the panel's reminder card: every reminder
+    not yet fired or acknowledged that is due now or within ``hours``, soonest
+    first. Each is just its label, its time (ISO) and whether it is due."""
+    if now is None:
+        now = _now_local()
+    try:
+        with _connect() as conn:
+            rows = [dict(row) for row in conn.execute(_SELECT_PENDING)]
+    except Exception as err:
+        _LOGGER.warning("Could not read pending reminders: %s", err)
+        return []
+    out = []
+    for row in rows:
+        try:
+            at = datetime.fromisoformat(row["trigger_at"])
+        except (TypeError, ValueError):
+            continue
+        # Stored times are naive local; an aware one is compared in UTC.
+        ref = now if at.tzinfo is None else dt_util.utcnow()
+        if at > ref + timedelta(hours=hours):
+            continue
+        out.append({"label": str(row["label"]), "at": row["trigger_at"], "due": at <= ref})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def mark_fired(reminder_id: int) -> None:
     try:
         with _connect() as conn:

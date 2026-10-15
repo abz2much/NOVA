@@ -546,6 +546,17 @@
     ],
     "registered": true
   },
+  "nova/get_reminders": {
+    "admin": false,
+    "error_codes": [
+      "reminders_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "items"
+    ],
+    "registered": true
+  },
   "nova/get_setup_health": {
     "admin": true,
     "error_codes": [

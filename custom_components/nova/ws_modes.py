@@ -1,12 +1,12 @@
 """Panel commands for modes, intrusion, hazards, energy, solar and wellbeing.
 
 nova/mode, nova/intrusion, nova/hazard, nova/energy, nova/energy_flow,
-nova/energy_outlook, nova/subscribe_presentation, nova/solar and
-nova/biometrics. websocket.py imports each handler by name to register it.
-The logger keeps websocket.py's name.
+nova/energy_outlook, nova/subscribe_presentation, nova/get_reminders,
+nova/solar and nova/biometrics. websocket.py imports each handler by name
+to register it. The logger keeps websocket.py's name.
 
-Commands that only read (solar, energy flow and outlook, presentation, hazard) are open
-to any panel user, like the other read only panel data; anything that
+Commands that only read (solar, energy flow and outlook, presentation,
+reminders, hazard) are open to any panel user, like the other read only panel data; anything that
 changes a setting or an alert needs an admin.
 """
 from __future__ import annotations
@@ -157,6 +157,22 @@ async def ws_subscribe_presentation(hass: HomeAssistant, connection: websocket_a
     except Exception as exc:
         connection.send_error(msg["id"], "presentation_failed",
                               _log_failure("ws_subscribe_presentation", exc))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_reminders",
+})
+@websocket_api.async_response
+async def ws_get_reminders(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                           msg: dict) -> None:
+    """The reminders still to come (due now or in the next 24 hours), for the
+    Command Center's reminder card. Read only: label, time and whether due."""
+    try:
+        from . import reminders
+        items = await hass.async_add_executor_job(reminders.pending_reminders)
+        connection.send_result(msg["id"], {"items": items})
+    except Exception as exc:
+        connection.send_error(msg["id"], "reminders_failed", _log_failure("ws_get_reminders", exc))
 
 
 @websocket_api.websocket_command({
