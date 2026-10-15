@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.53.0
+ * v8.54.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.53.0 ",
+      console.log("%c Nova Panel %c v8.54.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -8273,7 +8273,7 @@ ${this._htmlDashboardBody()}`;
 
   _presentCycleStart() {
     if (this._presentCycleTimer) return;
-    const every = this._presentCycleMs || 90000;
+    const every = this._presentCycleMs || 20000;
     this._presentCycleTimer = setInterval(() => this._presentAmbient(), every);
     // The first card comes soon after the page opens, not a full round later.
     this._presentFirstTimer = setTimeout(() => this._presentAmbient(), this._presentFirstMs || 15000);
@@ -8285,9 +8285,46 @@ ${this._htmlDashboardBody()}`;
   // rotation by being added here.
   _presentKinds() {
     return {
+      // `refresh` (optional) redraws a card on show every `every` ms.
+      datetime: { html: (d) => this._presentClockHtml(d.now), ambient: async () => ({ now: Date.now() }),
+        refresh: () => this._presentClockHtml(Date.now()), every: 1000 },
+      home: { html: (d) => this._presentHomeHtml(d), ambient: async () => this._presentHomeData() },
       energy: { html: (d) => this._presentEnergyHtml(d), ambient: () => this._presentEnergyData() },
       security: { html: (d) => this._presentSecurityHtml(d), ambient: async () => this._presentSecurityData() },
     };
+  }
+
+  // The time and date, in the panel's language. Ticks while it is on show.
+  _presentClockHtml(ms) {
+    const lang = this._resolveUiLang(), t = new Date(ms);
+    let time, date;
+    try {
+      time = t.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+      date = t.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" });
+    } catch (_) {
+      time = t.toTimeString().slice(0, 5);
+      date = t.toDateString();
+    }
+    return `<div class="pc-big"><span class="pc-fig" data-unit="">${this._esc(time)}</span></div><div class="pc-cap">${this._esc(date)}</div>`;
+  }
+
+  // Who is home, from Home Assistant's person entities. Null with nobody set up.
+  _presentHomeData() {
+    const people = [];
+    for (const [id, st] of Object.entries(this._hass?.states || {})) {
+      if (!id.startsWith("person.") || !st || st.state === "unavailable" || st.state === "unknown") continue;
+      people.push({ name: String(st.attributes?.friendly_name || id.slice(7)), home: st.state === "home" });
+    }
+    if (!people.length) return null;
+    people.sort((a, b) => (b.home - a.home) || a.name.localeCompare(b.name));
+    return { people: people.slice(0, 6), total: people.length, home: people.filter(p => p.home).length };
+  }
+
+  _presentHomeHtml(d) {
+    if (!d.total) return "";
+    const n = (v) => this._esc(this._presentNum(v, 0));
+    return `<div class="pc-cap">HOME</div><div class="pc-big"><span class="pc-fig" data-unit="">${n(d.home)}/${n(d.total)}</span></div>`
+      + `<div class="pc-rows">${(d.people || []).map(p => `<div class="pc-row"><span>${this._esc(p.name)}</span><b>${this._esc(p.home ? this._tx("HOME") : this._tx("AWAY"))}</b></div>`).join("")}</div>`;
   }
 
   async _presentEnergyData() {
@@ -8403,12 +8440,25 @@ ${this._htmlDashboardBody()}`;
     if (this._coreState() !== "asleep") this._targetCoreState("presenting");
     if (this._presentTimer) clearTimeout(this._presentTimer);
     this._presentTimer = setTimeout(() => this._presentEnd(), left);
+    if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
+    if (def.refresh) {
+      this._presentTick = setInterval(() => {
+        const next = def.refresh(card.data);
+        if (next) this._setHtml(el, next);
+      }, def.every || 1000);
+    }
   }
 
   _presentEnd() {
     if (this._presentTimer) { clearTimeout(this._presentTimer); this._presentTimer = null; }
+    if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
     if (!this._presenting) return;
     this._presenting = false;
+    // The next card comes a full gap after this one goes, not part way through it.
+    if (this._presentCycleTimer) {
+      clearInterval(this._presentCycleTimer);
+      this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
+    }
     this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
     this._targetCoreState(this._coreState());
   }
