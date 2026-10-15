@@ -1,5 +1,10 @@
   _wire() {
     const root = this.shadowRoot;
+    const presentCard = root.getElementById("presentCard");
+    if (presentCard) {
+      presentCard.addEventListener("click", () => this._presentEnd());
+      presentCard.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") this._presentEnd(); });
+    }
     const camToggle = root.getElementById("camToggle");
     if (camToggle) {
       camToggle.addEventListener("click", () => {

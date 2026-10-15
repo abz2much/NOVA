@@ -1084,6 +1084,16 @@
     "literal_response_keys": [],
     "registered": true
   },
+  "nova/subscribe_presentation": {
+    "admin": false,
+    "error_codes": [
+      "not_loaded",
+      "presentation_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/suggestion_action": {
     "admin": true,
     "error_codes": [

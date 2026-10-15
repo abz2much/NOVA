@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from .cognitive.holds import ProviderHolds
 from .const import DOMAIN
 from .migrations import CURRENT_SCHEMA_VERSION
+from .presentation import PresentationStore
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -82,6 +83,8 @@ class NovaRuntime:
     # The Nova Voice ID STT entity while it is in HA (stt.py sets and clears
     # it). The panel card and the health row read its status from here.
     voice_id: NovaVoiceIdStt | None = None
+    # The latest Presenting card (memory only, never on disk).
+    presentation: PresentationStore = field(default_factory=PresentationStore)
 
 
 # String form keeps the alias lazy: nothing subscripts ConfigEntry at import

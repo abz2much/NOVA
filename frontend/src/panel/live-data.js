@@ -55,11 +55,9 @@
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
-    const marqueeEl = root.getElementById("heroMarquee");
-    const marquee = `${words[state].replace(/[.…]/g, "").toUpperCase()} · `.repeat(8);
-    if (marqueeEl && marqueeEl.textContent !== marquee) this._setText(marqueeEl, marquee);
     this._typeHeroWord(words[state]);
-    this._targetCoreState(state);
+    // A card on show keeps the head turned towards it, unless the house sleeps.
+    this._targetCoreState(this._presenting && state !== "asleep" ? "presenting" : state);
 
     // status chips
     const chipDefs = [

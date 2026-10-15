@@ -8,6 +8,7 @@
     // time someone switches tabs. Stop it before _initCore() starts a
     // fresh one.
     this._holoStop();
+    this._presentStop();
     if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
     if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
     this._ctx = null;
@@ -20,6 +21,7 @@
     this._wire();
     this._initCore();
     this._renderData();
+    if (this._currentTab === "dashboard") this._presentStart();
   }
 
   // Panel translations are keyed by exact English source strings. Dynamic
@@ -168,14 +170,14 @@
     return `
         <div id="onboardingMount"></div>
         <div class="hero">
-          <div class="hero-stage">
-            <div class="hero-marquee" aria-hidden="true"><span id="heroMarquee"></span></div>
+          <div class="hero-stage" id="heroStage">
             <canvas class="core" id="core"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>
               <div class="state-sub" id="stateSub">—</div>
             </div>
+            <div class="present-card" id="presentCard" role="button" tabindex="0" title="Dismiss"></div>
           </div>
           <div class="chips" id="chips"></div>
         </div>

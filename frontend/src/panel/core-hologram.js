@@ -199,8 +199,8 @@
       c += (texture(t, uv + dir * 4.).rgb + texture(t, uv - dir * 4.).rgb) * 0.016216;
       o = vec4(c, 1.);
     }`;
-    // The canvas is transparent, so the hero's own background and marquee
-    // show through; the light is written premultiplied.
+    // The canvas is transparent, so the hero's own background
+    // shows through; the light is written premultiplied.
     const compose = `#version 300 es
     precision highp float; in vec2 uv; out vec4 o;
     uniform sampler2D scene, bloom; uniform vec2 uRes, uC, uF; uniform float uDpr, uR, uGlow, uWarm, uBloomK, uS; uniform vec3 cA, cW;

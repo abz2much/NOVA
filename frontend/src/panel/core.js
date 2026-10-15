@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.50.0
+ * v8.51.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.50.0 ",
+      console.log("%c Nova Panel %c v8.51.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -101,6 +101,8 @@ class NovaPanel extends HTMLElement {
       const old = this.shadowRoot.getElementById("core");
       if (old) { old.replaceWith(old.cloneNode(false)); this._initCore(); }
     }
+    // Leaving the page closed the card subscription; start it again.
+    if (this._renderedOnce && this._currentTab === "dashboard") this._presentStart();
   }
 
   disconnectedCallback() {
@@ -109,6 +111,7 @@ class NovaPanel extends HTMLElement {
     if (this._cameraInterval) clearInterval(this._cameraInterval);
     this._holoResume = !!this._holo;
     this._holoStop();
+    this._presentStop();
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
     if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }

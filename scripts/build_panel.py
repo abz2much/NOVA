@@ -44,6 +44,7 @@ SOURCES = (
     "panel/wiring.js",               # event wiring, settings save
     "panel/core-hologram.js",        # hero hologram (WebGL 2)
     "panel/core-animation.js",       # hero fallback head (canvas 2D)
+    "panel/presenting.js",           # Presenting: the energy card beside the head
     "panel/floor-plan.js",
     "panel/floor-plan-geometry.js",  # coverage and line-of-sight maths
     "panel/floor-plan-editor.js",

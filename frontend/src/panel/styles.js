@@ -23,11 +23,20 @@
         border:1px solid var(--line-soft);border-radius:22px;overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(300px,36cqw,440px)}
-      .hero-marquee{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);overflow:hidden;pointer-events:none;
-        font-family:var(--font-display);font-weight:600;font-size:clamp(110px,20cqw,240px);line-height:1;white-space:nowrap;
-        color:#f4b8600d;letter-spacing:-.02em}
-      .hero-marquee span{display:inline-block;animation:hero-marquee 60s linear infinite}
-      @keyframes hero-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+      .present-card{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;
+        padding:14px 18px;border:1px solid var(--line-soft);border-radius:16px;background:var(--surface-2);cursor:pointer;text-align:left}
+      .hero-stage.presenting .present-card{display:flex}
+      .hero-stage.presenting .hero-copy{display:none}
+      .pc-cap{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+      .pc-big{font-family:var(--font-display);font-weight:500;line-height:1}
+      .pc-fig{font-size:clamp(44px,8cqw,84px);letter-spacing:-.02em;
+        background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent}
+      .pc-fig::after{content:" " attr(data-unit);font-size:clamp(16px,2.4cqw,22px);letter-spacing:0;-webkit-text-fill-color:var(--gold-pale)}
+      .pc-now{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;color:var(--ink-faint)}
+      .pc-curve{width:100%;height:28px;display:block}
+      .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
+      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint)}
+      .pc-row b{font-weight:500;color:var(--gold-pale)}
       canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
       canvas.core:active{cursor:grabbing}
       .hero-copy{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);pointer-events:none;
@@ -42,10 +51,11 @@
       @container (max-width:639px){
         .hero-stage{height:auto;display:flex;flex-direction:column}
         canvas.core{position:relative;height:300px}
-        .hero-marquee{top:150px}
+        .present-card{position:relative;left:auto;right:auto;top:auto;transform:none;margin:0 16px 20px;align-items:center;text-align:center}
+        .pc-row{width:100%}
         .hero-copy{position:relative;left:auto;right:auto;top:auto;transform:none;align-items:center;text-align:center;padding:0 16px 20px}
       }
-      @media (prefers-reduced-motion: reduce){.hero-marquee span,.hero-caret{animation:none}}
+      @media (prefers-reduced-motion: reduce){.hero-caret{animation:none}}
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--surface-2);
         font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);border:1px solid var(--line-soft)}

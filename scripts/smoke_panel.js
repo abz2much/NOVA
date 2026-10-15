@@ -198,6 +198,7 @@ const PANEL = {
   ],
 };
 const _subscribedEvents = [];
+const _presSubs = [];
 const _renameCalls = [];
 const _locationCalls = [];
 const _sugCalls = [];
@@ -596,6 +597,11 @@ const hass = {
     return {};
   },
   connection: {
+    subscribeMessage: async (handler, msg) => {
+      const sub = { handler, msg, closed: false };
+      _presSubs.push(sub);
+      return () => { sub.closed = true; };
+    },
     subscribeEvents: async (handler, eventType) => {
       _subscribedEvents.push(eventType);
       return () => {};
@@ -834,6 +840,83 @@ if (require.main === module) setTimeout(async () => {
     const after = newRoot.getElementById("core");
     checks.push(["hologram: a failed start hands the 2D head a fresh canvas",
       fellBack === false && !elNew._holo && after && after !== before && after.id === "core"]);
+
+    // ── 8.51.0: Presenting. A card of real figures from the presentation
+    // subscription turns the head towards it and replaces the hero copy.
+    const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
+    const root = () => elNew.shadowRoot;
+    const openDashboard = async () => {
+      elNew._currentTab = "dashboard"; elNew._render();
+      await tick();
+      global.requestAnimationFrame = () => 0;
+      elNew._initHologram(stage(fakeGl(true)));
+      global.requestAnimationFrame = realRaf;
+      return _presSubs[_presSubs.length - 1];
+    };
+    const mkCard = (id, data, secs = 30) => ({ v: 1, kind: "energy", id, created: Date.now() / 1000 - (30 - secs),
+      expires: Date.now() / 1000 + secs,
+      data: Object.assign({ solar_today_kwh: 14.3, battery_pct: 64, export_kwh: 5, home_kwh: 9.8, solar_w: 3120, curve: [] }, data) });
+    const card = () => root().getElementById("presentCard");
+    const shown = () => root().getElementById("heroStage").classList.contains("presenting");
+    const sleepWas = elNew._liveData.status.sleep;
+    elNew._liveData.status.sleep = { state: "AWAKE" };
+    global.requestAnimationFrame = () => 0;
+    let sub = await openDashboard();
+    checks.push(["presenting: the dashboard subscribes to nova/subscribe_presentation",
+      !!sub && sub.msg.type === "nova/subscribe_presentation" && !sub.closed]);
+    checks.push(["presenting: no card is showing before one arrives",
+      !shown() && elNew._coreStateKey === "idle" && card().textContent === ""]);
+    sub.handler(mkCard("c1", {}));
+    const txt = card().textContent;
+    checks.push(["presenting: a card turns the head towards it and shows the real figures",
+      elNew._coreStateKey === "presenting" && shown() && txt.includes("14.3") && txt.includes("64%")
+      && txt.includes("5.0 kWh") && txt.includes("9.8 kWh") && txt.includes("3,120 W")]);
+    elNew._renderData();
+    checks.push(["presenting: a live data refresh does not pull the head away from the card",
+      elNew._coreStateKey === "presenting" && shown()]);
+    sub.handler(mkCard("c2", { battery_pct: null, export_kwh: null }));
+    const rows = [...card().querySelectorAll(".pc-row")];
+    checks.push(["presenting: a figure Nova cannot read is hidden, not shown as zero",
+      rows.length === 1 && rows[0].textContent.includes("9.8") && !card().textContent.includes("Battery")
+      && !card().textContent.includes("0%")]);
+    sub.handler(mkCard("c3", { solar_today_kwh: null, battery_pct: null, export_kwh: null, home_kwh: null, solar_w: null }));
+    checks.push(["presenting: a card with nothing readable leaves the last card as it was",
+      card().textContent.includes("9.8")]);
+    card().click();
+    checks.push(["presenting: tapping the card goes back to idle and shows the hero copy",
+      !shown() && elNew._coreStateKey === elNew._holoTargets(elNew._coreState()).key
+      && elNew._coreStateKey === "idle"]);
+    sub.handler(mkCard("old", {}, -5));
+    checks.push(["presenting: a card that has already expired is ignored", !shown() && elNew._coreStateKey === "idle"]);
+    sub.handler(mkCard("c4", {}, 0.15));
+    const wasShown = shown();
+    await tick(300);
+    checks.push(["presenting: the card goes away on its own and the head goes back to idle",
+      wasShown && !shown() && elNew._coreStateKey === "idle"]);
+    elNew._liveData.status.sleep = { state: "ASLEEP" };
+    elNew._renderData();
+    sub.handler(mkCard("c5", {}));
+    checks.push(["presenting: asleep wins, the head stays asleep but the card can still be read",
+      elNew._coreStateKey === "asleep" && shown() && card().textContent.includes("14.3")]);
+    card().click();
+    checks.push(["presenting: after the card the sleeping head is still asleep", elNew._coreStateKey === "asleep"]);
+    elNew._liveData.status.sleep = { state: "AWAKE" };
+    elNew._renderData();
+    sub.handler(mkCard("c6", {}));
+    elNew._currentTab = "settings"; elNew._render();
+    await tick();
+    checks.push(["presenting: switching tab closes the subscription and drops the card",
+      sub.closed === true && !elNew._presenting && !elNew._presentTimer]);
+    const before2 = _presSubs.length;
+    await openDashboard();
+    checks.push(["presenting: coming back to the dashboard subscribes again",
+      _presSubs.length === before2 + 1 && !_presSubs[_presSubs.length - 1].closed]);
+    const last = _presSubs[_presSubs.length - 1];
+    elNew.disconnectedCallback();
+    checks.push(["presenting: leaving the page closes the subscription", last.closed === true]);
+    elNew._liveData.status.sleep = sleepWas;
+    global.requestAnimationFrame = realRaf;
+    elNew._currentTab = "dashboard"; elNew._render();
   }
 
   // 8.0.1: Decisions rows have four parts (time, kind, decision, outcome), so
@@ -4041,7 +4124,7 @@ if (require.main === module) setTimeout(async () => {
   global.cancelAnimationFrame = _realCaf;
 
   // The hero types its state word (Hello / Thinking / Goodnight) next to the
-  // head and echoes it in the scrolling marquee behind it.
+  // head. The scrolling marquee behind it is gone.
   {
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const want = words[elNew._coreState()];
@@ -4052,9 +4135,9 @@ if (require.main === module) setTimeout(async () => {
       await new Promise(r => setTimeout(r, 10));
     }
     const wordText = elNew.shadowRoot.getElementById("heroWordText")?.textContent;
-    const marqueeText = elNew.shadowRoot.getElementById("heroMarquee")?.textContent || "";
-    checks.push(["hero types the state word and echoes it in the marquee",
-      wordText === want && marqueeText.startsWith(want.replace(/[.…]/g, "").toUpperCase() + " · ")]);
+    checks.push(["hero types the state word next to the head", wordText === want]);
+    checks.push(["the scrolling marquee behind the hologram is gone",
+      !elNew.shadowRoot.getElementById("heroMarquee") && !elNew.shadowRoot.querySelector(".hero-marquee")]);
   }
 
   // Command Center localization was accidentally dropped when Classic was
