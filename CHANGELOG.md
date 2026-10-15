@@ -1,3 +1,15 @@
+## [8.50.0] — A new hologram for the Command Center
+
+The head on the Command Center is now a hologram: a head, neck and shoulders drawn as glowing gold contour lines with a soft bloom, in Nova's own colours.
+
+### Added
+- **The hologram**, drawn with WebGL 2. It breathes, blinks, glances at the word when the state changes, follows the mouse on a computer and can be turned by dragging. Thinking lifts sparks off the head and runs a scan line down it; asleep closes the eyes and dims right down.
+- **Ready for later states**: listening, speaking (a moving mouth and a voice line) and presenting (the head turns towards a card). Nothing selects them yet; they wait for Nova to send the live voice state and data cards.
+
+### Changed
+- **The old head stays as the fallback** for a browser without WebGL 2, and it shows the new states as idle.
+- The hologram pauses when it is off screen or the tab is hidden, honours reduced motion, rebuilds itself if the browser drops the graphics, and releases its graphics context when you leave the Command Center.
+
 ## [8.49.43] — Copied code out of the learning and panel commands, and what is left for later
 
 Phase 8 finishes its prioritised list: the next files with the most copied code are rewritten with their copied text removed and nothing else changed. The work left for a later phase is written up in docs/phase8-deferred.md.

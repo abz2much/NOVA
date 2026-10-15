@@ -782,6 +782,60 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["command center: the ember head can be rebuilt and drawn again without errors",
     !_headError && elNew._headGeoKey !== null]);
 
+  // ── 8.50.0: the WebGL hologram. jsdom has no WebGL, so a stand-in
+  // context lets the real setup, frame and teardown code run.
+  {
+    const T = (k) => elNew._holoTargets(k);
+    checks.push(["hologram: asleep closes the eyes, thinking lifts sparks, presenting turns only a little, unknown is idle",
+      T("asleep").target.open === 0 && T("reasoning").target.lift === 1 && T("reasoning").target.scan > 0
+      && T("presenting").target.yaw > 0 && T("presenting").target.yaw <= 0.35
+      && T("nonsense").key === "idle" && T(undefined).key === "idle"]);
+    const _lost = [];
+    const fakeGl = (shadersCompile) => new Proxy({}, {
+      get: (t, k) => (k in t ? t[k]
+        : k === "getShaderParameter" ? () => shadersCompile
+        : k === "getProgramParameter" ? () => true
+        : k === "getAttribLocation" ? () => 0
+        : k === "getExtension" ? (n) => (n === "WEBGL_lose_context" ? { loseContext: () => _lost.push(1) } : null)
+        : k === "getShaderInfoLog" || k === "getProgramInfoLog" ? () => "failed"
+        : () => ({})),
+    });
+    const stage = (gl) => {
+      const c = newRoot.getElementById("core");
+      c.getContext = (kind) => (kind === "webgl2" ? gl : null);
+      c.getBoundingClientRect = () => ({ width: 900, height: 320, left: 0, top: 0 });
+      return c;
+    };
+    let _holoError = null, started = false, frames = 0;
+    const realRaf = global.requestAnimationFrame;
+    global.requestAnimationFrame = () => 0;   // drive frames by hand
+    try {
+      started = elNew._initHologram(stage(fakeGl(true)));
+      let t = performance.now();
+      for (const key of ["idle", "reasoning", "asleep", "speaking", "presenting", "listening"]) {
+        elNew._targetCoreState(key);
+        for (let i = 0; i < 20; i++) { t += 50; elNew._holoFrame(t); frames++; }
+      }
+    } catch (err) { _holoError = err; }
+    global.requestAnimationFrame = realRaf;
+    checks.push(["hologram: starts on WebGL 2 and draws every state without errors",
+      started && !_holoError && frames === 120 && !!elNew._holo && !!elNew._holo.fbo.scene]);
+    checks.push(["hologram: knows the voice and presenting states the fallback head does not",
+      elNew._coreStateKey === "listening"]);
+    const held = elNew._holo;
+    elNew._holoStop();
+    checks.push(["hologram: stopping it releases the graphics context and the loop",
+      held.stopped && elNew._holo === null && _lost.length === 1 && !elNew._animHandle]);
+    elNew._targetCoreState("listening");
+    checks.push(["fallback head shows states it does not know as idle",
+      elNew._coreStateKey === "idle"]);
+    const before = stage(fakeGl(false));
+    const fellBack = elNew._initHologram(before);
+    const after = newRoot.getElementById("core");
+    checks.push(["hologram: a failed start hands the 2D head a fresh canvas",
+      fellBack === false && !elNew._holo && after && after !== before && after.id === "core"]);
+  }
+
   // 8.0.1: Decisions rows have four parts (time, kind, decision, outcome), so
   // they get their own grid. jsdom cannot lay anything out, so this pins the
   // rule itself; the layout was checked in a real browser.

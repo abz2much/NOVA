@@ -42,7 +42,8 @@ SOURCES = (
     "panel/settings-cards-more.js",
     "panel/live-data.js",            # live data patching, cameras, area tiles
     "panel/wiring.js",               # event wiring, settings save
-    "panel/core-animation.js",       # stellar core canvas
+    "panel/core-hologram.js",        # hero hologram (WebGL 2)
+    "panel/core-animation.js",       # hero fallback head (canvas 2D)
     "panel/floor-plan.js",
     "panel/floor-plan-geometry.js",  # coverage and line-of-sight maths
     "panel/floor-plan-editor.js",
