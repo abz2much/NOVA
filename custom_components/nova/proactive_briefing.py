@@ -1,150 +1,122 @@
-"""
-Nova — Proactive Briefing System (v5.8.01).
+"""Briefings Nova starts on its own.
 
-Triggers briefings automatically when Nova determines they're warranted.
-Collects camera detection snapshots for inclusion in briefings.
-Pushes briefings to phone when user is away.
+Three things start one:
 
-Triggers:
-  - Arrival home (person.* → home): welcome briefing
-  - Significant security events accumulated (3+ in 30 min)
-  - Time-based (morning briefing, evening summary)
-  - Unusual activity detected by cameras
+* someone comes home: presence alone only arms a welcome, which is spoken
+  once the configured front door opens (no door set, no welcome at all);
+* several doors, windows or locks open while the house is empty;
+* the scheduled briefing, which arrives here with reason "scheduled".
 
-Camera snapshots are stored in a ring buffer — the last N detection
-snapshots with their analysis text. Briefings include a summary of
-recent detections without re-analyzing images.
+Camera analyses are kept in a small in-memory ring so a briefing can say
+what the cameras saw without looking at any image again.
 """
 from __future__ import annotations
 
-import json
 import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
-from homeassistant.core import HomeAssistant, Event, callback
-from homeassistant.util import dt as dt_util
+from homeassistant.core import Event, HomeAssistant, callback
 
 from .locale_format import format_date
 
 _LOGGER = logging.getLogger(__name__)
 
+BRIEFING_COOLDOWN = 30        # minutes between any two proactive briefings
+ARRIVAL_COOLDOWN = 60         # minutes, so presence flapping never re-welcomes
+SECURITY_THRESHOLD = 3        # openings within the window below
+_SECURITY_WINDOW_S = 30 * 60
+ARRIVAL_DOOR_WINDOW_S = 600   # how long an arrival waits for the door
+# On arrival only the last half hour is news: a caller from this morning is not.
+ARRIVAL_RECENT_HOURS = 0.5
+_OTHER_RECENT_HOURS = 4
 
-# ── Camera snapshot ring buffer ─────────────────────────────────────────────
+# A state either side of these is no evidence that anything moved.
+_NO_READING = ("unavailable", "unknown")
+_OPENING_CLASSES = ("door", "window", "garage_door")
+
+
+# ── what the cameras saw ────────────────────────────────────────────────────
 
 @dataclass
 class CameraSnapshot:
-    """A detection snapshot stored for briefing inclusion."""
+    """One analysed camera detection, kept for later briefings."""
     timestamp: float
     camera_name: str
     camera_entity: str
-    analysis: str          # The LLM analysis text
-    detection_type: str    # "person", "vehicle", "motion", "doorbell"
-    urgency: str = "low"   # low, medium, high
+    analysis: str          # what the model said about the frame
+    detection_type: str    # person, vehicle, motion or doorbell
+    urgency: str = "low"   # low, medium or high
 
 
-# Ring buffer — last 50 snapshots
 _SNAPSHOTS: deque[CameraSnapshot] = deque(maxlen=50)
 
 
-def record_snapshot(
-    camera_name: str,
-    camera_entity: str,
-    analysis: str,
-    detection_type: str = "motion",
-    urgency: str = "low",
-) -> None:
-    """Called by camera.py after analyzing a snapshot."""
-    _SNAPSHOTS.append(CameraSnapshot(
-        timestamp=time.time(),
-        camera_name=camera_name,
-        camera_entity=camera_entity,
-        analysis=analysis,
-        detection_type=detection_type,
-        urgency=urgency,
-    ))
-    _LOGGER.debug(
-        "Proactive: recorded snapshot from %s (%s, %s)",
-        camera_name, detection_type, urgency,
-    )
+def record_snapshot(camera_name: str, camera_entity: str, analysis: str,
+                    detection_type: str = "motion", urgency: str = "low") -> None:
+    """Keep one analysis from camera.py for the next briefing."""
+    snap = CameraSnapshot(time.time(), camera_name, camera_entity, analysis,
+                          detection_type, urgency)
+    _SNAPSHOTS.append(snap)
+    _LOGGER.debug("Proactive: recorded snapshot from %s (%s, %s)",
+                  camera_name, detection_type, urgency)
 
 
 def get_recent_snapshots(hours: float = 12) -> list[CameraSnapshot]:
-    """Get snapshots from the last N hours."""
-    cutoff = time.time() - (hours * 3600)
-    return [s for s in _SNAPSHOTS if s.timestamp > cutoff]
+    """The kept analyses newer than ``hours`` ago, oldest first."""
+    since = time.time() - hours * 3600
+    return [snap for snap in _SNAPSHOTS if snap.timestamp > since]
 
 
 def get_snapshot_summary(hours: float = 12) -> str:
-    """Build a text summary of recent camera detections for briefing inclusion."""
-    recent = get_recent_snapshots(hours)
-    if not recent:
+    """One line per camera: how many detections of each kind, and the newest
+    analysis with the time it happened. Empty when nothing was seen."""
+    per_camera: dict[str, list[CameraSnapshot]] = {}
+    for snap in get_recent_snapshots(hours):
+        per_camera.setdefault(snap.camera_name, []).append(snap)
+    if not per_camera:
         return ""
-
-    # Group by camera
-    by_camera: dict[str, list[CameraSnapshot]] = {}
-    for s in recent:
-        by_camera.setdefault(s.camera_name, []).append(s)
-
-    lines = []
-    for cam, snaps in by_camera.items():
-        types = {}
-        for s in snaps:
-            types[s.detection_type] = types.get(s.detection_type, 0) + 1
-        type_str = ", ".join(f"{count} {dtype}" for dtype, count in types.items())
-        latest = snaps[-1]
-        # The time says it already happened, so a briefing never reports an
-        # old detection as something going on right now.
-        at = datetime.fromtimestamp(latest.timestamp).strftime("%H:%M")
-        lines.append(
-            f"  {cam}: {len(snaps)} detection(s) ({type_str}). "
-            f"Latest, at {at}: {latest.analysis[:120]}"
-        )
-
-    return "Camera detections:\n" + "\n".join(lines)
+    rows = []
+    for camera, snaps in per_camera.items():
+        kinds: dict[str, int] = {}
+        for snap in snaps:
+            kinds[snap.detection_type] = kinds.get(snap.detection_type, 0) + 1
+        mix = ", ".join(f"{n} {kind}" for kind, n in kinds.items())
+        newest = snaps[-1]
+        # Stamped with its time, so the briefing reports it as past.
+        clock = datetime.fromtimestamp(newest.timestamp).strftime("%H:%M")
+        rows.append(f"  {camera}: {len(snaps)} detection(s) ({mix}). "
+                    f"Latest, at {clock}: {newest.analysis[:120]}")
+    return "Camera detections:\n" + "\n".join(rows)
 
 
-# ── Event accumulator for proactive triggers ────────────────────────────────
+# ── listener state ──────────────────────────────────────────────────────────
 
 @dataclass
 class _ProactiveState:
+    running: bool = False
     hass: Optional[HomeAssistant] = None
     config: dict = field(default_factory=dict)
-    unsub_presence: Optional[object] = None
-    unsub_timer: Optional[object] = None
-    security_events: list = field(default_factory=list)  # timestamps
     last_briefing_time: float = 0.0
     last_arrival_briefing: float = 0.0
-    running: bool = False
-    # Presence (GPS/zone) says someone's home, but the welcome briefing waits
-    # for the configured front door to actually open (v7.101.9) — otherwise
-    # it fires while they're still in the driveway/car, before they've
-    # actually walked in. Cleared on a matching door-open or once stale.
+    security_events: list = field(default_factory=list)   # opening times
+    unsub_presence: Optional[object] = None
+    unsub_timer: Optional[object] = None
+    # Who presence says has come home, waiting for the front door to open.
     pending_arrival_person: str = ""
     pending_arrival_entity: str = ""
     pending_arrival_ts: float = 0.0
 
+
 _STATE = _ProactiveState()
 
-# Minimum time between proactive briefings (minutes)
-BRIEFING_COOLDOWN = 30
-ARRIVAL_COOLDOWN = 60  # Don't re-brief on every presence toggle
-SECURITY_THRESHOLD = 3  # events in 30 min to trigger security briefing
-ARRIVAL_DOOR_WINDOW_S = 600  # give up waiting for the door after 10 min
-# A welcome home covers what is true now. Camera detections and events older
-# than this (a caller who rang hours ago) are no longer news on arrival.
-ARRIVAL_RECENT_HOURS = 0.5
-
-
-# ── Arrival detection ───────────────────────────────────────────────────────
 
 def _house_maybe_occupied(hass) -> bool:
-    """False only when the residents are confidently away (household.py).
-    A person reading unknown, or a device tracker not linked to anyone, no
-    longer decides this (8.21.0)."""
+    """Only a confident "everyone is away" from household.py says no."""
     try:
         from . import household
         return household.residents(hass) != household.AWAY
@@ -153,9 +125,8 @@ def _house_maybe_occupied(hass) -> bool:
 
 
 def _configured_front_door() -> str:
-    """The binary_sensor gating the arrival-briefing trigger, or "" if unset
-    (Settings -> General -> Arrival). Unset means stay silent on arrival
-    entirely — see the person-arrived branch below."""
+    """The door sensor that releases a welcome, or "" when none is set
+    (Settings, General, Arrival)."""
     try:
         from . import nova_config
         return str(nova_config.get("arrival_front_door_entity", "") or "")
@@ -163,471 +134,403 @@ def _configured_front_door() -> str:
         return ""
 
 
+def _arm_arrival(entity_id: str, new_state, door: str) -> None:
+    name = new_state.attributes.get("friendly_name",
+                                    entity_id.split(".")[-1].title())
+    _STATE.pending_arrival_person = name
+    _STATE.pending_arrival_entity = entity_id
+    _STATE.pending_arrival_ts = time.time()
+    _LOGGER.info("Proactive: %s is home (presence), waiting for %s to open "
+                 "before announcing", name, door)
+
+
+def _release_arrival() -> None:
+    """The front door opened while a welcome was waiting. A welcome armed
+    over ten minutes ago is dropped without a word: too late to be one."""
+    person = _STATE.pending_arrival_person
+    entity = _STATE.pending_arrival_entity
+    waited = time.time() - _STATE.pending_arrival_ts
+    _STATE.pending_arrival_person = ""
+    _STATE.pending_arrival_entity = ""
+    if waited > ARRIVAL_DOOR_WINDOW_S:
+        return
+    now = time.time()
+    if now - _STATE.last_arrival_briefing <= ARRIVAL_COOLDOWN * 60:
+        return
+    _STATE.last_arrival_briefing = now
+    _LOGGER.info("Proactive: %s opened the front door, triggering welcome "
+                 "briefing", person)
+    _STATE.hass.async_create_task(
+        _trigger_briefing("arrival", person_name=person, person_entity=entity))
+
+
+def _is_opening(entity_id: str, old_state, new_state) -> bool:
+    """A door, window or garage door opening, or a lock unlocking, seen as a
+    real change. An update that keeps the same state (attributes only), or a
+    sensor coming back from unavailable or a restart, is not one."""
+    if old_state is None or old_state.state in _NO_READING:
+        return False
+    if old_state.state == new_state.state:
+        return False
+    domain = entity_id.split(".", 1)[0]
+    if domain == "lock":
+        return new_state.state == "unlocked"
+    if domain == "binary_sensor":
+        return (new_state.state == "on"
+                and new_state.attributes.get("device_class", "") in _OPENING_CLASSES)
+    return False
+
+
+def _count_opening() -> None:
+    """Note an opening in an empty house; enough of them close together
+    start a security briefing."""
+    now = time.time()
+    _STATE.security_events = [t for t in _STATE.security_events
+                              if now - t < _SECURITY_WINDOW_S] + [now]
+    if len(_STATE.security_events) < SECURITY_THRESHOLD:
+        return
+    if now - _STATE.last_briefing_time <= BRIEFING_COOLDOWN * 60:
+        return
+    _LOGGER.info("Proactive: %d security events in 30min (house empty), "
+                 "triggering security briefing", len(_STATE.security_events))
+    _STATE.hass.async_create_task(_trigger_briefing("security"))
+    _STATE.security_events.clear()
+
+
 @callback
 def _on_state_changed(event: Event) -> None:
-    """Watch for person arrivals and security event accumulation."""
     if not _STATE.running:
         return
-
     entity_id = event.data.get("entity_id", "")
     new_state = event.data.get("new_state")
-    old_state = event.data.get("old_state")
     if not new_state:
         return
+    old_state = event.data.get("old_state")
 
-    # ── Person arrived home (GPS/zone) ───────────────────────────────
-    # This only marks a PENDING arrival (v7.101.9) — GPS/zone presence can
-    # flip to "home" while someone's still in the driveway or car, well
-    # before they've actually walked in. The welcome briefing itself fires
-    # below, once the configured front door actually opens. No front door
-    # configured means no way to know when they're actually inside, so stay
-    # silent entirely rather than fall back to the old premature trigger.
     if entity_id.startswith("person."):
-        old_val = old_state.state if old_state else "unknown"
-        new_val = new_state.state
-        if old_val != "home" and new_val == "home":
-            door_entity = _configured_front_door()
-            if not door_entity:
-                return
-            _STATE.pending_arrival_person = new_state.attributes.get(
-                "friendly_name", entity_id.split(".")[-1].title()
-            )
-            _STATE.pending_arrival_entity = entity_id
-            _STATE.pending_arrival_ts = time.time()
-            _LOGGER.info(
-                "Proactive: %s is home (presence) — waiting for %s to open before announcing",
-                _STATE.pending_arrival_person, door_entity,
-            )
+        was_home = old_state is not None and old_state.state == "home"
+        if new_state.state == "home" and not was_home:
+            # Presence turns home in the driveway; the welcome waits for the
+            # door, and with no door set there is no welcome.
+            door = _configured_front_door()
+            if door:
+                _arm_arrival(entity_id, new_state, door)
         return
 
-    # ── Configured front door opened: consume a pending arrival ──────
-    door_entity = _configured_front_door()
-    if door_entity and entity_id == door_entity and new_state.state == "on":
-        if _STATE.pending_arrival_person:
-            person_name = _STATE.pending_arrival_person
-            person_entity = _STATE.pending_arrival_entity
-            _STATE.pending_arrival_entity = ""
-            fresh = (time.time() - _STATE.pending_arrival_ts) <= ARRIVAL_DOOR_WINDOW_S
-            _STATE.pending_arrival_person = ""
-            if fresh:
-                now = time.time()
-                if (now - _STATE.last_arrival_briefing) > ARRIVAL_COOLDOWN * 60:
-                    _STATE.last_arrival_briefing = now
-                    _LOGGER.info(
-                        "Proactive: %s opened the front door — triggering welcome briefing",
-                        person_name,
-                    )
-                    _STATE.hass.async_create_task(
-                        _trigger_briefing("arrival", person_name=person_name,
-                                          person_entity=person_entity)
-                    )
-            # else: stale (>10 min since presence flipped home) — drop it
-            # silently rather than announce a late/wrong-context arrival.
-        # No pending arrival — an ordinary door open with someone already
-        # home; fall through to the security-accumulation check below (it
-        # already no-ops whenever anyone_home is true).
+    door = _configured_front_door()
+    if (door and entity_id == door and new_state.state == "on"
+            and _STATE.pending_arrival_person):
+        _release_arrival()
 
-    # ── Security event accumulation ─────────────────────────────────
-    # Watch for doors opening, locks unlocking, motion at unusual times
-    domain = entity_id.split(".")[0]
-    is_security = False
-
-    if domain == "binary_sensor":
-        dc = new_state.attributes.get("device_class", "")
-        if dc in ("door", "window", "garage_door") and new_state.state == "on":
-            is_security = True
-    elif domain == "lock" and new_state.state == "unlocked":
-        is_security = True
-
-    if is_security:
-        # Open windows / unlocked doors are NORMAL when a registered user is
-        # home — only treat them as security-relevant when the house is empty.
-        if _house_maybe_occupied(_STATE.hass):
-            return
-        now = time.time()
-        _STATE.security_events.append(now)
-        # Clean old events (> 30 min)
-        _STATE.security_events = [t for t in _STATE.security_events if now - t < 1800]
-
-        if (len(_STATE.security_events) >= SECURITY_THRESHOLD
-                and (now - _STATE.last_briefing_time) > BRIEFING_COOLDOWN * 60):
-            _LOGGER.info(
-                "Proactive: %d security events in 30min (house empty) — triggering security briefing",
-                len(_STATE.security_events),
-            )
-            _STATE.hass.async_create_task(_trigger_briefing("security"))
-            _STATE.security_events.clear()
+    # Openings matter only in an empty house; at home they are daily life.
+    if _is_opening(entity_id, old_state, new_state) \
+            and not _house_maybe_occupied(_STATE.hass):
+        _count_opening()
 
 
-# ── Action-claim guard ───────────────────────────────────────────────────────
-# _trigger_briefing's LLM call below is a single-shot text completion with no
-# device-control tools at all — nothing stops it writing in-character flavor
-# text that CLAIMS a device action happened ("I've nudged the thermostat up
-# two degrees") when nothing was ever executed (the 2026-09-18 08:54
-# incident). This is detected deterministically (no second LLM call) and,
-# if found, the ENTIRE generated briefing is discarded for a safe fallback —
-# never edited sentence-by-sentence, since a partial edit of model text can
-# leave behind damaged or misleading wording. Kept generic across every
-# controllable domain (lights, locks, covers, climate, media players,
-# scenes, scripts, ...), not just climate.
-#
-# Device-action QUESTIONS/OFFERS ("Would you like me to raise the
-# thermostat?") are rejected too, not just completed/promised claims. This
-# branch has no mechanism to turn a "yes" reply into a real action — no
-# device-control tools, and no pending-offer system — so an offer here
-# would be a dead end for the user. Questions unrelated to device control
-# (e.g. offering to read out the calendar) are unaffected.
-import re as _re
+# ── device action guard ─────────────────────────────────────────────────────
+# The briefing model has no tools, yet it can still write "I've nudged the
+# thermostat up" or "Shall I lock the door?". Neither can be true or followed
+# up here, so any such sentence about a device throws the whole reply away
+# for a plain one built from checked facts. Nothing is edited sentence by
+# sentence: half an edited model reply can still mislead. What Nova only saw
+# (checked, noticed, confirmed) is never treated as an action.
 
-_ACTION_VERBS = (
-    r"turn(?:ed|ing)?|switch(?:ed|ing)?|set(?:ting)?|adjust(?:ed|ing)?|"
-    r"nudg(?:ed|e|ing)|lock(?:ed|ing)?|unlock(?:ed|ing)?|open(?:ed|ing)?|"
-    r"clos(?:ed|e|ing)|start(?:ed|ing)?|stopp?(?:ed|ing)?|"
-    r"activat(?:ed|e|ing)|deactivat(?:ed|e|ing)|dimm?(?:ed|ing)?|"
-    r"rais(?:ed|e|ing)|lower(?:ed|ing)?|arm(?:ed|ing)?|disarm(?:ed|ing)?|"
-    r"paus(?:ed|e|ing)|resum(?:ed|e|ing)|play(?:ed|ing)?|runn?(?:ing)?|ran|"
-    r"launch(?:ed|ing)?"
-)
-# Deliberately excludes observation verbs (checked, noticed, seen,
-# confirmed, ...) — those describe what Nova perceived, not an action it
-# took or is offering, and must never be treated as a control claim.
-_APOSTROPHE = r"['’]"  # straight and curly ('ve vs 've)
-_FIRST_PERSON_ACTION_CLAIM = _re.compile(
-    rf"\bI(?:{_APOSTROPHE}ve|\s+have|\s+just|\s+already|{_APOSTROPHE}ll|"
-    rf"\s+will|{_APOSTROPHE}m|\s+am(?:\s+going\s+to)?)?"
-    rf"\s+(?:{_ACTION_VERBS})\b",
-    _re.IGNORECASE,
-)
-# "Would you like me to raise..." / "Do you want me to lock..." — offer
-# phrasing whose subject is "me"/"you", not "I", so it never matches
-# _FIRST_PERSON_ACTION_CLAIM above. ("Shall I turn off the lights?" /
-# "Should I lock the door?" / "Can I raise the thermostat?" DO contain a
-# literal "I <verb>" and are already caught by _FIRST_PERSON_ACTION_CLAIM
-# now that questions are no longer exempt from it — see below.)
-_OFFER_ACTION_PATTERN = _re.compile(
+_ACTION_VERBS = "|".join((
+    r"turn(?:ed|ing)?", r"switch(?:ed|ing)?", r"set(?:ting)?",
+    r"adjust(?:ed|ing)?", r"nudg(?:ed|e|ing)", r"lock(?:ed|ing)?",
+    r"unlock(?:ed|ing)?", r"open(?:ed|ing)?", r"clos(?:ed|e|ing)",
+    r"start(?:ed|ing)?", r"stopp?(?:ed|ing)?", r"activat(?:ed|e|ing)",
+    r"deactivat(?:ed|e|ing)", r"dimm?(?:ed|ing)?", r"rais(?:ed|e|ing)",
+    r"lower(?:ed|ing)?", r"arm(?:ed|ing)?", r"disarm(?:ed|ing)?",
+    r"paus(?:ed|e|ing)", r"resum(?:ed|e|ing)", r"play(?:ed|ing)?",
+    r"runn?(?:ing)?", r"ran", r"launch(?:ed|ing)?",
+))
+_APOSTROPHE = r"['’]"
+# "I've turned", "I will lock", "I'm going to raise", and also questions such
+# as "Shall I turn off", which contain a bare "I turn".
+_FIRST_PERSON_ACTION_CLAIM = re.compile(
+    rf"\bI(?:{_APOSTROPHE}ve|\s+have|\s+just|\s+already|{_APOSTROPHE}ll"
+    rf"|\s+will|{_APOSTROPHE}m|\s+am(?:\s+going\s+to)?)?\s+(?:{_ACTION_VERBS})\b",
+    re.IGNORECASE)
+# "Would you like me to raise", "Do you want me to lock".
+_OFFER_ACTION_PATTERN = re.compile(
     rf"\b(?:would you like (?:me )?to|do you want me to|want me to)"
     rf"\s+(?:{_ACTION_VERBS})\b",
-    _re.IGNORECASE,
-)
-_DEVICE_NOUN = _re.compile(
+    re.IGNORECASE)
+_DEVICE_NOUN = re.compile(
     r"\b(light|lamp|lock|door|thermostat|climate|heat(?:ing)?|cover|blind|"
     r"curtain|shade|garage|media\s*player|speaker|tv|television|scene|"
     r"script|fan|switch|outlet|plug|alarm|siren|camera)s?\b",
-    _re.IGNORECASE,
-)
+    re.IGNORECASE)
 
 
 def _split_sentences(text: str) -> list[str]:
-    """Sentence split good enough to scope matching per sentence — not meant
-    to reconstruct polished text."""
-    return _re.split(r"(?<=[.!?])\s+", text.strip())
+    """Rough sentence split, only to keep each match inside one sentence."""
+    return re.split(r"(?<=[.!?])\s+", text.strip())
 
 
 def contains_unsupported_device_action_claim(text: str) -> bool:
-    """True if `text` contains a first-person claim that Nova performed, is
-    performing, or will perform a device action, OR a question/offer asking
-    whether Nova should perform one. This briefing path has no way to turn
-    either into a real action (no device-control tools, no pending-offer
-    system), so both are rejected — regardless of phrasing as a statement
-    or a question. Plain factual state reports ("the thermostat is at 18")
-    and questions unrelated to device control (e.g. offering to read out
-    the calendar) are never flagged."""
+    """True when a sentence about a device says Nova did, is doing or will
+    do something to it, or offers to. Plain state ("the thermostat is at
+    18") and offers that are not about devices ("shall I read the
+    calendar?") pass."""
     for sentence in _split_sentences(text):
-        stripped = sentence.strip()
-        if not stripped:
+        if not sentence.strip() or not _DEVICE_NOUN.search(sentence):
             continue
-        if not _DEVICE_NOUN.search(stripped):
-            continue
-        if _FIRST_PERSON_ACTION_CLAIM.search(stripped) or _OFFER_ACTION_PATTERN.search(stripped):
+        if (_FIRST_PERSON_ACTION_CLAIM.search(sentence)
+                or _OFFER_ACTION_PATTERN.search(sentence)):
             return True
     return False
 
 
 def _deterministic_fallback_briefing(
-    *, honorific: str, greeting: str, reason: str,
-    weather: str = "", open_things: list[str] | None = None,
-    events: list[str] | None = None,
+    *, honorific: str, greeting: str, reason: str, weather: str = "",
+    open_things: list[str] | None = None, events: list[str] | None = None,
 ) -> str:
-    """A safe briefing built only from context already verified elsewhere in
-    _trigger_briefing — used when the generated text fails the action-claim
-    guard. Never claims a device was changed and never mentions a device
-    action at all, question or otherwise — this function only ever emits
-    the greeting plus verified weather/security/event facts."""
-    parts = []
+    """The briefing said with no model at all: the greeting, then the
+    weather, open things and recent events already gathered. It names no
+    device action of any kind."""
     if reason == "arrival":
-        parts.append(f"Welcome home, {honorific}." if honorific else "Welcome home.")
-    elif honorific:
-        parts.append(f"{greeting}, {honorific}.")
+        opening = f"Welcome home, {honorific}." if honorific else "Welcome home."
     else:
-        parts.append(f"{greeting}.")
+        opening = f"{greeting}, {honorific}." if honorific else f"{greeting}."
+    said = [opening]
     if weather:
-        parts.append(f"{weather}.")
+        said.append(f"{weather}.")
     if open_things:
-        parts.append(f"Open/unlocked: {', '.join(open_things)}.")
+        said.append(f"Open/unlocked: {', '.join(open_things)}.")
     if events:
-        parts.append(f"Recent events: {'; '.join(events[:3])}.")
-    return " ".join(parts)
+        said.append(f"Recent events: {'; '.join(events[:3])}.")
+    return " ".join(said)
 
 
-# ── Briefing trigger ────────────────────────────────────────────────────────
+# ── building and delivering one briefing ────────────────────────────────────
 
-async def _trigger_briefing(
-    reason: str,
-    person_name: str = "",
-    person_entity: str = "",
-) -> None:
-    """Fire a proactive briefing through the existing briefing system."""
-    hass = _STATE.hass
-    config = _STATE.config
-    now = time.time()
+_NO_ACTIONS_RULE = (
+    "This message has NO device-control tools — you cannot turn anything on "
+    "or off, lock or unlock anything, or adjust any device right now, and "
+    "nothing you say here can be followed up on or acted on later. Do not "
+    "claim, promise, or imply that you changed or will change a device "
+    "(never say things like \"I've turned up the heat\" or \"I'll lock the "
+    "door\"). Do not ask whether the user wants you to change a device "
+    "either (never say things like \"Would you like me to raise the "
+    "thermostat?\" or \"Shall I turn off the lights?\") — if they want a "
+    "device changed, they can ask you directly by voice or chat afterward. "
+    "Questions unrelated to device control — for example offering to read "
+    "out the calendar — are fine. "
+)
 
-    if (now - _STATE.last_briefing_time) < BRIEFING_COOLDOWN * 60:
-        _LOGGER.debug("Proactive: briefing cooldown active, skipping")
-        return
+_PUSH_TITLES = {
+    "arrival": "Nova — Welcome Home",
+    "security": "Nova — Security Alert",
+    "scheduled": "Nova — Briefing",
+    "camera": "Nova — Camera Alert",
+}
 
-    _STATE.last_briefing_time = now
+
+def _push_title(reason: str) -> str:
+    return _PUSH_TITLES.get(reason, "Nova — Briefing")
+
+
+def _honorific_for(hass, reason: str, person_entity: str, config: dict) -> str:
     try:
         from . import honorific as honorific_mod
         if reason == "arrival" and person_entity:
-            # Spoken to the person walking in, even with others home.
-            honorific = honorific_mod.arrival_honorific(hass, person_entity)
-        else:
-            honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
+            # Said to whoever walked in, even with others at home.
+            return honorific_mod.arrival_honorific(hass, person_entity)
+        return honorific_mod.effective_honorific(hass)
     except Exception:
-        honorific = config.get("honorific", "sir")
+        return config.get("honorific", "sir")
 
-    # Gather camera snapshot summary
-    recent_hours = ARRIVAL_RECENT_HOURS if reason == "arrival" else 4
-    snap_summary = get_snapshot_summary(hours=recent_hours)
 
-    # Build extra context based on reason
-    extra_context = ""
+def _reason_note(reason: str, honorific: str, person_name: str) -> str:
     if reason == "arrival":
-        if honorific:
-            # honorific is non-empty only when exactly one person is home
-            # (see honorific.py) — that's the person who just walked in, so
-            # this briefing is spoken directly to them. Telling the model
-            # their name AND instructing it to greet "sir"/"ma'am" produced
-            # redundant lines like "Good afternoon, sir. Alex has just
-            # arrived home." Drop the name restatement; the greeting alone
-            # already addresses them.
-            extra_context = (
-                "This welcome-home briefing is addressed directly to the "
-                "person who just walked in. Do not restate their name or "
-                "the fact that they arrived — the greeting already covers that."
+        if not honorific:
+            # Nobody in particular is addressed, so who came in is the news.
+            return f"{person_name} just arrived home. This is a welcome briefing."
+        # An honorific means one person is home: the one who just came in.
+        # Naming them as well gave "Good afternoon, sir. Alex has just
+        # arrived home."
+        return ("This welcome-home briefing is addressed directly to the "
+                "person who just walked in. Do not restate their name or the "
+                "fact that they arrived — the greeting already covers that.")
+    if reason == "security":
+        return ("Multiple security events detected in a short period. "
+                "Summarize what happened and any concerns.")
+    if reason == "scheduled":
+        return "This is a scheduled briefing."
+    return ""
+
+
+def _task_text(reason: str, honorific: str, greeting: str) -> str:
+    from .const import BRIEFING_GROUNDING_RULE
+    if reason == "arrival":
+        first = f"Welcome home, {honorific}." if honorific else "Welcome home."
+    else:
+        first = f"{greeting}, {honorific}." if honorific else f"{greeting}."
+    audience = f"to {honorific}" if honorific else "to the household"
+    return (f"You are delivering a proactive briefing ({reason}) {audience}. "
+            f"Begin with '{first}' Cover only the important items. Under 100 "
+            "words. Be direct. Anything listed with a time already happened: "
+            "say so in the past tense with its time, never as if it is "
+            f"happening now. {_NO_ACTIONS_RULE}{BRIEFING_GROUNDING_RULE}")
+
+
+async def _generate(hass, config: dict, system: str, context: str) -> str:
+    """One tool free completion on the reasoning tier, or on the primary
+    provider when that tier cannot be built. The entry's ProviderManager
+    owns the client, or a short lived one closes it."""
+    from contextlib import AsyncExitStack
+    from . import llm_provider
+    from .providers.activity import execute_chat
+    from .providers.manager import provider_scope
+    from .providers.routing import ProviderSpec, tier_spec
+
+    async with AsyncExitStack() as stack:
+        providers = await stack.enter_async_context(provider_scope(hass))
+        try:
+            lease = providers.lease(
+                tier_spec(config, "reasoning"),
+                factory=lambda: llm_provider.create_tier_provider(config, "reasoning"))
+            provider = await stack.enter_async_context(lease)
+        except Exception:
+            name = config.get("llm_provider", "groq")
+            spec = ProviderSpec(
+                provider=name,
+                model=config.get("model", "openai/gpt-oss-120b"),
+                api_key=llm_provider.resolve_provider_credential(config, name),
+                base_url=llm_provider.resolve_provider_endpoint(config, name),
             )
-        else:
-            # Nobody specific is being addressed (others already home, or
-            # this is a whole-house broadcast) — naming who arrived is the
-            # useful part for everyone else.
-            extra_context = f"{person_name} just arrived home. This is a welcome briefing."
-    elif reason == "security":
-        extra_context = (
-            "Multiple security events detected in a short period. "
-            "Summarize what happened and any concerns."
-        )
-    elif reason == "scheduled":
-        extra_context = "This is a scheduled briefing."
+            provider = await stack.enter_async_context(providers.lease(
+                spec, factory=lambda: llm_provider.create_provider(
+                    spec.provider, spec.api_key, spec.model, spec.base_url)))
+        reply = await execute_chat(
+            hass, provider,
+            [{"role": "system", "content": system},
+             {"role": "user", "content": context}],
+            role="briefing", data_category="text",
+            tools=None, max_tokens=300, temperature=0.2)
+    return (reply.text or "").strip()
 
-    if snap_summary:
-        extra_context += f"\n\n{snap_summary}"
 
-    # Try to use the existing briefing service
+async def _trigger_briefing(reason: str, person_name: str = "",
+                            person_entity: str = "") -> None:
+    """Write one briefing and hand it to delivery."""
+    hass, config = _STATE.hass, _STATE.config
+    now = time.time()
+    if now - _STATE.last_briefing_time < BRIEFING_COOLDOWN * 60:
+        _LOGGER.debug("Proactive: briefing cooldown active, skipping")
+        return
+    _STATE.last_briefing_time = now
+
+    honorific = _honorific_for(hass, reason, person_entity, config)
+    hours = ARRIVAL_RECENT_HOURS if reason == "arrival" else _OTHER_RECENT_HOURS
+    note = _reason_note(reason, honorific, person_name)
+    cameras = get_snapshot_summary(hours=hours)
+    if cameras:
+        note += f"\n\n{cameras}"
+
     try:
-        from .briefing import _gather_weather, _gather_open_things, _gather_overnight_events
-        from .briefing import _gather_calendar, _gather_energy_anomalies, _time_greeting
-        from .briefing import ungrounded_briefing_fact
+        from .briefing import (
+            _gather_calendar, _gather_energy_anomalies, _gather_open_things,
+            _gather_overnight_events, _gather_weather, _time_greeting,
+            ungrounded_briefing_fact,
+        )
         from .directive_helper import build_system_prompt
-        from .const import BRIEFING_GROUNDING_RULE
         from .tts_helper import resolve_tts_for_context
+        from . import output_language
 
-        # Gather context
         local_now = datetime.now()
-        context_lines = [
-            f"It is {format_date(local_now, hass)}, {local_now.strftime('%-I:%M %p')}."
-        ]
+        facts = [f"It is {format_date(local_now, hass)}, "
+                 f"{local_now.strftime('%-I:%M %p')}."]
         weather = _gather_weather(hass)
         if weather:
-            context_lines.append(f"Weather: {weather}.")
+            facts.append(f"Weather: {weather}.")
         open_things = _gather_open_things(hass)
         if reason == "arrival":
-            # The arrival trigger IS a door opening (see _configured_front_door)
-            # — reporting that door as "open" on the very briefing it caused
-            # is stating the obvious. Unlocked locks are still worth a
-            # mention (that's not self-evident from having just walked in).
-            open_things = [item for item in open_things if not item.endswith("is open")]
+            # The door they came through is the one that started this; open
+            # locks are still worth saying.
+            open_things = [t for t in open_things if not t.endswith("is open")]
         if open_things:
-            context_lines.append(f"Open/unlocked: {', '.join(open_things)}.")
-        events = _gather_overnight_events(hass, recent_hours)
+            facts.append(f"Open/unlocked: {', '.join(open_things)}.")
+        events = _gather_overnight_events(hass, hours)
         if events:
-            context_lines.append(f"Recent events: {'; '.join(events[:5])}.")
-        if extra_context:
-            context_lines.append(extra_context)
-
-        context = "\n".join(context_lines)
+            facts.append(f"Recent events: {'; '.join(events[:5])}.")
+        if note:
+            facts.append(note)
+        context = "\n".join(facts)
         greeting = _time_greeting()
 
-        # honorific may be "" once nobody specific is home to address (see
-        # honorific.py) — instruct the model accordingly instead of leaving a
-        # blank subject or a dangling "Begin with 'Good morning, .'"
-        if honorific:
-            to_whom = f"to {honorific}"
-            if reason == "arrival":
-                begin_with = f"Begin with 'Welcome home, {honorific}.'"
-            else:
-                begin_with = f"Begin with '{greeting}, {honorific}.'"
-        else:
-            to_whom = "to the household"
-            if reason == "arrival":
-                begin_with = "Begin with 'Welcome home.'"
-            else:
-                begin_with = f"Begin with '{greeting}.'"
-        task = (
-            f"You are delivering a proactive briefing ({reason}) {to_whom}. "
-            f"{begin_with} "
-            f"Cover only the important items. Under 100 words. Be direct. "
-            f"Anything listed with a time already happened: say so in the "
-            f"past tense with its time, never as if it is happening now. "
-            f"This message has NO device-control tools — you cannot turn "
-            f"anything on or off, lock or unlock anything, or adjust any "
-            f"device right now, and nothing you say here can be followed up "
-            f"on or acted on later. Do not claim, promise, or imply that you "
-            f"changed or will change a device (never say things like "
-            f"\"I've turned up the heat\" or \"I'll lock the door\"). Do not "
-            f"ask whether the user wants you to change a device either "
-            f"(never say things like \"Would you like me to raise the "
-            f"thermostat?\" or \"Shall I turn off the lights?\") — if they "
-            f"want a device changed, they can ask you directly by voice or "
-            f"chat afterward. Questions unrelated to device control — for "
-            f"example offering to read out the calendar — are fine. "
-            f"{BRIEFING_GROUNDING_RULE}"
-        )
+        task = _task_text(reason, honorific, greeting)
         system = build_system_prompt(hass, honorific, task)
-        from . import output_language
-        system = output_language.with_language(hass, system)   # spoken and pushed: follows Nova's language
+        # Spoken and pushed, so in Nova's output language.
+        system = output_language.with_language(hass, system)
 
-        # Generate briefing via LLM: the reasoning tier, or the primary
-        # provider when the tier can't be built. The entry's ProviderManager
-        # owns the client (a transient one closes it without a loaded entry).
-        from contextlib import AsyncExitStack
-        from . import llm_provider
-        from .providers.activity import execute_chat
-        from .providers.manager import provider_scope
-        from .providers.routing import ProviderSpec, tier_spec
-        async with AsyncExitStack() as stack:
-            providers = await stack.enter_async_context(provider_scope(hass))
-            try:
-                provider = await stack.enter_async_context(providers.lease(
-                    tier_spec(config, "reasoning"),
-                    factory=lambda: llm_provider.create_tier_provider(config, "reasoning"),
-                ))
-            except Exception:
-                provider_name = config.get("llm_provider", "groq")
-                primary = ProviderSpec(
-                    provider=provider_name,
-                    model=config.get("model", "openai/gpt-oss-120b"),
-                    api_key=llm_provider.resolve_provider_credential(config, provider_name),
-                    base_url=llm_provider.resolve_provider_endpoint(config, provider_name),
-                )
-                provider = await stack.enter_async_context(providers.lease(
-                    primary,
-                    factory=lambda: llm_provider.create_provider(
-                        primary.provider, primary.api_key, primary.model, primary.base_url),
-                ))
-
-            reply = await execute_chat(
-                hass, provider,
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": context},
-                ],
-                role="briefing", data_category="text",
-                tools=None, max_tokens=300, temperature=0.2,
-            )
-        briefing_text = (reply.text or "").strip()
-        if not briefing_text:
+        text = await _generate(hass, config, system, context)
+        if not text:
             return
 
-        if contains_unsupported_device_action_claim(briefing_text):
+        if contains_unsupported_device_action_claim(text):
             _LOGGER.warning(
                 "Proactive briefing (%s) rejected — unsupported device-action "
                 "claim in generated text; using deterministic fallback: %s",
-                reason, briefing_text[:200],
-            )
-            briefing_text = _deterministic_fallback_briefing(
-                honorific=honorific, greeting=greeting, reason=reason,
-                weather=weather, open_things=open_things, events=events,
-            )
-            if not briefing_text:
-                return
+                reason, text[:200])
+            problem = True
         else:
-            bad = ungrounded_briefing_fact(briefing_text, context)
+            bad = ungrounded_briefing_fact(text, context)
             if bad:
                 _LOGGER.warning(
                     "Proactive briefing (%s) rejected — %s is not in the "
                     "gathered facts; using deterministic fallback: %s",
-                    reason, bad, briefing_text[:200],
-                )
-                briefing_text = _deterministic_fallback_briefing(
-                    honorific=honorific, greeting=greeting, reason=reason,
-                    weather=weather, open_things=open_things, events=events,
-                )
+                    reason, bad, text[:200])
+            problem = bool(bad)
+        if problem:
+            text = _deterministic_fallback_briefing(
+                honorific=honorific, greeting=greeting, reason=reason,
+                weather=weather, open_things=open_things, events=events)
+            if not text:
+                return
 
-        _LOGGER.info("Proactive briefing (%s): %s", reason, briefing_text[:100])
+        _LOGGER.info("Proactive briefing (%s): %s", reason, text[:100])
 
-        # One delivery request (8.44.0): the household's rules decide. A
-        # briefing is always pushed to the phones as a record, and spoken on
-        # the announcement speakers when someone is home and the rules allow.
-        # A scheduled briefing is the person's own, at the time they chose,
-        # so shush, the Announcements switch and quiet hours never swallow
-        # it; sleep still applies, as before. Arrival, security and camera
-        # briefings follow every rule.
+        # Delivery applies the household's rules. Every briefing goes to the
+        # phones as a record and is spoken when someone is home and the rules
+        # allow it. The scheduled one was asked for at its time, so shush,
+        # the Announcements switch and quiet hours let it through (sleep
+        # still holds it); arrival and security briefings follow every rule.
         from . import delivery
         tts_entity = resolve_tts_for_context(
-            hass, "briefing",
-            config.get("tts_engine", "auto"),
+            hass, "briefing", config.get("tts_engine", "auto"),
             config.get("tts_premium_engine") or None,
-            config.get("tts_premium_contexts") or [],
-        )
+            config.get("tts_premium_contexts") or [])
+        scheduled = reason == "scheduled"
         await delivery.async_deliver(hass, delivery.DeliveryRequest(
-            source="briefing", message=briefing_text, category=f"briefing_{reason}",
-            requested_by_user=(reason == "scheduled"), quiet_ok=(reason == "scheduled"),
-            push=delivery.PUSH_ALWAYS,
-            title=_push_title(reason), tts_context="briefing",
-            tts_entity=tts_entity or "", config=config))
-
+            source="briefing", message=text, category=f"briefing_{reason}",
+            requested_by_user=scheduled, quiet_ok=scheduled,
+            push=delivery.PUSH_ALWAYS, title=_push_title(reason),
+            tts_context="briefing", tts_entity=tts_entity or "", config=config))
     except Exception as exc:
         _LOGGER.warning("Proactive briefing failed: %s", exc)
 
 
-def _push_title(reason: str) -> str:
-    return {
-        "arrival": "Nova — Welcome Home",
-        "security": "Nova — Security Alert",
-        "scheduled": "Nova — Briefing",
-        "camera": "Nova — Camera Alert",
-    }.get(reason, "Nova — Briefing")
-
-
-# ── Start / Stop ────────────────────────────────────────────────────────────
+# ── lifecycle ───────────────────────────────────────────────────────────────
 
 async def start(hass: HomeAssistant, config: dict) -> None:
-    """Start proactive briefing system."""
+    """Begin listening; a second start replaces the first listener."""
     if _STATE.running:
         await stop()
-
-    _STATE.hass = hass
-    _STATE.config = config
-    _STATE.running = True
+    _STATE.hass, _STATE.config, _STATE.running = hass, config, True
     _STATE.unsub_presence = hass.bus.async_listen("state_changed", _on_state_changed)
     _LOGGER.info("Nova Proactive Briefing system started")
 
 
 async def stop() -> None:
-    """Stop proactive briefing system."""
-    if _STATE.unsub_presence:
+    """Stop listening."""
+    unsub = _STATE.unsub_presence
+    if unsub:
         try:
-            _STATE.unsub_presence()
+            unsub()
         except Exception:
             pass
     _STATE.running = False

@@ -1,3 +1,17 @@
+## [8.49.39] — Fewer false security briefings, offers that reach every room
+
+Phase 8 continues with the proactive briefing, Nova's settings file, the comfort offers, the mode and intrusion panel commands and the agent prompt context, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **False security briefings while away.** An open door or unlocked lock that only updated its details, or came back after a restart, counted as a new opening, and three of those set off a security briefing. Only a real change from closed to open, or locked to unlocked, counts now.
+- **A config.json with stray bytes could lose every setting.** A file that wasn't UTF-8 text was read as empty but left in place, so the next panel save replaced it with that one setting. It is now set aside like broken JSON, with the usual notification, and the file is always read as UTF-8.
+- **One offer blocked the rest.** Once a room, light or thermostat had been offered about, every other room, light or thermostat waited for that cooldown. Nova now moves on to the next one.
+- **"Appears empty" in rooms Nova can't see.** The light left on offer fired in rooms with no motion or presence sensor, even with people in them. It now needs a sensor in the room that reads empty.
+- **The Plain tone never reached AI replies.** The Character setting's Plain level was read as the default, and AI replies ignored each mode's tone (full wit in party, plain in movie). Replies now follow the mode first, then the setting, the same as the canned lines.
+
+### Changed
+- **The proactive briefing, settings file, comfort offers, mode and intrusion commands and agent prompt context rewritten from empty files**, keeping every public name, message, command schema and stored value. The briefing and agent prompts are laid out differently with identical wording.
+
 ## [8.49.38] — Fewer false package alerts, a lockdown that names every lock
 
 Phase 8 continues with the secrets bridge, the agent's turn loop, package detection, identity and the formal lockdown, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.

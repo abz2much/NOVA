@@ -88,6 +88,9 @@ async def test_tick_returns_offers_in_dark_stale_hvac_order(
     _room(registry, fake_hass)
     fake_hass.states.set("light.hall", "on", last_changed=NOW - timedelta(minutes=120))
     registry.add(FakeRegistryEntry("light.hall", "x", area_id="hall"))
+    # 8.49.39: a room is only "empty" when a sensor there says so.
+    fake_hass.states.set("binary_sensor.hall_motion", "off", device_class="motion")
+    registry.add(FakeRegistryEntry("binary_sensor.hall_motion", "x", area_id="hall"))
     fake_hass.states.set("climate.main", "heat", supported_features=16, preset_modes=["eco"], hvac_action="heating")
     offers = await proactive.tick(False, True)
     assert [o["type"] for o in offers] == ["proactive_lights", "proactive_stale_light"]
@@ -171,15 +174,17 @@ async def test_the_dark_offer_is_not_repeated_within_30_minutes_of_being_deliver
     assert await proactive._check_dark_occupied_room(True) is not None
 
 
-async def test_current_behaviour_a_cooldown_on_one_dark_room_hides_every_other_dark_room(
+async def test_a_cooldown_on_one_dark_room_moves_on_to_the_next(
         proactive, registry, fake_hass):
-    """On a cooldown the check returns None instead of moving on, so a second
-    dark, occupied room is not offered until the first room's cooldown ends."""
+    """8.49.39 fix: a room on cooldown used to end the check, so a second
+    dark, occupied room waited for the first room's cooldown."""
     _room(registry, fake_hass, "lounge")
     _room(registry, fake_hass, "study", name="Study")
     first = await proactive._check_dark_occupied_room(True)
     assert first["offer_key"] == "dark:lounge"
     proactive._mark_offered("dark:lounge")
+    assert (await proactive._check_dark_occupied_room(True))["offer_key"] == "dark:study"
+    proactive._mark_offered("dark:study")
     assert await proactive._check_dark_occupied_room(True) is None
 
 
@@ -209,13 +214,15 @@ def test_area_name_survives_a_broken_registry(proactive, monkeypatch):
 # ── the stale light offer ───────────────────────────────────────────────────
 
 def _stale(registry, hass, minutes, area="hall", present=False):
+    """A light on for ``minutes`` in a room whose motion sensor reads
+    ``present`` (8.49.39: without a sensor a room is never called empty)."""
     hass.states.set("light.hall", "on", friendly_name="Hall Light",
                     last_changed=NOW - timedelta(minutes=minutes))
     registry.add(FakeRegistryEntry("light.hall", "x", area_id=area))
     registry.areas.setdefault(area, "Hall")
-    if present:
-        hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
-        registry.add(FakeRegistryEntry("binary_sensor.hall_motion", "x", area_id=area))
+    hass.states.set("binary_sensor.hall_motion", "on" if present else "off",
+                    device_class="motion")
+    registry.add(FakeRegistryEntry("binary_sensor.hall_motion", "x", area_id=area))
 
 
 async def test_a_light_left_on_in_an_empty_room_gets_an_offer(proactive, registry, fake_hass):
@@ -261,6 +268,30 @@ async def test_the_stale_light_cooldown_starts_when_delivered(proactive, clock, 
     assert await proactive._check_stale_lights(True) is not None
 
 
+async def test_a_room_without_a_presence_sensor_is_never_called_empty(
+        proactive, registry, fake_hass):
+    """8.49.39 fix: with no sensor the room "appeared empty" to Nova and got
+    the offer even with people sitting in it."""
+    _stale(registry, fake_hass, 200)
+    fake_hass.states.remove("binary_sensor.hall_motion")
+    registry.entities.pop("binary_sensor.hall_motion")
+    assert await proactive._check_stale_lights(True) is None
+    fake_hass.states.set("binary_sensor.hall_motion", "unavailable", device_class="motion")
+    registry.add(FakeRegistryEntry("binary_sensor.hall_motion", "x", area_id="hall"))
+    assert await proactive._check_stale_lights(True) is None                          # unavailable is not empty
+    fake_hass.states.set("binary_sensor.hall_motion", "off", device_class="motion")
+    assert await proactive._check_stale_lights(True) is not None
+
+
+async def test_a_stale_light_on_cooldown_moves_on_to_the_next(proactive, registry, fake_hass):
+    """8.49.39 fix: one light on cooldown used to hide every other one."""
+    _stale(registry, fake_hass, 120)
+    fake_hass.states.set("light.landing", "on", last_changed=NOW - timedelta(minutes=120))
+    registry.add(FakeRegistryEntry("light.landing", "x", area_id="hall"))
+    proactive._mark_offered("stale:light.hall")
+    assert (await proactive._check_stale_lights(True))["offer_key"] == "stale:light.landing"
+
+
 # ── the HVAC offer ──────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("action,expected", [
@@ -282,12 +313,15 @@ async def test_hvac_offer_shape_and_it_needs_an_empty_house(proactive, fake_hass
         "pattern_key": "hvac_eco_when_away"}
 
 
-async def test_current_behaviour_the_hvac_cooldown_on_one_thermostat_hides_the_others(
+async def test_the_hvac_cooldown_on_one_thermostat_moves_on_to_the_next(
         proactive, clock, fake_hass):
+    """8.49.39 fix: a thermostat on cooldown used to hide every other one."""
     fake_hass.states.set("climate.a", "heat", hvac_action="heating")
     fake_hass.states.set("climate.b", "heat", hvac_action="heating")
     proactive._mark_offered("hvac:climate.a")
-    assert await proactive._check_hvac_efficiency(False) is None                       # b is hidden behind a's cooldown
+    assert (await proactive._check_hvac_efficiency(False))["offer_key"] == "hvac:climate.b"
+    proactive._mark_offered("hvac:climate.b")
+    assert await proactive._check_hvac_efficiency(False) is None
     clock["now"] += 1800
     assert (await proactive._check_hvac_efficiency(False))["offer_key"] == "hvac:climate.a"
 

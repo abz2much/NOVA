@@ -1,8 +1,7 @@
-"""ProactiveManager: comfort and efficiency offers (a dark occupied room, a light
-left on in an empty room, heating or cooling an empty house).
+"""Comfort and efficiency offers: a dark room with someone in it, a light
+left on in an empty room, heating or cooling an empty house.
 
-Moved out of cognitive_core.py unchanged in 8.7.17. cognitive_core.py
-still exports every name defined here, as the same object.
+cognitive_core.py re-exports ProactiveManager under its old name.
 """
 from __future__ import annotations
 
@@ -14,7 +13,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from . import core_common as _m_common
-from .device_capability import can_perform
 from .core_common import (
     DARK_LUX_THRESHOLD,
     PROACTIVE_CHECK_INTERVAL,
@@ -22,276 +20,230 @@ from .core_common import (
     STALE_LIGHT_MINUTES,
     _persona,
 )
+from .device_capability import can_perform
 
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
+_PRESENCE_CLASSES = ("motion", "occupancy", "presence")
 
-# ── Proactive Intelligence (v5.9.07) ────────────────────────────────────────
 
 def _info_only(kind: str, key: str, message: str) -> dict:
-    """An alert with nothing to accept (8.14.0): Nova cannot do the action, so
-    there is no question, no action and no pattern to learn. offer_key keeps
-    the usual cooldown so it is not repeated every tick."""
+    """A notice Nova cannot act on: no question, no action, nothing to
+    learn. The offer_key still gives it the usual cooldown."""
     return {"type": kind, "urgency": "low", "offer": False, "offer_key": key,
             "message": message}
 
 
+def _offer(kind: str, key: str, message: str, action: dict, pattern: str) -> dict:
+    return {"type": kind, "urgency": "low", "offer": True, "offer_key": key,
+            "message": message, "action_data": action, "pattern_key": pattern}
+
+
+def _entity_registry(hass):
+    from homeassistant.helpers import entity_registry as er
+    return er.async_get(hass)
+
+
 class ProactiveManager:
-    """
-    Pursues comfort & efficiency opportunities — not just safety.
+    """Notices when a small action would make the home nicer or cheaper and
+    offers it. Safety is SafetyManager's job; this is about friction.
 
-    Where SafetyManager prevents harm, ProactiveManager reduces friction:
-    it notices when a small action would help (dark room with someone in it,
-    a light left on in an empty room, HVAC fighting an empty house) and
-    OFFERS to act. It never forces — offers are spoken/pushed suggestions the
-    user can accept by voice, in the room that heard them, within a minute.
-    Nova never carries an offer out on its own, however often it was accepted.
-
-    All offers respect: the global proactive kill-switch, quiet hours/sleep,
-    ignore rules, and a per-opportunity cooldown so Nova never nags.
+    An offer is only ever a spoken or pushed question, accepted by voice in
+    the room that heard it within a minute. Nova never carries one out by
+    itself, however often it was accepted before. The proactive switch,
+    quiet hours and sleep, ignore rules and a cooldown per opportunity all
+    apply, so nothing is asked twice in a row.
     """
 
     def __init__(self, hass: HomeAssistant, config: dict):
         self.hass = hass
         self.config = config
         self._last_check = 0.0
-        self._offer_cooldowns: dict[str, float] = {}  # opportunity_key -> ts
+        self._offer_cooldowns: dict[str, float] = {}   # offer key -> when offered
 
     def _on_cooldown(self, key: str) -> bool:
-        last = self._offer_cooldowns.get(key, 0.0)
-        return (time.time() - last) < PROACTIVE_OFFER_COOLDOWN
+        offered = self._offer_cooldowns.get(key, 0.0)
+        return time.time() - offered < PROACTIVE_OFFER_COOLDOWN
 
     def _mark_offered(self, key: str) -> None:
+        """Called by the tick once an offer was really delivered, so one held
+        back for now comes round again."""
         self._offer_cooldowns[key] = time.time()
 
     async def tick(self, sleeping: bool, anyone_home: bool,
                    nobody_home: Optional[bool] = None) -> list[dict]:
-        """
-        Evaluate comfort/efficiency opportunities. Returns a list of offer
-        actions (same dict shape SafetyManager uses, with offer=True).
+        """The offers due now, in the same dict shape SafetyManager uses.
 
-        `nobody_home` is True only when the residents are confidently away
-        (household.py). Not given, it is taken as "not anyone_home".
+        ``nobody_home`` is True only when household.py is sure everyone is
+        out; left as None it is the opposite of ``anyone_home``.
         """
-        if nobody_home is None:
-            nobody_home = not anyone_home
         now = time.time()
-        if (now - self._last_check) < PROACTIVE_CHECK_INTERVAL:
+        if now - self._last_check < PROACTIVE_CHECK_INTERVAL:
             return []
         self._last_check = now
-
-        # Proactive offers are silent during sleep — comfort can wait.
         if sleeping:
-            return []
+            return []   # comfort waits for the morning
+        if nobody_home is None:
+            nobody_home = not anyone_home
 
+        checks = (
+            ("dark-room", self._check_dark_occupied_room, anyone_home),
+            ("stale-light", self._check_stale_lights, anyone_home),
+            # "No one's home" only when that is known for sure.
+            ("HVAC", self._check_hvac_efficiency, not nobody_home),
+        )
         offers: list[dict] = []
-
-        try:
-            dark = await self._check_dark_occupied_room(anyone_home)
-            if dark:
-                offers.append(dark)
-        except Exception as exc:
-            _LOGGER.debug("Proactive dark-room check error: %s", exc)
-
-        try:
-            stale = await self._check_stale_lights(anyone_home)
-            if stale:
-                offers.append(stale)
-        except Exception as exc:
-            _LOGGER.debug("Proactive stale-light check error: %s", exc)
-
-        try:
-            # "No one's home" is said only when that is known (8.21.0).
-            hvac = await self._check_hvac_efficiency(not nobody_home)
-            if hvac:
-                offers.append(hvac)
-        except Exception as exc:
-            _LOGGER.debug("Proactive HVAC check error: %s", exc)
-
+        for label, check, arg in checks:
+            try:
+                found = await check(arg)
+            except Exception as exc:
+                _LOGGER.debug("Proactive %s check error: %s", label, exc)
+                continue
+            if found:
+                offers.append(found)
         return offers
 
     async def _check_dark_occupied_room(self, anyone_home: bool) -> Optional[dict]:
-        """Someone present in a room that's dark and has lights off → offer."""
+        """A dark room with someone in it and every light off: offer to turn
+        on the lights Nova can switch. A room on cooldown is passed over
+        for the next one."""
         if not anyone_home:
             return None
-        from homeassistant.helpers import entity_registry as er
-        ent_reg = er.async_get(self.hass)
-
-        # Find lux sensors that read dark
-        for s in self.hass.states.async_all("sensor"):
-            if s.attributes.get("device_class") != "illuminance":
+        reg = _entity_registry(self.hass)
+        states = self.hass.states
+        for sensor in states.async_all("sensor"):
+            if sensor.attributes.get("device_class") != "illuminance":
                 continue
             try:
-                lux = float(s.state)
-            except (ValueError, TypeError):
+                if float(sensor.state) > DARK_LUX_THRESHOLD:
+                    continue
+            except (TypeError, ValueError):
                 continue
-            if lux > DARK_LUX_THRESHOLD:
-                continue
-
-            # Determine the area of this sensor
-            entry = ent_reg.async_get(s.entity_id)
+            entry = reg.async_get(sensor.entity_id)
             area_id = entry.area_id if entry else None
-            if not area_id:
+            if not area_id or not self._area_has_presence(area_id, reg):
                 continue
-
-            # Is there occupancy (motion/presence) in this area?
-            occupied = self._area_has_presence(area_id, ent_reg)
-            if not occupied:
-                continue
-
-            # Are the lights in this area already off?
-            lights = self._area_lights(area_id, ent_reg)
+            lights = self._area_lights(area_id, reg)
             if not lights:
                 continue
-            if any(self.hass.states.get(l).state == "on" for l in lights if self.hass.states.get(l)):
-                continue  # already lit
-            # Only lights Nova can really switch on (8.14.0). With none, there
-            # is nothing to offer, so no message at all.
-            lights = [l for l in lights if can_perform(self.hass, l, "light", "turn_on")]
-            if not lights:
+            if any((st := states.get(lid)) and st.state == "on" for lid in lights):
                 continue
-
+            switchable = [lid for lid in lights
+                          if can_perform(self.hass, lid, "light", "turn_on")]
             key = f"dark:{area_id}"
-            if self._on_cooldown(key):
-                return None
-            # Cooldown is marked by the tick only when this offer is actually
-            # delivered (see _tick), so deferred offers re-surface naturally.
-
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            area_name = self._area_name(area_id)
-            return {
-                "type": "proactive_lights",
-                "urgency": "low",
-                "offer": True,
-                "offer_key": key,
-                "message": _persona().lead_in(honorific,
-                    f"it's quite dark in the {area_name} "
-                    f"and someone's in there. Shall I turn the lights on?"
-                ),
-                "action_data": {"domain": "light", "service": "turn_on",
-                                "entity_ids": lights},
-                "pattern_key": f"lights_on_when_dark:{area_id}",
-            }
+            if not switchable or self._on_cooldown(key):
+                continue
+            message = _persona().lead_in(
+                _m_common._live_honorific(self.hass),
+                f"it's quite dark in the {self._area_name(area_id)} and someone's "
+                "in there. Shall I turn the lights on?")
+            return _offer("proactive_lights", key, message,
+                          {"domain": "light", "service": "turn_on",
+                           "entity_ids": switchable},
+                          f"lights_on_when_dark:{area_id}")
         return None
 
     async def _check_stale_lights(self, anyone_home: bool) -> Optional[dict]:
-        """Light on a long time in an unoccupied area → offer to turn off."""
-        from homeassistant.helpers import entity_registry as er
-        ent_reg = er.async_get(self.hass)
+        """A light on for a long while in a room its sensors show empty.
+        A room with no motion or presence sensor is never called empty: Nova
+        cannot see whether anyone is in it. A light on cooldown is passed
+        over for the next one."""
+        reg = _entity_registry(self.hass)
         now = dt_util.utcnow()
-
-        for s in self.hass.states.async_all("light"):
-            if s.state != "on":
+        for light in self.hass.states.async_all("light"):
+            if light.state != "on" or not light.last_changed:
                 continue
-            # How long has it been on?
-            last_changed = s.last_changed
-            if not last_changed:
+            minutes = (now - light.last_changed).total_seconds() / 60.0
+            if minutes < STALE_LIGHT_MINUTES:
                 continue
-            mins_on = (now - last_changed).total_seconds() / 60.0
-            if mins_on < STALE_LIGHT_MINUTES:
-                continue
-
-            entry = ent_reg.async_get(s.entity_id)
+            entry = reg.async_get(light.entity_id)
             area_id = entry.area_id if entry else None
-            if not area_id:
+            if not area_id or not self._area_known_empty(area_id, reg):
                 continue
-
-            # Only flag if the area has NO presence
-            if self._area_has_presence(area_id, ent_reg):
-                continue
-
-            key = f"stale:{s.entity_id}"
+            key = f"stale:{light.entity_id}"
             if self._on_cooldown(key):
-                return None
-
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            name = s.attributes.get("friendly_name", s.entity_id)
-            area_name = self._area_name(area_id)
-            if not can_perform(self.hass, s.entity_id, "light", "turn_off"):
-                return _info_only("proactive_stale_light", key, _persona().lead_in(honorific,
-                    f"the {name} has been on for {int(mins_on)} minutes in the "
-                    f"{area_name}, which appears empty."))
-            return {
-                "type": "proactive_stale_light",
-                "urgency": "low",
-                "offer": True,
-                "offer_key": key,
-                "message": _persona().lead_in(honorific,
-                    f"the {name} has been on for "
-                    f"{int(mins_on)} minutes in the {area_name}, which appears "
-                    f"empty. Shall I turn it off?"
-                ),
-                "action_data": {"domain": "light", "service": "turn_off",
-                                "entity_ids": [s.entity_id]},
-                "pattern_key": f"lights_off_when_empty:{area_id}",
-            }
+                continue
+            name = light.attributes.get("friendly_name", light.entity_id)
+            said = (f"the {name} has been on for {int(minutes)} minutes in the "
+                    f"{self._area_name(area_id)}, which appears empty.")
+            honorific = _m_common._live_honorific(self.hass)
+            if not can_perform(self.hass, light.entity_id, "light", "turn_off"):
+                return _info_only("proactive_stale_light", key,
+                                  _persona().lead_in(honorific, said))
+            return _offer("proactive_stale_light", key,
+                          _persona().lead_in(honorific, f"{said} Shall I turn it off?"),
+                          {"domain": "light", "service": "turn_off",
+                           "entity_ids": [light.entity_id]},
+                          f"lights_off_when_empty:{area_id}")
         return None
 
     async def _check_hvac_efficiency(self, anyone_home: bool) -> Optional[dict]:
-        """Climate actively heating/cooling while the house is empty → flag."""
+        """Heating or cooling with nobody home: offer the eco preset where
+        the thermostat has one, else just say so. A thermostat on cooldown
+        is passed over for the next one."""
         if anyone_home:
             return None
-        for s in self.hass.states.async_all("climate"):
-            action = s.attributes.get("hvac_action")
+        eco = {"preset_mode": "eco"}
+        for climate in self.hass.states.async_all("climate"):
+            action = climate.attributes.get("hvac_action")
             if action not in ("heating", "cooling"):
                 continue
-
-            key = f"hvac:{s.entity_id}"
+            key = f"hvac:{climate.entity_id}"
             if self._on_cooldown(key):
-                return None
-
-            honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
-            name = s.attributes.get("friendly_name", s.entity_id)
-            if not can_perform(self.hass, s.entity_id, "climate", "set_preset_mode",
-                               {"preset_mode": "eco"}):
-                return _info_only("proactive_hvac", key, _persona().lead_in(honorific,
-                    f"the {name} is {action} but no one's home."))
-            return {
-                "type": "proactive_hvac",
-                "urgency": "low",
-                "offer": True,
-                "offer_key": key,
-                "message": _persona().lead_in(honorific,
-                    f"the {name} is {action} but no one's "
-                    f"home. Would you like me to set it back to save energy?"
-                ),
-                "action_data": {"domain": "climate", "service": "set_preset_mode",
-                                "entity_ids": [s.entity_id],
-                                "service_data": {"preset_mode": "eco"}},
-                "pattern_key": "hvac_eco_when_away",
-            }
+                continue
+            name = climate.attributes.get("friendly_name", climate.entity_id)
+            said = f"the {name} is {action} but no one's home."
+            honorific = _m_common._live_honorific(self.hass)
+            if not can_perform(self.hass, climate.entity_id, "climate",
+                               "set_preset_mode", eco):
+                return _info_only("proactive_hvac", key,
+                                  _persona().lead_in(honorific, said))
+            return _offer("proactive_hvac", key,
+                          _persona().lead_in(honorific, f"{said} Would you like me "
+                                                        "to set it back to save energy?"),
+                          {"domain": "climate", "service": "set_preset_mode",
+                           "entity_ids": [climate.entity_id], "service_data": eco},
+                          "hvac_eco_when_away")
         return None
 
-    # ── Area helpers ─────────────────────────────────────────────────
-    def _area_has_presence(self, area_id: str, ent_reg) -> bool:
-        """True if any motion/occupancy/presence sensor in the area is active. A
-        camera's car, animal or package sensor is not a person (8.14.0)."""
+    # ── rooms ────────────────────────────────────────────────────────
+
+    def _presence_readings(self, area_id: str, ent_reg) -> list[str]:
+        """States of the area's motion, occupancy and presence sensors. A
+        camera's car, animal or package sensor is not a person and is left
+        out."""
         from .entity_filter import is_object_sensor
-        for s in self.hass.states.async_all("binary_sensor"):
-            dc = s.attributes.get("device_class")
-            if dc not in ("motion", "occupancy", "presence"):
+        readings = []
+        for sensor in self.hass.states.async_all("binary_sensor"):
+            if sensor.attributes.get("device_class") not in _PRESENCE_CLASSES:
                 continue
-            if is_object_sensor(s.entity_id, s.attributes.get("friendly_name")):
+            if is_object_sensor(sensor.entity_id, sensor.attributes.get("friendly_name")):
                 continue
-            entry = ent_reg.async_get(s.entity_id)
-            if entry and entry.area_id == area_id and s.state == "on":
-                return True
-        return False
+            entry = ent_reg.async_get(sensor.entity_id)
+            if entry and entry.area_id == area_id:
+                readings.append(sensor.state)
+        return readings
+
+    def _area_has_presence(self, area_id: str, ent_reg) -> bool:
+        """Someone is sensed in the area right now."""
+        return "on" in self._presence_readings(area_id, ent_reg)
+
+    def _area_known_empty(self, area_id: str, ent_reg) -> bool:
+        """The area's sensors say nobody is there: at least one reads off and
+        none reads on. No sensor, or only unavailable ones, is not known."""
+        readings = self._presence_readings(area_id, ent_reg)
+        return "off" in readings and "on" not in readings
 
     def _area_lights(self, area_id: str, ent_reg) -> list[str]:
-        """All light entity_ids in the given area."""
-        out = []
-        for s in self.hass.states.async_all("light"):
-            entry = ent_reg.async_get(s.entity_id)
-            if entry and entry.area_id == area_id:
-                out.append(s.entity_id)
-        return out
+        """Every light in the area."""
+        return [light.entity_id for light in self.hass.states.async_all("light")
+                if (entry := ent_reg.async_get(light.entity_id))
+                and entry.area_id == area_id]
 
     def _area_name(self, area_id: str) -> str:
         try:
             from homeassistant.helpers import area_registry as ar
-            reg = ar.async_get(self.hass)
-            area = reg.async_get_area(area_id)
-            return area.name if area else area_id
+            area = ar.async_get(self.hass).async_get_area(area_id)
         except Exception:
             return area_id
+        return area.name if area else area_id

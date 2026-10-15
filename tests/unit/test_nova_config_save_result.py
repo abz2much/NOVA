@@ -1,9 +1,10 @@
-"""Regression tests for the save-failure visibility fix (security review,
-Finding 6): save()/set()/set_many() used to swallow a disk-write failure
-entirely -- the in-memory cache had the new value, but nothing on disk did,
-and nothing told the caller. A panel setting could appear to "stick" and
-then silently revert on the next restart. save() now returns whether the
-write actually succeeded, and set()/set_many() propagate that."""
+"""save(), set() and set_many() report whether the change reached disk.
+
+A failed write used to be logged and nothing more: the cache held the new
+value, so a panel setting looked saved and quietly reverted at the next
+restart. They now return False when the file was not written, and the cache
+still keeps the value so the running session carries on.
+"""
 import os
 import stat
 from pathlib import Path
@@ -13,11 +14,11 @@ import pytest
 
 @pytest.fixture
 def jcfg(load, tmp_path, monkeypatch):
-    j = load("nova_config")
-    monkeypatch.setattr(j, "CONFIG_PATH", Path(tmp_path / "config.json"))
-    monkeypatch.setattr(j, "_cache", {})
-    monkeypatch.setattr(j, "_loaded", True)  # skip load() — cache is already "loaded"
-    return j
+    mod = load("nova_config")
+    monkeypatch.setattr(mod, "CONFIG_PATH", Path(tmp_path) / "config.json")
+    monkeypatch.setattr(mod, "_loaded", True)   # already loaded, empty
+    monkeypatch.setattr(mod, "_cache", {})
+    return mod
 
 
 def test_save_returns_true_on_success(jcfg):
