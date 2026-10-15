@@ -391,5 +391,7 @@
   "Usual activity": "Sædvanlig aktivitet",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Du vurderede de sidste to af disse som Ikke nyttig. Stop dette mønster? Kun dette stopper, og du kan genstarte det her.",
   "since {date}": "siden {date}",
-  "{agree} of {n} verdicts agree": "{agree} af {n} afgørelser er enige"
+  "{agree} of {n} verdicts agree": "{agree} af {n} afgørelser er enige",
+  "Cards on the Command Center": "Kort i kommandocentralen",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Vis nu og da et kort med live-tal ved siden af hovedet, mens huset er vågent"
 }

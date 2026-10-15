@@ -1295,5 +1295,7 @@
   "Usual activity": "Gebruikelijke activiteit",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Je hebt de laatste twee hiervan als Niet nuttig beoordeeld. Dit patroon stoppen? Alleen dit stopt, en je kunt het hier opnieuw starten.",
   "since {date}": "sinds {date}",
-  "{agree} of {n} verdicts agree": "{agree} van {n} oordelen zijn eens"
+  "{agree} of {n} verdicts agree": "{agree} van {n} oordelen zijn eens",
+  "Cards on the Command Center": "Kaarten in het commandocentrum",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Toon af en toe een kaart met actuele cijfers naast het hoofd zolang het huis wakker is"
 }

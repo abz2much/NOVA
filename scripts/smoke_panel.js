@@ -911,9 +911,94 @@ if (require.main === module) setTimeout(async () => {
     await openDashboard();
     checks.push(["presenting: coming back to the dashboard subscribes again",
       _presSubs.length === before2 + 1 && !_presSubs[_presSubs.length - 1].closed]);
+    {
+      // Drawn again before the subscription has even connected (the panel
+      // does this when its language loads): one live subscription remains.
+      const from = _presSubs.length;
+      elNew._render(); elNew._render(); elNew._render();
+      await tick();
+      const mine = _presSubs.slice(from);
+      checks.push(["presenting: drawing the page again while connecting leaves exactly one live subscription and the cycle running",
+        mine.length >= 1 && mine.filter(x => !x.closed).length === 1 && !mine[mine.length - 1].closed && !!elNew._presentCycleTimer]);
+    }
     const last = _presSubs[_presSubs.length - 1];
     elNew.disconnectedCallback();
     checks.push(["presenting: leaving the page closes the subscription", last.closed === true]);
+
+    // ── 8.52.0: the same card also comes round by itself while the house
+    // is awake, unless the setting is off.
+    {
+      const realWS = elNew._hass.callWS;
+      let energyCalls = 0, fixture = {
+        status: { configured: true, solar: { w: 2500 }, battery: { pct: 80 } },
+        today: { configured: true, solar_kwh: 11.2, grid_export_kwh: 3.1, home_kwh: 7.4 },
+      };
+      elNew._hass.callWS = async (m) => {
+        if (m.type === "nova/energy_flow") { energyCalls++; return fixture[m.action]; }
+        return realWS(m);
+      };
+      elNew._presentCycleMs = 40; elNew._presentFirstMs = 120;
+      elNew._liveData.config = Object.assign({}, elNew._liveData.config, { hero_card_cycle: true });
+      elNew._liveData.status.sleep = { state: "AWAKE" };
+      await openDashboard();
+      await tick(200);
+      const t2 = card().textContent;
+      checks.push(["ambient: with the setting on, the card comes round by itself with the Energy tab's figures",
+        shown() && elNew._coreStateKey === "presenting" && t2.includes("11.2") && t2.includes("80%")
+        && t2.includes("3.1 kWh") && t2.includes("7.4 kWh") && t2.includes("2,500 W")]);
+      card().click();
+      await tick(200);
+      checks.push(["ambient: after a tap it comes round again, so the hero is not only ever Hello", shown()]);
+      // Rotation: each kind of card takes its turn, and one with nothing to
+      // show is skipped.
+      const realKinds = elNew._presentKinds.bind(elNew);
+      const seen = [];
+      let spareData = { n: 1 };
+      elNew._presentKinds = () => Object.assign(realKinds(), {
+        spare: { html: (d) => `<div class="pc-cap">SPARE ${d.n}</div>`, ambient: async () => spareData },
+        empty: { html: () => "x", ambient: async () => null },
+      });
+      for (let i = 0; i < 4; i++) {
+        card().click();
+        await tick(150);
+        seen.push(card().textContent.includes("SPARE") ? "spare" : card().textContent.includes("Solar made") ? "energy" : "none");
+      }
+      checks.push(["ambient: the cards rotate through every kind, skipping one with nothing to show",
+        seen.join(",") === "spare,energy,spare,energy" || seen.join(",") === "energy,spare,energy,spare"]);
+      spareData = null;
+      card().click();
+      await tick(150);
+      checks.push(["ambient: a kind that has nothing to show leaves the others in the rotation",
+        shown() && card().textContent.includes("Solar made")]);
+      elNew._presentKinds = realKinds;
+      card().click();
+      elNew._liveData.config.hero_card_cycle = false;
+      let before = energyCalls;
+      await tick(200);
+      checks.push(["ambient: with the setting off nothing is read and no card shows", !shown() && energyCalls === before]);
+      elNew._liveData.config.hero_card_cycle = true;
+      elNew._liveData.status.sleep = { state: "ASLEEP" };
+      elNew._renderData();
+      before = energyCalls;
+      await tick(200);
+      checks.push(["ambient: asleep, it stays quiet", !shown() && energyCalls === before && elNew._coreStateKey === "asleep"]);
+      elNew._liveData.status.sleep = { state: "AWAKE" };
+      elNew._renderData();
+      fixture = { status: { configured: false, solar: { w: null }, battery: { pct: null } },
+        today: { configured: false, solar_kwh: null, grid_export_kwh: null, home_kwh: null } };
+      await tick(200);
+      checks.push(["ambient: with no energy set up there is no card", !shown()]);
+      fixture = {
+        status: { configured: true, solar: { w: 100 }, battery: { pct: 50 } },
+        today: { configured: true, solar_kwh: 1, grid_export_kwh: 0, home_kwh: 2 },
+      };
+      elNew._currentTab = "settings"; elNew._render();
+      before = energyCalls;
+      await tick(200);
+      checks.push(["ambient: off the Command Center the cycle stops and reads nothing", energyCalls === before && !elNew._presentCycleTimer]);
+      elNew._presentCycleMs = 0; elNew._presentFirstMs = 0;
+      elNew._hass.callWS = realWS;
+    }
     elNew._liveData.status.sleep = sleepWas;
     global.requestAnimationFrame = realRaf;
     elNew._currentTab = "dashboard"; elNew._render();

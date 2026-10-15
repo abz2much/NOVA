@@ -391,5 +391,7 @@
   "Usual activity": "Obvyklá aktivita",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Posledné dve z nich ste ohodnotili ako Neužitočné. Zastaviť tento vzor? Zastaví sa len tento a môžete ho tu znova spustiť.",
   "since {date}": "od {date}",
-  "{agree} of {n} verdicts agree": "{agree} z {n} verdiktov sa zhoduje"
+  "{agree} of {n} verdicts agree": "{agree} z {n} verdiktov sa zhoduje",
+  "Cards on the Command Center": "Karty vo veliteľskom centre",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Čas od času zobraziť vedľa hlavy kartu s aktuálnymi údajmi, kým dom nespí"
 }

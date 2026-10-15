@@ -145,6 +145,7 @@
     "hazard_source",
     "hazard_speak_level",
     "hazard_weather_on",
+    "hero_card_cycle",
     "home_context_max_entities",
     "home_stories",
     "host_health_alerts_enabled",

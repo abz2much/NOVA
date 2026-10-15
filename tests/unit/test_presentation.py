@@ -264,3 +264,20 @@ async def test_a_refused_energy_tool_does_not_make_a_card(load, energy, runtime,
          {"text": "I could not read it.", "tool_calls": []}],
         run_tool=lambda call: models.ToolResult.error("tool_error", "boom"))
     assert runtime.presentation.latest is None
+
+
+# ── the rotation setting ───────────────────────────────────────────────────
+
+def test_the_card_rotation_is_on_by_default_and_reaches_the_panel(load):
+    schema = load("settings_schema")
+    assert schema.default("hero_card_cycle") is True
+    payload = schema.payload(lambda key, default: default, lambda key, default: default,
+                             lambda v: v)
+    assert payload["hero_card_cycle"] is True
+
+
+def test_the_card_rotation_can_be_turned_off(load):
+    schema = load("settings_schema")
+    payload = schema.payload(lambda key, default: False if key == "hero_card_cycle" else default,
+                             lambda key, default: default, lambda v: v)
+    assert payload["hero_card_cycle"] is False

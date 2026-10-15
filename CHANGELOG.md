@@ -1,3 +1,17 @@
+## [8.52.0] — Cards come round by themselves
+
+The Command Center no longer says "Hello" all the time. While the house is awake, a card of live figures now comes round beside the head every so often, then the head goes back to normal.
+
+### Added
+- **Cards on the Command Center**: about 15 seconds after the page opens, and then about every 90 seconds, a card shows for 30 seconds. Energy is the first card. Cards made later join the same rotation, one kind after another, and a kind with nothing to show is skipped.
+- **A setting to turn it off**: Settings, General, "Cards on the Command Center". It is on by default.
+
+### Changed
+- The cards stay quiet while the house is asleep, when something is happening on the head, when the page is hidden, and on every other tab. A card from a reply to you still shows straight away.
+
+### Fixed
+- **A reply card could be missed.** If the page drew itself again while its card subscription was still connecting, which it does once when the language loads, the subscription could be lost and the card never showed. It now always ends with one live subscription.
+
 ## [8.51.0] — Nova shows an energy card, and the scrolling word is gone
 
 When you ask Nova about energy, the Command Center now shows a card of the real figures next to the hologram, and the head turns towards it.

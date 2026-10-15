@@ -1295,5 +1295,7 @@
   "Usual activity": "Übliche Aktivität",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Du hast die letzten zwei davon als Nicht hilfreich bewertet. Dieses Muster stoppen? Nur dieses stoppt, und du kannst es hier neu starten.",
   "since {date}": "seit {date}",
-  "{agree} of {n} verdicts agree": "{agree} von {n} Urteilen stimmen überein"
+  "{agree} of {n} verdicts agree": "{agree} von {n} Urteilen stimmen überein",
+  "Cards on the Command Center": "Karten in der Kommandozentrale",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Zeigt hin und wieder eine Karte mit aktuellen Werten neben dem Kopf, solange das Haus wach ist"
 }

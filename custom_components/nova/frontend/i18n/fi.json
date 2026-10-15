@@ -391,5 +391,7 @@
   "Usual activity": "Tavallinen toiminta",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Arvioit kaksi viimeisintä näistä: Ei hyödyllinen. Lopetetaanko tämä kaava? Vain tämä lopetetaan, ja voit käynnistää sen uudelleen täältä.",
   "since {date}": "{date} alkaen",
-  "{agree} of {n} verdicts agree": "{agree}/{n} ratkaisusta on samaa mieltä"
+  "{agree} of {n} verdicts agree": "{agree}/{n} ratkaisusta on samaa mieltä",
+  "Cards on the Command Center": "Kortit komentokeskuksessa",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Näytä silloin tällöin kortti ajantasaisista luvuista pään vieressä, kun talo on hereillä"
 }

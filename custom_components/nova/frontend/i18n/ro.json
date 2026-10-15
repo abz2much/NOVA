@@ -391,5 +391,7 @@
   "Usual activity": "Activitate obișnuită",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Ai evaluat ultimele două ca Nefolositor. Oprești acest tipar? Se oprește doar acesta și îl poți reporni aici.",
   "since {date}": "din {date}",
-  "{agree} of {n} verdicts agree": "{agree} din {n} verdicte sunt de acord"
+  "{agree} of {n} verdicts agree": "{agree} din {n} verdicte sunt de acord",
+  "Cards on the Command Center": "Carduri în Centrul de comandă",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Din când în când, arată lângă cap un card cu cifre în timp real cât timp casa este trează"
 }
