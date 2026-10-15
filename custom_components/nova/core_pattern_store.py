@@ -17,6 +17,16 @@ from .persistence import sqlite as _store
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
 
+# Which domains pattern learning keeps. The history import in
+# core_learning.py uses these same two sets (8.49.37).
+# Helpers and automations are Nova's own plumbing, never a person's routine.
+# Scenes are kept on purpose: "button then scene" needs them.
+META_DOMAINS = frozenset({"automation", "script", "input_boolean", "input_number"})
+# Chatty sources, kept only for an entity or group the user opted in.
+NOISY_DOMAINS = frozenset({"sensor", "binary_sensor", "weather", "sun", "update",
+                           "device_tracker", "event"})
+
+
 # ── State Change Logger ─────────────────────────────────────────────────────
 
 class StateLogger:
@@ -51,17 +61,10 @@ class StateLogger:
         all — distinct from person_confidence (confidence in WHO). None
         means the source supplied no score; never invented here."""
         domain = entity_id.split(".")[0]
-        if domain in ("automation", "script", "input_boolean", "input_number"):
-            return  # Meta entities, not useful for patterns
-        # scene is deliberately NOT skipped: a scene activation is a real,
-        # low-volume action worth learning as the target of "button → scene".
-
-        # Noisy domains are skipped for pattern learning UNLESS the user opted
-        # this entity/group in (e.g. garage door contacts, presence) — v7.11.0.
-        if not force_include and domain in ("sensor", "binary_sensor", "weather",
-                                            "sun", "update", "device_tracker",
-                                            "event"):
-            return  # Too noisy for pattern learning
+        if domain in META_DOMAINS:
+            return
+        if not force_include and domain in NOISY_DOMAINS:
+            return
 
         now = datetime.now()
         try:

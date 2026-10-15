@@ -8,7 +8,8 @@ import pytest
 @pytest.fixture
 def energy(load, monkeypatch):
     m = load("energy")
-    # default config accessor returns provided defaults unless overridden per-test
+    # Each test starts outside an over peak spell (8.49.37).
+    monkeypatch.setattr(m, "_peak_spell_offered", False, raising=False)
     return m
 
 
@@ -192,6 +193,33 @@ def test_autonomous_never_sheds_critical(energy, monkeypatch):
     })
     # no sheddable loads → no offer at all
     assert energy.evaluate_for_proactive(_Hass()) is None
+
+
+def test_peak_advice_is_offered_once_per_spell(energy, monkeypatch):
+    """8.49.37: a long over peak evening is mentioned once, not every tick.
+    The spell ends when a reading comes back under peak."""
+    _over_peak_status(energy, monkeypatch, "advisory")
+    assert energy.evaluate_for_proactive(_Hass()) is not None
+    assert energy.evaluate_for_proactive(_Hass()) is None
+    assert energy.evaluate_for_proactive(_Hass()) is None
+    monkeypatch.setattr(energy, "power_status", lambda h: {
+        "watts": 3000, "kw": 3.0, "over_peak": False, "running": []})
+    assert energy.evaluate_for_proactive(_Hass()) is None
+    _over_peak_status(energy, monkeypatch, "advisory")
+    assert energy.evaluate_for_proactive(_Hass()) is not None
+
+
+def test_offline_meter_is_not_called_missing(energy, monkeypatch):
+    """8.49.37: a meter that is found but not reporting gets its own line."""
+    monkeypatch.setattr(energy, "_running_appliances", lambda h: [])
+    monkeypatch.setattr(energy, "_read_whole_home_watts",
+                        lambda h: (None, "sensor.home_power"))
+    advice = energy.power_status(_Hass())["advice"]
+    assert len(advice) == 1
+    assert "No whole-home power meter found" not in advice[0]
+    assert "isn't reporting" in advice[0]
+    monkeypatch.setattr(energy, "_read_whole_home_watts", lambda h: (None, ""))
+    assert "No whole-home power meter found" in energy.power_status(_Hass())["advice"][0]
 
 
 # ── agent tool registration ──────────────────────────────────────────────────

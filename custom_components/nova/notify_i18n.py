@@ -1,417 +1,718 @@
-"""Localized templates for Nova's deterministic safety/security notifications.
+"""Translations for the safety notifications Nova writes without the model.
 
-Freeze, intrusion and lockdown notifications are generated WITHOUT the LLM so
-they stay reliable — which means they need their own translations to honour a
-non-English household (the agent's language directive only covers LLM-generated
-replies). English is the base and the fallback for any language or key not
-present here. Entity/area names and the user's honorific are passed through as
-parameters and never translated.
+Freeze, intrusion and lockdown alerts are built from fixed templates so they
+never depend on the model, which also means the model's language setting
+cannot translate them. The household's language is looked up here instead,
+with English as the fallback for any language or key that is missing.
+Device names, area names and the honorific are filled in as they are, never
+translated.
 
-Scope: the self-contained safety messages. The composed lockdown variants that
-stitch together device lists ("I locked X and closed Y, but Z is open") are not
-here yet — localizing generated, grammar-sensitive device phrases is a separate
-pass, and a half-translated sentence reads worse than a clean English one.
+The longer lockdown summaries that stitch device lists into one sentence
+("I locked X and closed Y, but Z is open") are still English only; a half
+translated sentence reads worse than a clean English one.
+
+Notes for the lockdown templates:
+* {names} is a comma joined device list and always follows the verb, so
+  past participles never have to agree with a device (de and nl put the
+  participle after the object, as their grammar needs).
+* Clauses about a device are impersonal or use the infinitive, so one
+  wording is right whatever the device's grammatical gender.
+* The auxiliary ("I", "j'ai", "ich habe") sits in the wrapper, so {did}
+  reads naturally after it; pt uses the simple past and needs none.
+* The *_pending forms only say a command was sent. A background check
+  confirms each lock or cover later and alerts if one did not secure, so
+  these never claim the home is secure. lockdown_locked and lockdown_closed
+  remain for the night sweep's own wording.
 """
 from __future__ import annotations
 
 _FALLBACK = "en"
+
+# Full sentences start with this; see message().
+_HONORIFIC_LEAD_IN = "{honorific}, "
+
+# The word for "and" in device lists, and the languages that put a comma
+# before it.
+_AND: dict[str, str] = {"en": "and", "fr": "et", "de": "und", "es": "y",
+                        "it": "e", "nl": "en", "pt": "e"}
+_OXFORD = {"en"}
 
 
 def _norm(lang: str | None) -> str:
     return (lang or "en").split("-")[0].lower()
 
 
-TITLES: dict[str, dict[str, str]] = {
-    "freeze_critical": {
-        "en": "Nova — Freeze Warning", "fr": "Nova — Alerte de gel",
-        "de": "Nova — Frostwarnung", "es": "Nova — Alerta de heladas",
-        "it": "Nova — Allerta gelo", "nl": "Nova — Vorstwaarschuwing",
-        "pt": "Nova — Alerta de gelo",
+_TITLE_TEXT: dict[str, dict[str, str]] = {
+    "en": {  # English
+        "freeze_critical": "Nova — Freeze Warning",
+        "freeze_warning": "Nova — Temperature Alert",
+        "intrusion_investigating": "Nova — Security Alert",
+        "intrusion_confirmed": "Nova — INTRUSION",
+        "critical_hazard": "Nova — Safety Alarm",
+        "lockdown": "Nova — House Secured",
     },
-    "freeze_warning": {
-        "en": "Nova — Temperature Alert", "fr": "Nova — Alerte température",
-        "de": "Nova — Temperaturwarnung", "es": "Nova — Alerta de temperatura",
-        "it": "Nova — Allerta temperatura", "nl": "Nova — Temperatuuralarm",
-        "pt": "Nova — Alerta de temperatura",
+    "fr": {  # French
+        "freeze_critical": "Nova — Alerte de gel",
+        "freeze_warning": "Nova — Alerte température",
+        "intrusion_investigating": "Nova — Alerte de sécurité",
+        "intrusion_confirmed": "Nova — INTRUSION",
+        "critical_hazard": "Nova — Alarme de sécurité",
+        "lockdown": "Nova — Maison sécurisée",
     },
-    "intrusion_investigating": {
-        "en": "Nova — Security Alert", "fr": "Nova — Alerte de sécurité",
-        "de": "Nova — Sicherheitswarnung", "es": "Nova — Alerta de seguridad",
-        "it": "Nova — Allerta sicurezza", "nl": "Nova — Beveiligingsalarm",
-        "pt": "Nova — Alerta de segurança",
+    "de": {  # German
+        "freeze_critical": "Nova — Frostwarnung",
+        "freeze_warning": "Nova — Temperaturwarnung",
+        "intrusion_investigating": "Nova — Sicherheitswarnung",
+        "intrusion_confirmed": "Nova — EINBRUCH",
+        "critical_hazard": "Nova — Sicherheitsalarm",
+        "lockdown": "Nova — Haus gesichert",
     },
-    "intrusion_confirmed": {
-        "en": "Nova — INTRUSION", "fr": "Nova — INTRUSION",
-        "de": "Nova — EINBRUCH", "es": "Nova — INTRUSIÓN",
-        "it": "Nova — INTRUSIONE", "nl": "Nova — INBRAAK",
-        "pt": "Nova — INTRUSÃO",
+    "es": {  # Spanish
+        "freeze_critical": "Nova — Alerta de heladas",
+        "freeze_warning": "Nova — Alerta de temperatura",
+        "intrusion_investigating": "Nova — Alerta de seguridad",
+        "intrusion_confirmed": "Nova — INTRUSIÓN",
+        "critical_hazard": "Nova — Alarma de seguridad",
+        "lockdown": "Nova — Casa asegurada",
     },
-    "intrusion_away": {
-        "en": "Nova — Security Alert", "fr": "Nova — Alerte de sécurité",
-        "de": "Nova — Sicherheitswarnung", "es": "Nova — Alerta de seguridad",
-        "it": "Nova — Allerta sicurezza", "nl": "Nova — Beveiligingsalarm",
-        "pt": "Nova — Alerta de segurança",
+    "it": {  # Italian
+        "freeze_critical": "Nova — Allerta gelo",
+        "freeze_warning": "Nova — Allerta temperatura",
+        "intrusion_investigating": "Nova — Allerta sicurezza",
+        "intrusion_confirmed": "Nova — INTRUSIONE",
+        "critical_hazard": "Nova — Allarme di sicurezza",
+        "lockdown": "Nova — Casa protetta",
     },
-    "intrusion_sleep": {
-        "en": "Nova — Motion Detected", "fr": "Nova — Mouvement détecté",
-        "de": "Nova — Bewegung erkannt", "es": "Nova — Movimiento detectado",
-        "it": "Nova — Movimento rilevato", "nl": "Nova — Beweging gedetecteerd",
-        "pt": "Nova — Movimento detetado",
+    "nl": {  # Dutch
+        "freeze_critical": "Nova — Vorstwaarschuwing",
+        "freeze_warning": "Nova — Temperatuuralarm",
+        "intrusion_investigating": "Nova — Beveiligingsalarm",
+        "intrusion_confirmed": "Nova — INBRAAK",
+        "critical_hazard": "Nova — Veiligheidsalarm",
+        "lockdown": "Nova — Huis beveiligd",
     },
-    "critical_hazard": {
-        "en": "Nova — Safety Alarm", "fr": "Nova — Alarme de sécurité",
-        "de": "Nova — Sicherheitsalarm", "es": "Nova — Alarma de seguridad",
-        "it": "Nova — Allarme di sicurezza", "nl": "Nova — Veiligheidsalarm",
-        "pt": "Nova — Alarme de segurança",
-    },
-    "lockdown": {
-        "en": "Nova — House Secured", "fr": "Nova — Maison sécurisée",
-        "de": "Nova — Haus gesichert", "es": "Nova — Casa asegurada",
-        "it": "Nova — Casa protetta", "nl": "Nova — Huis beveiligd",
-        "pt": "Nova — Casa protegida",
+    "pt": {  # Portuguese
+        "freeze_critical": "Nova — Alerta de gelo",
+        "freeze_warning": "Nova — Alerta de temperatura",
+        "intrusion_investigating": "Nova — Alerta de segurança",
+        "intrusion_confirmed": "Nova — INTRUSÃO",
+        "critical_hazard": "Nova — Alarme de segurança",
+        "lockdown": "Nova — Casa protegida",
     },
 }
 
 
-MESSAGES: dict[str, dict[str, str]] = {
-    "freeze_critical": {
-        "en": "{honorific}, outdoor temperature has dropped to {reading}. Pipe freeze risk is severe. I recommend opening cabinet doors near exterior walls and confirming heat is set to at least {set_to}.",
-        "fr": "{honorific}, la température extérieure est descendue à {reading}. Le risque de gel des canalisations est élevé. Je recommande d'ouvrir les portes des placards le long des murs extérieurs et de régler le chauffage à au moins {set_to}.",
-        "de": "{honorific}, die Außentemperatur ist auf {reading} gefallen. Es besteht ein hohes Risiko eingefrorener Rohre. Ich empfehle, Schranktüren an Außenwänden zu öffnen und die Heizung auf mindestens {set_to} einzustellen.",
-        "es": "{honorific}, la temperatura exterior ha bajado a {reading}. El riesgo de congelación de tuberías es alto. Recomiendo abrir las puertas de los armarios junto a las paredes exteriores y ajustar la calefacción al menos a {set_to}.",
-        "it": "{honorific}, la temperatura esterna è scesa a {reading}. Il rischio di congelamento delle tubature è elevato. Consiglio di aprire gli sportelli dei mobiletti lungo le pareti esterne e di impostare il riscaldamento ad almeno {set_to}.",
-        "nl": "{honorific}, de buitentemperatuur is gedaald tot {reading}. Er is een hoog risico op bevriezing van leidingen. Ik raad aan om kastdeuren bij buitenmuren te openen en de verwarming op minstens {set_to} te zetten.",
-        "pt": "{honorific}, a temperatura exterior desceu para {reading}. O risco de congelamento das tubagens é elevado. Recomendo abrir as portas dos armários junto às paredes exteriores e definir o aquecimento para pelo menos {set_to}.",
+_MESSAGE_TEXT: dict[str, dict[str, str]] = {
+    "en": {  # English
+        "freeze_critical": (
+            "{honorific}, outdoor temperature has dropped to {reading}. Pipe "
+            "freeze risk is severe. I recommend opening cabinet doors near "
+            "exterior walls and confirming heat is set to at least {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, outdoor temperature is {reading}. I'm monitoring for "
+            "pipe freeze risk."
+        ),
+        "intrusion_alert": (
+            "{honorific}, motion at {where} while no one is home{ctx}. "
+            "Investigating from the point of entry — I'll alert the house and "
+            "every device only if it's a real intrusion."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, motion at {where} while the household is asleep{ctx}. "
+            "Investigating from the point of entry — I'll alert the house and "
+            "every device only if it's a real intrusion."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, motion at {where} while the house is secured{ctx}. "
+            "Investigating from the point of entry — I'll alert the house and "
+            "every device only if it's a real intrusion."
+        ),
+        "intrusion_ctx_open": " ({name} open)",
+        "intrusion_ctx_armed": " (alarm armed)",
+        "lockdown_lifted": "{honorific}, lockdown lifted. The house is back to normal.",
+        "lockdown_already_secured": (
+            "{honorific}, lockdown engaged — the home was already fully secured."
+        ),
+        "lockdown_locked": "locked {names}",
+        "lockdown_closed": "closed {names}",
+        "lockdown_lock_pending": "lock {names}",
+        "lockdown_close_pending": "close {names}",
+        "lockdown_gap_one": (
+            "{names} is open and I can't secure it remotely — you'll want to close "
+            "it"
+        ),
+        "lockdown_gap_few": (
+            "{names} are open and I can't secure them remotely — you'll want to "
+            "close them"
+        ),
+        "lockdown_gap_many": (
+            "{count} openings are open and I can't secure them remotely — you'll "
+            "want to close them"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, lockdown engaged. I sent commands to {did}. I will alert "
+            "you if anything does not secure."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, lockdown engaged. I sent commands to {did}, but {gap}. I "
+            "will alert you if anything does not secure."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, lockdown engaged. Everything was already secured, but "
+            "{gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, nighttime lockdown: {body}. The house is secured.",
+        "lockdown_left_alone": (
+            "{names} was opened again after I secured it, so I'll leave it until "
+            "morning"
+        ),
+        "lockdown_unreadable": "I can't tell if {names} is closed",
+        "lockdown_secure_failed": "I couldn't secure {names} — please check by hand",
+        "lockdown_failed_only": "{honorific}, lockdown engaged, but {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, nighttime lockdown: {body}. The house is not fully "
+            "secured — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, nighttime lockdown: the house is not fully secured — "
+            "{failed}."
+        ),
     },
-    "freeze_warning": {
-        "en": "{honorific}, outdoor temperature is {reading}. I'm monitoring for pipe freeze risk.",
-        "fr": "{honorific}, la température extérieure est de {reading}. Je surveille le risque de gel des canalisations.",
-        "de": "{honorific}, die Außentemperatur beträgt {reading}. Ich überwache das Risiko eingefrorener Rohre.",
-        "es": "{honorific}, la temperatura exterior es de {reading}. Estoy vigilando el riesgo de congelación de tuberías.",
-        "it": "{honorific}, la temperatura esterna è di {reading}. Sto monitorando il rischio di congelamento delle tubature.",
-        "nl": "{honorific}, de buitentemperatuur is {reading}. Ik houd het risico op bevriezing van leidingen in de gaten.",
-        "pt": "{honorific}, a temperatura exterior é de {reading}. Estou a monitorizar o risco de congelamento das tubagens.",
+    "fr": {  # French
+        "freeze_critical": (
+            "{honorific}, la température extérieure est descendue à {reading}. Le "
+            "risque de gel des canalisations est élevé. Je recommande d'ouvrir les "
+            "portes des placards le long des murs extérieurs et de régler le "
+            "chauffage à au moins {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, la température extérieure est de {reading}. Je surveille "
+            "le risque de gel des canalisations."
+        ),
+        "intrusion_alert": (
+            "{honorific}, mouvement détecté à {where} alors que personne n'est à "
+            "la maison{ctx}. J'enquête depuis le point d'entrée — je n'alerterai "
+            "la maison et tous les appareils que s'il s'agit d'une véritable "
+            "intrusion."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, mouvement détecté à {where} pendant que le foyer "
+            "dort{ctx}. J'enquête depuis le point d'entrée — je n'alerterai la "
+            "maison et tous les appareils que s'il s'agit d'une véritable "
+            "intrusion."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, mouvement détecté à {where} alors que la maison est "
+            "sécurisée{ctx}. J'enquête depuis le point d'entrée — je n'alerterai "
+            "la maison et tous les appareils que s'il s'agit d'une véritable "
+            "intrusion."
+        ),
+        "intrusion_ctx_open": " ({name} ouvert)",
+        "intrusion_ctx_armed": " (alarme armée)",
+        "lockdown_lifted": "{honorific}, confinement levé. La maison est revenue à la normale.",
+        "lockdown_already_secured": (
+            "{honorific}, confinement activé — la maison était déjà entièrement "
+            "sécurisée."
+        ),
+        "lockdown_locked": "verrouillé {names}",
+        "lockdown_closed": "fermé {names}",
+        "lockdown_lock_pending": "verrouiller {names}",
+        "lockdown_close_pending": "fermer {names}",
+        "lockdown_gap_one": "{names} : impossible à verrouiller à distance, à fermer manuellement",
+        "lockdown_gap_few": "{names} : impossible à verrouiller à distance, à fermer manuellement",
+        "lockdown_gap_many": (
+            "{count} ouvertures ne peuvent pas être verrouillées à distance — à "
+            "fermer manuellement"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, confinement activé. J'ai envoyé les commandes pour "
+            "{did}. Je vous alerterai si quelque chose ne se sécurise pas."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, confinement activé. J'ai envoyé les commandes pour "
+            "{did}, mais {gap}. Je vous alerterai si quelque chose ne se sécurise "
+            "pas."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, confinement activé. Tout était déjà sécurisé, mais {gap}."
+        ),
+        "lockdown_nighttime": (
+            "{honorific}, confinement nocturne : {body}. La maison est sécurisée."
+        ),
+        "lockdown_left_alone": (
+            "{names} a été rouvert après que je l'ai sécurisé, je n'y touche plus "
+            "jusqu'au matin"
+        ),
+        "lockdown_unreadable": "je ne sais pas si {names} est fermé",
+        "lockdown_secure_failed": "je n'ai pas pu sécuriser {names} — à vérifier manuellement",
+        "lockdown_failed_only": "{honorific}, confinement activé, mais {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, confinement nocturne : {body}. La maison n'est pas "
+            "entièrement sécurisée — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, confinement nocturne : la maison n'est pas entièrement "
+            "sécurisée — {failed}."
+        ),
     },
-    "intrusion_alert": {
-        "en": "{honorific}, motion at {where} while no one is home{ctx}. Investigating from the point of entry — I'll alert the house and every device only if it's a real intrusion.",
-        "fr": "{honorific}, mouvement détecté à {where} alors que personne n'est à la maison{ctx}. J'enquête depuis le point d'entrée — je n'alerterai la maison et tous les appareils que s'il s'agit d'une véritable intrusion.",
-        "de": "{honorific}, Bewegung bei {where}, während niemand zu Hause ist{ctx}. Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und alle Geräte nur bei einem echten Einbruch.",
-        "es": "{honorific}, movimiento en {where} cuando no hay nadie en casa{ctx}. Estoy investigando desde el punto de entrada; solo alertaré a la casa y a todos los dispositivos si es una intrusión real.",
-        "it": "{honorific}, movimento a {where} mentre non c'è nessuno in casa{ctx}. Sto indagando dal punto di ingresso — avviserò la casa e tutti i dispositivi solo se si tratta di una vera intrusione.",
-        "nl": "{honorific}, beweging bij {where} terwijl er niemand thuis is{ctx}. Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en alle apparaten alleen als het een echte inbraak is.",
-        "pt": "{honorific}, movimento em {where} enquanto não está ninguém em casa{ctx}. Estou a investigar a partir do ponto de entrada — só alertarei a casa e todos os dispositivos se for uma intrusão real.",
+    "de": {  # German
+        "freeze_critical": (
+            "{honorific}, die Außentemperatur ist auf {reading} gefallen. Es "
+            "besteht ein hohes Risiko eingefrorener Rohre. Ich empfehle, "
+            "Schranktüren an Außenwänden zu öffnen und die Heizung auf mindestens "
+            "{set_to} einzustellen."
+        ),
+        "freeze_warning": (
+            "{honorific}, die Außentemperatur beträgt {reading}. Ich überwache das "
+            "Risiko eingefrorener Rohre."
+        ),
+        "intrusion_alert": (
+            "{honorific}, Bewegung bei {where}, während niemand zu Hause ist{ctx}. "
+            "Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und "
+            "alle Geräte nur bei einem echten Einbruch."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, Bewegung bei {where}, während der Haushalt schläft{ctx}. "
+            "Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und "
+            "alle Geräte nur bei einem echten Einbruch."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, Bewegung bei {where}, während das Haus gesichert "
+            "ist{ctx}. Ich untersuche vom Eintrittspunkt aus — ich alarmiere das "
+            "Haus und alle Geräte nur bei einem echten Einbruch."
+        ),
+        "intrusion_ctx_open": " ({name} offen)",
+        "intrusion_ctx_armed": " (Alarm scharf)",
+        "lockdown_lifted": (
+            "{honorific}, Sicherung aufgehoben. Das Haus ist wieder im "
+            "Normalzustand."
+        ),
+        "lockdown_already_secured": (
+            "{honorific}, Sicherung aktiviert — das Haus war bereits vollständig "
+            "gesichert."
+        ),
+        "lockdown_locked": "{names} verriegelt",
+        "lockdown_closed": "{names} geschlossen",
+        "lockdown_lock_pending": "{names} zu verriegeln",
+        "lockdown_close_pending": "{names} zu schließen",
+        "lockdown_gap_one": (
+            "{names}: lässt sich nicht aus der Ferne sichern — bitte manuell "
+            "schließen"
+        ),
+        "lockdown_gap_few": (
+            "{names}: lassen sich nicht aus der Ferne sichern — bitte manuell "
+            "schließen"
+        ),
+        "lockdown_gap_many": (
+            "{count} Öffnungen lassen sich nicht aus der Ferne sichern — bitte "
+            "manuell schließen"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um "
+            "{did}. Ich werde Sie benachrichtigen, falls etwas nicht sichert."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um "
+            "{did}, aber {gap}. Ich werde Sie benachrichtigen, falls etwas nicht "
+            "sichert."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, Sicherung aktiviert. Alles war bereits gesichert, aber "
+            "{gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, nächtliche Sicherung: {body}. Das Haus ist gesichert.",
+        "lockdown_left_alone": (
+            "{names} wurde wieder geöffnet, nachdem ich es gesichert hatte, ich "
+            "lasse es bis zum Morgen"
+        ),
+        "lockdown_unreadable": "ich kann nicht erkennen, ob {names} geschlossen ist",
+        "lockdown_secure_failed": "{names} konnte nicht gesichert werden — bitte manuell prüfen",
+        "lockdown_failed_only": "{honorific}, Sicherung aktiviert, aber {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, nächtliche Sicherung: {body}. Das Haus ist nicht "
+            "vollständig gesichert — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, nächtliche Sicherung: das Haus ist nicht vollständig "
+            "gesichert — {failed}."
+        ),
     },
-    "intrusion_alert_sleep": {
-        "en": "{honorific}, motion at {where} while the household is asleep{ctx}. Investigating from the point of entry — I'll alert the house and every device only if it's a real intrusion.",
-        "fr": "{honorific}, mouvement détecté à {where} pendant que le foyer dort{ctx}. J'enquête depuis le point d'entrée — je n'alerterai la maison et tous les appareils que s'il s'agit d'une véritable intrusion.",
-        "de": "{honorific}, Bewegung bei {where}, während der Haushalt schläft{ctx}. Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und alle Geräte nur bei einem echten Einbruch.",
-        "es": "{honorific}, movimiento en {where} mientras la casa duerme{ctx}. Estoy investigando desde el punto de entrada; solo alertaré a la casa y a todos los dispositivos si es una intrusión real.",
-        "it": "{honorific}, movimento a {where} mentre la casa dorme{ctx}. Sto indagando dal punto di ingresso — avviserò la casa e tutti i dispositivi solo se si tratta di una vera intrusione.",
-        "nl": "{honorific}, beweging bij {where} terwijl het huishouden slaapt{ctx}. Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en alle apparaten alleen als het een echte inbraak is.",
-        "pt": "{honorific}, movimento em {where} enquanto a casa dorme{ctx}. Estou a investigar a partir do ponto de entrada — só alertarei a casa e todos os dispositivos se for uma intrusão real.",
+    "es": {  # Spanish
+        "freeze_critical": (
+            "{honorific}, la temperatura exterior ha bajado a {reading}. El riesgo "
+            "de congelación de tuberías es alto. Recomiendo abrir las puertas de "
+            "los armarios junto a las paredes exteriores y ajustar la calefacción "
+            "al menos a {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, la temperatura exterior es de {reading}. Estoy vigilando "
+            "el riesgo de congelación de tuberías."
+        ),
+        "intrusion_alert": (
+            "{honorific}, movimiento en {where} cuando no hay nadie en casa{ctx}. "
+            "Estoy investigando desde el punto de entrada; solo alertaré a la casa "
+            "y a todos los dispositivos si es una intrusión real."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, movimiento en {where} mientras la casa duerme{ctx}. "
+            "Estoy investigando desde el punto de entrada; solo alertaré a la casa "
+            "y a todos los dispositivos si es una intrusión real."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, movimiento en {where} mientras la casa está "
+            "protegida{ctx}. Estoy investigando desde el punto de entrada; solo "
+            "alertaré a la casa y a todos los dispositivos si es una intrusión "
+            "real."
+        ),
+        "intrusion_ctx_open": " ({name} abierto)",
+        "intrusion_ctx_armed": " (alarma armada)",
+        "lockdown_lifted": (
+            "{honorific}, confinamiento desactivado. La casa ha vuelto a la "
+            "normalidad."
+        ),
+        "lockdown_already_secured": (
+            "{honorific}, confinamiento activado — la casa ya estaba totalmente "
+            "asegurada."
+        ),
+        "lockdown_locked": "bloqueado {names}",
+        "lockdown_closed": "cerrado {names}",
+        "lockdown_lock_pending": "bloquear {names}",
+        "lockdown_close_pending": "cerrar {names}",
+        "lockdown_gap_one": (
+            "{names}: no se puede asegurar a distancia — hay que cerrarlo "
+            "manualmente"
+        ),
+        "lockdown_gap_few": (
+            "{names}: no se pueden asegurar a distancia — hay que cerrarlos "
+            "manualmente"
+        ),
+        "lockdown_gap_many": (
+            "{count} aberturas no se pueden asegurar a distancia — hay que "
+            "cerrarlas manualmente"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, confinamiento activado. He enviado órdenes para {did}. "
+            "Le avisaré si algo no se asegura."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, confinamiento activado. He enviado órdenes para {did}, "
+            "pero {gap}. Le avisaré si algo no se asegura."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, confinamiento activado. Todo ya estaba asegurado, pero "
+            "{gap}."
+        ),
+        "lockdown_nighttime": (
+            "{honorific}, confinamiento nocturno: {body}. La casa está asegurada."
+        ),
+        "lockdown_left_alone": (
+            "{names} se volvió a abrir después de asegurarlo, así que lo dejo "
+            "hasta mañana"
+        ),
+        "lockdown_unreadable": "no sé si {names} está cerrado",
+        "lockdown_secure_failed": "no pude asegurar {names} — hay que revisarlo manualmente",
+        "lockdown_failed_only": "{honorific}, confinamiento activado, pero {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, confinamiento nocturno: {body}. La casa no está "
+            "totalmente asegurada — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, confinamiento nocturno: la casa no está totalmente "
+            "asegurada — {failed}."
+        ),
     },
-    "intrusion_alert_confined": {
-        "en": "{honorific}, motion at {where} while the house is secured{ctx}. Investigating from the point of entry — I'll alert the house and every device only if it's a real intrusion.",
-        "fr": "{honorific}, mouvement détecté à {where} alors que la maison est sécurisée{ctx}. J'enquête depuis le point d'entrée — je n'alerterai la maison et tous les appareils que s'il s'agit d'une véritable intrusion.",
-        "de": "{honorific}, Bewegung bei {where}, während das Haus gesichert ist{ctx}. Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und alle Geräte nur bei einem echten Einbruch.",
-        "es": "{honorific}, movimiento en {where} mientras la casa está protegida{ctx}. Estoy investigando desde el punto de entrada; solo alertaré a la casa y a todos los dispositivos si es una intrusión real.",
-        "it": "{honorific}, movimento a {where} mentre la casa è messa in sicurezza{ctx}. Sto indagando dal punto di ingresso — avviserò la casa e tutti i dispositivi solo se si tratta di una vera intrusione.",
-        "nl": "{honorific}, beweging bij {where} terwijl het huis beveiligd is{ctx}. Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en alle apparaten alleen als het een echte inbraak is.",
-        "pt": "{honorific}, movimento em {where} enquanto a casa está protegida{ctx}. Estou a investigar a partir do ponto de entrada — só alertarei a casa e todos os dispositivos se for uma intrusão real.",
+    "it": {  # Italian
+        "freeze_critical": (
+            "{honorific}, la temperatura esterna è scesa a {reading}. Il rischio "
+            "di congelamento delle tubature è elevato. Consiglio di aprire gli "
+            "sportelli dei mobiletti lungo le pareti esterne e di impostare il "
+            "riscaldamento ad almeno {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, la temperatura esterna è di {reading}. Sto monitorando "
+            "il rischio di congelamento delle tubature."
+        ),
+        "intrusion_alert": (
+            "{honorific}, movimento a {where} mentre non c'è nessuno in casa{ctx}. "
+            "Sto indagando dal punto di ingresso — avviserò la casa e tutti i "
+            "dispositivi solo se si tratta di una vera intrusione."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, movimento a {where} mentre la casa dorme{ctx}. Sto "
+            "indagando dal punto di ingresso — avviserò la casa e tutti i "
+            "dispositivi solo se si tratta di una vera intrusione."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, movimento a {where} mentre la casa è messa in "
+            "sicurezza{ctx}. Sto indagando dal punto di ingresso — avviserò la "
+            "casa e tutti i dispositivi solo se si tratta di una vera intrusione."
+        ),
+        "intrusion_ctx_open": " ({name} aperto)",
+        "intrusion_ctx_armed": " (allarme inserito)",
+        "lockdown_lifted": "{honorific}, blocco revocato. La casa è tornata alla normalità.",
+        "lockdown_already_secured": (
+            "{honorific}, blocco attivato — la casa era già completamente protetta."
+        ),
+        "lockdown_locked": "bloccato {names}",
+        "lockdown_closed": "chiuso {names}",
+        "lockdown_lock_pending": "bloccare {names}",
+        "lockdown_close_pending": "chiudere {names}",
+        "lockdown_gap_one": "{names}: impossibile bloccare a distanza — da chiudere manualmente",
+        "lockdown_gap_few": "{names}: impossibile bloccare a distanza — da chiudere manualmente",
+        "lockdown_gap_many": (
+            "{count} aperture non si possono bloccare a distanza — da chiudere "
+            "manualmente"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, blocco attivato. Ho inviato i comandi per {did}. Ti "
+            "avviserò se qualcosa non si mette in sicurezza."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, blocco attivato. Ho inviato i comandi per {did}, ma "
+            "{gap}. Ti avviserò se qualcosa non si mette in sicurezza."
+        ),
+        "lockdown_gap_only": "{honorific}, blocco attivato. Era già tutto protetto, ma {gap}.",
+        "lockdown_nighttime": "{honorific}, blocco notturno: {body}. La casa è protetta.",
+        "lockdown_left_alone": (
+            "{names} è stato riaperto dopo che l'avevo messo in sicurezza, lo "
+            "lascio stare fino al mattino"
+        ),
+        "lockdown_unreadable": "non riesco a capire se {names} è chiuso",
+        "lockdown_secure_failed": (
+            "non sono riuscito a mettere in sicurezza {names} — da controllare "
+            "manualmente"
+        ),
+        "lockdown_failed_only": "{honorific}, blocco attivato, ma {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, blocco notturno: {body}. La casa non è completamente "
+            "protetta — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, blocco notturno: la casa non è completamente protetta — "
+            "{failed}."
+        ),
     },
-    "intrusion_ctx_open": {
-        "en": " ({name} open)", "fr": " ({name} ouvert)", "de": " ({name} offen)",
-        "es": " ({name} abierto)", "it": " ({name} aperto)",
-        "nl": " ({name} open)", "pt": " ({name} aberto)",
+    "nl": {  # Dutch
+        "freeze_critical": (
+            "{honorific}, de buitentemperatuur is gedaald tot {reading}. Er is een "
+            "hoog risico op bevriezing van leidingen. Ik raad aan om kastdeuren "
+            "bij buitenmuren te openen en de verwarming op minstens {set_to} te "
+            "zetten."
+        ),
+        "freeze_warning": (
+            "{honorific}, de buitentemperatuur is {reading}. Ik houd het risico op "
+            "bevriezing van leidingen in de gaten."
+        ),
+        "intrusion_alert": (
+            "{honorific}, beweging bij {where} terwijl er niemand thuis is{ctx}. "
+            "Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en "
+            "alle apparaten alleen als het een echte inbraak is."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, beweging bij {where} terwijl het huishouden slaapt{ctx}. "
+            "Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en "
+            "alle apparaten alleen als het een echte inbraak is."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, beweging bij {where} terwijl het huis beveiligd is{ctx}. "
+            "Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en "
+            "alle apparaten alleen als het een echte inbraak is."
+        ),
+        "intrusion_ctx_open": " ({name} open)",
+        "intrusion_ctx_armed": " (alarm ingeschakeld)",
+        "lockdown_lifted": "{honorific}, vergrendeling opgeheven. Het huis is weer normaal.",
+        "lockdown_already_secured": (
+            "{honorific}, vergrendeling ingeschakeld — het huis was al volledig "
+            "beveiligd."
+        ),
+        "lockdown_locked": "{names} vergrendeld",
+        "lockdown_closed": "{names} gesloten",
+        "lockdown_lock_pending": "{names} te vergrendelen",
+        "lockdown_close_pending": "{names} te sluiten",
+        "lockdown_gap_one": "{names}: niet op afstand te vergrendelen — graag handmatig sluiten",
+        "lockdown_gap_few": "{names}: niet op afstand te vergrendelen — graag handmatig sluiten",
+        "lockdown_gap_many": (
+            "{count} openingen zijn niet op afstand te vergrendelen — graag "
+            "handmatig sluiten"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd "
+            "om {did}. Ik waarschuw u als iets niet beveiligt."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd "
+            "om {did}, maar {gap}. Ik waarschuw u als iets niet beveiligt."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, vergrendeling ingeschakeld. Alles was al beveiligd, maar "
+            "{gap}."
+        ),
+        "lockdown_nighttime": (
+            "{honorific}, nachtelijke vergrendeling: {body}. Het huis is beveiligd."
+        ),
+        "lockdown_left_alone": (
+            "{names} is weer geopend nadat ik het had beveiligd, dus ik laat het "
+            "tot de ochtend"
+        ),
+        "lockdown_unreadable": "ik kan niet zien of {names} dicht is",
+        "lockdown_secure_failed": "ik kon {names} niet beveiligen — graag handmatig controleren",
+        "lockdown_failed_only": "{honorific}, vergrendeling ingeschakeld, maar {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, nachtelijke vergrendeling: {body}. Het huis is niet "
+            "volledig beveiligd — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, nachtelijke vergrendeling: het huis is niet volledig "
+            "beveiligd — {failed}."
+        ),
     },
-    "intrusion_ctx_armed": {
-        "en": " (alarm armed)", "fr": " (alarme armée)", "de": " (Alarm scharf)",
-        "es": " (alarma armada)", "it": " (allarme inserito)",
-        "nl": " (alarm ingeschakeld)", "pt": " (alarme armado)",
-    },
-    "lockdown_lifted": {
-        "en": "{honorific}, lockdown lifted. The house is back to normal.",
-        "fr": "{honorific}, confinement levé. La maison est revenue à la normale.",
-        "de": "{honorific}, Sicherung aufgehoben. Das Haus ist wieder im Normalzustand.",
-        "es": "{honorific}, confinamiento desactivado. La casa ha vuelto a la normalidad.",
-        "it": "{honorific}, blocco revocato. La casa è tornata alla normalità.",
-        "nl": "{honorific}, vergrendeling opgeheven. Het huis is weer normaal.",
-        "pt": "{honorific}, confinamento levantado. A casa voltou ao normal.",
-    },
-    "lockdown_already_secured": {
-        "en": "{honorific}, lockdown engaged — the home was already fully secured.",
-        "fr": "{honorific}, confinement activé — la maison était déjà entièrement sécurisée.",
-        "de": "{honorific}, Sicherung aktiviert — das Haus war bereits vollständig gesichert.",
-        "es": "{honorific}, confinamiento activado — la casa ya estaba totalmente asegurada.",
-        "it": "{honorific}, blocco attivato — la casa era già completamente protetta.",
-        "nl": "{honorific}, vergrendeling ingeschakeld — het huis was al volledig beveiligd.",
-        "pt": "{honorific}, confinamento ativado — a casa já estava totalmente protegida.",
-    },
-    # ── Composed lockdown pieces (device lists) ─────────────────────────────
-    # Verb phrases: {names} is a comma-joined device list and always follows the
-    # verb, so past participles stay invariable (no gender agreement with the
-    # device). de/nl place the participle after the object, as the grammar wants.
-    "lockdown_locked": {
-        "en": "locked {names}", "fr": "verrouillé {names}",
-        "de": "{names} verriegelt", "es": "bloqueado {names}",
-        "it": "bloccato {names}", "nl": "{names} vergrendeld",
-        "pt": "tranquei {names}",
-    },
-    "lockdown_closed": {
-        "en": "closed {names}", "fr": "fermé {names}",
-        "de": "{names} geschlossen", "es": "cerrado {names}",
-        "it": "chiuso {names}", "nl": "{names} gesloten",
-        "pt": "fechei {names}",
-    },
-    # Pending-verification verb phrases (Phase 3): engage() schedules a
-    # background _verify_secured() for every lock/cover it acts on, so its
-    # own immediate announcement must not claim "locked"/"closed" (a
-    # completion it hasn't observed) -- these are infinitive forms paired
-    # with the "I sent commands to ..." wrappers below. lockdown_locked/
-    # lockdown_closed above are untouched and still used, unchanged, by
-    # _nighttime_lockdown's own blocking wording -- a blocking service call
-    # only proves Home Assistant accepted and handled the request, not that
-    # the lock/cover physically reached that state; that path is unchanged
-    # and out of scope for this phase, not claimed as verified.
-    "lockdown_lock_pending": {
-        "en": "lock {names}", "fr": "verrouiller {names}",
-        "de": "{names} zu verriegeln", "es": "bloquear {names}",
-        "it": "bloccare {names}", "nl": "{names} te vergrendelen",
-        "pt": "trancar {names}",
-    },
-    "lockdown_close_pending": {
-        "en": "close {names}", "fr": "fermer {names}",
-        "de": "{names} zu schließen", "es": "cerrar {names}",
-        "it": "chiudere {names}", "nl": "{names} te sluiten",
-        "pt": "fechar {names}",
-    },
-    # Gap clauses — openings that can't be secured remotely. Phrased to avoid any
-    # adjective/pronoun agreeing with the (unknown-gender) device: impersonal /
-    # infinitive forms, so one wording is correct whatever the device is.
-    "lockdown_gap_one": {
-        "en": "{names} is open and I can't secure it remotely — you'll want to close it",
-        "fr": "{names} : impossible à verrouiller à distance, à fermer manuellement",
-        "de": "{names}: lässt sich nicht aus der Ferne sichern — bitte manuell schließen",
-        "es": "{names}: no se puede asegurar a distancia — hay que cerrarlo manualmente",
-        "it": "{names}: impossibile bloccare a distanza — da chiudere manualmente",
-        "nl": "{names}: niet op afstand te vergrendelen — graag handmatig sluiten",
-        "pt": "{names}: não dá para trancar à distância — feche manualmente",
-    },
-    "lockdown_gap_few": {
-        "en": "{names} are open and I can't secure them remotely — you'll want to close them",
-        "fr": "{names} : impossible à verrouiller à distance, à fermer manuellement",
-        "de": "{names}: lassen sich nicht aus der Ferne sichern — bitte manuell schließen",
-        "es": "{names}: no se pueden asegurar a distancia — hay que cerrarlos manualmente",
-        "it": "{names}: impossibile bloccare a distanza — da chiudere manualmente",
-        "nl": "{names}: niet op afstand te vergrendelen — graag handmatig sluiten",
-        "pt": "{names}: não dá para trancar à distância — feche manualmente",
-    },
-    "lockdown_gap_many": {
-        "en": "{count} openings are open and I can't secure them remotely — you'll want to close them",
-        "fr": "{count} ouvertures ne peuvent pas être verrouillées à distance — à fermer manuellement",
-        "de": "{count} Öffnungen lassen sich nicht aus der Ferne sichern — bitte manuell schließen",
-        "es": "{count} aberturas no se pueden asegurar a distancia — hay que cerrarlas manualmente",
-        "it": "{count} aperture non si possono bloccare a distanza — da chiudere manualmente",
-        "nl": "{count} openingen zijn niet op afstand te vergrendelen — graag handmatig sluiten",
-        "pt": "{count} aberturas não podem ser trancadas à distância — feche manualmente",
-    },
-    # Wrappers. The auxiliary ("I", "j'ai", "ich habe", …) lives in the wrapper
-    # so {did} — the joined verb phrases — reads naturally after it; pt uses the
-    # simple past and takes no auxiliary.
-    "lockdown_did": {
-        "en": "{honorific}, lockdown engaged — I {did}. The home is secure.",
-        "fr": "{honorific}, confinement activé — j'ai {did}. La maison est sécurisée.",
-        "de": "{honorific}, Sicherung aktiviert — ich habe {did}. Das Haus ist gesichert.",
-        "es": "{honorific}, confinamiento activado — he {did}. La casa está asegurada.",
-        "it": "{honorific}, blocco attivato — ho {did}. La casa è protetta.",
-        "nl": "{honorific}, vergrendeling ingeschakeld — ik heb {did}. Het huis is beveiligd.",
-        "pt": "{honorific}, confinamento ativado — {did}. A casa está segura.",
-    },
-    "lockdown_did_gap": {
-        "en": "{honorific}, lockdown engaged — I {did}, but {gap}.",
-        "fr": "{honorific}, confinement activé — j'ai {did}, mais {gap}.",
-        "de": "{honorific}, Sicherung aktiviert — ich habe {did}, aber {gap}.",
-        "es": "{honorific}, confinamiento activado — he {did}, pero {gap}.",
-        "it": "{honorific}, blocco attivato — ho {did}, ma {gap}.",
-        "nl": "{honorific}, vergrendeling ingeschakeld — ik heb {did}, maar {gap}.",
-        "pt": "{honorific}, confinamento ativado — {did}, mas {gap}.",
-    },
-    # Pending-verification wrappers (Phase 3): used by build_lockdown_message
-    # in place of lockdown_did/lockdown_did_gap whenever it locked or closed
-    # something -- that action is only accepted, not yet confirmed, so the
-    # wrapper reports what was SENT and promises an alert rather than
-    # asserting the home is secure. lockdown_did/lockdown_did_gap below are
-    # untouched (still used by their own existing callers/tests).
-    "lockdown_did_pending": {
-        "en": "{honorific}, lockdown engaged. I sent commands to {did}. I will alert you if anything does not secure.",
-        "fr": "{honorific}, confinement activé. J'ai envoyé les commandes pour {did}. Je vous alerterai si quelque chose ne se sécurise pas.",
-        "de": "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um {did}. Ich werde Sie benachrichtigen, falls etwas nicht sichert.",
-        "es": "{honorific}, confinamiento activado. He enviado órdenes para {did}. Le avisaré si algo no se asegura.",
-        "it": "{honorific}, blocco attivato. Ho inviato i comandi per {did}. Ti avviserò se qualcosa non si mette in sicurezza.",
-        "nl": "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd om {did}. Ik waarschuw u als iets niet beveiligt.",
-        "pt": "{honorific}, confinamento ativado. Enviei comandos para {did}. Vou avisá-lo se algo não ficar seguro.",
-    },
-    "lockdown_did_gap_pending": {
-        "en": "{honorific}, lockdown engaged. I sent commands to {did}, but {gap}. I will alert you if anything does not secure.",
-        "fr": "{honorific}, confinement activé. J'ai envoyé les commandes pour {did}, mais {gap}. Je vous alerterai si quelque chose ne se sécurise pas.",
-        "de": "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um {did}, aber {gap}. Ich werde Sie benachrichtigen, falls etwas nicht sichert.",
-        "es": "{honorific}, confinamiento activado. He enviado órdenes para {did}, pero {gap}. Le avisaré si algo no se asegura.",
-        "it": "{honorific}, blocco attivato. Ho inviato i comandi per {did}, ma {gap}. Ti avviserò se qualcosa non si mette in sicurezza.",
-        "nl": "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd om {did}, maar {gap}. Ik waarschuw u als iets niet beveiligt.",
-        "pt": "{honorific}, confinamento ativado. Enviei comandos para {did}, mas {gap}. Vou avisá-lo se algo não ficar seguro.",
-    },
-    "lockdown_gap_only": {
-        "en": "{honorific}, lockdown engaged. Everything was already secured, but {gap}.",
-        "fr": "{honorific}, confinement activé. Tout était déjà sécurisé, mais {gap}.",
-        "de": "{honorific}, Sicherung aktiviert. Alles war bereits gesichert, aber {gap}.",
-        "es": "{honorific}, confinamiento activado. Todo ya estaba asegurado, pero {gap}.",
-        "it": "{honorific}, blocco attivato. Era già tutto protetto, ma {gap}.",
-        "nl": "{honorific}, vergrendeling ingeschakeld. Alles was al beveiligd, maar {gap}.",
-        "pt": "{honorific}, confinamento ativado. Tudo já estava seguro, mas {gap}.",
-    },
-    "lockdown_nighttime": {
-        "en": "{honorific}, nighttime lockdown: {body}. The house is secured.",
-        "fr": "{honorific}, confinement nocturne : {body}. La maison est sécurisée.",
-        "de": "{honorific}, nächtliche Sicherung: {body}. Das Haus ist gesichert.",
-        "es": "{honorific}, confinamiento nocturno: {body}. La casa está asegurada.",
-        "it": "{honorific}, blocco notturno: {body}. La casa è protetta.",
-        "nl": "{honorific}, nachtelijke vergrendeling: {body}. Het huis is beveiligd.",
-        "pt": "{honorific}, confinamento noturno: {body}. A casa está segura.",
-    },
-    # Failure wording (8.7.16). {names} is a comma joined device list. The
-    # clause is impersonal so it reads the same whatever the device is.
-    # The night sweep left something alone until morning because it was
-    # opened again after the sweep secured it (8.25.0).
-    "lockdown_left_alone": {
-        "en": "{names} was opened again after I secured it, so I'll leave it until morning",
-        "fr": "{names} a été rouvert après que je l'ai sécurisé, je n'y touche plus jusqu'au matin",
-        "de": "{names} wurde wieder geöffnet, nachdem ich es gesichert hatte, ich lasse es bis zum Morgen",
-        "es": "{names} se volvió a abrir después de asegurarlo, así que lo dejo hasta mañana",
-        "it": "{names} è stato riaperto dopo che l'avevo messo in sicurezza, lo lascio stare fino al mattino",
-        "nl": "{names} is weer geopend nadat ik het had beveiligd, dus ik laat het tot de ochtend",
-        "pt": "{names} foi aberto de novo depois de eu o proteger, por isso deixo-o até de manhã",
-    },
-    # Lockdown could not read these doors or windows (8.25.0).
-    "lockdown_unreadable": {
-        "en": "I can't tell if {names} is closed",
-        "fr": "je ne sais pas si {names} est fermé",
-        "de": "ich kann nicht erkennen, ob {names} geschlossen ist",
-        "es": "no sé si {names} está cerrado",
-        "it": "non riesco a capire se {names} è chiuso",
-        "nl": "ik kan niet zien of {names} dicht is",
-        "pt": "não consigo saber se {names} está fechado",
-    },
-    "lockdown_secure_failed": {
-        "en": "I couldn't secure {names} — please check by hand",
-        "fr": "je n'ai pas pu sécuriser {names} — à vérifier manuellement",
-        "de": "{names} konnte nicht gesichert werden — bitte manuell prüfen",
-        "es": "no pude asegurar {names} — hay que revisarlo manualmente",
-        "it": "non sono riuscito a mettere in sicurezza {names} — da controllare manualmente",
-        "nl": "ik kon {names} niet beveiligen — graag handmatig controleren",
-        "pt": "não consegui proteger {names} — verifique manualmente",
-    },
-    # Lockdown engaged, nothing could be sent or was already secure, but a lock
-    # command failed: never "already fully secured".
-    "lockdown_failed_only": {
-        "en": "{honorific}, lockdown engaged, but {gap}.",
-        "fr": "{honorific}, confinement activé, mais {gap}.",
-        "de": "{honorific}, Sicherung aktiviert, aber {gap}.",
-        "es": "{honorific}, confinamiento activado, pero {gap}.",
-        "it": "{honorific}, blocco attivato, ma {gap}.",
-        "nl": "{honorific}, vergrendeling ingeschakeld, maar {gap}.",
-        "pt": "{honorific}, confinamento ativado, mas {gap}.",
-    },
-    "lockdown_nighttime_partial": {
-        "en": "{honorific}, nighttime lockdown: {body}. The house is not fully secured — {failed}.",
-        "fr": "{honorific}, confinement nocturne : {body}. La maison n'est pas entièrement sécurisée — {failed}.",
-        "de": "{honorific}, nächtliche Sicherung: {body}. Das Haus ist nicht vollständig gesichert — {failed}.",
-        "es": "{honorific}, confinamiento nocturno: {body}. La casa no está totalmente asegurada — {failed}.",
-        "it": "{honorific}, blocco notturno: {body}. La casa non è completamente protetta — {failed}.",
-        "nl": "{honorific}, nachtelijke vergrendeling: {body}. Het huis is niet volledig beveiligd — {failed}.",
-        "pt": "{honorific}, confinamento noturno: {body}. A casa não está totalmente segura — {failed}.",
-    },
-    "lockdown_nighttime_failed_only": {
-        "en": "{honorific}, nighttime lockdown: the house is not fully secured — {failed}.",
-        "fr": "{honorific}, confinement nocturne : la maison n'est pas entièrement sécurisée — {failed}.",
-        "de": "{honorific}, nächtliche Sicherung: das Haus ist nicht vollständig gesichert — {failed}.",
-        "es": "{honorific}, confinamiento nocturno: la casa no está totalmente asegurada — {failed}.",
-        "it": "{honorific}, blocco notturno: la casa non è completamente protetta — {failed}.",
-        "nl": "{honorific}, nachtelijke vergrendeling: het huis is niet volledig beveiligd — {failed}.",
-        "pt": "{honorific}, confinamento noturno: a casa não está totalmente segura — {failed}.",
+    "pt": {  # Portuguese
+        "freeze_critical": (
+            "{honorific}, a temperatura exterior desceu para {reading}. O risco de "
+            "congelamento das tubagens é elevado. Recomendo abrir as portas dos "
+            "armários junto às paredes exteriores e definir o aquecimento para "
+            "pelo menos {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, a temperatura exterior é de {reading}. Estou a "
+            "monitorizar o risco de congelamento das tubagens."
+        ),
+        "intrusion_alert": (
+            "{honorific}, movimento em {where} enquanto não está ninguém em "
+            "casa{ctx}. Estou a investigar a partir do ponto de entrada — só "
+            "alertarei a casa e todos os dispositivos se for uma intrusão real."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, movimento em {where} enquanto a casa dorme{ctx}. Estou a "
+            "investigar a partir do ponto de entrada — só alertarei a casa e todos "
+            "os dispositivos se for uma intrusão real."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, movimento em {where} enquanto a casa está "
+            "protegida{ctx}. Estou a investigar a partir do ponto de entrada — só "
+            "alertarei a casa e todos os dispositivos se for uma intrusão real."
+        ),
+        "intrusion_ctx_open": " ({name} aberto)",
+        "intrusion_ctx_armed": " (alarme armado)",
+        "lockdown_lifted": "{honorific}, confinamento levantado. A casa voltou ao normal.",
+        "lockdown_already_secured": (
+            "{honorific}, confinamento ativado — a casa já estava totalmente "
+            "protegida."
+        ),
+        "lockdown_locked": "tranquei {names}",
+        "lockdown_closed": "fechei {names}",
+        "lockdown_lock_pending": "trancar {names}",
+        "lockdown_close_pending": "fechar {names}",
+        "lockdown_gap_one": "{names}: não dá para trancar à distância — feche manualmente",
+        "lockdown_gap_few": "{names}: não dá para trancar à distância — feche manualmente",
+        "lockdown_gap_many": (
+            "{count} aberturas não podem ser trancadas à distância — feche "
+            "manualmente"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, confinamento ativado. Enviei comandos para {did}. Vou "
+            "avisá-lo se algo não ficar seguro."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, confinamento ativado. Enviei comandos para {did}, mas "
+            "{gap}. Vou avisá-lo se algo não ficar seguro."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, confinamento ativado. Tudo já estava seguro, mas {gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, confinamento noturno: {body}. A casa está segura.",
+        "lockdown_left_alone": (
+            "{names} foi aberto de novo depois de eu o proteger, por isso deixo-o "
+            "até de manhã"
+        ),
+        "lockdown_unreadable": "não consigo saber se {names} está fechado",
+        "lockdown_secure_failed": "não consegui proteger {names} — verifique manualmente",
+        "lockdown_failed_only": "{honorific}, confinamento ativado, mas {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, confinamento noturno: {body}. A casa não está totalmente "
+            "segura — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, confinamento noturno: a casa não está totalmente segura "
+            "— {failed}."
+        ),
     },
 }
+
+
+def _by_key(by_language: dict) -> dict[str, dict[str, str]]:
+    """{language: {key: text}} turned into {key: {language: text}}, the
+    shape callers and tests read."""
+    out: dict[str, dict[str, str]] = {}
+    for lang, texts in by_language.items():
+        for key, text in texts.items():
+            out.setdefault(key, {})[lang] = text
+    return out
+
+
+TITLES = _by_key(_TITLE_TEXT)
+MESSAGES = _by_key(_MESSAGE_TEXT)
 
 
 def title(key: str, lang: str | None) -> str:
-    """Localized notification title for ``key`` (English fallback)."""
-    table = TITLES.get(key, {})
-    return table.get(_norm(lang)) or table.get(_FALLBACK) or "Nova"
-
-
-# Every full-sentence template above opens with this literal lead-in
-# (verified: only ever the first 13 characters, at no other position, across
-# all ~70 such template strings in all 7 languages) — stripped here and
-# re-added via persona.lead_in() so an empty honorific (nobody specifically
-# home to address; see honorific.py) produces a properly capitalized
-# sentence instead of a stray leading ", ". A few keys are mid-sentence
-# fragments (e.g. "intrusion_ctx_open") rather than full sentences and never
-# had this prefix — those pass through untouched, same as before.
-_HONORIFIC_LEAD_IN = "{honorific}, "
+    """The notification title for ``key`` in ``lang``, else English, else
+    "Nova"."""
+    texts = TITLES.get(key, {})
+    return texts.get(_norm(lang)) or texts.get(_FALLBACK) or "Nova"
 
 
 def _strip_honorific_lead_in(tmpl: str) -> tuple[str, bool]:
+    """Every full sentence template opens with "{honorific}, " and nowhere
+    else holds it. It is taken off here and put back by persona.lead_in(),
+    so an empty honorific (nobody in particular to address) gives a properly
+    capitalised sentence rather than a stray ", ". Fragments such as
+    intrusion_ctx_open never had it and pass through as they are."""
     if tmpl.startswith(_HONORIFIC_LEAD_IN):
         return tmpl[len(_HONORIFIC_LEAD_IN):], True
     return tmpl, False
 
 
+def _fill(template: str, params: dict) -> tuple[str, bool]:
+    body, addressed = _strip_honorific_lead_in(template)
+    return body.format(**params), addressed
+
+
 def message(key: str, lang: str | None, **params) -> str:
-    """Localized, parameter-filled message for ``key`` (English fallback).
+    """The message for ``key`` in ``lang`` (English when missing), filled
+    with ``params``. ``honorific`` (default "sir") is applied through the
+    persona's lead in rather than formatted in.
 
-    ``honorific`` (default "sir") is pulled out of ``params`` rather than
-    passed through ``.format()`` — see ``_strip_honorific_lead_in``.
-
-    Never raises: an unknown key or a formatting problem yields the English
-    template (or an empty string) rather than propagating.
+    Never raises: when the translation cannot be filled the English one is
+    tried, and when that fails too the raw English template (or "") comes
+    back.
     """
     honorific = params.pop("honorific", "sir")
-    table = MESSAGES.get(key, {})
-    tmpl = table.get(_norm(lang)) or table.get(_FALLBACK) or ""
-    body, had_lead_in = _strip_honorific_lead_in(tmpl)
+    texts = MESSAGES.get(key, {})
+    english = texts.get(_FALLBACK, "") or ""
     try:
-        filled = body.format(**params)
+        text, addressed = _fill(texts.get(_norm(lang)) or english, params)
     except Exception:
         try:
-            body, had_lead_in = _strip_honorific_lead_in(table.get(_FALLBACK, "") or "")
-            filled = body.format(**params)
+            text, addressed = _fill(english, params)
         except Exception:
-            return table.get(_FALLBACK, "") or ""
-    if not had_lead_in:
-        return filled
+            return english
+    if not addressed:
+        return text
     from . import persona
-    return persona.lead_in(honorific, filled)
-
-
-# Coordinating conjunction per language, for natural-language device lists.
-_AND: dict[str, str] = {
-    "en": "and", "fr": "et", "de": "und", "es": "y",
-    "it": "e", "nl": "en", "pt": "e",
-}
-# Languages that put a comma before the final conjunction (the "Oxford comma").
-_OXFORD = {"en"}
+    return persona.lead_in(honorific, text)
 
 
 def join_names(names, lang: str | None = None) -> str:
-    """Natural-language list join with the localized conjunction:
-    ['a'] -> 'a'; ['a','b'] -> 'a et b' (fr); ['a','b','c'] -> 'a, b, and c' (en).
-    Device/area names pass through untranslated."""
-    names = [n for n in (names or []) if n]
-    a = _AND.get(_norm(lang), "and")
-    if not names:
-        return ""
-    if len(names) == 1:
-        return names[0]
+    """Join names as a sentence would, with the language's "and": one name
+    as is, two as "a et b" (fr), three or more as "a, b, and c" (en) or
+    "a, b e c" (it). Names are never translated."""
+    names = [name for name in (names or []) if name]
+    if len(names) < 2:
+        return names[0] if names else ""
+    code = _norm(lang)
+    word = _AND.get(code, "and")
     if len(names) == 2:
-        return f"{names[0]} {a} {names[1]}"
-    sep = f", {a} " if _norm(lang) in _OXFORD else f" {a} "
-    return f"{', '.join(names[:-1])}{sep}{names[-1]}"
+        return f"{names[0]} {word} {names[1]}"
+    last = f", {word} " if code in _OXFORD else f" {word} "
+    return ", ".join(names[:-1]) + last + names[-1]
