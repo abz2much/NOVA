@@ -1,3 +1,12 @@
+## [8.56.0] — A weather card and an indoor temperature card
+
+Two more cards join the rotation on the Command Center.
+
+### Added
+- **A weather card.** The temperature outside in big figures, the condition under it, and humidity and wind. It uses your Home Assistant weather entity, or an outdoor temperature sensor when there is no weather entity (the same two sources Nova's own weather answer uses). The condition and the row names come from Home Assistant's own words, so they follow your language. It is skipped when there is no outdoor source.
+- **An indoor card.** The average temperature across your rooms in big figures with the average humidity under it, then up to four rooms with their own readings. It uses the readings the room cards already show, and is skipped when no room reports temperature or humidity.
+- Both are panel only: no backend change and no new panel words, so no new translations.
+
 ## [8.55.0] — A next event card and a reminders card
 
 Two more cards join the rotation on the Command Center.
