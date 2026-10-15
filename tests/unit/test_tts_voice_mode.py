@@ -1,8 +1,7 @@
-"""TTS voice mode: Nova never requests a voice, so the engine uses Home
-Assistant's default voice. tts_use_ha_voice only decides which TTS entity is
-used (the preferred Assist pipeline's, instead of the free local pick).
-
-Delivery is media_player.play_media, so these tests inspect that call.
+"""Nova never asks for a voice: whatever engine is used speaks with Home
+Assistant's default. tts_use_ha_voice only chooses the engine (the preferred
+Assist pipeline's instead of the free local one). Announcements go out as
+media_player.play_media, so that is the call these tests read.
 """
 import urllib.parse
 
@@ -11,15 +10,15 @@ import pytest
 DOMAIN = "nova"
 
 
+def _set_ha_voice(hass, on):
+    # The switch is read from the Nova entry's live runtime config.
+    from conftest import _install_nova_runtime
+    _install_nova_runtime(hass, {"tts_use_ha_voice": on})
+
+
 @pytest.fixture
 def tts(load):
     return load("tts_helper")
-
-
-def _set_ha_voice(hass, on):
-    """The flag lives in the Nova entry's NovaRuntime.runtime_config."""
-    from conftest import _install_nova_runtime
-    _install_nova_runtime(hass, {"tts_use_ha_voice": on})
 
 
 def _play_media_call(hass):
@@ -37,6 +36,8 @@ def _query(hass):
 @pytest.mark.parametrize("ha_voice", [False, True])
 async def test_announce_never_requests_a_voice(tts, fake_hass, entity, ha_voice):
     _set_ha_voice(fake_hass, ha_voice)
+    # 8.49.40: a speaker must exist to count as delivered.
+    fake_hass.states.set("media_player.x", "idle")
     ok = await tts.async_announce(fake_hass, "hello", entity, ["media_player.x"])
     assert ok is True
     assert "tts_options" not in _query(fake_hass)

@@ -1,4 +1,5 @@
-"""Home state and entity search (read only)."""
+"""Read only home tools: entity state, entity search, a room's devices, the
+home summary and recorded history."""
 from __future__ import annotations
 
 import json
@@ -9,289 +10,278 @@ from homeassistant.core import HomeAssistant
 
 from . import memory as _memory
 
-# One logger for the whole agent, named as it always was (…nova.agent), so
-# log filters and levels set for the agent keep applying.
+# The whole agent logs as ...nova.agent, the name it always had, so filters
+# and levels set for it still apply.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
+
+_STATE_LIMIT = 20
+_AREA_LIST_LIMIT = 30
+# The attributes worth showing the model for an entity.
+_USEFUL_ATTRIBUTES = (
+    "friendly_name", "brightness", "temperature", "current_temperature",
+    "humidity", "unit_of_measurement", "device_class", "battery_level",
+    "media_title", "volume_level", "source",
+)
+_OPENINGS = ("door", "window", "garage_door")
+
+
+def _name(state) -> str:
+    return state.attributes.get("friendly_name", state.entity_id)
+
+
+def _iso(moment):
+    return moment.isoformat() if moment else None
 
 
 async def _exec_get_entity_state(hass: HomeAssistant, args: dict) -> str:
-    """Get state of one or more entities."""
-    entity_ids = args.get("entity_ids", [])
-    results = []
-    for eid in entity_ids[:20]:  # Cap at 20
+    """State, useful attributes and change times for up to 20 entities.
+    last_changed is what answers "when did this turn on?"."""
+    out = []
+    for eid in args.get("entity_ids", [])[:_STATE_LIMIT]:
         state = hass.states.get(eid)
-        if state:
-            attrs = dict(state.attributes)
-            # Filter to useful attributes
-            useful = {}
-            for key in ("friendly_name", "brightness", "temperature",
-                        "current_temperature", "humidity", "unit_of_measurement",
-                        "device_class", "battery_level", "media_title",
-                        "volume_level", "source"):
-                if key in attrs:
-                    useful[key] = attrs[key]
-            results.append({
-                "entity_id": eid,
-                "state": state.state,
-                "attributes": useful,
-                # When the state last changed / was last written — lets Nova
-                # answer "when did this turn on?" by reading history instead of
-                # (wrongly) acting on a question about the past.
-                "last_changed": state.last_changed.isoformat() if state.last_changed else None,
-                "last_updated": state.last_updated.isoformat() if state.last_updated else None,
-            })
-        else:
-            results.append({"entity_id": eid, "error": "not found"})
-    return json.dumps(results)
+        if not state:
+            out.append({"entity_id": eid, "error": "not found"})
+            continue
+        attrs = state.attributes
+        out.append({
+            "entity_id": eid,
+            "state": state.state,
+            "attributes": {k: attrs[k] for k in _USEFUL_ATTRIBUTES if k in attrs},
+            "last_changed": state.last_changed.isoformat() if state.last_changed else None,
+            "last_updated": _iso(state.last_updated),
+        })
+    return json.dumps(out)
 
+
+# ── search and clarification ────────────────────────────────────────────────
 
 def _dedupe_candidates(items: list[dict]) -> list[dict]:
-    """Dedupe a candidate list by entity_id, first occurrence wins. Used
-    everywhere an ambiguity candidate list is built, so the same entity can
-    never appear twice in a clarification."""
-    seen: dict = {}
-    for it in items:
-        seen.setdefault(it["entity_id"], it)
-    return list(seen.values())
+    """One candidate per entity_id, the first kept, so a clarification never
+    offers the same entity twice."""
+    first: dict = {}
+    for item in items:
+        first.setdefault(item["entity_id"], item)
+    return list(first.values())
 
 
 def _build_clarification(candidates: list[dict], hass=None) -> str:
-    """Fixed, deterministic clarification question — no LLM call. Candidates
-    are named by friendly name; when two share one, the area tells them
-    apart, and the entity_id only when there is no area or it is the same
-    (never "did you mean Kitchen Light or Kitchen Light?")."""
+    """The fixed question asked when a target is ambiguous, with no model
+    call. Each candidate is named by its friendly name; two with the same
+    name are told apart by area, or by entity_id when the area does not
+    separate them, so it never asks "Kitchen Light or Kitchen Light?"."""
     from ..presentation import _area_name
+
+    def tally(values):
+        counts: dict = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        return counts
+
     names = [c.get("friendly_name") or c["entity_id"] for c in candidates]
-    counts: dict = {}
-    for n in names:
-        counts[n] = counts.get(n, 0) + 1
+    name_count = tally(names)
     labels = []
-    for c, n in zip(candidates, names):
-        if counts[n] > 1:
-            area = _area_name(hass, c["entity_id"]) if hass is not None else None
-            labels.append(f"{n} ({area})" if area else f"{n} ({c['entity_id']})")
-        else:
-            labels.append(n)
-    seen: dict = {}
-    for label in labels:
-        seen[label] = seen.get(label, 0) + 1
-    labels = [f"{label} ({c['entity_id']})" if seen[label] > 1 and c["entity_id"] not in label
-              else label for c, label in zip(candidates, labels)]
-    if len(labels) >= 2:
-        return f"I found more than one match — did you mean {labels[0]} or {labels[1]}?"
-    return "I found more than one possible match — could you be more specific about which one you mean?"
+    for cand, name in zip(candidates, names):
+        if name_count[name] == 1:
+            labels.append(name)
+            continue
+        area = _area_name(hass, cand["entity_id"]) if hass is not None else None
+        labels.append(f"{name} ({area or cand['entity_id']})")
+    label_count = tally(labels)
+    labels = [label if label_count[label] == 1 or cand["entity_id"] in label
+              else f"{label} ({cand['entity_id']})"
+              for cand, label in zip(candidates, labels)]
+    if len(labels) < 2:
+        return ("I found more than one possible match — could you be more "
+                "specific about which one you mean?")
+    return f"I found more than one match — did you mean {labels[0]} or {labels[1]}?"
 
 
 def _search_candidates(hass: HomeAssistant, domains) -> list:
-    """The entities a search may match, read once: id, domain, friendly name,
-    state and area. Bounded by the domains searched."""
+    """Every entity in the searched domains, read once with its name, state
+    and area."""
     from ..entity_resolution import Candidate
     from ..presentation import _area_name
-    out = []
-    for domain in domains:
-        for state in hass.states.async_all(domain):
-            out.append(Candidate(
-                entity_id=state.entity_id, domain=state.entity_id.split(".", 1)[0],
-                friendly_name=str(state.attributes.get("friendly_name") or ""),
-                state=str(state.state), area=_area_name(hass, state.entity_id) or ""))
-    return out
+    return [
+        Candidate(entity_id=st.entity_id, domain=st.entity_id.split(".", 1)[0],
+                  friendly_name=str(st.attributes.get("friendly_name") or ""),
+                  state=str(st.state), area=_area_name(hass, st.entity_id) or "")
+        for domain in domains for st in hass.states.async_all(domain)
+    ]
+
+
+def _alias_hit(state, entity_id: str, how: str) -> dict:
+    return {"entity_id": entity_id,
+            "friendly_name": state.attributes.get("friendly_name", ""),
+            "state": state.state, "matched_by": how}
 
 
 async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
-    """Search for entities by entity_id, name, alias, area or domain.
+    """Find entities by id, name, alias, area or domain.
 
-    Resolution is deterministic first (agent_runtime.entity_resolution): an
-    explicit entity_id, an exact learned alias or friendly name, an exact
-    object name, then a domain the request names ("lights", "locks"),
-    optionally with a state ("lights that are on") or an area or name; only
-    then bounded fuzzy scoring. An explicit `domain` restricts every stage.
+    The order is fixed (agent_runtime.entity_resolution): an exact learned
+    alias, then an explicit entity_id, an exact alias or friendly name, an
+    exact object name, a domain the words name ("lights", optionally "that
+    are on" or with an area or name); partial aliases next, and fuzzy
+    scoring last. A ``domain`` argument limits every step.
 
-    `require_unique`: when true, this search is resolving exactly ONE target
-    entity before an action. Several exact matches, a near tie
-    (runner-up/top score >= 0.85) or no fuzzy candidate strong enough to act
-    on returns an `{"ambiguous": true, "candidates": [...]}` marker instead
-    of a plain list, which run_agent's tool-dispatch loop intercepts to stop
-    the turn with a fixed clarification question rather than letting the
-    model guess. Default false is discovery: a plain list, never a forced
-    clarification. Read only: never calls a service.
+    With ``require_unique`` the search is picking the one entity to act on:
+    several exact matches, a near tie (runner up at 0.85 of the top score or
+    more) or no fuzzy match good enough returns ``{"ambiguous": true,
+    "candidates": [...]}``, which the agent loop turns into a fixed question
+    instead of letting the model guess. Without it the result is a plain
+    list. Never calls a service.
     """
     from ..entity_resolution import DEFAULT_DOMAINS, resolve
 
     query = args.get("query", "").lower().strip()
-    domain_filter = args.get("domain")
-    require_unique = bool(args.get("require_unique", False))
+    domain = args.get("domain")
+    unique = bool(args.get("require_unique", False))
 
-    def _in_domain(eid: str) -> bool:
-        return not domain_filter or eid.split(".", 1)[0] == domain_filter
+    def allowed(eid: str) -> bool:
+        return not domain or eid.split(".", 1)[0] == domain
 
-    # A learned alias names exactly one entity, so it is inherently unique.
-    learned = _memory._load_learned()
-    aliases = learned.get("alias", {})
-    if query in aliases and _in_domain(aliases[query]):
-        resolved_id = aliases[query]
-        state = hass.states.get(resolved_id)
+    aliases = _memory._load_learned().get("alias", {})
+    # An exact learned alias names one entity, so it is unique by nature.
+    target = aliases.get(query) if query in aliases else None
+    if target and allowed(target):
+        state = hass.states.get(target)
         if state:
-            return json.dumps([{
-                "entity_id": resolved_id,
-                "friendly_name": state.attributes.get("friendly_name", ""),
-                "state": state.state,
-                "matched_by": f"learned alias: '{query}'",
-            }])
+            return json.dumps([_alias_hit(state, target, f"learned alias: '{query}'")])
 
-    domains = [domain_filter] if domain_filter else list(DEFAULT_DOMAINS)
-    result = resolve(query, _search_candidates(hass, domains), domain=domain_filter,
-                     require_unique=require_unique)
+    searched = [domain] if domain else list(DEFAULT_DOMAINS)
+    result = resolve(query, _search_candidates(hass, searched), domain=domain,
+                     require_unique=unique)
     if result.stage != "fuzzy":
         return json.dumps(result.as_payload())
 
-    # Partial alias matches — ALL of them (deduped by entity_id), before
-    # fuzzy name scoring. Several different entities matching partially is
-    # genuine ambiguity when require_unique is set.
-    alias_matches: dict = {}
-    for alias_name, alias_id in sorted(aliases.items()):
-        if (query in alias_name or alias_name in query) and _in_domain(alias_id):
-            state = hass.states.get(alias_id)
-            if state and alias_id not in alias_matches:
-                alias_matches[alias_id] = {
-                    "entity_id": alias_id,
-                    "friendly_name": state.attributes.get("friendly_name", ""),
-                    "state": state.state,
-                    "matched_by": f"partial alias: '{alias_name}'",
-                }
-    if alias_matches:
-        alias_results = list(alias_matches.values())
-        if require_unique and len(alias_results) > 1:
-            return json.dumps({
-                "ambiguous": True,
-                "candidates": _dedupe_candidates(alias_results),
-            })
-        return json.dumps(alias_results)
+    # Before fuzzy scoring: every alias that partly matches, one per entity.
+    # Different entities here are a real ambiguity when one is required.
+    partial: dict = {}
+    for alias, eid in sorted(aliases.items()):
+        if eid in partial or not allowed(eid):
+            continue
+        if query in alias or alias in query:
+            state = hass.states.get(eid)
+            if state:
+                partial[eid] = _alias_hit(state, eid, f"partial alias: '{alias}'")
+    if not partial:
+        return json.dumps(result.as_payload())
+    hits = list(partial.values())
+    if unique and len(hits) > 1:
+        return json.dumps({"ambiguous": True, "candidates": _dedupe_candidates(hits)})
+    return json.dumps(hits)
 
-    return json.dumps(result.as_payload())
+
+# ── rooms ───────────────────────────────────────────────────────────────────
+
+def _find_area(area_reg, wanted: str):
+    """The area a spoken name means: an exact name first, then the first area
+    whose name contains it. An empty name means none."""
+    wanted = wanted.strip().lower()
+    if not wanted:
+        return None
+    areas = list(area_reg.async_list_areas())
+    for area in areas:
+        if area.name.lower() == wanted:
+            return area
+    return next((a for a in areas if wanted in a.name.lower()), None)
+
+
+def _area_members(hass: HomeAssistant, area_name: str):
+    """(area, entities) for a spoken room name, or (None, []) when there is no
+    such room. An entity is in the room it is assigned to; only one with no
+    room of its own takes its device's room, as in Home Assistant."""
+    from homeassistant.helpers import area_registry as areg
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    area = _find_area(areg.async_get(hass), area_name)
+    if area is None:
+        return None, []
+    devices = dr.async_get(hass)
+    members = []
+    for entry in er.async_get(hass).entities.values():
+        room = entry.area_id
+        if not room and entry.device_id:
+            device = devices.async_get(entry.device_id)
+            room = device.area_id if device else None
+        state = hass.states.get(entry.entity_id) if room == area.id else None
+        if state:
+            members.append({"entity_id": entry.entity_id,
+                            "friendly_name": state.attributes.get("friendly_name", ""),
+                            "state": state.state, "domain": entry.domain})
+    return area, members
+
+
+def area_entity_ids(hass: HomeAssistant, area_name: str, domain: str) -> list[str]:
+    """Every entity of ``domain`` in the named room, for room control; [] when
+    the room is not found or the registries cannot be read."""
+    try:
+        _area, members = _area_members(hass, area_name)
+    except Exception:
+        return []
+    return [m["entity_id"] for m in members if m["domain"] == domain]
 
 
 async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:
-    """List all devices in an area."""
-    area_name = args.get("area_name", "").lower()
+    """The entities in a room, the first 30 listed with the full count."""
+    wanted = args.get("area_name", "").lower()
     try:
-        from homeassistant.helpers import (
-            area_registry as areg, entity_registry as er, device_registry as dr,
-        )
-        area_reg = areg.async_get(hass)
-        ent_reg = er.async_get(hass)
-        dev_reg = dr.async_get(hass)
-
-        target = None
-        for area in area_reg.async_list_areas():
-            if area_name in area.name.lower():
-                target = area
-                break
-        if not target:
-            return json.dumps({"error": f"Area '{area_name}' not found"})
-
-        devices = []
-        for entry in ent_reg.entities.values():
-            in_area = entry.area_id == target.id
-            if not in_area and entry.device_id:
-                device = dev_reg.async_get(entry.device_id)
-                in_area = device and device.area_id == target.id
-            if in_area:
-                state = hass.states.get(entry.entity_id)
-                if state:
-                    devices.append({
-                        "entity_id": entry.entity_id,
-                        "friendly_name": state.attributes.get("friendly_name", ""),
-                        "state": state.state,
-                        "domain": entry.domain,
-                    })
-
-        return json.dumps({
-            "area": target.name,
-            "device_count": len(devices),
-            "devices": devices[:30],
-        })
+        area, members = _area_members(hass, wanted)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
+    if area is None:
+        return json.dumps({"error": f"Area '{wanted}' not found"})
+    return json.dumps({"area": area.name, "device_count": len(members),
+                       "devices": members[:_AREA_LIST_LIMIT]})
 
+
+# ── summary and history ─────────────────────────────────────────────────────
 
 async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
-    """Build a comprehensive home summary."""
-    summary: dict[str, Any] = {}
-
-    # People
-    people = []
-    for s in hass.states.async_all("person"):
-        people.append({
-            "name": s.attributes.get("friendly_name", s.entity_id),
-            "state": s.state,
-        })
-    summary["people"] = people
-
-    # Lights
-    on_lights = [
-        s.attributes.get("friendly_name", s.entity_id)
-        for s in hass.states.async_all("light") if s.state == "on"
-    ]
-    summary["lights_on"] = on_lights
-    summary["lights_on_count"] = len(on_lights)
-
-    # Locks
+    """Who is home, lights on, unlocked locks (exempt ones left out), open
+    doors, windows and covers, the thermostats and the weather."""
     from ...cognitive_core import _lockdown_exempt_locks
+    states = hass.states
+    lights_on = [_name(s) for s in states.async_all("light") if s.state == "on"]
     exempt = _lockdown_exempt_locks()
-    unlocked = [
-        s.attributes.get("friendly_name", s.entity_id)
-        for s in hass.states.async_all("lock")
-        if s.state == "unlocked" and s.entity_id not in exempt
-    ]
-    summary["locks_unlocked"] = unlocked
+    opened = [_name(s) for s in states.async_all("binary_sensor")
+              if s.attributes.get("device_class", "") in _OPENINGS and s.state == "on"]
+    opened += [_name(s) for s in states.async_all("cover") if s.state == "open"]
 
-    # Doors/Windows
-    open_items = []
-    for s in hass.states.async_all("binary_sensor"):
-        dc = s.attributes.get("device_class", "")
-        if dc in ("door", "window", "garage_door") and s.state == "on":
-            open_items.append(s.attributes.get("friendly_name", s.entity_id))
-    for s in hass.states.async_all("cover"):
-        if s.state == "open":
-            open_items.append(s.attributes.get("friendly_name", s.entity_id))
-    summary["open_doors_windows"] = open_items
-
-    # Climate
-    climate = []
-    for s in hass.states.async_all("climate"):
-        climate.append({
-            "name": s.attributes.get("friendly_name", s.entity_id),
-            "state": s.state,
-            "current_temp": s.attributes.get("current_temperature"),
-            "target_temp": s.attributes.get("temperature"),
-        })
-    summary["climate"] = climate
-
-    # Weather
-    for s in hass.states.async_all("weather"):
-        summary["weather"] = {
-            "condition": s.state,
-            "temperature": s.attributes.get("temperature"),
-            "humidity": s.attributes.get("humidity"),
-        }
-        break
-
+    summary: dict[str, Any] = {
+        "people": [{"name": _name(s), "state": s.state}
+                   for s in states.async_all("person")],
+        "lights_on": lights_on,
+        "lights_on_count": len(lights_on),
+        "locks_unlocked": [_name(s) for s in states.async_all("lock")
+                           if s.state == "unlocked" and s.entity_id not in exempt],
+        "open_doors_windows": opened,
+        "climate": [{"name": _name(s), "state": s.state,
+                     "current_temp": s.attributes.get("current_temperature"),
+                     "target_temp": s.attributes.get("temperature")}
+                    for s in states.async_all("climate")],
+    }
+    weather = next(iter(states.async_all("weather")), None)
+    if weather is not None:
+        summary["weather"] = {"condition": weather.state,
+                              "temperature": weather.attributes.get("temperature"),
+                              "humidity": weather.attributes.get("humidity")}
     return json.dumps(summary)
 
 
 async def _exec_activity_history(hass: HomeAssistant, args: dict) -> str:
-    """Read HA's recorded history or logbook — 'what has happened' (v6.72.0)."""
+    """Home Assistant's recorded history, or its logbook with kind
+    "logbook": what has happened."""
     try:
         from ... import activity_history
         kind = str(args.get("kind", "history") or "history").lower()
-        entity = args.get("entity")
-        area = args.get("area")
-        hours = args.get("hours", 24)
+        entity, hours = args.get("entity"), args.get("hours", 24)
         if kind == "logbook":
-            res = await activity_history.logbook(hass, entity=entity, hours=hours)
+            found = await activity_history.logbook(hass, entity=entity, hours=hours)
         else:
-            res = await activity_history.entity_history(
-                hass, entity=entity, area=area, hours=hours)
-        return json.dumps(res)
+            found = await activity_history.entity_history(
+                hass, entity=entity, area=args.get("area"), hours=hours)
+        return json.dumps(found)
     except Exception as exc:
         return json.dumps({"error": str(exc)})

@@ -156,16 +156,16 @@ _COMPONENTS = (
     event_type  TEXT    NOT NULL,
     detail      TEXT
 )""",
-            """CREATE TABLE IF NOT EXISTS activity_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT    NOT NULL,
-    entity_id   TEXT    NOT NULL DEFAULT '',
-    category    TEXT    NOT NULL DEFAULT 'other',
-    urgency     TEXT    NOT NULL DEFAULT 'low',
-    message     TEXT    NOT NULL DEFAULT '',
-    was_spoken  INTEGER NOT NULL DEFAULT 0,
-    source      TEXT    NOT NULL DEFAULT 'observer'
-)""",
+            ("CREATE TABLE IF NOT EXISTS activity_log (\n"
+             "    id          INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    timestamp   TEXT    NOT NULL,\n"
+             "    entity_id   TEXT    NOT NULL DEFAULT '',\n"
+             "    category    TEXT    NOT NULL DEFAULT 'other',\n"
+             "    urgency     TEXT    NOT NULL DEFAULT 'low',\n"
+             "    message     TEXT    NOT NULL DEFAULT '',\n"
+             "    was_spoken  INTEGER NOT NULL DEFAULT 0,\n"
+             "    source      TEXT    NOT NULL DEFAULT 'observer'\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp)",
         ),
         # Person-scoped episodic continuity. No backfill: old rows read NULL.
@@ -231,22 +231,22 @@ _COMPONENTS = (
         version=3,
         tables=("facts",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS facts (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind            TEXT NOT NULL DEFAULT 'fact',
-    subject         TEXT NOT NULL DEFAULT 'household',
-    key             TEXT NOT NULL,
-    value           TEXT NOT NULL,
-    source          TEXT NOT NULL DEFAULT 'stated',
-    confidence      REAL NOT NULL DEFAULT 1.0,
-    salience        REAL NOT NULL DEFAULT 1.0,
-    status          TEXT NOT NULL DEFAULT 'confirmed',
-    created_at      REAL NOT NULL,
-    updated_at      REAL NOT NULL,
-    last_referenced REAL,
-    expires_at      REAL,
-    UNIQUE(subject, key)
-)""",
+            ("CREATE TABLE IF NOT EXISTS facts (\n"
+             "    id              INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    kind            TEXT NOT NULL DEFAULT 'fact',\n"
+             "    subject         TEXT NOT NULL DEFAULT 'household',\n"
+             "    key             TEXT NOT NULL,\n"
+             "    value           TEXT NOT NULL,\n"
+             "    source          TEXT NOT NULL DEFAULT 'stated',\n"
+             "    confidence      REAL NOT NULL DEFAULT 1.0,\n"
+             "    salience        REAL NOT NULL DEFAULT 1.0,\n"
+             "    status          TEXT NOT NULL DEFAULT 'confirmed',\n"
+             "    created_at      REAL NOT NULL,\n"
+             "    updated_at      REAL NOT NULL,\n"
+             "    last_referenced REAL,\n"
+             "    expires_at      REAL,\n"
+             "    UNIQUE(subject, key)\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject)",
         ),
         # v7.88.0: every fact stored before pending facts existed was trusted,
@@ -311,50 +311,50 @@ _COMPONENTS = (
         version=6,
         tables=("state_changes", "commands", "suggestions"),
         statements=(
-            """CREATE TABLE IF NOT EXISTS state_changes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    old_state TEXT,
-    new_state TEXT NOT NULL,
-    area_id TEXT,
-    hour INTEGER,
-    day_of_week INTEGER,
-    triggered_by TEXT DEFAULT 'system',
-    source_entity_id TEXT DEFAULT '',
-    source_confidence REAL DEFAULT 0.0,
-    person TEXT DEFAULT 'unknown',
-    person_confidence REAL DEFAULT 0.0
-)""",
+            ("CREATE TABLE IF NOT EXISTS state_changes (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    timestamp TEXT NOT NULL,\n"
+             "    entity_id TEXT NOT NULL,\n"
+             "    domain TEXT NOT NULL,\n"
+             "    old_state TEXT,\n"
+             "    new_state TEXT NOT NULL,\n"
+             "    area_id TEXT,\n"
+             "    hour INTEGER,\n"
+             "    day_of_week INTEGER,\n"
+             "    triggered_by TEXT DEFAULT 'system',\n"
+             "    source_entity_id TEXT DEFAULT '',\n"
+             "    source_confidence REAL DEFAULT 0.0,\n"
+             "    person TEXT DEFAULT 'unknown',\n"
+             "    person_confidence REAL DEFAULT 0.0\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_sc_entity ON state_changes(entity_id)",
             "CREATE INDEX IF NOT EXISTS idx_sc_ts ON state_changes(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_sc_hour_dow ON state_changes(hour, day_of_week)",
-            """CREATE TABLE IF NOT EXISTS commands (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    text TEXT NOT NULL,
-    handled_by TEXT DEFAULT 'agent',
-    entity_ids TEXT DEFAULT '[]',
-    person TEXT DEFAULT 'unknown',
-    hour INTEGER,
-    day_of_week INTEGER
-)""",
+            ("CREATE TABLE IF NOT EXISTS commands (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    timestamp TEXT NOT NULL,\n"
+             "    text TEXT NOT NULL,\n"
+             "    handled_by TEXT DEFAULT 'agent',\n"
+             "    entity_ids TEXT DEFAULT '[]',\n"
+             "    person TEXT DEFAULT 'unknown',\n"
+             "    hour INTEGER,\n"
+             "    day_of_week INTEGER\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_cmd_ts ON commands(timestamp)",
-            """CREATE TABLE IF NOT EXISTS suggestions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created TEXT NOT NULL,
-    description TEXT NOT NULL,
-    automation_yaml TEXT,
-    status TEXT DEFAULT 'pending',
-    confidence REAL DEFAULT 0.0,
-    pattern_count INTEGER DEFAULT 0,
-    approved_at TEXT,
-    dismissed_at TEXT,
-    pattern_type TEXT DEFAULT '',
-    entity_ids TEXT DEFAULT '',
-    details TEXT DEFAULT '{}'
-)""",
+            ("CREATE TABLE IF NOT EXISTS suggestions (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    created TEXT NOT NULL,\n"
+             "    description TEXT NOT NULL,\n"
+             "    automation_yaml TEXT,\n"
+             "    status TEXT DEFAULT 'pending',\n"
+             "    confidence REAL DEFAULT 0.0,\n"
+             "    pattern_count INTEGER DEFAULT 0,\n"
+             "    approved_at TEXT,\n"
+             "    dismissed_at TEXT,\n"
+             "    pattern_type TEXT DEFAULT '',\n"
+             "    entity_ids TEXT DEFAULT '',\n"
+             "    details TEXT DEFAULT '{}'\n"
+             ")"),
         ),
         columns=(
             # v6.41.0 who; v6.77.0 how sure of who.
@@ -381,16 +381,16 @@ _COMPONENTS = (
         version=2,
         tables=("person_patterns",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS person_patterns (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    person TEXT NOT NULL,
-    pattern_type TEXT NOT NULL,
-    description TEXT NOT NULL,
-    data TEXT DEFAULT '{}',
-    confidence REAL DEFAULT 0.0,
-    last_seen TEXT,
-    occurrences INTEGER DEFAULT 1
-)""",
+            ("CREATE TABLE IF NOT EXISTS person_patterns (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    person TEXT NOT NULL,\n"
+             "    pattern_type TEXT NOT NULL,\n"
+             "    description TEXT NOT NULL,\n"
+             "    data TEXT DEFAULT '{}',\n"
+             "    confidence REAL DEFAULT 0.0,\n"
+             "    last_seen TEXT,\n"
+             "    occurrences INTEGER DEFAULT 1\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_pp_person ON person_patterns(person)",
         ),
         # v2: routines are identified by what they are, not by their wording.
@@ -436,15 +436,15 @@ _COMPONENTS = (
         version=1,
         tables=("followups",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS followups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_ts TEXT NOT NULL,
-    due_ts TEXT NOT NULL,
-    instruction TEXT NOT NULL,
-    context TEXT DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'pending',
-    result TEXT DEFAULT ''
-)""",
+            ("CREATE TABLE IF NOT EXISTS followups (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    created_ts TEXT NOT NULL,\n"
+             "    due_ts TEXT NOT NULL,\n"
+             "    instruction TEXT NOT NULL,\n"
+             "    context TEXT DEFAULT '',\n"
+             "    status TEXT NOT NULL DEFAULT 'pending',\n"
+             "    result TEXT DEFAULT ''\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_fu_due ON followups(status, due_ts)",
         ),
     ),
@@ -453,21 +453,21 @@ _COMPONENTS = (
         version=1,
         tables=("goals",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_ts TEXT NOT NULL,
-    updated_ts TEXT NOT NULL,
-    title TEXT NOT NULL,
-    outcome TEXT NOT NULL,
-    steps TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'active',
-    progress TEXT NOT NULL DEFAULT '[]',
-    next_check_ts TEXT NOT NULL,
-    check_interval_min REAL NOT NULL DEFAULT 30,
-    deadline_ts TEXT,
-    runs INTEGER NOT NULL DEFAULT 0,
-    last_result TEXT DEFAULT ''
-)""",
+            ("CREATE TABLE IF NOT EXISTS goals (\n"
+             "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    created_ts TEXT NOT NULL,\n"
+             "    updated_ts TEXT NOT NULL,\n"
+             "    title TEXT NOT NULL,\n"
+             "    outcome TEXT NOT NULL,\n"
+             "    steps TEXT NOT NULL DEFAULT '[]',\n"
+             "    status TEXT NOT NULL DEFAULT 'active',\n"
+             "    progress TEXT NOT NULL DEFAULT '[]',\n"
+             "    next_check_ts TEXT NOT NULL,\n"
+             "    check_interval_min REAL NOT NULL DEFAULT 30,\n"
+             "    deadline_ts TEXT,\n"
+             "    runs INTEGER NOT NULL DEFAULT 0,\n"
+             "    last_result TEXT DEFAULT ''\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_goal_due ON goals(status, next_check_ts)",
         ),
     ),
@@ -477,24 +477,24 @@ _COMPONENTS = (
         version=2,
         tables=("decision_records",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS decision_records (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts             REAL NOT NULL,
-    kind           TEXT NOT NULL,
-    observation    TEXT NOT NULL DEFAULT '{}',
-    interpretation TEXT NOT NULL DEFAULT '{}',
-    evidence       TEXT NOT NULL DEFAULT '{}',
-    decision       TEXT NOT NULL DEFAULT '',
-    reason         TEXT NOT NULL DEFAULT '',
-    model          TEXT,
-    tokens         INTEGER,
-    latency_ms     INTEGER,
-    confidence     REAL,
-    outcome        TEXT,
-    outcome_ts     REAL,
-    outcome_source TEXT,
-    ref            TEXT
-)""",
+            ("CREATE TABLE IF NOT EXISTS decision_records (\n"
+             "    id             INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    ts             REAL NOT NULL,\n"
+             "    kind           TEXT NOT NULL,\n"
+             "    observation    TEXT NOT NULL DEFAULT '{}',\n"
+             "    interpretation TEXT NOT NULL DEFAULT '{}',\n"
+             "    evidence       TEXT NOT NULL DEFAULT '{}',\n"
+             "    decision       TEXT NOT NULL DEFAULT '',\n"
+             "    reason         TEXT NOT NULL DEFAULT '',\n"
+             "    model          TEXT,\n"
+             "    tokens         INTEGER,\n"
+             "    latency_ms     INTEGER,\n"
+             "    confidence     REAL,\n"
+             "    outcome        TEXT,\n"
+             "    outcome_ts     REAL,\n"
+             "    outcome_source TEXT,\n"
+             "    ref            TEXT\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_dr_ts      ON decision_records (ts)",
             "CREATE INDEX IF NOT EXISTS idx_dr_kind    ON decision_records (kind)",
             "CREATE INDEX IF NOT EXISTS idx_dr_outcome ON decision_records (outcome)",
@@ -565,17 +565,17 @@ _COMPONENTS = (
         version=1,
         tables=("reminders",),
         statements=(
-            """CREATE TABLE IF NOT EXISTS reminders (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    created     TEXT NOT NULL,
-    label       TEXT NOT NULL,
-    trigger_at  TEXT NOT NULL,  -- ISO timestamp
-    repeat      TEXT,            -- 'daily', 'weekly:MON', etc. (optional)
-    require_home   INTEGER NOT NULL DEFAULT 1,  -- 1 = only fire when someone home
-    respect_quiet  INTEGER NOT NULL DEFAULT 1,  -- 1 = skip during quiet hours
-    acknowledged   INTEGER NOT NULL DEFAULT 0,
-    last_fired     TEXT
-)""",
+            ("CREATE TABLE IF NOT EXISTS reminders (\n"
+             "    id          INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+             "    created     TEXT NOT NULL,\n"
+             "    label       TEXT NOT NULL,\n"
+             "    trigger_at  TEXT NOT NULL,  -- ISO timestamp\n"
+             "    repeat      TEXT,            -- 'daily', 'weekly:MON', etc. (optional)\n"
+             "    require_home   INTEGER NOT NULL DEFAULT 1,  -- 1 = only fire when someone home\n"
+             "    respect_quiet  INTEGER NOT NULL DEFAULT 1,  -- 1 = skip during quiet hours\n"
+             "    acknowledged   INTEGER NOT NULL DEFAULT 0,\n"
+             "    last_fired     TEXT\n"
+             ")"),
             "CREATE INDEX IF NOT EXISTS idx_trigger_at ON reminders(trigger_at)",
         ),
     ),
@@ -626,16 +626,10 @@ _COMPONENTS = (
         version=1,
         tables=("doc_vectors",),
         statements=(
-            "CREATE TABLE IF NOT EXISTS doc_vectors ("
-            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "  source TEXT NOT NULL,"
-            "  chunk INTEGER NOT NULL,"
-            "  content TEXT NOT NULL,"
-            "  dim INTEGER NOT NULL,"
-            "  vec BLOB NOT NULL,"
-            "  model TEXT NOT NULL,"
-            "  ingested TEXT NOT NULL"
-            ")",
+            ("CREATE TABLE IF NOT EXISTS doc_vectors (  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+             "  source TEXT NOT NULL,  chunk INTEGER NOT NULL,  content TEXT NOT NULL,"
+             "  dim INTEGER NOT NULL,  vec BLOB NOT NULL,  model TEXT NOT NULL,"
+             "  ingested TEXT NOT NULL)"),
             "CREATE INDEX IF NOT EXISTS idx_doc_vectors_source ON doc_vectors(source)",
         ),
     ),

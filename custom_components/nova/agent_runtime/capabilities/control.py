@@ -10,7 +10,7 @@ from typing import Optional
 from homeassistant.core import HomeAssistant
 
 from ..presentation import display_name
-from .home import _exec_get_area_devices
+from .home import area_entity_ids
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
@@ -464,14 +464,8 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
 
     entities = []
     if area_name:
-        # Get area-specific entities
-        area_json = await _exec_get_area_devices(hass, {"area_name": area_name})
-        area_data = json.loads(area_json)
-        if "devices" in area_data:
-            entities = [
-                d["entity_id"] for d in area_data["devices"]
-                if d["domain"] == domain
-            ]
+        # Every entity of the domain in that room, not just the first page.
+        entities = area_entity_ids(hass, area_name, domain)
     else:
         entities = [
             s.entity_id for s in hass.states.async_all(domain)
