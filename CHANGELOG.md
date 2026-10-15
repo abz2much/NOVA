@@ -1,3 +1,15 @@
+## [8.49.41] — A garage door that can't be toggled open by voice, a truer Memory tab
+
+Phase 8 continues with the authorisation policy, the infrastructure audit, the Memory tab commands, the suggestion and goal commands and the agent's planning tools, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **A garage door or gate could be toggled open by voice with no phone tap.** Only "open" was checked, so toggling a cover, or setting its position, got past both the phone tap and the confirmation. Both are now treated exactly like opening. Toggling a switch that looks security related is treated like turning it off. "Toggle the blinds" by voice now asks for a phone tap, as "open the blinds" already did.
+- **The infrastructure audit read some faults the wrong way round.** For update, battery, tamper, smoke, moisture and similar sensors, "off" is normal, but it was reported as critically offline. Only "on" is a fault for those now.
+- **The Memory tab showed unconfirmed facts as known.** After adding or forgetting a fact, the list that came back included pending facts until a refresh. It now holds confirmed facts only, as opening the tab does.
+
+### Changed
+- **The policy, infrastructure audit, Memory tab commands, suggestion and goal commands and planning tools rewritten from empty files**, keeping every public name, message, command schema and stored value. Every other policy decision is unchanged.
+
 ## [8.49.40] — Replies that find a working speaker, room commands that hit the right room
 
 Phase 8 continues with the TTS helper, the agent's home tools, the lockdown alarm sync, the conversation store and the database schema, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
