@@ -42,6 +42,8 @@
       datetime: { html: (d) => this._presentClockHtml(d.now), ambient: async () => ({ now: Date.now() }),
         refresh: () => this._presentClockHtml(Date.now()), every: 1000 },
       home: { html: (d) => this._presentHomeHtml(d), ambient: async () => this._presentHomeData() },
+      calendar: { html: (d) => this._presentCalendarHtml(d), ambient: async () => this._presentCalendarData() },
+      reminders: { html: (d) => this._presentRemindersHtml(d), ambient: () => this._presentRemindersData() },
       energy: { html: (d) => this._presentEnergyHtml(d), ambient: () => this._presentEnergyData() },
       security: { html: (d) => this._presentSecurityHtml(d), ambient: async () => this._presentSecurityData() },
     };
@@ -78,6 +80,77 @@
     const n = (v) => this._esc(this._presentNum(v, 0));
     return `<div class="pc-cap">HOME</div><div class="pc-big"><span class="pc-fig" data-unit="">${n(d.home)}/${n(d.total)}</span></div>`
       + `<div class="pc-rows">${(d.people || []).map(p => `<div class="pc-row"><span>${this._esc(p.name)}</span><b>${this._esc(p.home ? this._tx("HOME") : this._tx("AWAY"))}</b></div>`).join("")}</div>`;
+  }
+
+  // "today", "tomorrow" or a weekday and date, in the panel's language, from
+  // the browser's own date names (so no words of ours to translate).
+  _presentDayWord(date) {
+    const lang = this._resolveUiLang();
+    const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((midnight(date) - midnight(new Date())) / 86400000);
+    let word;
+    try {
+      word = Math.abs(days) <= 1 ? new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(days, "day")
+        : date.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" });
+    } catch (_) {
+      word = date.toDateString();
+    }
+    return word.charAt(0).toLocaleUpperCase(lang) + word.slice(1);
+  }
+
+  _presentTime(date) {
+    try {
+      return date.toLocaleTimeString(this._resolveUiLang(), { hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return date.toTimeString().slice(0, 5);
+    }
+  }
+
+  // The next event across the Home Assistant calendars: each calendar entity
+  // shows its current or next event in its attributes. Null when none starts
+  // within a week.
+  _presentCalendarData() {
+    const week = Date.now() + 7 * 86400000;
+    let best = null;
+    for (const [id, st] of Object.entries(this._hass?.states || {})) {
+      if (!id.startsWith("calendar.") || !st || st.state === "unavailable") continue;
+      const a = st.attributes || {};
+      if (!a.message || !a.start_time) continue;
+      const start = new Date(String(a.start_time).replace(" ", "T")).getTime();
+      const end = a.end_time ? new Date(String(a.end_time).replace(" ", "T")).getTime() : start;
+      if (!isFinite(start) || start > week || (end <= Date.now() && start < Date.now())) continue;
+      if (!best || start < best.start) best = { title: String(a.message), start, all_day: !!a.all_day };
+    }
+    return best;
+  }
+
+  _presentCalendarHtml(d) {
+    if (!d || !d.title || !isFinite(d.start)) return "";
+    const when = new Date(d.start), started = d.start <= Date.now();
+    const big = started ? this._tx("Now") : d.all_day ? this._presentDayWord(when) : this._presentTime(when);
+    const sub = started || d.all_day ? "" : `${this._presentDayWord(when)} · `;
+    return `<div class="pc-cap">Calendar</div><div class="pc-big"><span class="pc-fig" data-unit="">${this._esc(big)}</span></div>`
+      + `<div class="pc-now">${this._esc(sub + d.title)}</div>`;
+  }
+
+  // The reminders still to come, from Nova's own store.
+  async _presentRemindersData() {
+    const res = await this._hass.callWS({ type: "nova/get_reminders" });
+    const items = Array.isArray(res?.items) ? res.items.filter(r => r && r.label && r.at) : [];
+    return items.length ? { items } : null;
+  }
+
+  _presentRemindersHtml(d) {
+    const items = (d && Array.isArray(d.items) ? d.items : []).slice(0, 4);
+    if (!items.length) return "";
+    const first = items[0], at = new Date(first.at);
+    const big = first.due || !isFinite(at.getTime()) ? this._tx("Now") : this._presentTime(at);
+    return `<div class="pc-cap">Reminder</div><div class="pc-big"><span class="pc-fig" data-unit="">${this._esc(big)}</span></div>`
+      + `<div class="pc-rows">${items.map(r => {
+        const t = new Date(r.at);
+        const when = r.due || !isFinite(t.getTime()) ? this._tx("Now") : this._presentTime(t);
+        return `<div class="pc-row"><span>${this._esc(r.label)}</span><b>${this._esc(when)}</b></div>`;
+      }).join("")}</div>`;
   }
 
   async _presentEnergyData() {

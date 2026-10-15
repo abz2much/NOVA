@@ -698,3 +698,35 @@ async def test_a_reminder_is_capitalised_with_one_full_stop(rem, home, d, clock,
     rem.add_reminder(label, clock["now"])
     await _watcher(rem, FakeHass(), _Getters(honorific="sir"))._check_async()
     assert d.state["sent"][0].message == said
+
+
+# ── pending_reminders: what the Command Center's reminder card shows ─────────
+
+def test_pending_lists_what_is_due_now_or_within_a_day_soonest_first(rem, clock):
+    rem.add_reminder("later today", datetime(2026, 3, 1, 18, 0))
+    rem.add_reminder("due now", datetime(2026, 3, 1, 11, 59))
+    rem.add_reminder("tomorrow morning", datetime(2026, 3, 2, 9, 0))
+    rem.add_reminder("too far off", datetime(2026, 3, 2, 12, 1))
+    got = rem.pending_reminders()
+    assert [(r["label"], r["due"]) for r in got] == [
+        ("due now", True), ("later today", False), ("tomorrow morning", False)]
+    assert got[1]["at"] == datetime(2026, 3, 1, 18, 0).isoformat()
+    assert set(got[0]) == {"label", "at", "due"}
+
+
+def test_pending_leaves_out_fired_and_acknowledged_reminders(rem, clock):
+    a = rem.add_reminder("fired", datetime(2026, 3, 1, 11, 0))
+    b = rem.add_reminder("acked", datetime(2026, 3, 1, 13, 0))
+    rem.add_reminder("open", datetime(2026, 3, 1, 14, 0))
+    rem.mark_fired(a)
+    _sql(rem, "UPDATE reminders SET acknowledged = 1 WHERE id = ?", b)
+    assert [r["label"] for r in rem.pending_reminders()] == ["open"]
+
+
+def test_pending_is_capped_and_an_empty_or_broken_store_is_an_empty_list(rem, clock, monkeypatch):
+    for i in range(8):
+        rem.add_reminder(f"r{i}", datetime(2026, 3, 1, 13, i))
+    assert [r["label"] for r in rem.pending_reminders()] == ["r0", "r1", "r2", "r3", "r4"]
+    assert [r["label"] for r in rem.pending_reminders(limit=2)] == ["r0", "r1"]
+    monkeypatch.setattr(rem, "_connect", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+    assert rem.pending_reminders() == []

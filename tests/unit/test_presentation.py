@@ -281,3 +281,27 @@ def test_the_card_rotation_can_be_turned_off(load):
     payload = schema.payload(lambda key, default: False if key == "hero_card_cycle" else default,
                              lambda key, default: default, lambda v: v)
     assert payload["hero_card_cycle"] is False
+
+
+# ── nova/get_reminders ─────────────────────────────────────────────────────
+
+class _Hass(FakeHass):
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
+
+
+async def test_get_reminders_sends_the_pending_ones(ws, load, monkeypatch):
+    items = [{"label": "x", "at": "2026-03-01T18:00:00", "due": False}]
+    monkeypatch.setattr(load("reminders"), "pending_reminders", lambda: items)
+    conn = _Conn()
+    await ws.ws_get_reminders(_Hass(), conn, {"id": 11})
+    assert conn.results == [(11, {"items": items})] and conn.errors == []
+
+
+async def test_get_reminders_failure_sends_reminders_failed(ws, load, monkeypatch):
+    def boom():
+        raise RuntimeError("boom")
+    monkeypatch.setattr(load("reminders"), "pending_reminders", boom)
+    conn = _Conn()
+    await ws.ws_get_reminders(_Hass(), conn, {"id": 12})
+    assert conn.results == [] and conn.errors[0][:2] == (12, "reminders_failed")

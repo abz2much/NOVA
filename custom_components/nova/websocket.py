@@ -87,8 +87,8 @@ from .ws_knowledge import (
     ws_relation_action, ws_search_memory, ws_set_lockdown,
 )
 from .ws_modes import (
-    ws_biometrics, ws_energy, ws_energy_flow, ws_energy_outlook, ws_hazard, ws_intrusion,
-    ws_mode, ws_solar, ws_subscribe_presentation,
+    ws_biometrics, ws_energy, ws_energy_flow, ws_energy_outlook, ws_get_reminders, ws_hazard,
+    ws_intrusion, ws_mode, ws_solar, ws_subscribe_presentation,
 )
 from .ws_voice import (
     ws_get_spoken_history, ws_list_actions, ws_repeat_spoken, ws_say_hello, ws_voice_confirm_test,
@@ -213,6 +213,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_mode)
         websocket_api.async_register_command(hass, ws_solar)
         websocket_api.async_register_command(hass, ws_subscribe_presentation)
+        websocket_api.async_register_command(hass, ws_get_reminders)
         # Speech history and voice confirmation.
         websocket_api.async_register_command(hass, ws_get_spoken_history)
         websocket_api.async_register_command(hass, ws_list_actions)
