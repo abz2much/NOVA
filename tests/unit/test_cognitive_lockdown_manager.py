@@ -977,3 +977,85 @@ async def test_apply_runtime_config_ignores_unknown_keys_and_pushes_the_alarm_ch
     assert safety.config["intrusion_requires_confinement"] is False
     await cc.apply_runtime_config("face_stand_down", True)
     assert safety.config["face_stand_down"] is True and mgr.config["face_stand_down"] is True
+
+
+# ── 8.49.38: locks that cannot be locked, devices that stop reporting ──────
+
+@pytest.mark.parametrize("reading", ["jammed", "open", "unknown", "unavailable"])
+async def test_a_jammed_or_offline_lock_is_named_as_not_secured(cc, fake_hass, monkeypatch,
+                                                                reading):
+    # Before 8.49.38 only "unlocked" locks were looked at, so these were
+    # skipped and the home could be called already fully secured.
+    fake_hass.states.set("lock.front", reading, friendly_name="Front")
+    mgr = _mgr(cc, fake_hass)
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    action = await mgr.engage("x")
+    fake_hass.close_pending()
+    i18n = cc._notify_i18n()
+    assert action["message"] == i18n.message(
+        "lockdown_failed_only", "en", honorific="Sir",
+        gap=i18n.message("lockdown_secure_failed", "en", names="Front"))
+    assert service_calls(fake_hass, "lock", "lock") == []           # nothing sent to it
+
+
+async def test_an_exempt_jammed_lock_is_not_named(cc, fake_hass, monkeypatch):
+    fake_hass.states.set("lock.thermo", "jammed", friendly_name="Thermo")
+    mgr = _mgr(cc, fake_hass, lockdown_exempt_locks=["lock.thermo"])
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    action = await mgr.engage("x")
+    assert "Thermo" not in action["message"]
+
+
+@pytest.mark.parametrize("eid,attrs,secure", [
+    ("lock.front", {}, "locked"),
+    ("cover.garage", {"device_class": "garage"}, "closed"),
+    ("binary_sensor.door", {"device_class": "door"}, "off"),
+])
+async def test_a_device_that_stops_reporting_gets_one_alert_and_is_never_adopted(
+        cc, fake_hass, monkeypatch, eid, attrs, secure):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    mgr = await _active(cc, fake_hass)
+    fake_hass.service_calls.clear()
+    old = _st(eid, secure, friendly_name="Thing", **attrs)
+    gone = _st(eid, "unavailable", friendly_name="Thing", **attrs)
+    alert = await mgr.handle_state_change(eid, old, gone)
+    assert alert == {"type": "lockdown_breach", "urgency": "high", "auto_act": True,
+                     "message": "Sir, Thing stopped reporting during lockdown, so I can't "
+                                "tell if it's secure."}
+    assert fake_hass.service_calls == []                            # not treated as opened
+    assert eid not in mgr.exempt_windows
+    assert await mgr.handle_state_change(eid, gone, _st(eid, "unknown", **attrs)) is None
+
+
+async def test_a_door_sensor_that_comes_back_open_is_still_judged(cc, fake_hass):
+    # Before 8.49.38 a dropout was adopted as "left open on purpose", and the
+    # sensor was ignored for the rest of the lockdown.
+    mgr = await _active(cc, fake_hass)
+    eid = "binary_sensor.door"
+    await mgr.handle_state_change(eid, _st(eid, "off", device_class="door"),
+                                  _st(eid, "unavailable", device_class="door"))
+    assert eid not in mgr.exempt_windows
+    await mgr.handle_state_change(eid, _st(eid, "unavailable", device_class="door"),
+                                  _st(eid, "on", device_class="door"))
+    assert eid in mgr.exempt_windows                                # the normal contact rule ran
+
+
+async def test_a_lock_back_online_reading_unlocked_is_locked_again(cc, fake_hass):
+    mgr = await _active(cc, fake_hass)
+    fake_hass.service_calls.clear()
+    fake_hass.states.set("lock.front", "unlocked")
+    assert await mgr.handle_state_change("lock.front", _st("lock.front", "unavailable"),
+                                         _st("lock.front", "unlocked")) is None
+    fake_hass.close_pending()
+    assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": "lock.front"})]
+
+
+async def test_the_failed_check_says_a_lock_is_still_unlocked(cc, fake_hass, slept, emitted,
+                                                             monkeypatch):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked")
+    mgr = _mgr(cc, fake_hass)
+    mgr.active = True
+    await mgr._verify_secured("lock.front", "lock", "Front")
+    assert emitted[0][0]["message"] == ("Sir, I tried to secure Front during lockdown "
+                                        "but it's still unlocked.")

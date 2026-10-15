@@ -288,3 +288,13 @@ async def test_credential_status_reports_every_provider_booleans_only(hs, fake_h
     }
     # Never a value anywhere in the status payload.
     assert "ANTHROPIC-SECRET-VALUE" not in str(status)
+
+
+@pytest.mark.parametrize("value", ["line1\nline2", "a\rb", "tab\there", "nul\x00"])
+def test_set_secret_refuses_line_breaks_and_control_chars(hs, tmp_path, value):
+    # A value split across lines would break the whole of secrets.yaml.
+    path = tmp_path / "secrets.yaml"
+    path.write_text('other: "keep"\n')
+    assert hs.set_secret_sync("nova_groq_api_key", value, path) is False
+    assert path.read_text() == 'other: "keep"\n'
+    assert not (tmp_path / "secrets.yaml.nova.bak").exists()

@@ -183,3 +183,38 @@ async def test_after_the_cap_the_summary_is_asked_for_without_tools(loop, monkey
     assert client.calls[-1]["tools"] is None
     assert client.calls[-1]["messages"][-1] == {"role": "user",
                                                 "content": "Summarize what you've done briefly."}
+
+
+# ── long chats and the no provider reply (8.49.38) ──────────────────────────
+
+async def test_a_full_conversation_history_is_not_summarised(loop, monkeypatch):
+    # The conversation keeps 20 turns and adds the new one; that must reach
+    # the model word for word, with no extra summarising call first.
+    history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"}
+               for i in range(21)]
+    calls = []
+
+    class _Providers:
+        async def primary(self, *a):
+            calls.append(a)
+            raise AssertionError("no summary call expected")
+
+    full = [{"role": "system", "content": "S"}] + history
+    out = await loop._maybe_summarize(FakeHass(), full, "fake", "", "m", None,
+                                      providers=_Providers())
+    assert out == full and calls == []
+
+
+async def test_the_no_provider_reply_names_the_reasoning_tier_not_gemini(loop):
+    class _Providers:
+        async def primary(self, *a):
+            raise RuntimeError("down")
+
+        async def tier(self, cfg, name):
+            raise RuntimeError("down too")
+
+    with pytest.raises(RuntimeError) as err:
+        await loop._create_provider_with_fallback(
+            FakeHass(), "groq", "", "m", None, {"x": 1}, providers=_Providers())
+    assert "Gemini" not in str(err.value)
+    assert "(tried groq + the reasoning tier)" in str(err.value)

@@ -242,3 +242,17 @@ def test_no_other_weight_or_threshold_changed(identity):
             identity._W_PROXIMITY) == (0.6, 0.15, 0.8, 0.9, 0.75, 0.30, 0.35)
     assert (identity._ROOM_FRESH_SECS, identity._FACE_RECENCY_WINDOW) == (300.0, 300.0)
     assert identity._DEFAULT_FACE_CONFIDENCE == 0.7
+
+
+# ── 8.49.38: an unrecognised face is nobody ─────────────────────────────────
+
+@pytest.mark.parametrize("label", ["unknown", "Unknown"])
+def test_an_unknown_face_does_not_vote_or_block_the_sole_occupant(identity, cfg, sigs,
+                                                                   fake_hass, label):
+    # A stranger or courier passing a camera must not outweigh the one
+    # person who is home.
+    sigs["home"] = ["Alice"]
+    _face(sigs, "camera.front", label, confidence=95.0, age_seconds=0)
+    assert identity._face_votes(fake_hass, 0.0) == {}
+    ident = identity.resolve(fake_hass)
+    assert ident.person == "Alice" and ident.known

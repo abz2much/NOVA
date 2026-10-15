@@ -1,3 +1,23 @@
+## [8.49.38] — Fewer false package alerts, a lockdown that names every lock
+
+Phase 8 continues with the secrets bridge, the agent's turn loop, package detection, identity and the formal lockdown, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **A pasted key with a line break could break secrets.yaml.** The value was written across two lines, so on the next restart every `!secret` in Home Assistant could fail. A key with a line break or other control character is now refused and the file is left alone.
+- **Long chats paid for an extra AI call on every turn.** From about the tenth exchange, each turn first asked the model to summarise the older turns, then answered. Normal chats now reach the model with their last 20 turns word for word and no summary call; only a longer history is summarised.
+- **The "can't connect" reply named Gemini.** It now names the reasoning tier, which is what Nova actually falls back to.
+- **A doorbell press could report a waiting package as taken.** The doorbell description is about the caller, so it now only adds a package or mail, never clears one. Pickups still come from the camera check and Eufy.
+- **A pickup while everyone was out was judged on one frame.** Nova now takes a second look before the "package removed while no one is home" alert, the same as it does for a new delivery.
+- **A garbled vision reply could announce a delivery.** A reply that wasn't clean JSON fell back to keyword matching, which found "package" and "mail" in the field names. Nova now reads the true or false values, and treats anything else as no result.
+- **The package check gave different answers for the same frame.** It now runs at temperature 0.
+- **An unrecognised face stopped Nova knowing who you are.** After a stranger or courier passed a camera, the "unknown" face outvoted a sole occupant for five minutes. Unknown faces no longer vote.
+- **Lockdown skipped a jammed or offline lock in silence.** The announcement could even say the home was already fully secured. A lock reading jammed, open, unknown or unavailable is now named as not secured.
+- **A device dropping offline during lockdown was treated as opened.** A lock or cover going unavailable raised "opened during lockdown and I couldn't secure it", and a door sensor going unavailable was quietly treated as left open on purpose for the rest of the lockdown. A dropout now gets its own single alert saying it stopped reporting, and the device is still watched when it comes back.
+- **The failed lockdown check said a lock was "still open".** It now says "still unlocked".
+
+### Changed
+- **The secrets bridge, agent turn loop, package monitor, identity resolver and lockdown rewritten from empty files**, keeping every public name, message and stored value. The vision prompt and the keyword patterns are laid out differently with identical values.
+
 ## [8.49.37] — Learning toggles that work together, quieter energy advice
 
 Phase 8 continues with the knowledge store, energy, learning entry points, constants and notification translations, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
