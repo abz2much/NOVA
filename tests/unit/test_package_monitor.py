@@ -323,3 +323,142 @@ async def test_periodic_hallucination_single_frame_stays_quiet(pm, load, fake_ha
                             configured_camera="camera.front_door_test")
     assert spoken == []                                     # nothing announced
     assert pm._STATE["camera.front_door_test"]["package"] is False  # no phantom state
+
+
+# ── 8.49.38: false pickups and phantom sightings ────────────────────────────
+
+def _capture_speech(load, monkeypatch, pm):
+    spoken = []
+
+    async def _announce(hass, msg, *a, **k):
+        spoken.append(msg)
+        return True
+    monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+    return spoken
+
+
+async def test_a_doorbell_press_never_reports_a_package_as_taken(pm, load, fake_hass, monkeypatch):
+    # The press text is about the caller; not mentioning the parcel is not
+    # proof it is gone.
+    spoken = _capture_speech(load, monkeypatch, pm)
+    pm._STATE.clear()
+    pm._LAST_SPOKEN.clear()
+    pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 1}
+    fake_hass.states.set("person.alex", "not_home")
+    await pm.note_from_doorbell(fake_hass, None, "Sir", "tts.x", ["media_player.y"],
+                                "camera.front_door_bell", "A man in a blue jacket at the door")
+    await fake_hass.drain()
+    assert spoken == []
+    assert pm._STATE["camera.front_door_bell"]["package"] is True
+
+
+async def test_a_doorbell_press_mentioning_mail_keeps_the_tracked_package(pm, load, fake_hass,
+                                                                          monkeypatch):
+    spoken = _capture_speech(load, monkeypatch, pm)
+    pm._STATE.clear()
+    pm._LAST_SPOKEN.clear()
+    pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 2}
+    fake_hass.states.set("person.alex", "not_home")
+    await pm.note_from_doorbell(fake_hass, None, "Sir", "tts.x", ["media_player.y"],
+                                "camera.front_door_bell", "The postman is holding letters")
+    await fake_hass.drain()
+    assert len(spoken) == 1 and "mail has arrived" in spoken[0]
+    assert pm._STATE["camera.front_door_bell"]["package"] is True
+    assert pm._STATE["camera.front_door_bell"]["count"] == 2
+
+
+@pytest.mark.parametrize("second", [
+    {"package": True, "mail": False, "count": 1, "description": "box"},
+    None,                                          # the second capture failed
+])
+async def test_a_pickup_while_away_needs_a_second_look(pm, load, fake_hass, monkeypatch, second):
+    spoken = _capture_speech(load, monkeypatch, pm)
+    pm._STATE.clear()
+    pm._LAST_SPOKEN.clear()
+    pm._STATE["camera.front_door_test"] = {"package": True, "mail": False, "count": 1}
+    fake_hass.states.set("camera.front_door_test", "idle")
+    fake_hass.states.set("person.alex", "not_home")
+    seq = [{"package": False, "mail": False, "count": 0, "description": "someone in front"},
+           second]
+
+    async def _det(hass, client, eid):
+        return seq.pop(0)
+    monkeypatch.setattr(pm, "detect_on_camera", _det)
+    await pm.periodic_check(fake_hass, None, "Sir", "tts.x", ["media_player.y"],
+                            configured_camera="camera.front_door_test")
+    await fake_hass.drain()
+    assert seq == []                                   # the second look was taken
+    assert spoken == []
+    assert pm._STATE["camera.front_door_test"]["package"] is True
+
+
+async def test_a_confirmed_pickup_while_away_still_alerts(pm, load, fake_hass, monkeypatch):
+    spoken = _capture_speech(load, monkeypatch, pm)
+    pm._STATE.clear()
+    pm._LAST_SPOKEN.clear()
+    pm._STATE["camera.front_door_test"] = {"package": True, "mail": False, "count": 1}
+    fake_hass.states.set("camera.front_door_test", "idle")
+    fake_hass.states.set("person.alex", "not_home")
+
+    async def _det(hass, client, eid):
+        return {"package": False, "mail": False, "count": 0, "description": "empty step"}
+    monkeypatch.setattr(pm, "detect_on_camera", _det)
+    await pm.periodic_check(fake_hass, None, "Sir", "tts.x", ["media_player.y"],
+                            configured_camera="camera.front_door_test")
+    await fake_hass.drain()
+    assert len(spoken) == 1 and "no one is home" in spoken[0]
+    assert pm._STATE["camera.front_door_test"]["package"] is False
+
+
+@pytest.fixture
+def vision(load, monkeypatch):
+    """detect_on_camera with the frame and the model stubbed out."""
+    import contextlib
+    import sys
+    import types
+    if "aiohttp" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
+    cam = load("camera")
+    seen = {}
+
+    async def _image(hass, eid):
+        return b"jpeg"
+    monkeypatch.setattr(cam, "_get_best_image", _image)
+    monkeypatch.setattr(cam, "_looks_blank", lambda img: False)
+    monkeypatch.setattr(cam, "_downscale_jpeg", lambda img: img)
+    monkeypatch.setattr(cam, "_cfg_opt", lambda hass, k, d=None: d)
+
+    @contextlib.asynccontextmanager
+    async def _client(*a, **k):
+        yield object()
+    monkeypatch.setattr(cam, "_camera_client", _client)
+
+    class _Reply:
+        def __init__(self, text):
+            self.text = text
+
+    async def _chat(hass, client, messages, **kw):
+        seen.update(kw)
+        return _Reply(seen["reply"])
+    monkeypatch.setattr(load("providers.activity"), "execute_chat", _chat)
+    return seen
+
+
+@pytest.mark.parametrize("reply", [
+    '{"package": False, "mail": False}',          # Python booleans from a local model
+    '{"package": false, "mail": fal',             # cut off
+    '{"package": ',                               # cut off before any value
+])
+async def test_a_garbled_vision_reply_is_never_a_delivery(pm, vision, fake_hass, reply):
+    vision["reply"] = reply
+    det = await pm.detect_on_camera(fake_hass, None, "camera.front_door_test")
+    assert det is None or (det["package"] is False and det["mail"] is False)
+
+
+async def test_the_package_check_runs_at_temperature_zero(pm, vision, fake_hass):
+    vision["reply"] = '{"package": true, "mail": false, "count": 1, "description": "box"}'
+    det = await pm.detect_on_camera(fake_hass, None, "camera.front_door_test")
+    assert det["package"] is True
+    assert vision["temperature"] == 0
