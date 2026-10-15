@@ -1,3 +1,15 @@
+## [8.54.0] — A clock card and a who's home card, and a shorter gap between cards
+
+Two more cards join the rotation on the Command Center, and the cards now come round faster.
+
+### Added
+- **A date and time card.** The time in big figures with the date in words under it, in the panel's language. It keeps ticking while it is on show.
+- **A who's home card.** How many people are home (for example 2/3), then each person with HOME or AWAY. It uses Home Assistant's person entities, leaves out any that are unavailable, and is skipped when none are set up.
+
+### Changed
+- **The gap between cards is now 20 seconds** (it was 90 seconds from the start of one card to the start of the next, which left about a minute of the head alone). The count now starts when a card goes, so each card is followed by a full 20 seconds.
+- No new panel words, so no new translations.
+
 ## [8.53.0] — A security card on the Command Center
 
 The rotating cards on the Command Center now include a calm security summary.

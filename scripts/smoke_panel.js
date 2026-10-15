@@ -929,6 +929,10 @@ if (require.main === module) setTimeout(async () => {
     // is awake, unless the setting is off.
     {
       const realWS = elNew._hass.callWS;
+      // Only the kinds a test is about take part in the rotation.
+      const allKinds = elNew._presentKinds.bind(elNew);
+      const only = (...names) => () => { const k = allKinds(); return Object.fromEntries(names.map(n => [n, k[n]])); };
+      elNew._presentKinds = only("energy");
       let energyCalls = 0, fixture = {
         status: { configured: true, solar: { w: 2500 }, battery: { pct: 80 } },
         today: { configured: true, solar_kwh: 11.2, grid_export_kwh: 3.1, home_kwh: 7.4 },
@@ -1013,15 +1017,69 @@ if (require.main === module) setTimeout(async () => {
         elNew._liveData.lockdown = { active: false };
         elNew._hass.states = { "lock.a": L("locked"), "lock.b": L("locked") };
         const order = [];
+        elNew._presentKinds = only("energy", "security");
         for (let i = 0; i < 3; i++) {
           card().click();
           await tick(150);
           const t = card().textContent;
           order.push(t.includes("Solar made") ? "energy" : t.includes("2/2") ? "security" : "none");
         }
+        elNew._presentKinds = only("energy");
         checks.push(["security: it takes its turn in the rotation with energy",
           ["energy,security,energy", "security,energy,security"].includes(order.join(","))]);
         elNew._hass.states = saved; elNew._liveData.lockdown = lock;
+      }
+      // Date and time, who is home, and the gap between cards.
+      {
+        const saved = elNew._hass.states;
+        const t = new Date(2026, 9, 15, 14, 32, 5).getTime();
+        const clock = elNew._presentClockHtml(t);
+        checks.push(["clock: shows the time and the date in words",
+          clock.includes("32") && /Thursday/.test(clock) && /October/.test(clock) && clock.includes("15") && clock.includes("pc-big")]);
+        const P = (s, name) => ({ state: s, attributes: { friendly_name: name } });
+        elNew._hass.states = { "person.b": P("not_home", "Bee"), "person.a": P("home", "Ay"), "person.c": P("unavailable", "Cee"),
+          "person.d": P("home", "Dee") };
+        let hd = elNew._presentHomeData();
+        let hh = elNew._presentHomeHtml(hd);
+        checks.push(["home: counts the people at home, leaves out unavailable ones, and lists who is in and out",
+          hd.total === 3 && hd.home === 2 && hh.includes("2/3") && hh.includes("Ay") && hh.includes("Bee")
+          && !hh.includes("Cee") && hh.includes("HOME") && hh.includes("AWAY")
+          && hh.indexOf("Ay") < hh.indexOf("Bee")]);
+        elNew._hass.states = { "lock.a": { state: "locked", attributes: {} } };
+        checks.push(["home: with nobody set up there is no card to show", elNew._presentHomeData() === null]);
+        elNew._hass.states = saved;
+        // A card that has a refresh redraws while it is on show, and stops when it goes.
+        let ticks = 0;
+        elNew._presentKinds = () => ({ clk: { html: () => `<div class="pc-cap">T0</div>`, ambient: async () => ({}),
+          refresh: () => `<div class="pc-cap">T${++ticks}</div>`, every: 30 } });
+        card().click();
+        await tick(250);
+        const seenTicks = ticks, tt = card().textContent;
+        elNew._presentCycleMs = 5000;   // so nothing new comes up while this is checked
+        card().click();
+        const after = ticks, goneAtOnce = !shown();
+        await tick(150);
+        checks.push(["clock: a card that ticks redraws while on show and stops when it goes",
+          goneAtOnce && seenTicks >= 3 && /^T\d+$/.test(tt) && tt !== "T0" && ticks === after]);
+        elNew._presentCycleMs = 40;
+        // The next card comes a full gap after one goes.
+        elNew._presentKinds = () => ({ clk: { html: () => `<div class="pc-cap">NEXT</div>`, ambient: async () => ({}) } });
+        clearInterval(elNew._presentCycleTimer);   // back to a quick cycle to get a card up
+        elNew._presentCycleTimer = setInterval(() => elNew._presentAmbient(), 40);
+        elNew._presentCycleMs = 160;
+        await tick(300);
+        card().click();
+        await tick(80);
+        const tooSoon = shown();
+        await tick(240);
+        checks.push(["ambient: after a card goes, the next one waits a full gap, not what was left of the old timer",
+          tooSoon === false && shown() === true]);
+        const built = fs.readFileSync(path.join(__dirname, "..", "custom_components/nova/frontend/nova-panel.js"), "utf8");
+        checks.push(["ambient: the gap between cards is 20 seconds", /this\._presentCycleMs \|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
+        elNew._presentKinds = only("energy");
+        elNew._presentCycleMs = 40;
+        clearInterval(elNew._presentCycleTimer);
+        elNew._presentCycleTimer = setInterval(() => elNew._presentAmbient(), 40);
       }
       card().click();
       elNew._liveData.config.hero_card_cycle = false;
@@ -1052,6 +1110,7 @@ if (require.main === module) setTimeout(async () => {
       await tick(200);
       checks.push(["ambient: off the Command Center the cycle stops and reads nothing", energyCalls === before && !elNew._presentCycleTimer]);
       elNew._presentCycleMs = 0; elNew._presentFirstMs = 0;
+      delete elNew._presentKinds;
       elNew._hass.callWS = realWS;
     }
     elNew._liveData.status.sleep = sleepWas;
