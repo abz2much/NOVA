@@ -1,3 +1,11 @@
+## [8.49.43] — Copied code out of the learning and panel commands, and what is left for later
+
+Phase 8 finishes its prioritised list: the next files with the most copied code are rewritten with their copied text removed and nothing else changed. The work left for a later phase is written up in docs/phase8-deferred.md.
+
+### Changed
+- **The decision and calibration commands, the pattern store, sleep detection, scene picking, the Repairs notices and the cognition evaluators rewritten**, keeping every public name, message, prompt, stored value and behaviour. No user facing change.
+- **docs/phase8-deferred.md added**: the files that still carry copied code (48 small integration files, the old tests, the panel floor plan editor and translations, config text and repo tooling), left for a later phase on purpose.
+
 ## [8.49.42] — Copied code out of the control, camera, environment and routine tools
 
 Phase 8 continues, now prioritised: the files with the most copied code left are rewritten with their copied text removed and nothing else changed. This batch covers the agent's control, camera and environment tools, the ignore rules, entity exclusions, house routines, the panel's debug log and the diagnostics download.

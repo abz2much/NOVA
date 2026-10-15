@@ -1,13 +1,12 @@
-"""Home Assistant Repair issues for Nova operational problems.
+"""Nova's problems shown in Home Assistant's Settings, Repairs.
 
-These surface an actionable condition — the reasoning backend being unreachable
-— in Settings → Repairs with a clear description, complementing the in-panel
-diagnostics and the failure reason already logged on the LLM path. The issue is
-a *non-fixable notice*: it never blocks the integration from loading (Nova
-stays up in limited mode) and it clears itself the moment reasoning recovers.
+The reasoning backend being unreachable gets a notice there with the cause,
+next to the panel's diagnostics and the reason already logged on the AI
+path. It is a notice only, with nothing to fix through a flow: Nova still
+loads (in a limited way) and the notice goes the moment reasoning works.
 
-Deliberately named ``repair_notices`` rather than ``repairs`` so Home Assistant
-does not treat it as the repairs *platform* (which would expect a fix-flow).
+Called repair_notices, not repairs, so Home Assistant does not load it as
+the repairs platform, which would expect a fix flow.
 """
 from __future__ import annotations
 
@@ -18,49 +17,39 @@ from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
 
+_DETAIL_LIMIT = 300
+_DEFAULT_DETAIL = "The reasoning model could not be reached."
+_LLM_ISSUE = "llm_unavailable"
 _LOGGER = logging.getLogger(__name__)
 
-_LLM_ISSUE = "llm_unavailable"
-
-# Track our own issue so we neither churn the registry during an outage nor
-# leave a stale issue behind after a restart. ``cleared_once`` lets the first
-# recovery after startup delete an issue left over from a previous run.
+# Our own record of the notice, so an outage does not rewrite the registry
+# over and over and a restart leaves nothing stale. cleared_once lets the
+# first success after startup remove a notice from an earlier run.
 _state = {"active": False, "detail": None, "cleared_once": False}
 
 
 def note_llm_problem(hass: HomeAssistant, detail: str) -> None:
-    """Raise (or update) the 'reasoning backend unavailable' Repair issue.
-
-    ``detail`` is the specific cause already computed on the LLM failure path
-    (e.g. a decommissioned model, or an auth/connectivity error). Safe to call
-    from the event loop; never raises.
-    """
-    text = (detail or "The reasoning model could not be reached.").strip()[:300]
+    """Show, or update, the "reasoning backend unavailable" notice with the
+    cause the AI path worked out (a retired model, a key or connection
+    error). Event loop safe; never raises."""
+    text = (detail or _DEFAULT_DETAIL).strip()[:_DETAIL_LIMIT]
     if _state["active"] and _state["detail"] == text:
         return
     try:
-        ir.async_create_issue(
-            hass,
-            DOMAIN,
-            _LLM_ISSUE,
-            is_fixable=False,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key=_LLM_ISSUE,
-            translation_placeholders={"detail": text},
-        )
-        _state.update(active=True, detail=text, cleared_once=False)
-    except Exception as exc:  # registry unavailable / mid-teardown
+        ir.async_create_issue(hass, DOMAIN, _LLM_ISSUE, is_fixable=False,
+                              severity=ir.IssueSeverity.ERROR, translation_key=_LLM_ISSUE,
+                              translation_placeholders={"detail": text})
+    except Exception as exc:  # registry not there, or shutting down
         _LOGGER.debug("could not create LLM repair issue: %s", exc)
+        return
+    _state.update(active=True, detail=text, cleared_once=False)
 
 
 def clear_llm_problem(hass: HomeAssistant) -> None:
-    """Clear the LLM Repair issue once reasoning works again.
-
-    Clears once per process even if we didn't raise the issue this run, so a
-    notice left over from a previous run is removed on the next success. Safe to
-    call from the event loop; never raises.
-    """
-    if not _state["active"] and _state["cleared_once"]:
+    """Remove the notice once reasoning works again. Done once per run even
+    when this run never showed it, so a notice from an earlier run goes on
+    the first success. Event loop safe; never raises."""
+    if _state["cleared_once"] and not _state["active"]:
         return
     try:
         ir.async_delete_issue(hass, DOMAIN, _LLM_ISSUE)

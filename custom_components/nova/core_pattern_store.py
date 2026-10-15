@@ -86,87 +86,78 @@ class StateLogger:
         except Exception:
             pass
 
+    def _open(self):
+        """A connection to the pattern store, used as ``with``: it commits
+        when the block ends."""
+        return _store.connect(self._db_path, row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
+
     def log_command(self, text: str, handled_by: str = "agent",
-                     entity_ids: list = None, person: str = "unknown"):
-        """Record a voice/text command for pattern analysis."""
+                    entity_ids: list = None, person: str = "unknown"):
+        """Keep one spoken or typed command for pattern analysis."""
         now = datetime.now()
+        row = (now.isoformat(), text, handled_by, json.dumps(entity_ids or []), person,
+               now.hour, now.weekday())
         try:
-            with _store.connect(self._db_path, row_factory=False, mkdir=False,
-                                busy_timeout_ms=None) as conn:
-                conn.execute(
-                    "INSERT INTO commands "
-                    "(timestamp, text, handled_by, entity_ids, person, "
-                    "hour, day_of_week) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (now.isoformat(), text, handled_by,
-                     json.dumps(entity_ids or []), person,
-                     now.hour, now.weekday()),
-                )
+            with self._open() as conn:
+                conn.execute("INSERT INTO commands (timestamp, text, handled_by, "
+                             "entity_ids, person, hour, day_of_week) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?)", row)
         except Exception:
             pass
 
     def distinct_logged_entities(self) -> set:
-        """Entities already present in the pattern store — skipped on backfill so
-        importing history can't double-count what live logging already covers."""
+        """Every entity already in the store, which a history import skips so
+        it never counts twice what live logging already holds."""
         try:
-            with _store.connect(self._db_path, row_factory=False, mkdir=False,
-                                busy_timeout_ms=None) as conn:
-                return {r[0] for r in conn.execute(
-                    "SELECT DISTINCT entity_id FROM state_changes")}
+            with self._open() as conn:
+                found = conn.execute("SELECT DISTINCT entity_id FROM state_changes")
+                return {row[0] for row in found}
         except Exception:
             return set()
 
     def bulk_insert_history(self, rows: list) -> int:
-        """Bulk-insert backfilled historical state changes. Each row is
-        (timestamp_iso, entity_id, domain, old_state, new_state); hour and
-        day_of_week are derived from the historical timestamp (not now), and the
-        source is tagged 'history'. Returns the number inserted."""
-        prepared = []
+        """Add imported history: each row is (timestamp_iso, entity_id, domain,
+        old_state, new_state). Hour and weekday come from the row's own time,
+        and the source is "history". Returns how many went in; a row whose
+        time cannot be read is skipped."""
+        ready = []
         for row in rows:
             try:
-                ts, eid, dom, old, new = row
-                dt = datetime.fromisoformat(ts)
+                ts, entity_id, domain, old, new = row
+                when = datetime.fromisoformat(ts)
             except Exception:
                 continue
-            prepared.append((ts, eid, dom, old, new, "", dt.hour, dt.weekday(),
-                             "history", "unknown", 0.0))
-        if not prepared:
+            ready.append((ts, entity_id, domain, old, new, "", when.hour, when.weekday(),
+                          "history", "unknown", 0.0))
+        if not ready:
             return 0
         try:
-            with _store.connect(self._db_path, row_factory=False, mkdir=False,
-                                busy_timeout_ms=None) as conn:
+            with self._open() as conn:
                 conn.executemany(
-                    "INSERT INTO state_changes "
-                    "(timestamp, entity_id, domain, old_state, new_state, "
-                    "area_id, hour, day_of_week, triggered_by, person, "
-                    "person_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    prepared)
-            return len(prepared)
+                    "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, "
+                    "new_state, area_id, hour, day_of_week, triggered_by, person, "
+                    "person_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)", ready)
         except Exception:
             return 0
+        return len(ready)
 
     def get_pattern_stats(self) -> dict:
-        """Return learning statistics."""
+        """Counts for the learning panel, and how many days of data there are."""
         stats = {"state_changes": 0, "commands": 0, "suggestions": 0,
                  "patterns": 0, "days_of_data": 0}
+        counts = (("state_changes", "SELECT COUNT(*) FROM state_changes"),
+                  ("commands", "SELECT COUNT(*) FROM commands"),
+                  ("suggestions", "SELECT COUNT(*) FROM suggestions WHERE status='pending'"),
+                  ("patterns", "SELECT COUNT(*) FROM person_patterns"))
         try:
-            with _store.connect(self._db_path, row_factory=False, mkdir=False,
-                                busy_timeout_ms=None) as conn:
-                stats["state_changes"] = conn.execute(
-                    "SELECT COUNT(*) FROM state_changes").fetchone()[0]
-                stats["commands"] = conn.execute(
-                    "SELECT COUNT(*) FROM commands").fetchone()[0]
-                stats["suggestions"] = conn.execute(
-                    "SELECT COUNT(*) FROM suggestions WHERE status='pending'"
-                ).fetchone()[0]
-                stats["patterns"] = conn.execute(
-                    "SELECT COUNT(*) FROM person_patterns").fetchone()[0]
-                oldest = conn.execute(
-                    "SELECT MIN(timestamp) FROM state_changes"
-                ).fetchone()[0]
+            with self._open() as conn:
+                for key, sql in counts:
+                    stats[key] = conn.execute(sql).fetchone()[0]
+                oldest = conn.execute("SELECT MIN(timestamp) FROM state_changes").fetchone()[0]
                 if oldest:
-                    days = (datetime.now() - datetime.fromisoformat(oldest)).days
-                    stats["days_of_data"] = days
+                    stats["days_of_data"] = (datetime.now()
+                                             - datetime.fromisoformat(oldest)).days
         except Exception:
             pass
         return stats

@@ -1,11 +1,9 @@
-"""The decision record, calibration and analysis commands.
+"""Panel commands for decisions, calibration and analysis.
 
-Moved verbatim out of websocket.py: nova/list_decisions, nova/get_decision,
-nova/set_decision_outcome, nova/get_calibration,
-nova/run_analysis, nova/get_cognitive_status and nova/root_cause, with the
-helpers they use. The logger keeps the name it had in websocket.py.
-
-websocket.py imports every handler by name (async_register registers them).
+nova/list_decisions, nova/get_decision, nova/set_decision_outcome,
+nova/get_calibration, nova/run_analysis, nova/get_cognitive_status and
+nova/root_cause. websocket.py imports each handler by name to register it,
+and the logger keeps websocket.py's name.
 """
 from __future__ import annotations
 
@@ -26,28 +24,21 @@ _LOGGER = logging.getLogger(f"{__package__}.websocket")
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/root_cause",
     vol.Required("entity_id"): str,
-    vol.Optional("event_time"): str,
-    vol.Optional("window_secs"): int,
+    vol.Optional("event_time"): str, vol.Optional("window_secs"): int,
 })
 @websocket_api.async_response
-async def ws_root_cause(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Root cause analysis for an entity's (latest or specified) change —
-    the same engine the conversational 'why did …' tool uses, structured for
-    the panel."""
+async def ws_root_cause(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                        msg: dict[str, Any]) -> None:
+    """Why an entity changed (its latest change, or the one at event_time),
+    from the same engine as the chat's "why did ..." tool, laid out for the
+    panel."""
     try:
         from . import rca
         names = rca.entity_names(hass)
-        result = await hass.async_add_executor_job(
-            lambda: rca.analyze(
-                msg["entity_id"],
-                msg.get("event_time"),
-                int(msg.get("window_secs") or rca.DEFAULT_WINDOW_SECS),
-                names=names))
-        connection.send_result(msg["id"], result)
+        window = int(msg.get("window_secs") or rca.DEFAULT_WINDOW_SECS)
+        found = await hass.async_add_executor_job(lambda: rca.analyze(
+            msg["entity_id"], msg.get("event_time"), window, names=names))
+        connection.send_result(msg["id"], found)
     except Exception as exc:
         _LOGGER.exception("root_cause failed: %s", exc)
         connection.send_error(msg["id"], "root_cause_failed", safe_error_message(exc))
@@ -57,21 +48,18 @@ async def ws_root_cause(
     vol.Required("type"): "nova/get_calibration",
 })
 @websocket_api.async_response
-async def ws_get_calibration(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Confidence calibration + interruption-budget health for the dashboard."""
+async def ws_get_calibration(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                             msg: dict) -> None:
+    """How well Nova's confidence matches outcomes, and how its interruption
+    budget is doing, for the dashboard."""
     try:
-        from . import decision_record
+        from . import decision_record as record
         payload = {
-            "calibration": decision_record.calibration(),
-            "interruption_budget": decision_record.interruption_budget(),
-            "stats": decision_record.stats(),
-            "suggestion": decision_record.outcome_rate("suggestion"),
-            "anticipation": decision_record.outcome_rate(
-                "anticipation", None, None, True),
+            "calibration": record.calibration(),
+            "interruption_budget": record.interruption_budget(),
+            "stats": record.stats(),
+            "suggestion": record.outcome_rate("suggestion"),
+            "anticipation": record.outcome_rate("anticipation", None, None, True),
         }
         try:
             from . import adaptive_awareness
@@ -79,20 +67,20 @@ async def ws_get_calibration(
         except Exception:
             pass
         try:
-            from .automation import patterns as pattern_analyzer
+            from .automation import patterns
             payload["suggestion_threshold"] = {
-                "base": round(pattern_analyzer.CONFIDENCE_THRESHOLD, 3),
-                "effective": round(pattern_analyzer._effective_threshold(), 3),
-                "learned_delta": round(pattern_analyzer._learned_threshold_delta(), 3),
+                "base": round(patterns.CONFIDENCE_THRESHOLD, 3),
+                "effective": round(patterns._effective_threshold(), 3),
+                "learned_delta": round(patterns._learned_threshold_delta(), 3),
             }
         except Exception:
             pass
         connection.send_result(msg["id"], payload)
     except Exception as exc:
-        connection.send_result(msg["id"], {
-            "calibration": {"n": 0}, "interruption_budget": {"judged": 0},
-            "error": safe_error_message(exc, where="get_calibration", log=True),
-        })
+        failure = safe_error_message(exc, where="get_calibration", log=True)
+        connection.send_result(msg["id"], {"calibration": {"n": 0},
+                                           "interruption_budget": {"judged": 0},
+                                           "error": failure})
 
 
 @websocket_api.require_admin
@@ -105,11 +93,8 @@ async def ws_get_calibration(
     vol.Optional("cursor_id"): int,
 })
 @websocket_api.async_response
-async def ws_list_decisions(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
+async def ws_list_decisions(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                            msg: dict) -> None:
     """Bounded, cursor-paginated Decision Record browser for the Logs tab.
     Summary rows only (no observation/interpretation/evidence) — full detail
     is a separate nova/get_decision call."""
@@ -163,11 +148,8 @@ def _bound_decision_strings(obj):
     vol.Required("decision_id"): int,
 })
 @websocket_api.async_response
-async def ws_get_decision(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
+async def ws_get_decision(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                          msg: dict) -> None:
     """Full detail for one Decision Record — the drawer behind nova/list_decisions.
     Defence in depth (today's writers put nothing sensitive here — verified):
     redacted the same way the config-entry diagnostics dump already is, then
@@ -194,11 +176,8 @@ async def ws_get_decision(
     vol.Required("verdict"): vol.In(["good", "unnecessary", "wrong"]),
 })
 @websocket_api.async_response
-async def ws_set_decision_outcome(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
+async def ws_set_decision_outcome(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                                  msg: dict) -> None:
     """Record Helpful/Unnecessary/Wrong feedback on a Decision Record.
     Set-once: an already-judged record reports "already_judged", not a silent
     no-op, so the panel can tell the two apart from "not_found"."""
@@ -233,38 +212,30 @@ def _name_diagnostic(res, names: dict) -> None:
     vol.Required("type"): "nova/run_analysis",
 })
 @websocket_api.async_response
-async def ws_run_analysis(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Force a pattern-analysis pass now (manual 'Analyze Now')."""
+async def ws_run_analysis(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                          msg: dict) -> None:
+    """Run a pattern analysis now (the panel's Analyze Now)."""
     try:
         from . import cognitive_core
-        res = await cognitive_core.run_analysis_now(hass)
-        _name_diagnostic(res, _entity_names(hass))
-        connection.send_result(msg["id"], res)
+        report = await cognitive_core.run_analysis_now(hass)
+        _name_diagnostic(report, _entity_names(hass))
+        connection.send_result(msg["id"], report)
     except Exception as exc:
-        connection.send_result(msg["id"], {"ran": False, "error": safe_error_message(exc, where="analyze_now", log=True)})
+        failure = safe_error_message(exc, where="analyze_now", log=True)
+        connection.send_result(msg["id"], {"ran": False, "error": failure})
 
 
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_cognitive_status",
 })
 @websocket_api.async_response
-async def ws_get_cognitive_status(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Return Nova cognitive core status for the dashboard."""
+async def ws_get_cognitive_status(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                                  msg: dict) -> None:
+    """The cognitive core's status for the dashboard."""
     try:
         from . import cognitive_core
-        status = cognitive_core.status()
-        connection.send_result(msg["id"], status)
+        connection.send_result(msg["id"], cognitive_core.status())
     except Exception as exc:
-        connection.send_result(msg["id"], {
-            "running": False,
-            "error": safe_error_message(exc, where="get_cognitive_status", log=True),
-            "learning": {},
-        })
+        failure = safe_error_message(exc, where="get_cognitive_status", log=True)
+        connection.send_result(msg["id"], {"running": False, "error": failure,
+                                           "learning": {}})

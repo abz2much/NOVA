@@ -53,19 +53,20 @@ _SLEEP_PROMPT_LISTEN_TIMEOUT = 30 * 60  # 30 minutes
 _PROMPTED_DATE: Optional[str] = None
 
 
-# Module-level manual nap override
+# A nap started by the nova.nap service: when it ends (UTC), or None.
 _NAP_UNTIL: Optional[datetime] = None
 
 
 def set_nap(duration_minutes: int = 30) -> None:
-    """Called by nova.nap service — sets manual mute for N minutes."""
+    """nova.nap: mute Nova for the next ``duration_minutes``."""
     global _NAP_UNTIL
-    _NAP_UNTIL = dt_util.utcnow() + timedelta(minutes=duration_minutes)
-    _LOGGER.info("Nova: manual nap for %d min until %s", duration_minutes, _NAP_UNTIL)
+    until = dt_util.utcnow() + timedelta(minutes=duration_minutes)
+    _NAP_UNTIL = until
+    _LOGGER.info("Nova: manual nap for %d min until %s", duration_minutes, until)
 
 
 def clear_nap() -> None:
-    """Explicit wake — cancels manual nap override."""
+    """End a nap now (someone said they are awake)."""
     global _NAP_UNTIL
     _NAP_UNTIL = None
     _LOGGER.info("Nova: manual nap cleared")
@@ -136,44 +137,29 @@ def set_override(value: str, quiet_end: str = "07:00") -> None:
 
 
 def _in_quiet_hours(quiet_start: str, quiet_end: str) -> bool:
-    """Check if current local time is within the configured quiet window.
-    Handles windows that cross midnight (e.g. 22:00 → 07:00)."""
+    """Whether local time now is inside the quiet window, including one that
+    runs past midnight (22:00 to 07:00)."""
     try:
-        start = time.fromisoformat(quiet_start)
-        end   = time.fromisoformat(quiet_end)
+        start, end = time.fromisoformat(quiet_start), time.fromisoformat(quiet_end)
     except (ValueError, TypeError):
         _LOGGER.warning("invalid quiet hours '%s' -> '%s'", quiet_start, quiet_end)
         return False
-    now_local = dt_util.now().time()
-    if start <= end:
-        return start <= now_local < end
-    return now_local >= start or now_local < end
+    now = dt_util.now().time()
+    if end < start:
+        return now >= start or now < end
+    return start <= now < end
 
 
-def is_sleeping(
-    hass: HomeAssistant,
-    *,
-    bedroom_area_ids: Iterable[str] = (),
-    quiet_start: str = "22:00",
-    quiet_end: str = "07:00",
-) -> tuple[bool, str]:
-    """
-    Return (sleeping, reason_string).
-
-    Priority:
-      1. Manual nap override (highest)
-      2. Explicit sleep-state override (Awake/Asleep, not yet expired)
-      3. Wearable sleep signal
-      4. Bedroom occupancy during quiet hours
-      5. Otherwise not sleeping
-    """
+def is_sleeping(hass: HomeAssistant, *, bedroom_area_ids: Iterable[str] = (),
+                quiet_start: str = "22:00", quiet_end: str = "07:00") -> tuple[bool, str]:
+    """(sleeping, why). The first that applies decides: a nap, then the
+    Awake or Asleep setting while it lasts, then a wearable, then an occupied
+    bedroom in quiet hours; otherwise awake."""
     global _NAP_UNTIL
-
-    # Manual nap check
     if _NAP_UNTIL is not None:
-        if dt_util.utcnow() < _NAP_UNTIL:
-            minutes_left = (_NAP_UNTIL - dt_util.utcnow()).total_seconds() / 60
-            return True, f"manual nap ({minutes_left:.0f}min remaining)"
+        left = _NAP_UNTIL - dt_util.utcnow()
+        if left.total_seconds() > 0:
+            return True, f"manual nap ({left.total_seconds() / 60:.0f}min remaining)"
         _NAP_UNTIL = None
 
     # Explicit override (v7.86.0) — a deliberate answer (panel dropdown, or
@@ -186,26 +172,23 @@ def is_sleeping(
     if override == "awake":
         return False, "set to Awake"
 
-    # Wearable sleep signal (v6.63.0) — if a biometric sleep entity is present
-    # and enabled, it's stronger evidence than bedroom occupancy. Opt-in; returns
-    # None when unavailable, so this is a no-op on systems without a wearable.
+    # A wearable (opt in) beats bedroom occupancy. None means no wearable or
+    # no reading, and changes nothing.
+    bedroom_hours = bool(bedroom_area_ids) and _in_quiet_hours(quiet_start, quiet_end)
     try:
         from . import biometrics
-        sig = biometrics.sleep_signal(hass)
-        if sig is True:
+        worn = biometrics.sleep_signal(hass)
+        if worn is True:
             return True, "wearable reports asleep"
-        if sig is False and not (bedroom_area_ids and _in_quiet_hours(quiet_start, quiet_end)):
-            # wearable says awake and no strong occupancy signal → trust awake
+        if worn is False and not bedroom_hours:
             return False, "wearable reports awake"
     except Exception:
         pass
 
-    # Bedroom + quiet hours
-    if bedroom_area_ids and _in_quiet_hours(quiet_start, quiet_end):
+    if bedroom_hours:
         occupied, area_id = is_any_bedroom_occupied(hass, bedroom_area_ids)
         if occupied:
             return True, f"bedroom ({area_id}) occupied during quiet hours"
-
     return False, "awake"
 
 
