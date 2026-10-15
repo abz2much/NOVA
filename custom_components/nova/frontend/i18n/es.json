@@ -1297,5 +1297,8 @@
   "since {date}": "desde {date}",
   "{agree} of {n} verdicts agree": "{agree} de {n} veredictos coinciden",
   "Cards on the Command Center": "Tarjetas en el Centro de Mando",
-  "Now and then, show a card of live figures beside the head while the house is awake": "De vez en cuando, muestra junto a la cabeza una tarjeta con cifras en vivo mientras la casa está despierta"
+  "Now and then, show a card of live figures beside the head while the house is awake": "De vez en cuando, muestra junto a la cabeza una tarjeta con cifras en vivo mientras la casa está despierta",
+  "Arming": "Armando",
+  "Disarmed": "Desarmada",
+  "Triggered": "Disparada"
 }

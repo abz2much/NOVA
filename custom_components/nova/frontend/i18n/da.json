@@ -393,5 +393,8 @@
   "since {date}": "siden {date}",
   "{agree} of {n} verdicts agree": "{agree} af {n} afgørelser er enige",
   "Cards on the Command Center": "Kort i kommandocentralen",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Vis nu og da et kort med live-tal ved siden af hovedet, mens huset er vågent"
+  "Now and then, show a card of live figures beside the head while the house is awake": "Vis nu og da et kort med live-tal ved siden af hovedet, mens huset er vågent",
+  "Arming": "Aktiverer",
+  "Disarmed": "Frakoblet",
+  "Triggered": "Udløst"
 }

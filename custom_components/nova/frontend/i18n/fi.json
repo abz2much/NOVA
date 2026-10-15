@@ -393,5 +393,8 @@
   "since {date}": "{date} alkaen",
   "{agree} of {n} verdicts agree": "{agree}/{n} ratkaisusta on samaa mieltä",
   "Cards on the Command Center": "Kortit komentokeskuksessa",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Näytä silloin tällöin kortti ajantasaisista luvuista pään vieressä, kun talo on hereillä"
+  "Now and then, show a card of live figures beside the head while the house is awake": "Näytä silloin tällöin kortti ajantasaisista luvuista pään vieressä, kun talo on hereillä",
+  "Arming": "Viritetään",
+  "Disarmed": "Viritys pois",
+  "Triggered": "Lauennut"
 }

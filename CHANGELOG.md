@@ -1,3 +1,10 @@
+## [8.53.0] — A security card on the Command Center
+
+The rotating cards on the Command Center now include a calm security summary.
+
+### Added
+- **The security card**, in the same rotation as energy: how many locks are locked (for example 2/3), the alarm state, whether doors are open or closed, and lockdown when it is on. It uses Home Assistant's live states and counts only, with no names. The alarm shown is the one chosen under Settings, or the only one there is. A row with nothing to show is left out, and with nothing to summarise there is no card, so the rotation skips it. It follows the same setting, "Cards on the Command Center", and the same quiet times as the energy card.
+
 ## [8.52.0] — Cards come round by themselves
 
 The Command Center no longer says "Hello" all the time. While the house is awake, a card of live figures now comes round beside the head every so often, then the head goes back to normal.
