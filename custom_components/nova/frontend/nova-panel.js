@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.52.0
+ * v8.53.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.52.0 ",
+      console.log("%c Nova Panel %c v8.53.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -8286,6 +8286,7 @@ ${this._htmlDashboardBody()}`;
   _presentKinds() {
     return {
       energy: { html: (d) => this._presentEnergyHtml(d), ambient: () => this._presentEnergyData() },
+      security: { html: (d) => this._presentSecurityHtml(d), ambient: async () => this._presentSecurityData() },
     };
   }
 
@@ -8299,6 +8300,56 @@ ${this._htmlDashboardBody()}`;
       export_kwh: today?.grid_export_kwh ?? null, home_kwh: today?.home_kwh ?? null,
       solar_w: status?.solar?.w ?? null, curve: [],
     };
+  }
+
+  // The security card is a calm summary from Home Assistant's live states,
+  // counts only (no names): locks, doors, the alarm and lockdown. Null when
+  // there is nothing to summarise, so the rotation skips it.
+  _presentSecurityData() {
+    const states = this._hass?.states || {};
+    const cfg = this._liveData?.config || {};
+    let locks = 0, locked = 0, doors = 0, open = 0;
+    const alarms = [];
+    for (const [id, st] of Object.entries(states)) {
+      const s = st && st.state;
+      if (id.startsWith("lock.")) {
+        if (s === "locked") { locks++; locked++; }
+        else if (["unlocked", "unlocking", "locking", "jammed", "open", "opening"].includes(s)) locks++;
+      } else if (id.startsWith("binary_sensor.")) {
+        const cls = st?.attributes?.device_class;
+        if ((cls === "door" || cls === "garage_door") && (s === "on" || s === "off")) { doors++; if (s === "on") open++; }
+      } else if (id.startsWith("alarm_control_panel.")) {
+        alarms.push(id);
+      }
+    }
+    // The alarm Nova watches: the one chosen in Settings, else the only one.
+    const alarmId = cfg.security_alarm_entity && states[cfg.security_alarm_entity] ? cfg.security_alarm_entity
+      : (alarms.length === 1 ? alarms[0] : null);
+    const alarm = alarmId ? String(states[alarmId].state || "") : "";
+    const data = {
+      locks_total: locks || null, locks_locked: locks ? locked : null,
+      doors_total: doors || null, doors_open: doors ? open : null,
+      alarm: ["disarmed", "arming", "pending", "triggered"].includes(alarm) || alarm.startsWith("armed_") ? alarm : null,
+      lockdown: !!this._liveData?.lockdown?.active,
+    };
+    return data.locks_total || data.doors_total || data.alarm || data.lockdown ? data : null;
+  }
+
+  _presentSecurityHtml(d) {
+    const n = (v) => this._esc(this._presentNum(v, 0));
+    const big = d.locks_total > 0;
+    const alarmWord = !d.alarm ? null
+      : d.alarm.startsWith("armed_") ? this._tx("ARMED")
+      : d.alarm === "disarmed" ? this._tx("Disarmed")
+      : d.alarm === "triggered" ? this._tx("Triggered") : this._tx("Arming");
+    const rows = [
+      alarmWord ? ["Security alarm", this._esc(alarmWord)] : null,
+      d.doors_total > 0 ? ["Doors", d.doors_open > 0 ? `${n(d.doors_open)} ${this._esc(this._tx("Open"))}` : this._esc(this._tx("Closed"))] : null,
+      d.lockdown ? ["Lockdown", this._esc(this._tx("ON"))] : null,
+    ].filter(Boolean);
+    if (!big && !rows.length) return "";
+    return `${big ? `<div class="pc-cap">Locked</div><div class="pc-big"><span class="pc-fig" data-unit="">${n(d.locks_locked)}/${n(d.locks_total)}</span></div>` : ""}`
+      + (rows.length ? `<div class="pc-rows">${rows.map(([label, value]) => `<div class="pc-row"><span>${label}</span><b>${value}</b></div>`).join("")}</div>` : "");
   }
 
   async _presentAmbient() {

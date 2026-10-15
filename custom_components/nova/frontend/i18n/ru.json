@@ -1297,5 +1297,8 @@
   "since {date}": "с {date}",
   "{agree} of {n} verdicts agree": "{agree} из {n} вердиктов совпадают",
   "Cards on the Command Center": "Карточки в Командном центре",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Время от времени показывать рядом с головой карточку с текущими данными, пока дом не спит"
+  "Now and then, show a card of live figures beside the head while the house is awake": "Время от времени показывать рядом с головой карточку с текущими данными, пока дом не спит",
+  "Arming": "Постановка на охрану",
+  "Disarmed": "Снято с охраны",
+  "Triggered": "Тревога"
 }

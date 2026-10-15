@@ -952,6 +952,10 @@ if (require.main === module) setTimeout(async () => {
       // Rotation: each kind of card takes its turn, and one with nothing to
       // show is skipped.
       const realKinds = elNew._presentKinds.bind(elNew);
+      const realStates = elNew._hass.states;
+      const realLockdown = elNew._liveData.lockdown;
+      elNew._hass.states = {};   // so the security card has nothing to show here
+      elNew._liveData.lockdown = { active: false };
       const seen = [];
       let spareData = { n: 1 };
       elNew._presentKinds = () => Object.assign(realKinds(), {
@@ -971,6 +975,54 @@ if (require.main === module) setTimeout(async () => {
       checks.push(["ambient: a kind that has nothing to show leaves the others in the rotation",
         shown() && card().textContent.includes("Solar made")]);
       elNew._presentKinds = realKinds;
+      elNew._hass.states = realStates;
+      // The security card: a calm summary of locks, doors, alarm and lockdown.
+      {
+        const hs = elNew._hass.states, saved = hs, lock = elNew._liveData.lockdown;
+        const sec = (states, cfg = {}, lockdown = false) => {
+          elNew._hass.states = states;
+          elNew._liveData.config = Object.assign({}, elNew._liveData.config, cfg);
+          elNew._liveData.lockdown = { active: lockdown };
+          return elNew._presentSecurityData();
+        };
+        const L = (s) => ({ state: s, attributes: {} });
+        const D = (s, cls = "door") => ({ state: s, attributes: { device_class: cls } });
+        let d = sec({ "lock.a": L("locked"), "lock.b": L("unlocked"), "lock.c": L("locked"), "lock.gone": L("unavailable"),
+          "binary_sensor.d1": D("on"), "binary_sensor.d2": D("off", "garage_door"), "binary_sensor.w": D("on", "window"),
+          "binary_sensor.motion": D("on", "motion"), "alarm_control_panel.x": L("armed_away") });
+        checks.push(["security: counts only the locks, doors and the one alarm, and ignores unavailable or other sensors",
+          d.locks_total === 3 && d.locks_locked === 2 && d.doors_total === 2 && d.doors_open === 1
+          && d.alarm === "armed_away" && d.lockdown === false]);
+        let html = elNew._presentSecurityHtml(d);
+        checks.push(["security: the card shows locked 2/3, the alarm as armed and one door open",
+          html.includes("2/3") && html.includes("Locked") && html.includes("ARMED") && html.includes("1 Open")
+          && !html.includes("Lockdown")]);
+        d = sec({ "lock.a": L("locked"), "alarm_control_panel.x": L("disarmed"), "alarm_control_panel.y": L("triggered") });
+        checks.push(["security: with two alarm panels and none chosen the alarm row is left out", d.alarm === null]);
+        d = sec({ "lock.a": L("locked"), "alarm_control_panel.x": L("disarmed"), "alarm_control_panel.y": L("triggered") },
+          { security_alarm_entity: "alarm_control_panel.y" });
+        checks.push(["security: the alarm chosen in Settings is the one shown", d.alarm === "triggered"]);
+        html = elNew._presentSecurityHtml(sec({ "binary_sensor.d": D("off"), "alarm_control_panel.x": L("disarmed") },
+          { security_alarm_entity: "" }, true));
+        checks.push(["security: no locks leaves the big figure out; doors closed, alarm disarmed and lockdown on are shown",
+          !html.includes("pc-big") && html.includes("Closed") && html.includes("Disarmed") && html.includes("Lockdown")]);
+        checks.push(["security: with nothing set up there is no card to show",
+          sec({ "calendar.family": L("off") }, { security_alarm_entity: "" }, false) === null]);
+        elNew._hass.states = saved; elNew._liveData.lockdown = lock;
+        // It takes its turn in the real rotation after energy.
+        elNew._liveData.lockdown = { active: false };
+        elNew._hass.states = { "lock.a": L("locked"), "lock.b": L("locked") };
+        const order = [];
+        for (let i = 0; i < 3; i++) {
+          card().click();
+          await tick(150);
+          const t = card().textContent;
+          order.push(t.includes("Solar made") ? "energy" : t.includes("2/2") ? "security" : "none");
+        }
+        checks.push(["security: it takes its turn in the rotation with energy",
+          ["energy,security,energy", "security,energy,security"].includes(order.join(","))]);
+        elNew._hass.states = saved; elNew._liveData.lockdown = lock;
+      }
       card().click();
       elNew._liveData.config.hero_card_cycle = false;
       let before = energyCalls;
@@ -984,10 +1036,13 @@ if (require.main === module) setTimeout(async () => {
       checks.push(["ambient: asleep, it stays quiet", !shown() && energyCalls === before && elNew._coreStateKey === "asleep"]);
       elNew._liveData.status.sleep = { state: "AWAKE" };
       elNew._renderData();
+      const keepStates = elNew._hass.states, keepLock = elNew._liveData.lockdown;
+      elNew._hass.states = {}; elNew._liveData.lockdown = { active: false };   // nothing to summarise for security either
       fixture = { status: { configured: false, solar: { w: null }, battery: { pct: null } },
         today: { configured: false, solar_kwh: null, grid_export_kwh: null, home_kwh: null } };
       await tick(200);
       checks.push(["ambient: with no energy set up there is no card", !shown()]);
+      elNew._hass.states = keepStates; elNew._liveData.lockdown = keepLock;
       fixture = {
         status: { configured: true, solar: { w: 100 }, battery: { pct: 50 } },
         today: { configured: true, solar_kwh: 1, grid_export_kwh: 0, home_kwh: 2 },

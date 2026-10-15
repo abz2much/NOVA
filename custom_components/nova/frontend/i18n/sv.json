@@ -1297,5 +1297,8 @@
   "since {date}": "sedan {date}",
   "{agree} of {n} verdicts agree": "{agree} av {n} utslag är överens",
   "Cards on the Command Center": "Kort i kommandocentralen",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Visa då och då ett kort med aktuella siffror bredvid huvudet medan huset är vaket"
+  "Now and then, show a card of live figures beside the head while the house is awake": "Visa då och då ett kort med aktuella siffror bredvid huvudet medan huset är vaket",
+  "Arming": "Aktiverar",
+  "Disarmed": "Avlarmad",
+  "Triggered": "Utlöst"
 }

@@ -393,5 +393,8 @@
   "since {date}": "{date} tarihinden beri",
   "{agree} of {n} verdicts agree": "{n} karardan {agree} tanesi aynı",
   "Cards on the Command Center": "Komuta Merkezi'nde kartlar",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Ev uyanıkken ara sıra başın yanında canlı rakamlardan oluşan bir kart göster"
+  "Now and then, show a card of live figures beside the head while the house is awake": "Ev uyanıkken ara sıra başın yanında canlı rakamlardan oluşan bir kart göster",
+  "Arming": "Kuruluyor",
+  "Disarmed": "Devre dışı",
+  "Triggered": "Tetiklendi"
 }
