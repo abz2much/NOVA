@@ -1,15 +1,19 @@
   // ─── Ember head: the hero's 3D face ─────────────────────────────────────
+  // The fallback when the WebGL hologram (core-hologram.js) cannot start.
   // A head built from gold sparks, projected in plain canvas 2D (no library,
   // same idea as NOVA3D). It sits on the left of a full-width stage, turns
   // and looks around, glances at the state word when it changes, and its
   // eyes, brows and mouth follow the core state.
 
   _initCore() {
-    const canvas = this.shadowRoot.getElementById("core");
+    let canvas = this.shadowRoot.getElementById("core");
     if (!canvas) return;
-    this._canvas = canvas;
     this._reduceMotion = (typeof window.matchMedia === "function")
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (this._initHologram(canvas)) return;
+    canvas = this.shadowRoot.getElementById("core");
+    if (!canvas) return;
+    this._canvas = canvas;
     // Defensive, not just a test accommodation: canvas 2D context creation
     // can fail (exotic embedded webviews, jsdom in tests) and matchMedia
     // isn't universally present — both degrade to a static hero instead of
@@ -86,10 +90,13 @@
       reasoning: { open: 1, wide: 1, brow: 0.8, smile: 0, mouth: 0.35, speed: 0.62, glow: 1.0, hot: 0.85, count: 110, sleep: 0 },
       asleep: { open: 0, wide: 0, brow: 0, smile: 0.2, mouth: 0, speed: 0.07, glow: 0.30, hot: 0.10, count: 30, sleep: 1 },
     };
-    const next = STATES[state] ? state : "idle";
+    // The hologram knows more states (listening, speaking, presenting) than
+    // the fallback head, which shows those as idle.
+    const next = this._holo ? this._holoTargets(state).key : (STATES[state] ? state : "idle");
     if (this._coreStateKey !== next && this._face) this._face.lookText = 1.6;
     this._coreStateKey = next;
-    this._targetState = STATES[next];
+    this._targetState = STATES[next] || STATES.idle;
+    if (this._holo) { this._holoSetState(next); return; }
     if (this._reduceMotion && this._ctx) {
       Object.assign(this._current, this._targetState);
       this._coreFrame(performance.now());

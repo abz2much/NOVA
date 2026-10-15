@@ -7,6 +7,7 @@
     // running forever on a detached, invisible canvas, compounding every
     // time someone switches tabs. Stop it before _initCore() starts a
     // fresh one.
+    this._holoStop();
     if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
     if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
     this._ctx = null;

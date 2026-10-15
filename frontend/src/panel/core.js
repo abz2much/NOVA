@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.49.43
+ * v8.50.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -38,6 +38,7 @@ class NovaPanel extends HTMLElement {
     this._lastActivitySig = null;
     this._flareUntil = 0;
     this._animHandle = null;
+    this._holo = null;
     this._particles = [];
     this._current = { open: 1, wide: 0, brow: 0, smile: 0.45, mouth: 0, speed: 0.20, glow: 0.60, hot: 0.35, count: 60, sleep: 0 };
     this._heroTypeTimer = null;
@@ -77,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.49.43 ",
+      console.log("%c Nova Panel %c v8.50.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -93,6 +94,12 @@ class NovaPanel extends HTMLElement {
       this._startIntervals();
     } else if (this._renderedOnce && this._currentTab === "energy") {
       this._startEnergyFlowPoll();
+    } else if (this._holoResume) {
+      // Leaving the page released the hologram's graphics context, and a
+      // canvas never gets a lost context back: start again on a fresh copy.
+      this._holoResume = false;
+      const old = this.shadowRoot.getElementById("core");
+      if (old) { old.replaceWith(old.cloneNode(false)); this._initCore(); }
     }
   }
 
@@ -100,6 +107,8 @@ class NovaPanel extends HTMLElement {
     if (this._fetchInterval) clearInterval(this._fetchInterval);
     if (this._sparklineInterval) clearInterval(this._sparklineInterval);
     if (this._cameraInterval) clearInterval(this._cameraInterval);
+    this._holoResume = !!this._holo;
+    this._holoStop();
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
     if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }
