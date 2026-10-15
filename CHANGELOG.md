@@ -1,3 +1,17 @@
+## [8.49.40] — Replies that find a working speaker, room commands that hit the right room
+
+Phase 8 continues with the TTS helper, the agent's home tools, the lockdown alarm sync, the conversation store and the database schema, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **A reply sent to a speaker that no longer exists was lost.** Home Assistant skips a missing speaker without an error, so it counted as delivered and went into Spoken History. A missing speaker now counts as failed, so a voice reply falls back to the satellite.
+- **The automatic voice could pick one that was down.** With the usual voice unavailable (Piper with its add-on stopped, say), every announcement failed. The automatic choice, regular and premium, now passes over an unavailable voice. A voice that has never been used yet still counts.
+- **Room commands could act on the wrong room.** "office" could match "Back Office", an empty room name matched the first room, and an entity moved to another room still counted in its device's room. An exact room name now wins and an entity's own room comes first.
+- **Turning off a busy room's lights could miss some.** Room control only looked at the first 30 entities in the room. It now sees every one.
+- **The conversation store left connections open.** Each read and write now closes its connection when it is done.
+
+### Changed
+- **The TTS helper, home tools, lockdown alarm sync and conversation store rewritten from empty files**, keeping every public name, message and stored value. Lockdown follows the alarm exactly as before. The database schema is laid out differently with identical table definitions.
+
 ## [8.49.39] — Fewer false security briefings, offers that reach every room
 
 Phase 8 continues with the proactive briefing, Nova's settings file, the comfort offers, the mode and intrusion panel commands and the agent prompt context, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.

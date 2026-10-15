@@ -450,33 +450,27 @@ async def test_one_bad_speaker_does_not_silence_the_rest(tts):
     assert good_calls, "the working speaker must still play"
 
 
-async def test_no_speakers_is_a_noop(tts):
-    hass = _Hass({})
-    await tts.async_announce(hass, "hello", "tts.piper", [])
-    assert hass.calls == []
-
-
-async def test_no_tts_entity_is_a_noop(tts):
-    hass = _Hass({})
-    await tts.async_announce(hass, "hello", None, ["media_player.a"])
+@pytest.mark.parametrize("voice, speakers", [
+    ("tts.piper", []),               # nowhere to speak
+    (None, ["media_player.a"]),      # nothing to speak with
+])
+async def test_nothing_to_speak_with_or_on_does_nothing(tts, voice, speakers):
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle")})
+    assert await tts.async_announce(hass, "hello", voice, speakers) is False
     assert hass.calls == []
 
 
 def test_drop_display_targets_filters_tv_and_movie(routing, load, nova_runtime):
-    # The output choke point strips TVs + the movie player from ANY target list,
-    # regardless of how they were resolved — the safety net for TV takeovers.
-    # movie_media_player is read from the entry's NovaRuntime.runtime_config,
-    # not nova_config.
-    spk = _State("media_player.living_room_speaker", "idle")
-    tv = _State("media_player.samsung_tv", "on"); tv.attributes = {"device_class": "tv"}
-    movie = _State("media_player.projector", "idle")
-    players = {s.entity_id: s for s in (spk, tv, movie)}
-    hass = _Hass(players)
+    # The last line of defence against a TV takeover: whatever chose the
+    # targets, a TV and the configured film player (read from the entry's
+    # runtime config) never get spoken to.
+    tv = _State("media_player.samsung_tv", "on")
+    tv.attributes = {"device_class": "tv"}
+    players = [_State("media_player.living_room_speaker", "idle"), tv,
+               _State("media_player.projector", "idle")]
+    hass = _Hass({p.entity_id: p for p in players})
     nova_runtime(hass, {"movie_media_player": "media_player.projector"})
-    kept = routing.drop_display_targets(
-        hass,
-        ["media_player.living_room_speaker", "media_player.samsung_tv", "media_player.projector"],
-        "unit-test")
+    kept = routing.drop_display_targets(hass, [p.entity_id for p in players], "unit-test")
     assert kept == ["media_player.living_room_speaker"]
 
 

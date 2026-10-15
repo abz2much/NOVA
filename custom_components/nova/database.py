@@ -1,302 +1,256 @@
-"""Nova — Conversation database (SQLite)."""
+"""Nova's conversation store (SQLite): chat turns, sentinel events and the
+activity log, all in conversations.db.
+
+Every operation opens a connection, commits on success (rolls back on an
+error) and closes it again; nothing is left open for the garbage collector.
+Reads and writes fail open: a failure is logged and the caller gets an
+empty answer, while health() reports the store as degraded.
+"""
 from __future__ import annotations
 
-import sqlite3
 import logging
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH: Optional[Path] = None  # override; None resolves via paths.py
+DB_PATH: Optional[Path] = None   # set to use another file; None asks paths.py
+
+# The last connect, schema or write failure, for diagnostics; None when the
+# last attempt worked.
+_last_error: Optional[str] = None
+
+# Newest `limit` rows of a window, handed back oldest first. id breaks ties
+# between rows with the same timestamp so the order is always the same.
+_RECENT_SQL = ("SELECT * FROM ("
+               "  SELECT * FROM conversations WHERE timestamp > ?{scope} "
+               "  ORDER BY timestamp DESC, id DESC LIMIT ?"
+               ") ORDER BY timestamp ASC, id ASC")
 
 
 def _db_path() -> Path:
     return DB_PATH or Path(paths.conversations_db())
 
-_last_error: Optional[str] = None   # last connect/schema failure, for diagnostics
+
+def _utc_now() -> datetime:
+    """Stored times are naive UTC ISO strings."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _since(hours: float) -> str:
+    return (_utc_now() - timedelta(hours=hours)).isoformat()
+
+
+def _failed(exc: Exception) -> None:
+    global _last_error
+    _last_error = f"{type(exc).__name__}: {exc}"
 
 
 def _connect() -> sqlite3.Connection:
+    """A connection with the schema applied. A connect or schema failure is
+    logged and kept for health() before it is raised to the caller."""
     global _last_error
     try:
         conn = _store.connect(_db_path())
         _store.ensure(conn, "conversations")
         conn.commit()
-        _last_error = None
-        return conn
     except Exception as exc:
-        # A schema/migration failure is NOT swallowed silently — it's logged and
-        # retained so diagnostics can report the store as degraded. Callers still
-        # handle the raised error for the individual operation.
-        _last_error = f"{type(exc).__name__}: {exc}"
+        _failed(exc)
         _LOGGER.error("conversation DB connect/schema failed: %s", exc)
         raise
+    _last_error = None
+    return conn
+
+
+@contextmanager
+def _session() -> Iterator[sqlite3.Connection]:
+    """One connection for one operation: committed when the block finishes,
+    rolled back if it raises, and closed either way."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def health() -> dict:
-    """Actively probe the conversation store: connect, apply the schema, and run
-    a trivial read. Returns ``{'ok': bool, 'error': str}``. Diagnostics uses this
-    so a failed schema/migration surfaces as degraded instead of silent no-ops."""
+    """Connect, apply the schema and read once. ``{'ok': bool, 'error': str}``,
+    so diagnostics shows a failing store as degraded rather than silent."""
     try:
-        conn = _connect()
-        try:
+        with _session() as conn:
             conn.execute("SELECT 1 FROM conversations LIMIT 1")
-        finally:
-            conn.close()
-        return {"ok": True, "error": ""}
     except Exception as exc:
         return {"ok": False, "error": _last_error or f"{type(exc).__name__}: {exc}"}
+    return {"ok": True, "error": ""}
 
 
-# ── Conversation history ──────────────────────────────────────────────────────
+# ── conversation turns ──────────────────────────────────────────────────────
 
-def save_message(
-    role: str,
-    content: str,
-    device_id: str = "unknown",
-    subject: Optional[str] = None,
-) -> Optional[int]:
-    """Persist a single conversation turn. Returns the inserted row's id on
-    success, or None on failure (fail-open, unchanged externally-visible
-    failure behavior — existing callers that ignore the return value, such
-    as sentinel.py, are unaffected)."""
-    global _last_error
+def save_message(role: str, content: str, device_id: str = "unknown",
+                 subject: Optional[str] = None) -> Optional[int]:
+    """Store one turn; its row id, or None when it could not be written.
+    A failed write (a full disk, say) is kept for health() too, so health
+    does not report fine straight after one."""
     try:
-        with _connect() as conn:
-            cur = conn.execute(
+        with _session() as conn:
+            cursor = conn.execute(
                 "INSERT INTO conversations (timestamp, device_id, role, content, subject) "
                 "VALUES (?,?,?,?,?)",
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                 device_id, role, content, subject),
-            )
-            return cur.lastrowid
+                (_utc_now().isoformat(), device_id, role, content, subject))
+            return cursor.lastrowid
     except Exception as exc:
-        # _connect() already records a connect/schema failure in _last_error;
-        # this also catches a failure in the INSERT itself (e.g. disk full)
-        # after a successful connect had already cleared it — without this,
-        # health() would keep reporting "ok" right after a real write failure.
-        _last_error = f"{type(exc).__name__}: {exc}"
+        _failed(exc)
         _LOGGER.warning("Nova DB write error: %s", exc)
         return None
 
 
-def get_recent_messages(
-    hours: int = 24,
-    device_id: Optional[str] = None,
-    limit: int = 200,
-    subject: Optional[str] = None,
-) -> list[dict]:
-    """Return recent conversation rows, oldest first.
+def get_recent_messages(hours: int = 24, device_id: Optional[str] = None,
+                        limit: int = 200, subject: Optional[str] = None) -> list[dict]:
+    """The newest ``limit`` turns of the last ``hours``, oldest first.
 
-    `device_id` (conversation-id scope) is the first-choice filter — when
-    given, it's used and `subject` is ignored. `subject` is an exact-match
-    fallback filter for person-scoped continuity when the caller has no
-    conversation-id to scope by (or that scope came up empty); callers decide
-    when to use it, this function never combines the two. No index added for
-    `subject` — see database.py's migration note for the query-plan/scale
-    justification (bounded household row count, fallback-only query
-    frequency, existing idx_timestamp already narrows the scan first).
-
-    Selects the NEWEST `limit` matching rows (an inner query ordered
-    timestamp DESC, id DESC — id as a deterministic tiebreaker for rows
-    sharing a timestamp), then re-sorts just that selected set back into
-    chronological order for the return value, preserving the existing
-    oldest-first caller contract. Ordering ascending before LIMIT (the prior
-    behavior) selected the OLDEST matching rows instead of the most recent
-    ones whenever more than `limit` rows exist in the window — wrong for
-    continuity, which needs the most recent history."""
+    ``device_id`` (the conversation) scopes the read when given, and
+    ``subject`` is then ignored; ``subject`` (the person) is the fallback
+    scope for a caller with no conversation to go by. The two are never
+    combined. Taking the newest rows matters: ordering oldest first before
+    the limit used to return the start of a long window instead of its end.
+    No index on subject is needed: a household's rows are few, this
+    fallback is rare, and the timestamp index narrows the scan first.
+    """
+    args: list = [_since(hours)]
+    scope = ""
+    if device_id:
+        scope, args = " AND device_id = ?", args + [device_id]
+    elif subject:
+        scope, args = " AND subject = ?", args + [subject]
     try:
-        since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-        with _connect() as conn:
-            if device_id:
-                rows = conn.execute(
-                    "SELECT * FROM ("
-                    "  SELECT * FROM conversations WHERE timestamp > ? AND device_id = ? "
-                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
-                    ") ORDER BY timestamp ASC, id ASC",
-                    (since, device_id, limit),
-                ).fetchall()
-            elif subject:
-                rows = conn.execute(
-                    "SELECT * FROM ("
-                    "  SELECT * FROM conversations WHERE timestamp > ? AND subject = ? "
-                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
-                    ") ORDER BY timestamp ASC, id ASC",
-                    (since, subject, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM ("
-                    "  SELECT * FROM conversations WHERE timestamp > ? "
-                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
-                    ") ORDER BY timestamp ASC, id ASC",
-                    (since, limit),
-                ).fetchall()
-        return [dict(r) for r in rows]
+        with _session() as conn:
+            rows = conn.execute(_RECENT_SQL.format(scope=scope), (*args, limit)).fetchall()
     except Exception as exc:
         _LOGGER.warning("Nova DB read error: %s", exc)
         return []
+    return [dict(row) for row in rows]
 
 
 def get_stats() -> dict:
-    """Return quick stats for diagnostics."""
+    """How many turns are stored and the oldest one's time, for diagnostics."""
     try:
-        with _connect() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
-            oldest = conn.execute(
-                "SELECT MIN(timestamp) FROM conversations"
-            ).fetchone()[0]
-            return {"total_messages": total, "oldest_entry": oldest}
+        with _session() as conn:
+            total, oldest = conn.execute(
+                "SELECT COUNT(*), MIN(timestamp) FROM conversations").fetchone()
     except Exception:
         return {}
-
-
-# ── Sentinel events ───────────────────────────────────────────────────────────
-
-def save_sentinel_event(entity_id: str, event_type: str, detail: str = "") -> None:
-    try:
-        with _connect() as conn:
-            conn.execute(
-                "INSERT INTO sentinel_events (timestamp, entity_id, event_type, detail) VALUES (?,?,?,?)",
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), entity_id, event_type, detail),
-            )
-    except Exception as exc:
-        _LOGGER.warning("Nova sentinel DB write error: %s", exc)
+    return {"total_messages": total, "oldest_entry": oldest}
 
 
 def delete_conversation(conversation_id: str) -> int:
-    """Delete every row of one conversation (the Chat tab's NEW CHAT). Returns
-    the rows deleted, 0 on failure (logged, not raised)."""
+    """Remove one conversation's turns (the Chat tab's NEW CHAT); how many
+    went, or 0 on a failure, which is logged."""
     if not conversation_id:
         return 0
     try:
-        with _connect() as conn:
-            cur = conn.execute(
-                "DELETE FROM conversations WHERE device_id = ?", (conversation_id,))
-            return cur.rowcount or 0
+        with _session() as conn:
+            cursor = conn.execute("DELETE FROM conversations WHERE device_id = ?",
+                                  (conversation_id,))
+            return cursor.rowcount or 0
     except Exception as exc:
         _LOGGER.warning("Nova DB conversation delete error: %s", exc)
         return 0
 
 
 def purge_old_records(days: int = 30) -> int:
-    """Delete entries older than `days`. Returns rows deleted."""
+    """Drop turns, sentinel events and activity older than ``days``. Returns
+    how many turns went."""
+    cutoff = (_utc_now() - timedelta(days=days)).isoformat()
     try:
-        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).isoformat()
-        with _connect() as conn:
-            cur = conn.execute(
-                "DELETE FROM conversations WHERE timestamp < ?", (cutoff,)
-            )
-            conn.execute(
-                "DELETE FROM sentinel_events WHERE timestamp < ?", (cutoff,)
-            )
-            conn.execute(
-                "DELETE FROM activity_log WHERE timestamp < ?", (cutoff,)
-            )
-            return cur.rowcount
+        with _session() as conn:
+            turns = conn.execute("DELETE FROM conversations WHERE timestamp < ?",
+                                 (cutoff,)).rowcount
+            for table in ("sentinel_events", "activity_log"):
+                conn.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
+            return turns
     except Exception as exc:
         _LOGGER.warning("Nova DB purge error: %s", exc)
         return 0
 
 
-# ── Activity log (v5.4.8) ────────────────────────────────────────────────────
+# ── sentinel events and the activity log ────────────────────────────────────
 
-def save_activity(
-    *,
-    entity_id: str = "",
-    category: str = "other",
-    urgency: str = "low",
-    message: str = "",
-    was_spoken: bool = False,
-    source: str = "observer",
-    pushed: bool = False,
-    outcome: str = "",
-    request_id: str = "",
-) -> None:
-    """Persist an activity log entry (observer event, sentinel alert, etc.).
-    A proactive message also carries its outcome (delivery.py, 8.45.0):
-    whether it was pushed, why it was or was not delivered, and its request."""
+def save_sentinel_event(entity_id: str, event_type: str, detail: str = "") -> None:
     try:
-        with _connect() as conn:
+        with _session() as conn:
+            conn.execute("INSERT INTO sentinel_events (timestamp, entity_id, event_type, "
+                         "detail) VALUES (?,?,?,?)",
+                         (_utc_now().isoformat(), entity_id, event_type, detail))
+    except Exception as exc:
+        _LOGGER.warning("Nova sentinel DB write error: %s", exc)
+
+
+def save_activity(*, entity_id: str = "", category: str = "other", urgency: str = "low",
+                  message: str = "", was_spoken: bool = False, source: str = "observer",
+                  pushed: bool = False, outcome: str = "", request_id: str = "") -> None:
+    """Log one observer event, sentinel alert or other activity. A proactive
+    message also records whether it was pushed, why it was or was not
+    delivered, and its action request (delivery.py)."""
+    row = (_utc_now().isoformat(), entity_id, category, urgency, message,
+           int(bool(was_spoken)), source, int(bool(pushed)),
+           outcome or None, request_id or None)
+    try:
+        with _session() as conn:
             conn.execute(
-                "INSERT INTO activity_log "
-                "(timestamp, entity_id, category, urgency, message, was_spoken, source,"
-                " pushed, outcome, request_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    entity_id,
-                    category,
-                    urgency,
-                    message,
-                    1 if was_spoken else 0,
-                    source,
-                    1 if pushed else 0,
-                    outcome or None,
-                    request_id or None,
-                ),
-            )
+                "INSERT INTO activity_log (timestamp, entity_id, category, urgency, "
+                "message, was_spoken, source, pushed, outcome, request_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)", row)
     except Exception as exc:
         _LOGGER.warning("Nova activity log write error: %s", exc)
 
 
-def get_recent_activity(
-    hours: int = 24,
-    limit: int = 50,
-) -> list[dict]:
-    """Return recent activity log rows, newest first."""
+def get_recent_activity(hours: int = 24, limit: int = 50) -> list[dict]:
+    """The last ``hours`` of activity, newest first."""
     try:
-        since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-        with _connect() as conn:
+        with _session() as conn:
             rows = conn.execute(
                 "SELECT * FROM activity_log WHERE timestamp > ? "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (since, limit),
-            ).fetchall()
-        return [dict(r) for r in rows]
+                "ORDER BY timestamp DESC LIMIT ?", (_since(hours), limit)).fetchall()
     except Exception as exc:
         _LOGGER.warning("Nova activity log read error: %s", exc)
         return []
+    return [dict(row) for row in rows]
 
 
 def get_activity_count_today() -> int:
-    """Count of spoken announcements today."""
+    """Spoken announcements since midnight (UTC)."""
+    midnight = _utc_now().replace(hour=0, minute=0, second=0).isoformat()
     try:
-        today = datetime.now(timezone.utc).replace(tzinfo=None).replace(hour=0, minute=0, second=0).isoformat()
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM activity_log WHERE timestamp > ? AND was_spoken = 1",
-                (today,),
-            ).fetchone()
-            return row[0] if row else 0
+        with _session() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM activity_log "
+                               "WHERE timestamp > ? AND was_spoken = 1",
+                               (midnight,)).fetchone()
     except Exception:
         return 0
+    return row[0] if row else 0
 
 
 def get_activity_counts(hours: int = 24) -> dict:
-    """Counts over the activity log for the last `hours`, worked out in the
-    database so a busy home is not capped at a page of rows: every row,
-    spoken ones, and ones whose message mentions "flagged" or "not worth"."""
+    """Counts over the last ``hours`` of activity, worked out by SQLite so a
+    busy home is never capped at a page of rows: everything, spoken, and
+    messages that say "flagged" or "not worth"."""
     empty = {"total": 0, "spoken": 0, "flagged": 0, "dropped": 0}
     try:
-        since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-        with _connect() as conn:
+        with _session() as conn:
             row = conn.execute(
                 "SELECT COUNT(*),"
                 " SUM(CASE WHEN was_spoken THEN 1 ELSE 0 END),"
                 " SUM(CASE WHEN instr(COALESCE(message, ''), 'flagged') > 0 THEN 1 ELSE 0 END),"
                 " SUM(CASE WHEN instr(COALESCE(message, ''), 'not worth') > 0 THEN 1 ELSE 0 END)"
-                " FROM activity_log WHERE timestamp > ?",
-                (since,),
-            ).fetchone()
-        if not row:
-            return empty
-        return {key: int(value or 0) for key, value in zip(empty, row)}
+                " FROM activity_log WHERE timestamp > ?", (_since(hours),)).fetchone()
     except Exception as exc:
         _LOGGER.warning("Nova activity log count error: %s", exc)
         return empty
+    return {key: int(value or 0) for key, value in zip(empty, row)} if row else empty

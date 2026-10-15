@@ -22,6 +22,8 @@ def test_save_message_insert_failure_updates_last_error(load, tmp_path, monkeypa
             return False
         def execute(self, *a, **kw):
             raise db.sqlite3.OperationalError("disk I/O error")
+        def close(self):    # 8.49.40: every connection is closed after use
+            pass
 
     monkeypatch.setattr(db, "_connect", lambda: _BoomConn())
     db.save_message("user", "hello", "test_device")

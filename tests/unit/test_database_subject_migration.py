@@ -61,6 +61,8 @@ def test_save_message_write_failure_returns_none(load, tmp_path, monkeypatch):
             return False
         def execute(self, *a, **kw):
             raise db.sqlite3.OperationalError("disk I/O error")
+        def close(self):    # 8.49.40: every connection is closed after use
+            pass
 
     monkeypatch.setattr(db, "_connect", lambda: _BoomConn())
     result = db.save_message("user", "hello", "dev1")
