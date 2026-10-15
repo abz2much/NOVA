@@ -151,6 +151,7 @@
         <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
       </div>
       <div class="toggle-list">
+        ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside the head while the house is awake")}
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
         ${onOff("sentinel_enabled", "Sentinel", "Doors, windows and locks left open")}

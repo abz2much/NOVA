@@ -1295,5 +1295,7 @@
   "Usual activity": "Vanlig aktivitet",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Du gav de två senaste av dessa Inte hjälpsam. Stoppa det här mönstret? Bara det här stoppas, och du kan starta om det här.",
   "since {date}": "sedan {date}",
-  "{agree} of {n} verdicts agree": "{agree} av {n} utslag är överens"
+  "{agree} of {n} verdicts agree": "{agree} av {n} utslag är överens",
+  "Cards on the Command Center": "Kort i kommandocentralen",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Visa då och då ett kort med aktuella siffror bredvid huvudet medan huset är vaket"
 }

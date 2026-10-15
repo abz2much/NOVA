@@ -391,5 +391,7 @@
   "Usual activity": "Olağan etkinlik",
   "You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.": "Bunların son ikisini Yararlı değil olarak değerlendirdin. Bu deseni durdurmak istiyor musun? Yalnızca bu durur ve buradan yeniden başlatabilirsin.",
   "since {date}": "{date} tarihinden beri",
-  "{agree} of {n} verdicts agree": "{n} karardan {agree} tanesi aynı"
+  "{agree} of {n} verdicts agree": "{n} karardan {agree} tanesi aynı",
+  "Cards on the Command Center": "Komuta Merkezi'nde kartlar",
+  "Now and then, show a card of live figures beside the head while the house is awake": "Ev uyanıkken ara sıra başın yanında canlı rakamlardan oluşan bir kart göster"
 }

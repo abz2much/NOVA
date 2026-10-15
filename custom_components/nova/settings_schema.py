@@ -80,6 +80,7 @@ _ALL = (
     _t("output_language", ""),
     _b("tts_use_ha_voice", False),
     _n("banter_level", 1),
+    _b("hero_card_cycle", True),
     # Announcements and phones
     _b("announcements_enabled", True, "custom"),
     _b("announce_notify_only", False),

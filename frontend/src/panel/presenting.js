@@ -1,4 +1,9 @@
   // ─── Presenting ───────────────────────────────────────────────────────
+  // While the Command Center is open and the house is awake, the cards also
+  // come round by themselves, one kind after another (the "Cards on the
+  // Command Center" setting, on by default), so the hero is not only ever
+  // "Hello". Energy is the first kind; its figures are read with the Energy
+  // tab's own commands.
   // When Nova answers an energy question it publishes a small card of the
   // real figures (nova/subscribe_presentation). The head turns towards the
   // card and the hero copy gives way to it; after the card expires, or when
@@ -6,20 +11,75 @@
   // wins: the head stays asleep, though the card can still be read.
   _presentStart() {
     const conn = this._hass?.connection;
-    if (this._presentUnsub || this._presentPending || !conn || typeof conn.subscribeMessage !== "function") return;
-    const token = this._presentToken = (this._presentToken || 0) + 1;
-    this._presentPending = true;
+    if (!conn || typeof conn.subscribeMessage !== "function") return;
+    const token = this._presentToken = this._presentToken || 0;
+    if (this._presentLive === token) return;   // already started for this round
+    this._presentLive = token;
     Promise.resolve(conn.subscribeMessage((card) => this._onPresentCard(card), { type: "nova/subscribe_presentation" }))
       .then((unsub) => {
-        this._presentPending = false;
         if (this._presentToken === token) this._presentUnsub = unsub;
-        else if (typeof unsub === "function") unsub();   // torn down while connecting
+        else if (typeof unsub === "function") unsub();   // stopped, or drawn again, while connecting
       })
-      .catch(() => { this._presentPending = false; });   // the card is optional
+      .catch(() => { if (this._presentLive === token) this._presentLive = null; });   // the card is optional
+    this._presentCycleStart();
+  }
+
+  _presentCycleStart() {
+    if (this._presentCycleTimer) return;
+    const every = this._presentCycleMs || 90000;
+    this._presentCycleTimer = setInterval(() => this._presentAmbient(), every);
+    // The first card comes soon after the page opens, not a full round later.
+    this._presentFirstTimer = setTimeout(() => this._presentAmbient(), this._presentFirstMs || 15000);
+  }
+
+  // Every kind of card Nova can show is listed here: how to draw it (html)
+  // and how to read the figures for the rotation (ambient, which gives the
+  // card's data or null when there is nothing to show). New kinds join the
+  // rotation by being added here.
+  _presentKinds() {
+    return {
+      energy: { html: (d) => this._presentEnergyHtml(d), ambient: () => this._presentEnergyData() },
+    };
+  }
+
+  async _presentEnergyData() {
+    const [status, today] = await Promise.all([
+      this._hass.callWS({ type: "nova/energy_flow", action: "status" }),
+      this._hass.callWS({ type: "nova/energy_flow", action: "today" }),
+    ]);
+    return {
+      solar_today_kwh: today?.solar_kwh ?? null, battery_pct: status?.battery?.pct ?? null,
+      export_kwh: today?.grid_export_kwh ?? null, home_kwh: today?.home_kwh ?? null,
+      solar_w: status?.solar?.w ?? null, curve: [],
+    };
+  }
+
+  async _presentAmbient() {
+    const cfg = this._liveData?.config || {};
+    if (cfg.hero_card_cycle === false || this._currentTab !== "dashboard") return;
+    if (this._presenting || this._coreState() !== "idle" || document.hidden) return;
+    const token = this._presentToken;
+    const kinds = Object.entries(this._presentKinds());
+    // Each round starts at the next kind; one with nothing to show is skipped.
+    for (let i = 0; i < kinds.length; i++) {
+      const at = ((this._presentTurn || 0) + i) % kinds.length;
+      const [kind, def] = kinds[at];
+      let data = null;
+      try { data = await def.ambient(); } catch (_) { /* no card of this kind this time */ }
+      // Gone, or busy with a real card, while the figures were being read.
+      if (this._presentToken !== token || this._presenting || this._coreState() !== "idle") return;
+      if (!data || !def.html(data)) continue;
+      this._presentTurn = at + 1;
+      const now = Date.now() / 1000;
+      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 30, data });
+      return;
+    }
   }
 
   _presentStop() {
     this._presentToken = (this._presentToken || 0) + 1;
+    if (this._presentCycleTimer) { clearInterval(this._presentCycleTimer); this._presentCycleTimer = null; }
+    if (this._presentFirstTimer) { clearTimeout(this._presentFirstTimer); this._presentFirstTimer = null; }
     const unsub = this._presentUnsub;
     this._presentUnsub = null;
     if (typeof unsub === "function") { try { unsub(); } catch (_) { /* already closed */ } }
@@ -27,13 +87,14 @@
   }
 
   _onPresentCard(card) {
-    if (!card || card.v !== 1 || card.kind !== "energy" || !card.data) return;
+    const def = card && card.v === 1 && card.data ? this._presentKinds()[card.kind] : null;
+    if (!def) return;
     if (card.id && card.id === this._presentId) return;   // the same card twice
     const ttl = Math.max(0, (Number(card.expires) - Number(card.created)) * 1000) || 30000;
     let left = Number(card.expires) * 1000 - Date.now();
     if (!(left > 0)) return;                 // already expired
     if (left > ttl) left = ttl;              // this clock runs behind the server's
-    const html = this._presentHtml(card.data);
+    const html = def.html(card.data);
     if (!html) return;
     const root = this.shadowRoot, el = root.getElementById("presentCard");
     if (!el) return;
@@ -64,7 +125,7 @@
 
   // The card's markup, or "" when none of its figures can be shown. A
   // figure Nova could not read is null and its row is left out.
-  _presentHtml(d) {
+  _presentEnergyHtml(d) {
     const has = (v) => typeof v === "number" && isFinite(v);
     const n = (v, dp) => this._esc(this._presentNum(v, dp));
     const rows = [
