@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.56.0
+ * v8.57.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.56.0 ",
+      console.log("%c Nova Panel %c v8.57.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -8552,7 +8552,13 @@ ${this._htmlDashboardBody()}`;
       if (!data || !def.html(data)) continue;
       this._presentTurn = at + 1;
       const now = Date.now() / 1000;
-      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 30, data });
+      // Each one stays 15 seconds, and the next comes 20 seconds after this one
+      // started (the timer starts over here), so the head is alone for 5.
+      if (this._presentCycleTimer) {
+        clearInterval(this._presentCycleTimer);
+        this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
+      }
+      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 15, data });
       return;
     }
   }
@@ -8600,11 +8606,6 @@ ${this._htmlDashboardBody()}`;
     if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
     if (!this._presenting) return;
     this._presenting = false;
-    // The next card comes a full gap after this one goes, not part way through it.
-    if (this._presentCycleTimer) {
-      clearInterval(this._presentCycleTimer);
-      this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
-    }
     this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
     this._targetCoreState(this._coreState());
   }
