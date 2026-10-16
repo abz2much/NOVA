@@ -404,10 +404,15 @@ each message goes to the activity log. A few of the rules:
   endpoint. Nova keeps the conversation itself and asks Google not to store
   it. Gemini's reasoning state (its thought signatures) is carried back to it
   between tool calls, so tool use works on Gemini 3 models. It needs no extra
-  package. Your Gemini key, model choices and roles are unchanged. Gemini 3.6
-  and later ignore the temperature setting, so Nova no longer sends one.
-  An older shared endpoint setting moves to the right address by itself,
-  without tying Nova to any particular host, address or model.
+  package. Your Gemini key, model choices and roles are unchanged. Google
+  documents the Interactions API as Beta, so its details can change. A busy
+  Google or a dropped connection is retried twice, briefly. For Gemini 3 and
+  later Nova leaves the temperature at Google's default, as Google advises;
+  older Gemini models and Gemma get the setting. If Google's model list
+  cannot be fetched, the model picker shows a built in list of Gemini models
+  instead, and hovering over it shows the reason. An older shared endpoint
+  setting moves to the right address by itself, without tying Nova to any
+  particular host, address or model.
 - Model lists from Groq, OpenAI, Anthropic, Gemini, Ollama and custom
   endpoints are fetched live. Gemini and Anthropic lists are paged within
   strict limits, results are cached briefly per provider, and a saved model

@@ -33,6 +33,13 @@ THINKING_LEVEL = "low"
 # Models that take a thinking level (Gemini 2.5, 3.x and later).
 _THINKING_MODELS = re.compile(r"^gemini-(2\.5|[3-9])")
 
+# Google advises leaving temperature at its default of 1.0 on Gemini 3 and
+# later, because a lower value can cause looping or poorer answers. So Nova
+# sends its temperature only to models known to take one (Gemini 2.x and
+# Gemma). An alias such as gemini-flash-latest could point at a newer model,
+# so it gets no temperature either.
+_TEMPERATURE_MODELS = re.compile(r"^(gemini-2|gemma)")
+
 # Largest recorded model step list kept for replay. Signatures are a few KB.
 MAX_RECORDED_CHARS = 262144
 
@@ -48,6 +55,10 @@ def bare_model(model: Optional[str]) -> str:
     """The model id without the API resource prefix a model picker may save."""
     name = str(model or "").strip()
     return name[len("models/"):] if name.startswith("models/") else name
+
+
+def takes_temperature(model: Optional[str]) -> bool:
+    return bool(_TEMPERATURE_MODELS.match(bare_model(model).lower()))
 
 
 def thinking_level_for(model: Optional[str]) -> Optional[str]:
@@ -260,6 +271,8 @@ def build_request(request: ChatRequest, model: str, *, flatten_tools: bool = Fal
         "max_output_tokens": request.max_tokens + (THINKING_TOKEN_ROOM if level else 0)}
     if level and thinking:
         config["thinking_level"] = level
+    if takes_temperature(model) and request.temperature is not None:
+        config["temperature"] = request.temperature
     body: dict[str, Any] = {
         "model": model, "input": steps, "store": False, "generation_config": config}
     if system:
