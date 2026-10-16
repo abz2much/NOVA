@@ -428,10 +428,9 @@ async def _trigger_briefing(reason: str, person_name: str = "",
     hours = ARRIVAL_RECENT_HOURS if reason == "arrival" else _OTHER_RECENT_HOURS
     note = _reason_note(reason, honorific, person_name)
     cameras = get_snapshot_summary(hours=hours)
-    if cameras:
-        note += f"\n\n{cameras}"
 
     try:
+        from .prompt_fence import fence_home_data
         from .briefing import (
             _gather_calendar, _gather_energy_anomalies, _gather_open_things,
             _gather_overnight_events, _gather_weather, _time_greeting,
@@ -457,9 +456,14 @@ async def _trigger_briefing(reason: str, person_name: str = "",
         events = _gather_overnight_events(hass, hours)
         if events:
             facts.append(f"Recent events: {'; '.join(events[:5])}.")
+        if cameras:
+            facts.append(cameras)
+        # The facts hold device names and camera text, so they are fenced.
+        # The reason note is Nova's own instruction and stays outside.
+        plain = "\n".join(facts + ([note] if note else []))
+        context = fence_home_data("\n".join(facts))
         if note:
-            facts.append(note)
-        context = "\n".join(facts)
+            context = f"{note}\n\n{context}"
         greeting = _time_greeting()
 
         task = _task_text(reason, honorific, greeting)
@@ -478,7 +482,7 @@ async def _trigger_briefing(reason: str, person_name: str = "",
                 reason, text[:200])
             problem = True
         else:
-            bad = ungrounded_briefing_fact(text, context)
+            bad = ungrounded_briefing_fact(text, plain)
             if bad:
                 _LOGGER.warning(
                     "Proactive briefing (%s) rejected — %s is not in the "

@@ -683,8 +683,10 @@ async def test_reason_about_scene(cam, chat, fake_hass, monkeypatch):
     system, user = call["messages"][0]["content"], call["messages"][1]["content"]
     assert system.endswith(" [lang:speak]") and "ONLY a JSON object" in system
     assert user.startswith("Camera: Porch\nTime: ")
-    assert "\nDetection: person\nVision description: desc\n" in user
-    assert user.endswith("\nRecent home activity:\ndoor opened")
+    assert "\nDetection: person\n" in user
+    # The description and recent activity are fenced as data.
+    assert "BEGIN_HOME_DATA_" in user
+    assert "\nVision description: desc\n\nRecent home activity:\ndoor opened\nEND_HOME_DATA_" in user
 
 
 async def test_reason_about_scene_defaults(cam, chat, fake_hass, monkeypatch):

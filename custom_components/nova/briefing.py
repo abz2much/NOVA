@@ -25,6 +25,7 @@ from .directive_helper import build_system_prompt
 from .locale_format import format_date
 from .persistence import sqlite as _store
 from .presence import get_presence_summary
+from .prompt_fence import fence_home_data, one_line
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def _time_greeting() -> str:
 
 
 def _label(state) -> str:
-    return state.attributes.get("friendly_name", state.entity_id)
+    return one_line(state.attributes.get("friendly_name", state.entity_id))
 
 
 def _gather_weather(hass: HomeAssistant) -> str:
@@ -98,7 +99,7 @@ def _gather_calendar(hass: HomeAssistant) -> list[str]:
         title = cal.attributes.get("message")
         begins = cal.attributes.get("start_time")
         if cal.state == "on" and title and begins:
-            found.append(f"{title} at {begins[11:16]}")
+            found.append(f"{one_line(title, 120)} at {begins[11:16]}")
     return found
 
 
@@ -316,7 +317,7 @@ async def _compose(hass, groq_client, system: str, context: str) -> str:
         reply = await execute_chat(
             hass, groq_client,
             [{"role": "system", "content": system},
-             {"role": "user", "content": f"Context:\n{context}"}],
+             {"role": "user", "content": "Context:\n" + fence_home_data(context)}],
             role="briefing", data_category="text",
             max_tokens=1500,
             temperature=0.2,

@@ -313,7 +313,12 @@ async def test_full_context_in_order(run):
 async def test_model_call_shape(run, load):
     out, _, chats, _ = await run()
     (messages, kw), = chats
-    assert messages[1] == {"role": "user", "content": "Context:\n" + out["context"]}
+    # The facts go to the model fenced as data, so the markers surround them.
+    assert messages[1]["role"] == "user"
+    content = messages[1]["content"]
+    assert content.startswith("Context:\nBelow, between the markers BEGIN_HOME_DATA_")
+    assert out["context"] in content
+    assert content.rstrip().splitlines()[-1].startswith("END_HOME_DATA_")
     system = messages[0]["content"]
     assert messages[0]["role"] == "system"
     assert system.endswith("|lang") and system.startswith("SYS[")
