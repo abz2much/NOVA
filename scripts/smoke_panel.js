@@ -1092,6 +1092,49 @@ if (require.main === module) setTimeout(async () => {
         checks.push(["reminders: a failed or empty answer is no card, not an error", (await elNew._presentRemindersData()) === null]);
         elNew._hass.callWS = realWS2;
         elNew._hass.states = saved;
+        // Indoor temperature and humidity, from the room cards' own readings.
+        const savedAreas = elNew._liveData.areas;
+        elNew._liveData.areas = [
+          { name: "Lounge", temp: "21°C", humidity: "45%" }, { name: "Kitchen", temp: "23°C", humidity: "—" },
+          { name: "Hall", temp: "—", humidity: "—" }, { name: "Study", temp: "—", humidity: "50%" },
+          { name: "Bedroom", temp: "19°C", humidity: "55%" }, { name: "Spare", temp: "20°C", humidity: "40%" }];
+        const cl = elNew._presentClimateData();
+        const clh = elNew._presentClimateHtml(cl);
+        checks.push(["climate: averages the rooms' readings, skips rooms with none, lists up to four",
+          cl.temp === 20.75 && cl.unit === "°C" && cl.humidity === 47.5 && cl.rooms.length === 4
+          && !cl.rooms.some(r => r.name === "Hall") && clh.includes("INDOOR") && clh.includes("Lounge")
+          && clh.includes("21°C · 45%") && clh.includes("23°C") && !clh.includes("Spare")]);
+        checks.push(["climate: the average shows no needless decimal (21 not 21.0) and keeps a real one (20.8)",
+          elNew._presentClimateHtml({ temp: 21, unit: "°C", humidity: null, rooms: [] }).includes(">21°C<")
+          && elNew._presentClimateHtml({ temp: 20.75, unit: "°C", humidity: null, rooms: [] }).includes(">20.8°C<")]);
+        elNew._liveData.areas = [{ name: "Hall", temp: "—", humidity: "—" }];
+        checks.push(["climate: with no room reporting anything there is no card", elNew._presentClimateData() === null]);
+        elNew._liveData.areas = savedAreas;
+        // Outside: the weather entity, in Home Assistant's own words when it gives them.
+        const W = (state, attrs) => ({ state, attributes: attrs });
+        elNew._hass.states = { "weather.home": W("rainy", { temperature: 14.4, humidity: 62, wind_speed: 18, wind_speed_unit: "km/h", temperature_unit: "°C" }) };
+        let wd = elNew._presentWeatherData();
+        let wh = elNew._presentWeatherHtml(wd);
+        checks.push(["weather: shows the temperature, the condition, humidity and wind",
+          wd.id === "weather.home" && wh.includes("Weather") && wh.includes("14") && wh.includes("°C") && wh.includes("Rainy")
+          && wh.includes("62%") && wh.includes("18 km/h") && wh.includes("Humidity") && wh.includes("Wind speed")]);
+        elNew._hass.formatEntityState = (st) => `HA:${st.state}`;
+        elNew._hass.formatEntityAttributeName = (st, k) => `N:${k}`;
+        elNew._hass.formatEntityAttributeValue = (st, k) => `V:${k}`;
+        wh = elNew._presentWeatherHtml(wd);
+        checks.push(["weather: uses Home Assistant's own names and values for the condition and rows when it has them",
+          wh.includes("HA:rainy") && wh.includes("N:humidity") && wh.includes("V:wind_speed")]);
+        delete elNew._hass.formatEntityState; delete elNew._hass.formatEntityAttributeName; delete elNew._hass.formatEntityAttributeValue;
+        elNew._hass.states = { "weather.gone": W("unavailable", { temperature: 10 }),
+          "sensor.garden_outdoor_temp": W("8.6", { device_class: "temperature", unit_of_measurement: "°C" }),
+          "sensor.lounge_temp": W("21", { device_class: "temperature", unit_of_measurement: "°C" }) };
+        wd = elNew._presentWeatherData();
+        wh = elNew._presentWeatherHtml(wd);
+        checks.push(["weather: with no weather entity it falls back to an outdoor temperature sensor, never an indoor one",
+          wd.id === "sensor.garden_outdoor_temp" && wh.includes("9°C") && !wh.includes("pc-rows")]);
+        elNew._hass.states = { "sensor.lounge_temp": W("21", { device_class: "temperature" }) };
+        checks.push(["weather: with no outdoor source there is no card", elNew._presentWeatherData() === null]);
+        elNew._hass.states = saved;
         // A card that has a refresh redraws while it is on show, and stops when it goes.
         let ticks = 0;
         elNew._presentKinds = () => ({ clk: { html: () => `<div class="pc-cap">T0</div>`, ambient: async () => ({}),

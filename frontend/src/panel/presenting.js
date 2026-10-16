@@ -41,6 +41,8 @@
       // `refresh` (optional) redraws a card on show every `every` ms.
       datetime: { html: (d) => this._presentClockHtml(d.now), ambient: async () => ({ now: Date.now() }),
         refresh: () => this._presentClockHtml(Date.now()), every: 1000 },
+      weather: { html: (d) => this._presentWeatherHtml(d), ambient: async () => this._presentWeatherData() },
+      climate: { html: (d) => this._presentClimateHtml(d), ambient: async () => this._presentClimateData() },
       home: { html: (d) => this._presentHomeHtml(d), ambient: async () => this._presentHomeData() },
       calendar: { html: (d) => this._presentCalendarHtml(d), ambient: async () => this._presentCalendarData() },
       reminders: { html: (d) => this._presentRemindersHtml(d), ambient: () => this._presentRemindersData() },
@@ -151,6 +153,77 @@
         const when = r.due || !isFinite(t.getTime()) ? this._tx("Now") : this._presentTime(t);
         return `<div class="pc-row"><span>${this._esc(r.label)}</span><b>${this._esc(when)}</b></div>`;
       }).join("")}</div>`;
+  }
+
+  // Indoor temperature and humidity: the room cards' own readings, averaged,
+  // with up to four rooms listed. Null when no room reports either.
+  _presentClimateData() {
+    const rooms = [];
+    for (const a of this._liveData?.areas || []) {
+      const t = parseFloat(a.temp), h = parseFloat(a.humidity);
+      if (!isFinite(t) && !isFinite(h)) continue;   // "—" when a room has neither
+      rooms.push({ name: String(a.name || ""), temp: isFinite(t) ? t : null, humidity: isFinite(h) ? h : null,
+        unit: isFinite(t) ? String(a.temp).replace(/^[-\d.]+/, "") : "" });
+    }
+    if (!rooms.length) return null;
+    const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
+    const temps = rooms.filter(r => r.temp !== null), hums = rooms.filter(r => r.humidity !== null);
+    return { temp: avg(temps.map(r => r.temp)), unit: temps.length ? temps[0].unit : "",
+      humidity: avg(hums.map(r => r.humidity)), rooms: rooms.slice(0, 4) };
+  }
+
+  _presentClimateHtml(d) {
+    if (!d || (d.temp == null && d.humidity == null)) return "";
+    const n = (v, dp) => this._esc(this._presentNum(v, dp));
+    const tenths = d.temp != null ? Math.round(d.temp * 10) / 10 : 0;   // 21 not 21.0, but 20.8 stays
+    const big = d.temp != null ? `${n(tenths, Number.isInteger(tenths) ? 0 : 1)}${this._esc(d.unit || "°")}` : `${n(d.humidity, 0)}%`;
+    const sub = d.temp != null && d.humidity != null ? `<div class="pc-now">${n(d.humidity, 0)}%</div>` : "";
+    const rows = (d.rooms || []).map(r => {
+      const parts = [r.temp != null ? `${n(r.temp, 0)}${this._esc(r.unit || "°")}` : "", r.humidity != null ? `${n(r.humidity, 0)}%` : ""].filter(Boolean);
+      return `<div class="pc-row"><span>${this._esc(r.name)}</span><b>${parts.join(" · ")}</b></div>`;
+    }).join("");
+    return `<div class="pc-cap">INDOOR</div><div class="pc-big"><span class="pc-fig" data-unit="">${big}</span></div>${sub}`
+      + (rows ? `<div class="pc-rows">${rows}</div>` : "");
+  }
+
+  // Outside: the first weather entity, else an outdoor temperature sensor
+  // (as Nova's own weather answer does).
+  _presentWeatherData() {
+    const states = this._hass?.states || {};
+    const live = (st) => st && st.state !== "unavailable" && st.state !== "unknown";
+    const wid = Object.keys(states).sort().find(k => k.startsWith("weather.") && live(states[k]));
+    if (wid) {
+      const a = states[wid].attributes || {};
+      const t = parseFloat(a.temperature);
+      if (isFinite(t)) return { id: wid, temp: t };
+    }
+    const sid = Object.keys(states).sort().find(k => {
+      const st = states[k], low = k.toLowerCase();
+      return k.startsWith("sensor.") && live(st) && st.attributes?.device_class === "temperature"
+        && (low.includes("outdoor") || low.includes("outside")) && isFinite(parseFloat(st.state));
+    });
+    return sid ? { id: sid, temp: parseFloat(states[sid].state) } : null;
+  }
+
+  _presentWeatherHtml(d) {
+    const st = d && this._hass?.states?.[d.id];
+    if (!st || !isFinite(d.temp)) return "";
+    const h = this._hass, a = st.attributes || {};
+    const plain = (s) => { const t = String(s || "").replace(/[_-]+/g, " ").trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
+    const unit = a.temperature_unit || (st.attributes?.unit_of_measurement) || "°";
+    // Home Assistant names its own states and attributes in the user's language.
+    const cond = id => id.startsWith("weather.")
+      ? (typeof h.formatEntityState === "function" ? h.formatEntityState(st) : plain(st.state)) : "";
+    const attrName = k => (typeof h.formatEntityAttributeName === "function" ? h.formatEntityAttributeName(st, k) : plain(k));
+    const attrVal = (k, fallbackUnit) => (typeof h.formatEntityAttributeValue === "function"
+      ? h.formatEntityAttributeValue(st, k) : `${this._presentNum(a[k], 0)}${fallbackUnit ? (fallbackUnit === "%" ? "" : " ") + fallbackUnit : ""}`);
+    const rows = [];
+    if (isFinite(parseFloat(a.humidity))) rows.push([attrName("humidity"), attrVal("humidity", "%")]);
+    if (isFinite(parseFloat(a.wind_speed))) rows.push([attrName("wind_speed"), attrVal("wind_speed", a.wind_speed_unit || "")]);
+    const condition = cond(d.id);
+    return `<div class="pc-cap">Weather</div><div class="pc-big"><span class="pc-fig" data-unit="">${this._esc(this._presentNum(d.temp, 0))}${this._esc(unit)}</span></div>`
+      + (condition ? `<div class="pc-now">${this._esc(condition)}</div>` : "")
+      + (rows.length ? `<div class="pc-rows">${rows.map(([l, v]) => `<div class="pc-row"><span>${this._esc(l)}</span><b>${this._esc(v)}</b></div>`).join("")}</div>` : "");
   }
 
   async _presentEnergyData() {
