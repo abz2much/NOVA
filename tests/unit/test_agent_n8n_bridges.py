@@ -55,6 +55,17 @@ def _isolate_nova_config(nova_config, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _already_confirmed(load, monkeypatch):
+    """These tests are about the bridge, not the yes. The gate has its own
+    tests in test_specialists_confirm.py."""
+    pol = load("policy")
+
+    async def allow(hass, request):
+        return pol.AuthorityDecision(True, "approved")
+    monkeypatch.setattr(pol, "authorize", allow)
+
+
+@pytest.fixture(autouse=True)
 def _configured_secret(ha_secrets, monkeypatch):
     """Default: a secret is configured. Individual tests override this."""
     async def fake_get_secret(hass, key, default=""):

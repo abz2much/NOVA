@@ -115,18 +115,58 @@ async def _ask_n8n_specialist(hass: HomeAssistant, path: str, message: str,
     return json.dumps({"reply": json.dumps(data)[:2000]})
 
 
-async def _exec_ask_executive_assistant(hass: HomeAssistant, args: dict) -> str:
+# The two specialists that act in the world (8.58.6). Each needs a yes first.
+ACTING_SPECIALISTS = {
+    "ask_executive_assistant": ("the Executive Assistant", "nova-exec-assistant"),
+    "ask_marketing_agent": ("the Marketing agent", "nova-marketing"),
+}
+
+
+async def _ask_acting_specialist(hass: HomeAssistant, tool: str, args: dict,
+                                 device_id=None, user_id=None) -> str:
+    """Ask a specialist that can act, once the user has said yes: a spoken
+    yes on a voice satellite (held on the reply), a phone tap in Chat."""
+    from ... import pending_confirm, policy
+    from ...prompt_fence import one_line
+    who, path = ACTING_SPECIALISTS[tool]
+    message = args.get("message", "") if isinstance(args, dict) else ""
+    shown = one_line(str(message), 80)
+    decision = await policy.authorize(hass, policy.AuthorityRequest(
+        "nova", tool, "", device_id=device_id or "", user_id=user_id or "",
+        label=f"ask {who}", target_name=f'"{shown}"'))
+    if not decision.allowed:
+        from .control import _hold_for_spoken_yes
+        if _hold_for_spoken_yes(hass, device_id, decision.approval):
+            pending_confirm.put(device_id or "", pending_confirm.KIND_SPECIALIST,
+                                tool, user_id, data=str(message))
+            return json.dumps({
+                "status": "awaiting_confirmation",
+                "message": (f"I'd ask {who}: {shown}. It can act for real, "
+                            f"so it needs a spoken yes first. {pending_confirm.ASK}"),
+                "ask_user": pending_confirm.ASK,
+            })
+        return json.dumps({
+            "status": "awaiting_confirmation",
+            "message": decision.note or f"Confirmation required before asking {who}.",
+        })
+    return await _ask_n8n_specialist(hass, path, message, _N8N_SSH_TIMEOUT)
+
+
+async def _exec_ask_executive_assistant(hass: HomeAssistant, args: dict,
+                                        device_id=None, user_id=None) -> str:
     """Executive Assistant specialist — Gmail/Calendar via its own Claude Code
-    session over SSH. Can take real action, not read-only."""
-    return await _ask_n8n_specialist(
-        hass, "nova-exec-assistant", args.get("message", ""), _N8N_SSH_TIMEOUT)
+    session over SSH. Can take real action, so it needs a yes first."""
+    return await _ask_acting_specialist(
+        hass, "ask_executive_assistant", args, device_id, user_id)
 
 
-async def _exec_ask_marketing_agent(hass: HomeAssistant, args: dict) -> str:
+async def _exec_ask_marketing_agent(hass: HomeAssistant, args: dict,
+                                    device_id=None, user_id=None) -> str:
     """Marketing & Content specialist — @automatedhome.ie Instagram, via its
-    own Claude Code session over SSH. Can take real action, not read-only."""
-    return await _ask_n8n_specialist(
-        hass, "nova-marketing", args.get("message", ""), _N8N_SSH_TIMEOUT)
+    own Claude Code session over SSH. Can take real action, so it needs a
+    yes first."""
+    return await _ask_acting_specialist(
+        hass, "ask_marketing_agent", args, device_id, user_id)
 
 
 async def _exec_ask_security_privacy_agent(hass: HomeAssistant, args: dict) -> str:

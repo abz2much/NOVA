@@ -28,6 +28,8 @@ _LOGGER = logging.getLogger(__name__)
 TTL_SECONDS = 60.0
 KIND_PHRASE = "voice_phrase"
 KIND_SCENE_SCRIPT = "scene_script"
+KIND_SPECIALIST = "specialist"
+_KINDS = (KIND_PHRASE, KIND_SCENE_SCRIPT, KIND_SPECIALIST)
 # The question every held voice request ends its reply with, so the reply
 # reads as a question and the mic reopens for the answer.
 ASK = "Shall I go ahead?"
@@ -36,25 +38,26 @@ ASK = "Shall I go ahead?"
 @dataclass(frozen=True)
 class Pending:
     device_id: str
-    kind: str          # KIND_PHRASE or KIND_SCENE_SCRIPT
-    ref: str           # the phrase_id, or the scene/script/automation entity_id
+    kind: str          # KIND_PHRASE, KIND_SCENE_SCRIPT or KIND_SPECIALIST
+    ref: str           # the phrase_id, the scene/script/automation entity_id, or the specialist tool name
     user_id: str
     expires: float     # time.monotonic() deadline
     request_id: str = ""
+    data: str = ""     # a specialist's message, held word for word
 
 
 _ITEMS: dict[str, Pending] = {}
 
 
 def put(device_id: str, kind: str, ref: str, user_id: Optional[str] = None,
-        *, now: Optional[float] = None) -> Optional[Pending]:
+        *, now: Optional[float] = None, data: str = "") -> Optional[Pending]:
     """Record what a yes on this device would run. Replaces any older item
     for the device. Does nothing without a device or a reference."""
-    if not device_id or not ref or kind not in (KIND_PHRASE, KIND_SCENE_SCRIPT):
+    if not device_id or not ref or kind not in _KINDS:
         return None
     t = time.monotonic() if now is None else now
     item = Pending(str(device_id), kind, str(ref), str(user_id or ""), t + TTL_SECONDS,
-                   uuid.uuid4().hex)
+                   uuid.uuid4().hex, str(data or ""))
     _ITEMS[item.device_id] = item
     return item
 
@@ -139,6 +142,8 @@ async def answer(hass, device_id: str, text: str, *, honorific: str = "",
         _LOGGER.info("Held request %s confirmed on %s", item.request_id, item.device_id)
         if item.kind == KIND_PHRASE:
             return await _replay_phrase(hass, item, honorific)
+        if item.kind == KIND_SPECIALIST:
+            return await _replay_specialist(hass, item, honorific)
         return await _replay_scene_script(hass, item, honorific)
     except Exception:  # pylint: disable=broad-except
         clear(device_id)
@@ -180,4 +185,21 @@ async def _replay_scene_script(hass, item: Pending, honorific: str):
             user_id=item.user_id or None))
     if res.get("success"):
         return _result(f"Done{_addr(honorific)}.", True)
+    return _result(f"I couldn't do that{_addr(honorific)}.", False)
+
+
+async def _replay_specialist(hass, item: Pending, honorific: str):
+    import json
+    from . import policy
+    from .agent_runtime.capabilities import specialists
+    run = getattr(specialists, f"_exec_{item.ref}", None)
+    if item.ref not in specialists.ACTING_SPECIALISTS or run is None:
+        return _result(f"That isn't available any more{_addr(honorific)}.", False)
+    with policy.approved_confirmation(item.device_id, [("nova", item.ref, "")]):
+        res = json.loads(await run(
+            hass, {"message": item.data}, device_id=item.device_id,
+            user_id=item.user_id or None))
+    reply = res.get("reply")
+    if reply:
+        return _result(str(reply), True)
     return _result(f"I couldn't do that{_addr(honorific)}.", False)
