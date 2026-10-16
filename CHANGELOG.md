@@ -1,3 +1,11 @@
+## [8.57.0] — Cards swap every 20 seconds and stay for 15
+
+### Changed
+- **Each card now stays for 15 seconds, and a new one comes every 20 seconds**, so the head is alone for 5 seconds between cards. Before, a card stayed for 30 seconds and the next came 20 seconds after it went.
+- The 20 seconds now count from when a card appears, so a card you tap away early does not push the next one later.
+- A card made from your own question (such as an energy answer) is not part of the rotation and still stays for 30 seconds, so there is time to read it.
+- With eight cards, each one now comes round about every 2 minutes 40 seconds.
+
 ## [8.56.0] — A weather card and an indoor temperature card
 
 Two more cards join the rotation on the Command Center.

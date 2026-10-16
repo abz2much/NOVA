@@ -1142,25 +1142,33 @@ if (require.main === module) setTimeout(async () => {
         card().click();
         await tick(250);
         const seenTicks = ticks, tt = card().textContent;
-        elNew._presentCycleMs = 5000;   // so nothing new comes up while this is checked
+        clearInterval(elNew._presentCycleTimer);   // so nothing new comes up while this is checked
         card().click();
         const after = ticks, goneAtOnce = !shown();
         await tick(150);
         checks.push(["clock: a card that ticks redraws while on show and stops when it goes",
           goneAtOnce && seenTicks >= 3 && /^T\d+$/.test(tt) && tt !== "T0" && ticks === after]);
         elNew._presentCycleMs = 40;
-        // The next card comes a full gap after one goes.
+        // The next card comes one cycle after the last one STARTED (so a card that
+        // is tapped away early does not push the next one later), and each stays 15 s.
         elNew._presentKinds = () => ({ clk: { html: () => `<div class="pc-cap">NEXT</div>`, ambient: async () => ({}) } });
-        clearInterval(elNew._presentCycleTimer);   // back to a quick cycle to get a card up
+        if (shown()) card().click();
+        clearInterval(elNew._presentCycleTimer);   // a quick first tick to get a card up, then the real cycle
         elNew._presentCycleTimer = setInterval(() => elNew._presentAmbient(), 40);
-        elNew._presentCycleMs = 160;
-        await tick(300);
-        card().click();
-        await tick(80);
+        elNew._presentCycleMs = 400;
+        const seenCards = [], realOn = elNew._onPresentCard.bind(elNew);
+        elNew._onPresentCard = (c) => { seenCards.push(c); return realOn(c); };
+        await tick(120);
+        const gap15 = seenCards.length ? Math.round(seenCards[0].expires - seenCards[0].created) : -1;
+        card().click();                              // tapped away early
+        await tick(100);
         const tooSoon = shown();
-        await tick(240);
-        checks.push(["ambient: after a card goes, the next one waits a full gap, not what was left of the old timer",
-          tooSoon === false && shown() === true]);
+        await tick(400);
+        const comesBack = shown();
+        elNew._onPresentCard = realOn;
+        checks.push(["ambient: an on screen card stays 15 seconds", gap15 === 15]);
+        checks.push(["ambient: the next card comes one cycle after the last one started, even if that one was tapped away early",
+          tooSoon === false && comesBack === true]);
         const built = fs.readFileSync(path.join(__dirname, "..", "custom_components/nova/frontend/nova-panel.js"), "utf8");
         checks.push(["ambient: the gap between cards is 20 seconds", /this\._presentCycleMs \|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
         elNew._presentKinds = only("energy");

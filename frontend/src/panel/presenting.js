@@ -305,7 +305,13 @@
       if (!data || !def.html(data)) continue;
       this._presentTurn = at + 1;
       const now = Date.now() / 1000;
-      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 30, data });
+      // Each one stays 15 seconds, and the next comes 20 seconds after this one
+      // started (the timer starts over here), so the head is alone for 5.
+      if (this._presentCycleTimer) {
+        clearInterval(this._presentCycleTimer);
+        this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
+      }
+      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 15, data });
       return;
     }
   }
@@ -353,11 +359,6 @@
     if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
     if (!this._presenting) return;
     this._presenting = false;
-    // The next card comes a full gap after this one goes, not part way through it.
-    if (this._presentCycleTimer) {
-      clearInterval(this._presentCycleTimer);
-      this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
-    }
     this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
     this._targetCoreState(this._coreState());
   }
