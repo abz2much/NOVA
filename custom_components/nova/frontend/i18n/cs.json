@@ -182,7 +182,6 @@
   "autonomous": "autonomní",
   "door left open": "dveře nechány otevřené",
   "garage left open": "garáž nechána otevřená",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "nainstaluje Piper, Whisper a openWakeWord a při příštím restartu sestaví hlasový kanál (jen Home Assistant OS)",
   "lock unlocked": "zámek odemčen",
   "opt-in": "souhlas",
   "type to find an entity…": "pište pro nalezení entity…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Podívejte se, proč se zatím nic nekvalifikovalo, nebo vynuťte nový průchod historií.",
   "Self sufficiency today": "Soběstačnost dnes",
   "Self-hosted endpoints": "Vlastní koncové body",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Posílat proaktivní upozornění do telefonu místo jejich vyslovení. Kritická bezpečnostní upozornění se dál vyslovují. Připomínky, hlášení o balících a kamerách, plánované přehledy a kontrola infrastruktury se netýkají a dál se vyslovují",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Pošle Nově „Ahoj“ a zobrazí odpověď, aby se ověřilo, že umí odpovídat.",
   "Sensor threshold": "Práh senzoru",
   "Service tests": "Testy služeb",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Čas od času ukázat vedle hlavy kartu s aktuálními údaji, dokud dům nespí",
   "Arming": "Zapínání",
   "Disarmed": "Vypnuto",
-  "Triggered": "Spuštěno"
+  "Triggered": "Spuštěno",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "nainstaluje Piper, Whisper a openWakeWord a při příštím restartu sestaví hlasový kanál (Home Assistant OS nebo Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Posílat proaktivní upozornění do telefonu místo jejich vyslovení. Kritická bezpečnostní upozornění se dál vyslovují"
 }

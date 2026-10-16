@@ -420,7 +420,7 @@
         },
         "respect_quiet": {
           "name": "Respect quiet hours",
-          "description": "Hold the reminder during quiet hours (22:00 to 07:00)."
+          "description": "Hold the reminder during the household's quiet hours."
         }
       }
     },

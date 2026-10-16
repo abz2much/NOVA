@@ -182,7 +182,6 @@
   "autonomous": "автономно",
   "door left open": "дверь оставлена открытой",
   "garage left open": "гараж оставлен открытым",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "устанавливает Piper, Whisper и openWakeWord и создаёт голосовой конвейер при следующем перезапуске (только Home Assistant OS)",
   "lock unlocked": "замок разблокирован",
   "opt-in": "по согласию",
   "type to find an entity…": "введите, чтобы найти объект…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Посмотрите, почему ничего ещё не подошло, или запустите новый проход по вашей истории.",
   "Self sufficiency today": "Самообеспечение сегодня",
   "Self-hosted endpoints": "Собственные конечные точки",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Отправлять проактивные оповещения на телефон вместо того, чтобы произносить их. Критические оповещения безопасности всё равно произносятся. Напоминания, объявления о посылках и камерах, сводки по расписанию и проверка инфраструктуры не затрагиваются и всё равно произносятся",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Отправляет Nova «Привет» и показывает ответ, чтобы проверить, что она может ответить.",
   "Sensor threshold": "Порог датчика",
   "Service tests": "Проверки служб",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Время от времени показывать рядом с головой карточку с текущими данными, пока дом не спит",
   "Arming": "Постановка на охрану",
   "Disarmed": "Снято с охраны",
-  "Triggered": "Тревога"
+  "Triggered": "Тревога",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "устанавливает Piper, Whisper и openWakeWord и создаёт голосовой конвейер при следующем перезапуске (Home Assistant OS или Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Отправлять проактивные оповещения на телефон вместо того, чтобы произносить их. Критические оповещения безопасности всё равно произносятся"
 }

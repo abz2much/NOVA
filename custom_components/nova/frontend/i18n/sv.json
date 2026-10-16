@@ -182,7 +182,6 @@
   "autonomous": "autonom",
   "door left open": "dörr lämnad öppen",
   "garage left open": "garage lämnat öppet",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "installerar Piper, Whisper och openWakeWord och bygger röstpipelinen vid nästa omstart (endast Home Assistant OS)",
   "lock unlocked": "lås upplåst",
   "opt-in": "med samtycke",
   "type to find an entity…": "skriv för att hitta en entitet…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Se varför inget har kvalificerat sig ännu, eller tvinga fram en ny genomgång av din historik.",
   "Self sufficiency today": "Självförsörjning i dag",
   "Self-hosted endpoints": "Egna slutpunkter",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Skicka proaktiva varningar till telefonen i stället för att säga dem. Kritiska säkerhetsvarningar sägs fortfarande högt. Påminnelser, paket- och kamerautrop, schemalagda genomgångar och infrastrukturkontrollen omfattas inte och sägs fortfarande högt",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Skickar \"Hej\" till Nova och visar svaret, för att kontrollera att den kan svara.",
   "Sensor threshold": "Sensortröskel",
   "Service tests": "Tjänstetester",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Visa då och då ett kort med aktuella siffror bredvid huvudet medan huset är vaket",
   "Arming": "Aktiverar",
   "Disarmed": "Avlarmad",
-  "Triggered": "Utlöst"
+  "Triggered": "Utlöst",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installerar Piper, Whisper och openWakeWord och bygger röstpipelinen vid nästa omstart (Home Assistant OS eller Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Skicka proaktiva varningar till telefonen i stället för att säga dem. Kritiska säkerhetsvarningar sägs fortfarande högt"
 }

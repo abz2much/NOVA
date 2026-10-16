@@ -182,7 +182,6 @@
   "autonomous": "itsenäinen",
   "door left open": "ovi jätetty auki",
   "garage left open": "autotalli jätetty auki",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "asentaa Piperin, Whisperin ja openWakeWordin ja rakentaa puheputken seuraavassa uudelleenkäynnistyksessä (vain Home Assistant OS)",
   "lock unlocked": "lukko avattu",
   "opt-in": "suostumus",
   "type to find an entity…": "kirjoita löytääksesi entiteetin…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Näytä silloin tällöin kortti ajantasaisista luvuista pään vieressä, kun talo on hereillä",
   "Arming": "Viritetään",
   "Disarmed": "Viritys pois",
-  "Triggered": "Lauennut"
+  "Triggered": "Lauennut",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "asentaa Piperin, Whisperin ja openWakeWordin ja rakentaa puheputken seuraavassa uudelleenkäynnistyksessä (Home Assistant OS tai Supervised)"
 }

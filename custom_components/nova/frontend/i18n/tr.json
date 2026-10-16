@@ -182,7 +182,6 @@
   "autonomous": "özerk",
   "door left open": "kapı açık bırakıldı",
   "garage left open": "garaj açık bırakıldı",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "Piper, Whisper ve openWakeWord'ü yükler ve bir sonraki yeniden başlatmada ses hattını kurar (yalnızca Home Assistant OS)",
   "lock unlocked": "kilit açıldı",
   "opt-in": "onay",
   "type to find an entity…": "bir varlık bulmak için yazın…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Ev uyanıkken ara sıra başın yanında canlı rakamlardan oluşan bir kart göster",
   "Arming": "Kuruluyor",
   "Disarmed": "Devre dışı",
-  "Triggered": "Tetiklendi"
+  "Triggered": "Tetiklendi",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "Piper, Whisper ve openWakeWord'ü yükler ve bir sonraki yeniden başlatmada ses hattını kurar (Home Assistant OS veya Supervised)"
 }

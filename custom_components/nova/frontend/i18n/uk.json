@@ -182,7 +182,6 @@
   "autonomous": "автономний",
   "door left open": "двері залишено відчиненими",
   "garage left open": "гараж залишено відчиненим",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "встановлює Piper, Whisper і openWakeWord та створює голосовий конвеєр під час наступного перезапуску (лише Home Assistant OS)",
   "lock unlocked": "замок розблоковано",
   "opt-in": "згода",
   "type to find an entity…": "введіть, щоб знайти сутність…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Час від часу показувати поруч із головою картку з поточними даними, поки будинок не спить",
   "Arming": "Постановка на охорону",
   "Disarmed": "Знято з охорони",
-  "Triggered": "Тривога"
+  "Triggered": "Тривога",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "встановлює Piper, Whisper і openWakeWord та створює голосовий конвеєр під час наступного перезапуску (Home Assistant OS або Supervised)"
 }

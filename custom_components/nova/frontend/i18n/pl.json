@@ -182,7 +182,6 @@
   "autonomous": "autonomicznie",
   "door left open": "drzwi zostawione otwarte",
   "garage left open": "garaż zostawiony otwarty",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "instaluje Piper, Whisper i openWakeWord i tworzy potok głosowy przy następnym uruchomieniu (tylko Home Assistant OS)",
   "lock unlocked": "zamek odblokowany",
   "opt-in": "za zgodą",
   "type to find an entity…": "wpisz, aby znaleźć encję…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Zobacz, dlaczego nic jeszcze się nie zakwalifikowało, albo wymuś nowe przejście przez historię.",
   "Self sufficiency today": "Samowystarczalność dzisiaj",
   "Self-hosted endpoints": "Własne punkty końcowe",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Wysyłaj proaktywne alerty na telefon zamiast je wypowiadać. Krytyczne alerty bezpieczeństwa są nadal wypowiadane. Przypomnienia, komunikaty o paczkach i kamerach, zaplanowane podsumowania oraz audyt infrastruktury nie są objęte i nadal są wypowiadane",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Wysyła „Cześć” do Novy i pokazuje odpowiedź, aby sprawdzić, czy potrafi odpowiedzieć.",
   "Sensor threshold": "Próg czujnika",
   "Service tests": "Testy usług",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Od czasu do czasu pokazuj obok głowy kartę z danymi na żywo, gdy dom nie śpi",
   "Arming": "Uzbrajanie",
   "Disarmed": "Rozbrojony",
-  "Triggered": "Wyzwolony"
+  "Triggered": "Wyzwolony",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instaluje Piper, Whisper i openWakeWord i tworzy potok głosowy przy następnym uruchomieniu (Home Assistant OS lub Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Wysyłaj proaktywne alerty na telefon zamiast je wypowiadać. Krytyczne alerty bezpieczeństwa są nadal wypowiadane"
 }
