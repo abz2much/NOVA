@@ -12,6 +12,9 @@ watch for nearby earthquakes and natural disasters.
   only note when it is cancelled.
 - Yellow goes to your phone. Orange and Red are also spoken, outside quiet
   hours. During quiet hours only Red is spoken, unless you change it.
+- The phone copy always goes out, even with shush on. Shush, the
+  Announcements switch, Notifications only and sleep stop the spoken copy. A
+  warning at or above the night level is still spoken in quiet hours.
 - The morning briefing lists the Orange and Red warnings in force.
 - The **Settings → Hazard Monitor** card lists the warnings in force for your
   area, with their source.

@@ -34,6 +34,9 @@ on its own initiative.
   conversation memory are local SQLite too. Each is kept for the right
   conversation or person, not searched across everyone. You can edit and
   erase them from the panel.
+- Memory and documents use Nova's own SQLite search. A `nova_memory` folder
+  from a version before 8.40.0 (the old ChromaDB store) is left on disk, and
+  still goes into backups, until you delete it.
 - With semantic search turned on, each confirmed fact also gets a vector
   (`fact_vectors` in `knowledge.db`) so Nova can find it by meaning. The
   fact text is sent only to the Ollama server you set up, and forgetting a
@@ -78,7 +81,14 @@ bike" or "child's room adjacent_to hallway", in `knowledge.db`.
 ### Decisions and activity
 
 - `decisions.db` holds the Decisions view's evidence, confidence and the
-  feedback you gave.
+  feedback you gave. Each Observer alert decision leaves one short entry: the
+  event, the reading it used, only the facts it relied on (who was home,
+  asleep, quiet hours, with their source and time) and what delivery did. The
+  home's full state is never copied in. The Shadow comparison of anticipation
+  alerts is kept here for 180 days.
+- The Command Center's cards are built from live readings and kept in memory
+  only. The reminders card uses `nova/get_reminders`, which sends only each
+  reminder's label, time and whether it is due.
 - Provider Activity keeps daily totals: number of calls, model, token counts
   and timings. It never keeps the questions, answers, tool details, images
   or keys behind a call.
@@ -170,6 +180,10 @@ Only what the features you turn on need:
     NASA EONET feeds;
   - Google Maps travel times for leave alerts, through Home Assistant's own
     integration;
+  - the public OpenStreetMap router (`router.project-osrm.org`), when departure
+    alerts are on and you have set no routing server of your own. It receives
+    the start and end coordinates of a journey. Set your own OSRM URL to avoid
+    this;
   - the optional n8n specialist bridges.
 
 Each one is used only when the feature that needs it runs. Home Assistant,

@@ -22,6 +22,11 @@ it needs, what it learns, and what it will not do.
 - **Appliances.** The appliances Nova should know by name, so it can announce
   a finished cycle.
 
+The Command Center also shows an energy card (solar made today, live solar
+power, battery, sold to grid and home used) after you ask Nova about energy,
+and as one of the cards that come round by themselves. It uses the same
+readings as the Energy tab.
+
 ## What Nova needs
 
 - [ ] **The Energy dashboard is set up** (Settings → Dashboards → Energy) with

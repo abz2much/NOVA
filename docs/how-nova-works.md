@@ -111,8 +111,23 @@ id from your user (`nova_chat_` plus your user id), so each person has their
 own thread and the panel never sends one. A Chat turn skips the relevance gate
 and the duplicate check, works out who you are from your Home Assistant user,
 and is never routed to a speaker. Unlock, open, disarm and standing down an
-intrusion need a tap on your phone, as for voice. You can send 20 messages a
-minute and one at a time. See [Safety and security](safety-and-security.md#chat).
+intrusion need a tap on your phone, as for voice. A message is limited to
+1000 characters, and you can send 20 a minute, one at a time. See [Safety and security](safety-and-security.md#chat).
+
+### Command Center cards
+
+The panel's hologram head is drawn with WebGL 2, with the older head as a
+fallback. Cards of live figures come round beside it: about 15 seconds after
+the page opens, then a new one every 20 seconds, each shown for 15. The
+kinds are energy, security, clock, who is home, next event, reminders,
+weather and indoor. A kind with nothing to show is skipped. Most are built in
+the panel from readings it already has. Two commands feed it:
+`nova/subscribe_presentation` (read only, open to any signed in user) pushes
+the latest card made from one of Nova's own replies, such as an energy
+answer, which stays for 30 seconds and lives in memory only; and
+`nova/get_reminders` (read only, open to any signed in user) returns each
+reminder's label, time and whether it is due. The **Cards on the Command
+Center** setting turns the rotation off.
 
 ### Device control
 
@@ -209,8 +224,14 @@ themselves.
   is found automatically, other setups can choose theirs, and automatic
   lockdown is something you turn on, never on by default.
 - Voice can lock a door at once but can never unlock one or open a garage
-  door. That always needs a tap on your phone, so a spoofed or faked voice
-  can't open the house.
+  door. Toggling a cover or setting its position counts as opening it. That
+  always needs a tap on your phone, so a spoofed or faked voice can't open the
+  house.
+- Before any lock, cover, garage door or alarm command, Nova reads the device
+  again, for its own actions and your requests. A device it can't read is
+  refused, a device already in the wanted state gets no command, and arming
+  with doors or windows open asks first. See
+  [Safety and security](safety-and-security.md#checking-what-nova-did).
 - Knowing whose voice it is changes none of that. A voice Nova Voice ID
   recognises is a hint about who is talking, never a key.
 - Critical safety announcements pass every gate: the rate limit, entity and
@@ -258,7 +279,16 @@ themselves.
 
 ## How Nova stays quiet
 
-Nova tries hard not to nag you. A few of the rules:
+Nova tries hard not to nag you. Every proactive message (the Observer,
+left open reminders, appliance and host health alerts, the core's alerts,
+reminders, briefings, doorbell, camera, package and hazard messages) goes
+through one delivery path, `delivery.py`. It applies the same rules in the
+same order: critical always speaks and goes to the phones; then a mute,
+shush, the hourly limit or a repeat holds the message; then the Announcements
+switch; then quiet hours and sleep (high goes to the phones, everyday alerts
+are dropped); then Notifications only. Presence, sleep and quiet hours come
+from one reading per event, so no two parts of Nova disagree. The outcome of
+each message goes to the activity log. A few of the rules:
 
 - Intrusion never confirms on a resident walking about while the alarm is
   armed home or night, or the household is asleep. That needs the alarm
@@ -342,14 +372,19 @@ Nova tries hard not to nag you. A few of the rules:
 
 - **Decisions** (Logs tab): every proactive decision, with its evidence,
   confidence and the model that decided, and Helpful, Unnecessary or Wrong
-  feedback.
+  feedback. Observer alert decisions have one compact entry each: alerted,
+  suppressed or ignored, with the reading and the facts used.
+- **Shadow** (Logs tab): how the new path for anticipation alerts would have
+  judged each alert, beside what the current path did. See
+  [Presence and alerts](presence-and-alerts.md#the-new-path-in-shadow).
 - **Setup Doctor** (Diagnostics tab): a read only health check with a plain
   fix for each problem, never applied for you.
 - **Provider Activity** (Diagnostics tab): daily totals of AI calls by
   provider, model and role, with token counts and timings. Never the
   questions, answers, tool details, images or keys.
 - **Spoken History** (Logs tab): the last 100 announcements Nova actually
-  delivered. Replay one from the panel, or ask "what did you just say?".
+  delivered. Press REPEAT on one in the panel, or ask "what did you just
+  say?".
 - **Actions** (Logs tab): every command Nova sent and whether it was
   confirmed.
 - Conversation memory belongs to the person speaking, with the shared
@@ -409,6 +444,7 @@ Nova tries hard not to nag you. A few of the rules:
 ## See also
 
 - [Getting started](getting-started.md): setup and a tour of the panel
+- [What Nova includes](product-scope.md): what is core and what is optional
 - [Safety and security](safety-and-security.md): the safety features in detail
 - [Privacy and your data](privacy.md): what is stored and what leaves
 - [Settings reference](settings-reference.md): every setting

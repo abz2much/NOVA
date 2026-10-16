@@ -16,7 +16,7 @@ A home butler for Home Assistant. You talk to it, it watches over your home, and
 
 Nova is a custom integration for Home Assistant. You install it through HACS and it runs inside Home Assistant. There is no extra server, and you don't need a Nova account.
 
-You can talk to Nova by voice or text. Ask it to turn on a light, lock the door or tell you what is open. Ask about your calendar, your solar panels or something on the web. It also keeps an eye on the house in the background. It tells you about a door left open, a leak or someone at the front door, and it suggests automations based on your routines.
+You can talk to Nova by voice or text. Ask it to turn on a light, lock the door or tell you what is open. Ask about your calendar or your solar panels. Once you turn on web research, ask about something on the web too. It also keeps an eye on the house in the background. It tells you about a door left open, a leak or someone at the front door, and it suggests automations based on your routines.
 
 You don't need cameras or voice hardware to start. All you need is Home Assistant and an AI to think with: either a cloud key (Groq, Anthropic, OpenAI or Gemini) or a local Ollama server. Cameras, speakers and more can be added whenever you like.
 
@@ -27,6 +27,8 @@ Nova can control your home when you ask. What it won't do on its own is take big
 - It never installs a suggested automation until you approve it.
 - It can't unlock a door, open a garage or disarm the alarm by voice alone. Those need a tap on your phone.
 - It tells you what it knows. "The lock is locked" means Nova checked. "I sent the command" means it hasn't confirmed yet.
+- Before it locks, closes or arms anything, it reads the device again. If it can't read the device, it says so and sends nothing. Arming the alarm with a door or window open asks you first.
+- At night, everyday alerts are dropped rather than queued. High alerts go to your phone, and critical ones always speak.
 - If a device name is unclear, it asks which one you mean instead of guessing.
 - Smoke, carbon monoxide, water leak and confirmed intrusion alerts can't be muted.
 
@@ -58,7 +60,7 @@ Open the Nova panel in the sidebar, or talk to Nova through your Assist pipeline
 - "Turn off the lights in the kitchen."
 - "What's open in the house?"
 - "What's on my calendar tomorrow?"
-- "What's the latest news on the Mars mission?"
+- "What's the latest news on the Mars mission?" (needs web research, which is off until you choose DuckDuckGo or SearXNG)
 
 Nova's settings live in two places. Day to day settings (AI models, cameras, safety, language) are in the Nova panel under Settings. Routing settings such as which phone to notify, quiet hours and credentials are under Settings, Devices & Services, Nova, Configure. [Getting started](docs/getting-started.md) has a tour of the panel.
 
@@ -67,11 +69,13 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | You want to | What Nova does | Guide |
 |---|---|---|
 | Talk to your home | Voice and text conversation, with a calm, dry personality you can turn up or down | [Voice and speakers](docs/voice-and-speakers.md) |
+| Type to Nova from the panel | The Chat tab gives each person their own thread. Unlocking, opening and disarming from there need a tap on your phone | [Safety and security](docs/safety-and-security.md#chat) |
+| See the house at a glance | The Command Center has a hologram head and cards that come round by themselves: energy, security, clock, who is home, next event, reminders, weather and indoor temperature. Turn them off under Settings, General, "Cards on the Command Center" | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 | Run things with your own words | "Nova, the house is cold" runs the script, automation, scene or shell command you link to it. Works offline, with the same safety checks as any other action. Say a phrase exactly and it runs straight away; a looser match gets a short question on the satellite you spoke to, and a spoken yes runs it | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
 | Keep the home safe | Watches for intrusion, smoke, carbon monoxide, leaks, freezing pipes, and doors or windows left open. Can lock up at night | [Safety and security](docs/safety-and-security.md) |
-| Know who comes to the door | Analyses doorbell presses, spots packages and mail, and learns regular visitors. Can recognise faces through Frigate or Double Take | [Cameras and faces](docs/cameras-and-faces.md) |
+| Know who comes to the door | Analyses doorbell presses and learns regular visitors. Package Watch and face recognition (Frigate or Double Take) are off until you turn them on | [Cameras and faces](docs/cameras-and-faces.md) |
 | Stop being nagged at the wrong time | Knows who is home, who is asleep and when quiet hours are, and speaks to the right person in the right room | [Presence and alerts](docs/presence-and-alerts.md) |
-| Save effort | Suggests automations from your habits, reminds you when to leave for appointments, and gives morning and evening briefings | [Routines and suggestions](docs/routines-and-suggestions.md) |
+| Save effort | Suggests automations from your habits and gives morning and evening briefings once you pick a time. Departure alerts, which tell you when to leave for appointments, are off until you turn them on | [Routines and suggestions](docs/routines-and-suggestions.md) |
 | Understand your energy | Shows solar, battery and grid in one place, today's totals and a 36 hour outlook with advice | [Energy](docs/energy.md) |
 | Remember things | Keeps facts you tell it, answers from your manuals and receipts, and can read your email (read only) | [Memory and knowledge](docs/memory-and-knowledge.md) |
 | Use Nova's own speech to text, and know who is speaking | Nova Voice ID is Nova's own speech to text: it passes your speech to Whisper, gives back the same words, and falls back to your own speech to text if the app is down. Record or delete each person's voice from the panel; voice data stays in the app on your own machine, never in Nova. If you turn it on, a known voice helps Nova tell who is speaking (a hint, never a key) and keeps each voice up to date from everyday use. A speaker sensor you already have still works. Needs the [Nova Voice ID app](https://github.com/abz2much/nova-voice-id). | [Voice ID](docs/voice-and-speakers.md#voice-id) |
@@ -159,6 +163,7 @@ Nova follows Home Assistant's language, and you can choose another under Setting
 - [How Nova works](docs/how-nova-works.md): for developers and the curious
 - [Translating Nova](docs/translating.md): help add or fix a language
 - [Roadmap](docs/roadmap.md): ideas under consideration
+- [Phase 8: work left for later](docs/phase8-deferred.md): the independent rewrite, and what is left of it
 
 ## Project status
 

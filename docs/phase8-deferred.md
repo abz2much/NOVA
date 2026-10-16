@@ -125,10 +125,12 @@ stay as it is. Only the wording that is not part of the contract can change.
 
 - **CHANGELOG.md**: the old release notes carry 2970 lines in
   runs. Whether to keep, trim or rewrite them is the maintainer's call.
-- **README.md and LICENSE** stay as they are (MIT attribution); no change
-  without legal advice.
+- **README.md and LICENSE**: the credit and licence lines stay as they are
+  (MIT attribution); no change without legal advice. The rest of the README
+  is kept current like any other guide.
 
 ## Still to do once the above is done
 
 - A final whole repo copied run scan.
-- The shadow review (report only).
+- A final review of the finished rewrite (report only). It has nothing to do
+  with the Shadow view in the Logs tab.

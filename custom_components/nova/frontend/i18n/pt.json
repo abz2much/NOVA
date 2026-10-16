@@ -182,7 +182,6 @@
   "autonomous": "autónomo",
   "door left open": "porta deixada aberta",
   "garage left open": "garagem deixada aberta",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "instala Piper, Whisper e openWakeWord e cria o pipeline de voz no próximo reinício (apenas Home Assistant OS)",
   "lock unlocked": "fechadura destrancada",
   "opt-in": "adesão",
   "type to find an entity…": "escreva para encontrar uma entidade…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "De tempos a tempos, mostra ao lado da cabeça um cartão com valores em tempo real enquanto a casa está acordada",
   "Arming": "A armar",
   "Disarmed": "Desarmado",
-  "Triggered": "Disparado"
+  "Triggered": "Disparado",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instala Piper, Whisper e openWakeWord e cria o pipeline de voz no próximo reinício (Home Assistant OS ou Supervised)"
 }

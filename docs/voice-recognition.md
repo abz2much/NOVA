@@ -1,7 +1,7 @@
 # Nova Voice Recognition
 
-> **New in 8.37.0:** the easier way is the Nova Voice ID app, set up from
-> Nova's own Voice ID card. See [Voice ID](voice-and-speakers.md#voice-id).
+> The easier way is the Nova Voice ID app, set up from Nova's own Voice ID
+> card. See [Voice ID](voice-and-speakers.md#voice-id).
 > This guide covers a speaker recognition service you already run. When a
 > request has a Nova Voice ID result and its switch is on, that result is
 > used and the sensor below is not.
@@ -57,8 +57,9 @@ Neither service needs a GPU. Both default to the CPU.
 
 In **Settings → Devices & Services → Nova → Configure → Identity**:
 
-- Turn on **Voice fingerprinting (requires a local GPU)**. This switches on the
-  voice signal. The services above still run on the CPU.
+- Turn on **Voice fingerprints (needs a local GPU)**. This switches on the
+  voice signal. The label mentions a GPU, but the two services above run on
+  the CPU.
 - Set **Voice recognition source**: either a pattern for per person sensors,
   `binary_sensor.*_voice` (the VoiceBM style), or a single current speaker
   sensor, `sensor.current_speaker`.
@@ -104,7 +105,7 @@ For speaker-recognition, call its `/train` with the pending sample, named
 with `trigger.event.data.person`.
 
 The event fires at most once per person every 5 minutes, and can be turned
-off with **Auto-flag voices to enroll as people speak**.
+off with **Suggest voices to enrol as people speak**.
 
 ## What it will never do on its own
 
@@ -123,10 +124,10 @@ off with **Auto-flag voices to enroll as people speak**.
 
 | You see | What it means | What to do |
 |---|---|---|
-| Nova never knows who is speaking | The voice signal is off, or the source does not match an entity | Check **Voice fingerprinting** and **Voice recognition source**. |
+| Nova never knows who is speaking | The voice signal is off, or the source does not match an entity | Check **Voice fingerprints** and **Voice recognition source**. |
 | The source entity never changes | The service is not publishing | Check it in **Developer Tools → States**. |
-| Nova says "unknown" too often | The confidence is below the minimum | Lower **Minimum confidence before committing to a person**, or enrol more samples. |
-| No enrolment events | Auto flag is off, or it fired for that person in the last 5 minutes | Check **Auto-flag voices to enroll as people speak**. |
+| Nova says "unknown" too often | The confidence is below the minimum | Lower **How sure Nova must be before naming a person**, or enrol more samples. |
+| No enrolment events | Auto flag is off, or it fired for that person in the last 5 minutes | Check **Suggest voices to enrol as people speak**. |
 
 ## Settings
 
@@ -134,11 +135,11 @@ off with **Auto-flag voices to enroll as people speak**.
 
 | Setting | Key | Default | What it does |
 |---|---|---|---|
-| Recognize who's speaking | `identity_enabled` | on | Works out who is speaking at all. |
-| Voice fingerprinting (requires a local GPU) | `identity_voice_fingerprint` | off | Turns on the voice signal. |
+| Recognise who is speaking | `identity_enabled` | on | Works out who is speaking at all. |
+| Voice fingerprints (needs a local GPU) | `identity_voice_fingerprint` | off | Turns on the voice signal. |
 | Voice recognition source | `voice_recognition_source` | blank | The current speaker sensor, or a pattern such as `binary_sensor.*_voice`. |
-| Auto-flag voices to enroll as people speak | `voice_recognition_auto_enroll` | on | Fires `nova_voice_enroll_candidate`. |
-| Minimum confidence before committing to a person | `identity_min_confidence` | 0.45 | Below this, Nova says "unknown" rather than guess. |
+| Suggest voices to enrol as people speak | `voice_recognition_auto_enroll` | on | Fires `nova_voice_enroll_candidate`. |
+| How sure Nova must be before naming a person | `identity_min_confidence` | 0.45 | Below this, Nova says "unknown" rather than guess. |
 
 Only in `/config/nova/config.json`:
 

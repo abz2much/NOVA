@@ -59,12 +59,12 @@ needs, what it does by itself, and what it never does without you.
   sensors.
 - [ ] **For hazards**: smoke, gas, carbon monoxide or moisture sensors. For
   freeze alerts, a weather entity, or a sensor named outdoor or outside.
-- [ ] **A phone notify service** in Configure, Routing, "Phone notify service",
+- [ ] **A phone notify service** in Configure, Rooms and speakers, "Phone notify service",
   and the devices to alert in the panel's **Settings → Notifications** card.
 - [ ] **Optional: an alarm panel.** One Alarmo panel is found automatically.
   With anything else, pick it in **Settings → Security Alarm**.
-- [ ] **Optional: ground floor areas** in Configure, Routing, "Ground-floor
-  areas (for night-time intrusion alerts)".
+- [ ] **Optional: ground floor areas** in Configure, Rooms and speakers,
+  "Ground floor areas (for night time intrusion alerts)".
 
 ## Who counts as home
 
@@ -112,19 +112,43 @@ If the file is missing or damaged, Nova starts fresh, as it always did.
 
 ## How alerts reach you
 
-Every alert goes through one place that decides whether it goes out, and
-whether it is spoken, sent to your phones, or both. Each kind keeps its own
-rules:
+Every proactive message goes through one delivery path (since 8.44.0). It
+applies the same rules in the same order, then decides whether the message is
+spoken, sent to your phones, or both:
+
+1. **Critical** always speaks and always goes to the phones. Nothing holds it.
+2. A **mute**, **shush**, the hourly limit or a repeat holds the message.
+   Messages Nova always pushes, such as weather warnings, still reach the
+   phones.
+3. With the **Announcements** switch off, nothing is spoken. High messages
+   still go to the phones.
+4. In **quiet hours**, or while the house is **asleep**, nothing is spoken. A
+   high message goes to the phones instead. An everyday (medium or low) alert
+   is dropped, not sent to the phones. Messages you set yourself, such as a
+   reminder, also go to the phones.
+5. With **Notifications only** on, the message goes to the phones instead of
+   the speakers. If no phone can take it, Nova speaks it after all.
+
+A reminder or briefing you set yourself ignores shush and the Announcements
+switch. Quiet hours still apply unless you chose the time yourself. A repeat
+within the repeat window is held even when the words differ, because each
+message can carry a label.
+
+Each kind keeps its own details:
 
 | Alert | Spoken | Sent to phones |
 |---|---|---|
-| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours; anything not spoken while nobody is known to be home |
+| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical |
 | Household events (doors, appliances' problems and so on) | When someone is home and awake, outside quiet hours; critical always | When nobody is home, or high and critical |
-| An appliance finishing | When someone is home and awake | When nobody is home |
-| Left open reminders | Unless asleep | Always |
+| An appliance finishing | When someone is home and awake | When nobody is home, or high |
+| Left open reminders | Not in quiet hours or while asleep, unless urgent | Always |
 | Earthquakes, weather, disasters | Outside quiet hours, by your warning levels | Always |
 | Packages and mail | Outside quiet hours, with announcements on | A package taken while nobody is home, quiet hours or not |
-| Doorbell and camera events | When notable | No |
+| Doorbell and camera events | When notable | Only when they cannot be spoken and are high |
+
+The outcome of every proactive message (who sent it, whether it was spoken
+or pushed, and why not when it was held) is recorded in the activity log.
+Safety alerts also go to the Decision Record.
 
 A medium alert while nobody is known to be home, such as "Front Door is
 unlocked while nobody appears to be home", goes to your phones. That covers
@@ -184,8 +208,25 @@ their tap. This holds even when **Voice confirmation** is off.
   action and says why in the reply.
 - A refused, unanswered or failed tap means the action is not done.
 - Locking, closing, lights and heating need no tap.
+- A message can be up to 1000 characters. You can send 20 a minute, one at a
+  time. Over the limit, Chat says "You're sending too fast, wait a moment".
 
 ## Checking what Nova did
+
+Before any lock, cover, garage door or alarm command, Nova reads the device
+again at that moment, for its own actions and for your requests, and again
+after you say yes:
+
+- A device that reads unknown, unavailable or jammed, or a door sensor or
+  zone it cannot read, is refused. Nothing is sent, and Nova says why. Use the
+  Home Assistant app for a device Nova cannot read.
+- A device already locked, closed or armed that way gets no command. The
+  Actions log says it was already secure.
+- A lock whose door sensor reads open is skipped by lockdown and the night
+  sweep, and reported. Your own request is warned about and asked first.
+- Arming the alarm with doors or windows open asks first and names them.
+- Scenes and scripts are not checked this way, because Nova cannot see inside
+  them.
 
 After Nova locks or closes something it checks the device afterwards: the
 night sweep, lockdown, the voice "secure" reply and devices you ask it to
@@ -201,6 +242,17 @@ concluded, what it did (spoken, sent to phones, or both) and why. Where a
 decision sent commands (lockdown, the night sweep, the voice "secure" reply),
 it lists their request ids, which match the entries in **Logs → Actions**. That covers
 intrusion, lockdown, the night sweep, hazards, packages and doors left open.
+Each entry also names the reading it was decided on, and keeps where each
+fact came from and when (for example the person and the phone tracker that
+put them at home).
+
+With the Observer on, each decision it makes about an event also leaves one
+short entry: the event, the reading, only the facts it used (who was home,
+asleep, quiet hours), the rule and the reason, and the result. The result is
+alerted, suppressed (Nova chose to speak but a rule held it) or ignored (Nova
+chose to stay quiet), plus what delivery did. A critical hazard always gets
+an entry. Routine events that never reach a decision, such as motion while
+someone is home, get none and stay in the activity feed.
 
 ## What it learns from you
 
@@ -229,7 +281,9 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 
 - Unlock a door, open a garage door or disarm the alarm because of a voice
   command alone, or because of a message in the Chat tab alone. That always
-  needs a tap on your phone.
+  needs a tap on your phone. Toggling a cover, or setting its position, counts
+  as opening it (since 8.49.41). Toggling a switch that looks security related
+  is treated like turning it off.
 - Unlock, open, disarm, or run a scene or script by itself. When Nova acts on
   its own (lockdown, the night sweep, offers it trusts, a retry) it may only
   lock, close, and change lights or heating. Every action that can change a
@@ -293,8 +347,9 @@ asks in its own reply on that satellite's speaker and keeps listening there;
 only a yes on that same satellite counts (see
 [Confirming by voice](voice-and-speakers.md#confirming-by-voice)). **Mode**
 chooses the satellite's own audio or the room speaker for requests that did
-not come from a satellite. An unlock or garage opening asked for by voice
-still needs a tap on your phone, whatever this setting says.
+not come from a satellite. An unlock, a garage opening, or a toggle or
+position change of a cover, asked for by voice, still needs a tap on your
+phone, whatever this setting says.
 
 Only in `/config/nova/config.json`:
 

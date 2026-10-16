@@ -182,7 +182,6 @@
   "autonomous": "autonom",
   "door left open": "dør latt stå åpen",
   "garage left open": "garasje latt stå åpen",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "installerer Piper, Whisper og openWakeWord og bygger talepipelinen ved neste omstart (kun Home Assistant OS)",
   "lock unlocked": "lås låst opp",
   "opt-in": "samtykke",
   "type to find an entity…": "skriv for å finne en enhet…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Vis av og til et kort med sanntidstall ved siden av hodet mens huset er våkent",
   "Arming": "Aktiverer",
   "Disarmed": "Deaktivert",
-  "Triggered": "Utløst"
+  "Triggered": "Utløst",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installerer Piper, Whisper og openWakeWord og bygger talepipelinen ved neste omstart (Home Assistant OS eller Supervised)"
 }

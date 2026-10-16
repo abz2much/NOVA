@@ -4263,7 +4263,7 @@ ${this._htmlDashboardBody()}`;
       <div class="toggle-list">
         ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside the head while the house is awake")}
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
-        ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
+        ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak")}
         ${onOff("sentinel_enabled", "Sentinel", "Doors, windows and locks left open")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
         ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
@@ -5528,7 +5528,7 @@ ${this._htmlDashboardBody()}`;
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
       ${onOff("continued_conversation_speaker_reopen", true, { label: "Follow-up mic reopen (speaker-aware)" })}
       ${onOff("tts_use_ha_voice", false, { label: "Use Home Assistant default voice" })}
-      ${onOff("auto_bootstrap", false, { label: "Install voice add-ons", sub: "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)" })}
+      ${onOff("auto_bootstrap", false, { label: "Install voice add-ons", sub: "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)" })}
       ${num("departure_lead_minutes", "Departure lead (min)", "30", 0, 240, 5)}
       ${num("routine_departure_lead_minutes", "Leave reminder (min)", "15", 0, 120, 5)}
       ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}

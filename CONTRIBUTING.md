@@ -51,8 +51,10 @@ python3 ../../scripts/audit.py
 python3 ../../scripts/build_panel.py
 node --check frontend/nova-panel.js
 
-# Add-on shell script
-bash -n ../run.sh
+# Unit tests, panel strings and late text checks (from the repo root)
+(cd ../.. && python3 -m pytest tests/unit -q)
+(cd ../.. && NODE_PATH=node_modules node scripts/panel_strings.js --check)
+(cd ../.. && NODE_PATH=node_modules node scripts/late_text_check.js)
 ```
 
 ## Panel text and translations

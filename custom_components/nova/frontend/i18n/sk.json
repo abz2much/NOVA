@@ -182,7 +182,6 @@
   "autonomous": "autonómny",
   "door left open": "dvere nechané otvorené",
   "garage left open": "garáž nechaná otvorená",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "nainštaluje Piper, Whisper a openWakeWord a pri ďalšom reštarte zostaví hlasový kanál (len Home Assistant OS)",
   "lock unlocked": "zámok odomknutý",
   "opt-in": "súhlas",
   "type to find an entity…": "píšte na nájdenie entity…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Čas od času zobraziť vedľa hlavy kartu s aktuálnymi údajmi, kým dom nespí",
   "Arming": "Zapínanie",
   "Disarmed": "Vypnuté",
-  "Triggered": "Spustené"
+  "Triggered": "Spustené",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "nainštaluje Piper, Whisper a openWakeWord a pri ďalšom reštarte zostaví hlasový kanál (Home Assistant OS alebo Supervised)"
 }

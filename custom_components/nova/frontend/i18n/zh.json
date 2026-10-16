@@ -743,7 +743,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "查看为何还没有符合条件的内容，或强制重新扫描您的历史。",
   "Self sufficiency today": "今日自给率",
   "Self-hosted endpoints": "自托管端点",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "将主动警报推送到手机，而不是播报出来。关键安全警报仍会播报。提醒、包裹和摄像头播报、定时简报以及基础设施审计不受影响，仍会播报",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "向 Nova 发送“你好”并显示回复，以检查它能否应答。",
   "Sensor threshold": "传感器阈值",
   "Sentinel": "Sentinel",
@@ -927,7 +926,6 @@
   "how long a problem must persist before the first alert": "问题持续多久后才发出第一次警报",
   "indoor = bounded by walls, outdoor = by range": "室内 = 以墙为界，室外 = 以范围为界",
   "inferred": "推断",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "在下次重启时安装 Piper、Whisper 和 openWakeWord 并创建语音管道（仅限 Home Assistant OS）",
   "interior doors & cased openings attach to a room · a cased opening is a doorway with no door · dormers on the 2nd floor": "内门和门洞属于某个房间 · 门洞是没有门的门口 · 老虎窗位于二楼",
   "is (e.g. Tuesday)": "是（例如 周二）",
   "leak": "漏水",
@@ -1295,5 +1293,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "房子清醒时，偶尔在头像旁显示实时数据卡片",
   "Arming": "布防中",
   "Disarmed": "已撤防",
-  "Triggered": "已触发"
+  "Triggered": "已触发",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "在下次重启时安装 Piper、Whisper 和 openWakeWord 并创建语音管道（仅限 Home Assistant OS 或 Supervised）",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "将主动警报推送到手机，而不是播报出来。关键安全警报仍会播报"
 }

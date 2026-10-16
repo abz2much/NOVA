@@ -182,7 +182,6 @@
   "autonomous": "autonom",
   "door left open": "Tür offen gelassen",
   "garage left open": "Garage offen gelassen",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "installiert Piper, Whisper und openWakeWord und richtet die Sprach-Pipeline beim nächsten Neustart ein (nur Home Assistant OS)",
   "lock unlocked": "Schloss entsperrt",
   "opt-in": "Opt-in",
   "type to find an entity…": "Tippen, um eine Entität zu finden…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Sieh nach, warum noch nichts infrage kam, oder erzwinge einen neuen Durchlauf über deinen Verlauf.",
   "Self sufficiency today": "Eigenversorgung heute",
   "Self-hosted endpoints": "Selbst gehostete Endpunkte",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Proaktive Warnungen ans Handy senden statt sie zu sprechen. Kritische Sicherheitswarnungen werden weiter gesprochen. Erinnerungen, Paket- und Kamera-Durchsagen, geplante Briefings und der Infrastruktur-Check sind nicht betroffen und werden weiter gesprochen",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Sendet „Hallo“ an Nova und zeigt die Antwort, um zu prüfen, dass sie antworten kann.",
   "Sensor threshold": "Sensor-Schwellwert",
   "Service tests": "Diensttests",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Zeigt hin und wieder eine Karte mit aktuellen Werten neben dem Kopf, solange das Haus wach ist",
   "Arming": "Wird scharfgeschaltet",
   "Disarmed": "Unscharf",
-  "Triggered": "Ausgelöst"
+  "Triggered": "Ausgelöst",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installiert Piper, Whisper und openWakeWord und richtet die Sprach-Pipeline beim nächsten Neustart ein (Home Assistant OS oder Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Proaktive Warnungen ans Handy senden statt sie zu sprechen. Kritische Sicherheitswarnungen werden weiter gesprochen"
 }

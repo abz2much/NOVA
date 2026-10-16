@@ -7,8 +7,9 @@ change how chatty it is.
 
 ## What it does
 
-- **Leave alerts.** For an upcoming calendar event with a real place, one
-  heads up says when to leave on foot, by public transport and by car.
+- **Leave alerts.** Off until you turn on **Departure alerts**. For an
+  upcoming calendar event with a real place, one heads up says when to leave
+  on foot, by public transport and by car.
 - **Routine and presence reminders.** "You usually turn the Kitchen Light on
   around now." "You usually leave around 12:00." Each is said once, and only
   while that person is home.
@@ -26,7 +27,8 @@ change how chatty it is.
 
 ## What it needs
 
-- [ ] **Calendars in Home Assistant**, for leave alerts. Each event needs a
+- [ ] **Calendars in Home Assistant**, for leave alerts, and **Departure
+  alerts** turned on in Settings → Anticipation & Memory. Each event needs a
   location that is a real place.
 - [ ] **Optional: the Google Maps Travel Time integration**, for walking and
   public transport times. Driving falls back to a travel sensor, then an open
@@ -124,7 +126,7 @@ presence & arrivals" and "Learn button & remote presses" opt those signals
 in. "Learn motion/presence triggers" is in Anticipation & Memory.
 
 Panel, **Settings → Briefings**: **Morning** and **Evening** times (07:30 and
-19:30 by default), each on or off, **Only when someone's home**, and the
+19:30 by default), each on or off (both off until you turn them on), **Only when someone's home**, and the
 **Front door** whose opening starts a welcome briefing.
 
 Panel, **Command Center → Operational Mode**: the active mode, and **Auto

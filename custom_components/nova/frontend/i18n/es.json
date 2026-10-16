@@ -182,7 +182,6 @@
   "autonomous": "autónomo",
   "door left open": "puerta abierta",
   "garage left open": "garaje abierto",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "instala Piper, Whisper y openWakeWord y crea la canalización de voz en el próximo reinicio (solo Home Assistant OS)",
   "lock unlocked": "cerradura desbloqueada",
   "opt-in": "suscripción",
   "type to find an entity…": "escribe para buscar una entidad…",
@@ -754,7 +753,6 @@
   "See why nothing has qualified yet, or force a fresh pass over your history.": "Mira por qué nada ha cumplido los requisitos todavía, o fuerza una nueva pasada por tu historial.",
   "Self sufficiency today": "Autosuficiencia hoy",
   "Self-hosted endpoints": "Puntos de conexión autoalojados",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak": "Envía las alertas proactivas al móvil en lugar de decirlas. Las alertas de seguridad críticas se siguen anunciando. Los recordatorios, los avisos de paquetes y cámaras, los resúmenes programados y la auditoría de infraestructura no están incluidos y se siguen anunciando",
   "Sends \"Hello\" to Nova and shows the reply, to check it can answer.": "Envía «Hola» a Nova y muestra la respuesta, para comprobar que puede contestar.",
   "Sensor threshold": "Umbral de sensor",
   "Service tests": "Pruebas de servicios",
@@ -1300,5 +1298,7 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "De vez en cuando, muestra junto a la cabeza una tarjeta con cifras en vivo mientras la casa está despierta",
   "Arming": "Armando",
   "Disarmed": "Desarmada",
-  "Triggered": "Disparada"
+  "Triggered": "Disparada",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instala Piper, Whisper y openWakeWord y crea la canalización de voz en el próximo reinicio (Home Assistant OS o Supervised)",
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Envía las alertas proactivas al móvil en lugar de decirlas. Las alertas de seguridad críticas se siguen anunciando"
 }

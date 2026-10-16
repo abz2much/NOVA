@@ -841,7 +841,7 @@ When Nova needs you to confirm something you asked by voice, it now asks on the 
 - Unlock, open, disarm and calling off an intrusion by voice still need a phone tap; a spoken yes never replaces it.
 - Chat, panel and automation requests behave as before. Other tools that hit a confirmation by voice (`control_device`, `execute_plan`, `set_mode`, Home Assistant's own Assist tools) also no longer ask separately, but a spoken yes does not replay them: say the request again.
 
-## [8.32.0]
+## [8.32.0] — Voice phrases
 
 Voice phrases.
 
@@ -854,7 +854,7 @@ Voice phrases.
 - New admin only websocket commands: `nova/voice_phrases_list`, `nova/voice_phrases_save`, `nova/voice_phrases_delete`, `nova/voice_phrases_set_enabled` and `nova/voice_phrases_test`. Every entry is checked in the backend: allowed domains only, targets only as entity ids of the service's own domain, no templates, no `entity_id`, `area_id`, `device_id` or `target` inside the data.
 - 60 new panel strings, translated into all 20 languages. Docs: Voice and speakers (new Voice phrases section), Settings reference, How Nova works, README.
 
-## [8.31.0]
+## [8.31.0] — The Chat tab
 
 The Chat tab.
 

@@ -182,7 +182,6 @@
   "autonomous": "autonom",
   "door left open": "ușă lăsată deschisă",
   "garage left open": "garaj lăsat deschis",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)": "instalează Piper, Whisper și openWakeWord și creează fluxul vocal la următoarea repornire (doar Home Assistant OS)",
   "lock unlocked": "încuietoare deblocată",
   "opt-in": "consimțământ",
   "type to find an entity…": "scrie pentru a găsi o entitate…",
@@ -396,5 +395,6 @@
   "Now and then, show a card of live figures beside the head while the house is awake": "Din când în când, arată lângă cap un card cu cifre în timp real cât timp casa este trează",
   "Arming": "Se armează",
   "Disarmed": "Dezarmat",
-  "Triggered": "Declanșat"
+  "Triggered": "Declanșat",
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instalează Piper, Whisper și openWakeWord și creează fluxul vocal la următoarea repornire (Home Assistant OS sau Supervised)"
 }
