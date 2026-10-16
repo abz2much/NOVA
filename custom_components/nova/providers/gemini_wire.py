@@ -229,9 +229,10 @@ def build_input(messages: list[dict], *, flatten_tools: bool = False) -> tuple[s
                 steps.append({"type": "user_input", "content": [
                     {"type": "text", "text": f"Result of tool {name}: {content}"}]})
             else:
+                # A plain string. A list of content parts is a "multimodal"
+                # function response, which Gemini 2.5 models refuse (HTTP 400).
                 step: dict[str, Any] = {
-                    "type": "function_result", "call_id": call_id,
-                    "result": [{"type": "text", "text": content}]}
+                    "type": "function_result", "call_id": call_id, "result": content}
                 if name:
                     step["name"] = name
                 steps.append(step)

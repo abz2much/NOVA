@@ -403,8 +403,10 @@ each message goes to the activity log. A few of the rules:
 - Gemini uses Google's own Interactions API, not the OpenAI compatible
   endpoint. Nova keeps the conversation itself and asks Google not to store
   it. Gemini's reasoning state (its thought signatures) is carried back to it
-  between tool calls, so tool use works on Gemini 3 models. It needs no extra
-  package. Your Gemini key, model choices and roles are unchanged. Google
+  between tool calls, so tool use works on Gemini 2.5 and Gemini 3 models.
+  Tool results go back as plain text. If Gemini refuses a request that carries
+  tool turns, Nova asks again once with the earlier tool turns written as text.
+  It needs no extra package. Your Gemini key, model choices and roles are unchanged. Google
   documents the Interactions API as Beta, so its details can change. A busy
   Google or a dropped connection is retried twice, briefly. For Gemini 3 and
   later Nova leaves the temperature at Google's default, as Google advises;

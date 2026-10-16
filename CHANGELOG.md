@@ -1,3 +1,13 @@
+## [8.58.3] Gemini tool calls work on Gemini 2.5 models
+
+Follow up to 8.58.2.
+
+### Fixed
+- **A Gemini chat that used a tool failed with "the provider rejected the request" (HTTP 400).** Nova sent each tool result back to Gemini as a list of content parts. Google treats that as a multimodal function response and Gemini 2.5 models refuse it, so the first call worked and the second one, carrying the tool result, did not. Nova now sends the result as a plain string, which Google's reference allows.
+
+### Changed
+- **A refused tool turn is retried once as plain text.** If Gemini refuses a request that carries tool turns for any other reason, Nova asks again once with the earlier tool calls and results written as text. A wrong key, a too large prompt and a blocked prompt are not retried.
+
 ## [8.58.2] Gemini model picker fixed, Gemini retries, and Apply no longer blocks on a cloud check
 
 Follow up to 8.58.0 and 8.58.1.
