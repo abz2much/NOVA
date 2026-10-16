@@ -107,9 +107,9 @@ class ToolCall:
     # whether that is an error (native Ollama) or an empty object (Anthropic).
     arguments_error: Optional[str] = field(default=None, compare=False)
     # Opaque data the provider needs echoed back with this call on the next
-    # turn. Today only Gemini 3's thought signature
-    # (``{"google": {"thought_signature": ...}}``), which it rejects the follow
-    # up request without. Kept out of repr(), never shown to the user.
+    # turn. Today only native Gemini's recorded model steps
+    # (``{"google": {"steps": [...]}}``, thought signatures included), which
+    # it needs back unchanged. Kept out of repr(), never shown to the user.
     extra_content: Optional[Mapping[str, Any]] = field(
         default=None, repr=False, compare=False)
 

@@ -55,6 +55,13 @@ OLLAMA_POLICY = ConcurrencyPolicy(
 )
 
 
+# Native Gemini builds a fresh urllib request per call, like native Ollama.
+GEMINI_POLICY = ConcurrencyPolicy(
+    max_in_flight=8,
+    reason="stateless per-request urllib transport to Google's Gemini API",
+)
+
+
 def groq_vision(model: str) -> bool:
     # Groq vision-capable models all contain 'vision' in the name.
     return "vision" in (model or "").lower()
@@ -70,6 +77,12 @@ def openai_compatible_vision(model: str) -> bool:
     # Modern OpenAI models all support vision; Ollama varies by model; most
     # Gemini models are multimodal; LLaVA supports vision locally.
     return any(v in (model or "").lower() for v in _OPENAI_COMPATIBLE_VISION)
+
+
+def gemini_vision(model: str) -> bool:
+    # Gemini models read pictures. This also covers newer ids (gemini-4-...)
+    # that the older OpenAI compatible name list never named.
+    return "gemini" in (model or "").lower()
 
 
 def anthropic_vision(model: str) -> bool:

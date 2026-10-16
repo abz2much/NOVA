@@ -210,6 +210,12 @@ def _kind_for_status(status: int, text: str) -> ProviderErrorKind:
     return ProviderErrorKind.UNKNOWN
 
 
+def kind_for_http_status(status: int, text: str = "") -> ProviderErrorKind:
+    """The kind for an HTTP failure. ``text`` is response body text used only
+    to classify (a bad key, a missing model); it never enters a message."""
+    return _kind_for_status(status, str(text or "").lower())
+
+
 def normalize_error(exc: BaseException, provider: str = "") -> ProviderError:
     """Map any exception from a provider call to a ProviderError chained to
     it. asyncio.CancelledError is never normalized: callers must let task

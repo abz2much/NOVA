@@ -12,15 +12,17 @@ from typing import Literal, Mapping, Optional
 
 from .anthropic import AnthropicProvider
 from .base import LLMProvider
-from .capabilities import OLLAMA_POLICY, SDK_CLIENT_POLICY, ConcurrencyPolicy
+from .capabilities import (
+    GEMINI_POLICY,
+    OLLAMA_POLICY,
+    SDK_CLIENT_POLICY,
+    ConcurrencyPolicy,
+)
+from .gemini import GeminiProvider
+from .gemini_wire import GEMINI_API_BASE_URL
 from .groq import GroqProvider
 from .ollama import OllamaProvider
-from .openai_compatible import (
-    GEMINI_OPENAI_BASE_URL,
-    CustomProvider,
-    GeminiProvider,
-    OpenAIProvider,
-)
+from .openai_compatible import CustomProvider, OpenAIProvider
 
 LocationPolicy = Literal["cloud", "local", "endpoint"]
 AuthStyle = Literal["bearer", "x-api-key", "x-goog-api-key"]
@@ -90,8 +92,8 @@ _DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ),
     ProviderDescriptor(
         id="gemini", adapter=GeminiProvider, location="cloud",
-        credential_field="gemini_api_key", concurrency=SDK_CLIENT_POLICY,
-        default_base_url=GEMINI_OPENAI_BASE_URL,
+        credential_field="gemini_api_key", concurrency=GEMINI_POLICY,
+        default_base_url=GEMINI_API_BASE_URL,
         default_model="gemini-3.6-flash", legacy_shared_key=True,
         discovery=DiscoverySpec(
             auth="x-goog-api-key", shape="gemini",

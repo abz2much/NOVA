@@ -3,7 +3,7 @@ Nova — LLM provider compatibility façade.
 
 The provider architecture lives in the ``providers`` package: typed models,
 normalized errors, one descriptor registry, isolated adapters (Groq,
-OpenAI-compatible, native Ollama, Anthropic), central routing, model
+OpenAI-compatible, native Ollama, native Gemini, Anthropic), central routing, model
 discovery, the runtime-owned ProviderManager and the single activity-aware
 execution boundary.
 
@@ -32,6 +32,7 @@ from .providers.anthropic import AnthropicProvider
 from .providers.base import LLMProvider
 from .providers.destinations import check_url
 from .providers.errors import ProviderError, config_flow_error_key
+from .providers.gemini import GeminiProvider
 from .providers.groq import GroqProvider
 from .providers.manager import async_close_client
 from .providers.models import DATA_CATEGORIES
@@ -43,7 +44,6 @@ from .providers.ollama import (
 )
 from .providers.openai_compatible import (
     CustomProvider,
-    GeminiProvider,
     OpenAICompatibleProvider,
     OpenAIProvider,
 )
@@ -79,8 +79,8 @@ __all__ = [
     "resolve_provider_credential", "resolve_provider_endpoint", "test_connection",
 ]
 
-# provider id -> adapter class, in public order. Gemini and custom have
-# their own adapters (and names) instead of reusing OpenAIProvider.
+# provider id -> adapter class, in public order. Gemini (native) and custom
+# have their own adapters (and names) instead of reusing OpenAIProvider.
 PROVIDERS = dict(ADAPTERS)
 
 _CLOUD_PROVIDERS = set(CLOUD_PROVIDERS)

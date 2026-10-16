@@ -172,6 +172,9 @@ your own device or a medical professional.
 Only what the features you turn on need:
 
 - The AI and vision providers you chose, for the messages Nova sends them.
+  For Gemini, Nova keeps the conversation itself and asks Google not to
+  store it (`store` is off on every request). Google still processes what
+  Nova sends under its own terms, as with any cloud provider.
 - The text to speech service you chose, if it isn't the local Piper voice.
 - Only if you turn them on:
   - web research, through DuckDuckGo or your own SearXNG;
