@@ -228,8 +228,10 @@ def _error_text(exc: BaseException) -> str:
 
 _TOOL_FORMAT_MARKERS = (
     "tool_use_failed", "tool call validation failed", "failed to call a function",
-    # Gemini thinking models on the OpenAI style endpoint reject tool calls
-    # without a native thought_signature, which that format cannot carry.
+    # Gemini thinking models reject a tool call turn that lacks its reasoning
+    # state. The native adapter records and replays it and retries such a turn
+    # as text once; this keeps a refusal that still gets through from being
+    # taken as the model being offline.
     "thought_signature",
 )
 _CONNECTIVITY_MARKERS = (

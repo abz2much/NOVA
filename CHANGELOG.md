@@ -1,3 +1,24 @@
+## [8.58.0] Gemini now uses Google's own API
+
+Gemini no longer goes through Google's OpenAI compatible endpoint. Nova talks to Google's own Interactions API instead. Your Gemini key, model choices, roles, routing and model lists are unchanged, and there is nothing to set up again.
+
+### Changed
+- **Gemini uses Google's native Interactions API.** Tool use on Gemini 3 models works properly now: the model's reasoning state (its thought signatures) is kept and sent back between tool calls, instead of the old workaround that could fail with a "missing thought signature" error.
+- **Nova keeps the conversation itself and asks Google not to store it** (`store` is off on every Gemini request).
+- **Thinking is set to low, with room added for it.** Short jobs such as the classifier, scene matching and the camera no longer risk an empty reply because the model spent a small output budget on thinking.
+- **Gemini 3.6 and later ignore the temperature setting,** so Nova no longer sends one to Gemini.
+- Gemini picture checks now treat every Gemini model as able to read pictures, including Gemini 4.
+- A Gemini safety block and a prompt that is too large now give their own clear messages. A too large prompt triggers the same slimmer retry as on other providers.
+- Gemini needs no extra package: the call uses Python's own web client, with a 60 second limit and no automatic retries. It only ever talks to Google and never follows a redirect.
+
+### Removed
+- The Gemini workaround for the OpenAI compatible endpoint (the thought signature capture and replay in the OpenAI wire code).
+- A custom address for Gemini. It could not be set from any screen, and the native API only exists on Google's own host.
+
+### Notes
+- If Google refuses a conversation that has earlier tool calls from another provider, Nova retries once with those turns as plain text.
+- Not tested against Google's live service in this release: it is covered by fakes only. Please try a conversation with tool use, a camera description and a model list refresh.
+
 ## [8.57.0] — Cards swap every 20 seconds and stay for 15
 
 ### Changed

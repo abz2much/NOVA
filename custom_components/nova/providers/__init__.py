@@ -5,7 +5,8 @@
 * errors.py — the normalized error taxonomy;
 * capabilities.py — capability and concurrency policy;
 * base.py — the adapter contract;
-* groq.py, openai_compatible.py, ollama.py, anthropic.py — isolated adapters;
+* groq.py, openai_compatible.py, ollama.py, gemini.py, anthropic.py — isolated
+  adapters (gemini_wire.py holds the Gemini wire format);
 * registry.py — one descriptor per provider;
 * routing.py — credential and endpoint isolation, and the factory;
 * discovery.py — model discovery behind the descriptors;

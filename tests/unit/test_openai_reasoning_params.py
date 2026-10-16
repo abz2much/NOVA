@@ -61,9 +61,7 @@ def test_older_openai_models_are_unchanged(lp):
     assert sent["max_tokens"] == 64 and sent["temperature"] == 0.0
 
 
-@pytest.mark.parametrize("cls_name,model", [("GeminiProvider", "gemini-3.6-flash"),
-                                            ("CustomProvider", "gpt-5-mini")])
-def test_other_openai_compatible_providers_are_unchanged(lp, cls_name, model):
-    provider, sent = _provider(lp, cls_name, model)
+def test_custom_provider_is_unchanged(lp):
+    provider, sent = _provider(lp, "CustomProvider", "gpt-5-mini")
     provider.complete(_request(lp))
     assert sent["max_tokens"] == 64 and sent["temperature"] == 0.0

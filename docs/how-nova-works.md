@@ -400,6 +400,12 @@ each message goes to the activity log. A few of the rules:
   manual model fallback and one Apply action that checks every role before
   changing anything. Ollama uses its own `/api/chat` interface, including
   tools, images and thinking control.
+- Gemini uses Google's own Interactions API, not the OpenAI compatible
+  endpoint. Nova keeps the conversation itself and asks Google not to store
+  it. Gemini's reasoning state (its thought signatures) is carried back to it
+  between tool calls, so tool use works on Gemini 3 models. It needs no extra
+  package. Your Gemini key, model choices and roles are unchanged. Gemini 3.6
+  and later ignore the temperature setting, so Nova no longer sends one.
   An older shared endpoint setting moves to the right address by itself,
   without tying Nova to any particular host, address or model.
 - Model lists from Groq, OpenAI, Anthropic, Gemini, Ollama and custom

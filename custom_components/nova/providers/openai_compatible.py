@@ -1,6 +1,6 @@
-"""OpenAI-compatible adapters: OpenAI, Gemini and custom endpoints.
+"""OpenAI-compatible adapters: OpenAI and custom endpoints.
 
-The three share the OpenAI SDK and wire format but are distinct providers:
+The two share the OpenAI SDK and wire format but are distinct providers:
 each reports its own name, so Provider Activity and execution location see
 the provider that actually handled the call. A custom endpoint never falls
 back to OpenAI's default endpoint.
@@ -15,9 +15,6 @@ from .destinations import check_url
 from .errors import ProviderConfigurationError, ProviderErrorKind
 from .models import ChatRequest, ChatResponse
 from .openai_wire import build_openai_kwargs, parse_openai_completion
-
-GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-
 
 def _import_openai():
     try:
@@ -35,10 +32,6 @@ class OpenAICompatibleProvider(LLMProvider):
 
     name: ClassVar[str] = "openai"
     concurrency = SDK_CLIENT_POLICY
-    # Whether tool call ``extra_content`` in the history is sent back. Only
-    # Gemini needs it (its thought signature); everyone else would reject it.
-    keeps_extra_content: ClassVar[bool] = False
-
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         super().__init__(api_key, model, base_url)
         OpenAI = _import_openai()
@@ -64,8 +57,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def complete(self, request: ChatRequest) -> ChatResponse:
         model = request.model or self.model
-        kwargs = build_openai_kwargs(
-            request, model, keep_extra_content=self.keeps_extra_content)
+        kwargs = build_openai_kwargs(request, model)
         kwargs = self._adjust_kwargs(kwargs, model)
         extra = self._extra_body()
         if extra:
@@ -120,19 +112,6 @@ class OpenAIProvider(OpenAICompatibleProvider):
             if "-chat" not in base and not base.startswith(_NO_EFFORT_PREFIXES):
                 kwargs.setdefault("reasoning_effort", _REASONING_EFFORT)
         return kwargs
-
-
-class GeminiProvider(OpenAICompatibleProvider):
-    """Google Gemini through its OpenAI-compatible endpoint."""
-
-    name: ClassVar[str] = "gemini"
-    requires_credential = True
-    # Gemini 3 rejects a follow up tool call request unless the thought
-    # signature from its previous call is sent back unchanged.
-    keeps_extra_content = True
-
-    def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
-        super().__init__(api_key, model, base_url or GEMINI_OPENAI_BASE_URL)
 
 
 class CustomProvider(OpenAICompatibleProvider):
