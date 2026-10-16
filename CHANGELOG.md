@@ -1,3 +1,14 @@
+## [8.58.1] Apply now checks a cloud model you change, and a Gemini check script
+
+Follow up to 8.58.0.
+
+### Changed
+- **Apply now tests a cloud role you changed.** Before, Apply only called Ollama and custom roles before saving, so a wrong Gemini (or Groq, OpenAI or Anthropic) model or key only showed up on the first chat. Now one small test call runs for each cloud role whose provider or model you changed, and nothing is saved if it fails. Roles you did not touch are not called again.
+- **An empty Gemini reply is retried once.** When thinking uses up the whole output limit and nothing is written, Nova asks again with a larger limit. Both calls count in Provider Activity.
+
+### Added
+- **`scripts/live_gemini_probe.py`** checks the native Gemini adapter with your own key: the model list, a plain reply, a tool call round trip, a picture and a wrong key. Run it with the integration venv. See the top of the file.
+
 ## [8.58.0] Gemini now uses Google's own API
 
 Gemini no longer goes through Google's OpenAI compatible endpoint. Nova talks to Google's own Interactions API instead. Your Gemini key, model choices, roles, routing and model lists are unchanged, and there is nothing to set up again.

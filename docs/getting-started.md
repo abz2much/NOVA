@@ -59,6 +59,8 @@ To change them later, use the panel's **Settings → AI Models** card. It has
 profiles (Hybrid and Local Text move background work to Ollama), a separate
 OpenAI-compatible endpoint, and an Ollama context length. Changes are staged
 until you press **Apply**. Nova checks them, saves them and reloads itself.
+The check is one small test call for each self-hosted role and for each cloud
+role you changed. If a test fails, nothing is saved.
 
 ## Where settings live
 

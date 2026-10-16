@@ -547,3 +547,35 @@ def test_a_vision_call_sends_the_picture_and_reads_the_description(lp, pk, monke
     assert body["system_instruction"] == "Describe the scene."
     assert result["text"] == "A parcel on the step."
     assert result["usage"] == {"input_tokens": 268, "output_tokens": 12}
+
+
+# ── An output limit used up by thinking ─────────────────────────────────────
+
+def _incomplete(steps=(), **extra):
+    return {"id": "v1_x", "status": "incomplete", "steps": list(steps), **extra}
+
+
+def test_an_empty_incomplete_reply_is_retried_once_with_a_bigger_budget(lp, pk, monkeypatch):
+    provider, seen = _provider(
+        lp, pk, monkeypatch,
+        _incomplete([THOUGHT], usage={"total_input_tokens": 10, "total_output_tokens": 0,
+                                      "total_thought_tokens": 2000}),
+        _completed([_text_step("pong")], usage={"total_input_tokens": 10, "total_output_tokens": 2,
+                                                "total_thought_tokens": 50}))
+    result = provider.chat([{"role": "user", "content": "ping"}], max_tokens=32)
+    first, second = (json.loads(r.data)["generation_config"]["max_output_tokens"] for r, _ in seen)
+    assert second > first and second >= 2048 + 0
+    assert result["text"] == "pong" and len(seen) == 2
+    assert result["usage"] == {"input_tokens": 20, "output_tokens": 2052}   # both calls counted
+
+
+def test_an_incomplete_reply_with_some_text_is_not_retried(lp, pk, monkeypatch):
+    provider, seen = _provider(lp, pk, monkeypatch, _incomplete([_text_step("Half an")]))
+    assert provider.chat([{"role": "user", "content": "x"}])["text"] == "Half an"
+    assert len(seen) == 1
+
+
+def test_a_second_empty_incomplete_reply_is_returned_empty_without_a_third_call(lp, pk, monkeypatch):
+    provider, seen = _provider(lp, pk, monkeypatch, _incomplete([THOUGHT]))
+    result = provider.chat([{"role": "user", "content": "x"}])
+    assert result["text"] == "" and result["tool_calls"] == [] and len(seen) == 2
