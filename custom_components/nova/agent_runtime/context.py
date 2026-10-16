@@ -9,6 +9,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .. import output_language as _output_language
+from ..prompt_fence import one_line as _one_line
 from .capabilities import memory as _memory
 
 # The whole agent logs as ...nova.agent, the name it always had, so filters
@@ -110,7 +111,7 @@ def _build_home_context(hass: HomeAssistant) -> str:
         if cap <= 0:
             lines.append(f"{label}: {len(found)}")
             continue
-        shown = ", ".join(s.attributes.get("friendly_name", s.entity_id)
+        shown = ", ".join(_one_line(s.attributes.get("friendly_name", s.entity_id))
                           for s in found[:cap])
         more = len(found) - cap
         tail = f" (+{more} more)" if more > 0 else ""

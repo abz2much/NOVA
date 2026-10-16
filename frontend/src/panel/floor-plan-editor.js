@@ -1,3 +1,22 @@
+  // An imported layout file is text from outside, and the editor writes its
+  // names, floor keys and values into HTML and SVG attributes. Drop the
+  // characters that can close an attribute or open a tag, in keys and values
+  // alike, and skip the keys that change an object's prototype.
+  _fpCleanImport(value, depth = 0) {
+    if (depth > 12) return null;
+    if (typeof value === "string") return value.replace(/[<>"`]/g, "");
+    if (Array.isArray(value)) return value.map(v => this._fpCleanImport(v, depth + 1));
+    if (value && typeof value === "object") {
+      const out = {};
+      for (const key of Object.keys(value)) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+        out[this._fpCleanImport(key, depth + 1)] = this._fpCleanImport(value[key], depth + 1);
+      }
+      return out;
+    }
+    return value;
+  }
+
   _floorPlanEditorCardBody() {
     const plan = this._getEditingPlan();
     const floors = Object.keys(plan);
@@ -517,8 +536,8 @@
           try {
             const parsed = JSON.parse(ev.target.result);
             if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) throw new Error("empty");
-            this._editingPlan = parsed;
-            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(parsed)[0];
+            this._editingPlan = this._fpCleanImport(parsed);
+            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(this._editingPlan)[0];
             this._rerenderFloorPlanCard();
           } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
         };

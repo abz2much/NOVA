@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from . import paths
+from .safe_errors import safe_error_message
 from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
@@ -315,4 +316,4 @@ def analyze(entity_id: str, event_time=None,
     except Exception as exc:
         _LOGGER.exception("rca.analyze failed: %s", exc)
         return {"entity_id": entity_id, "event": {}, "candidates": [],
-                "timeline": [], "summary": f"analysis failed: {exc}"}
+                "timeline": [], "summary": f"analysis failed: {safe_error_message(exc)}"}

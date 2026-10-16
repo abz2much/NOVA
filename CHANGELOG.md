@@ -1,3 +1,16 @@
+## [8.58.4] Web search handles DuckDuckGo's HTTP 202, more outside text is fenced, and two error messages are shortened
+
+### Fixed
+- **Web search said "the web search failed" whenever DuckDuckGo answered with HTTP 202.** Nova only accepted HTTP 200. It now accepts 202 too and reads the body. If the body is an answer, Nova uses it. If it is a bot check page instead (DuckDuckGo does this to servers it has flagged), Nova says so and suggests trying later or using SearXNG, rather than a general failure.
+- **Two replies could include an exception's own text.** A failed scene pick or activation (`nova.scene_by_intent`) and a failed "why did this change" analysis now return the error type only, as the rest of Nova does. The full detail stays in the Home Assistant log.
+
+### Changed
+- **More text that other people or devices can write is now kept apart from Nova's instructions.** The facts in a briefing (device names, calendar titles, camera descriptions, hazard headlines), the event text and home summary sent to the observer's reasoning step, and the description and recent activity sent when Nova judges a camera scene are now wrapped in a random marker with the same "inert data" instruction already used for memory and knowledge. Device names, calendar titles and media titles that go into the main prompt are cut to one line and a sensible length, so a pasted line break cannot start a new part of the prompt. The reason note for a briefing stays outside the fence because it is Nova's own instruction.
+- **The follow up note and instruction a model wrote earlier were already handled** (the note is fenced and a scheduled run cannot control devices), so they are unchanged.
+
+### Fixed (panel)
+- **Importing a floor plan file could put markup from the file into the editor.** A layout file with a quote or angle bracket in a floor key, room name or label could add an element to the page. The import now removes `<`, `>`, double quote and backtick characters in keys and values, and skips keys that change an object's prototype. A new panel test checks it, and it fails without the fix.
+
 ## [8.58.3] Gemini tool calls work on Gemini 2.5 models
 
 Follow up to 8.58.2.

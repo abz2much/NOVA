@@ -272,13 +272,19 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         recent_block = "\n\nRecent announcements (avoid repeating):\n" + "\n".join(
             f"- {a}" for a in recent_announcements[-5:])
     presence_block = f"\n\nPresence: {presence_context}" if presence_context else ""
-    user_msg = (
+    from ..prompt_fence import fence_home_data
+    # The event text, device names and recent announcements can carry words
+    # someone else wrote (a camera description, a calendar title), so they are
+    # fenced. Nova's own classifier fields and the question stay outside.
+    flagged = fence_home_data(
         f"FLAGGED EVENT:\n{event_summary}\n\n"
-        f"Classifier suggested urgency: {classifier_urgency}\n"
-        f"Category: {classifier_category}\n\n"
         f"Home state summary:\n{home_state_summary}"
         f"{presence_block}"
-        f"{recent_block}\n\n"
+        f"{recent_block}")
+    user_msg = (
+        f"Classifier suggested urgency: {classifier_urgency}\n"
+        f"Category: {classifier_category}\n\n"
+        f"{flagged}\n\n"
         "Decide: speak or stay silent? Respond with JSON only."
     )
     messages = [{"role": "system", "content": system},

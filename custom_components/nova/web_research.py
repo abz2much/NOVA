@@ -107,9 +107,21 @@ async def _duckduckgo(hass: Any, q: str) -> dict:
               "skip_disambig": "1", "t": "nova_home"}
     async with session.get(_DDG_ENDPOINT, params=params,
                            timeout=aiohttp.ClientTimeout(total=_TIMEOUT)) as resp:
-        if resp.status != 200:
+        # DuckDuckGo sometimes answers 202 Accepted. That can be a real answer
+        # in the body, or a bot check page for a server it has flagged. Read
+        # the body to tell them apart. Any other status is an error.
+        if resp.status not in (200, 202):
             return _error(q, f"search returned HTTP {resp.status}")
-        return _shape_ddg(q, await resp.json(content_type=None))
+        try:
+            data = await resp.json(content_type=None)
+        except Exception:
+            if resp.status != 202:
+                raise
+            data = None
+        if resp.status == 202 and not isinstance(data, dict):
+            return _error(q, "DuckDuckGo sent a bot check instead of an answer "
+                             "(HTTP 202). Try again later, or use SearXNG")
+        return _shape_ddg(q, data)
 
 
 async def _searxng(hass: Any, q: str) -> dict:

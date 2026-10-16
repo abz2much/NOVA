@@ -11,6 +11,7 @@ from datetime import datetime
 
 from homeassistant.core import HomeAssistant, ServiceCall
 
+from .safe_errors import safe_error_message
 from .tts_helper import async_announce
 
 SCENE_MODEL = "openai/gpt-oss-120b"
@@ -77,7 +78,7 @@ async def async_activate_by_intent(hass: HomeAssistant, call: ServiceCall, groq_
         answer = result.text.strip().lower()
     except Exception as exc:
         _LOGGER.error("Nova scene-pick error: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": safe_error_message(exc)}
 
     pick = _known(answer, {scene["entity_id"] for scene in scenes})
     if not pick:
@@ -117,7 +118,7 @@ async def async_activate_by_intent(hass: HomeAssistant, call: ServiceCall, groq_
             lambda: action_log.set_execution(
                 action_id, "failed", reason_code="service_call_failed")
         )
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": safe_error_message(exc)}
     await hass.async_add_executor_job(
         lambda: action_log.set_execution(action_id, "accepted")
     )

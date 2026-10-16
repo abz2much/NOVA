@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.58.3
+ * v8.58.4
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.58.3 ",
+      console.log("%c Nova Panel %c v8.58.4 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -9072,6 +9072,25 @@ ${this._htmlDashboardBody()}`;
     return out;
   }
 
+  // An imported layout file is text from outside, and the editor writes its
+  // names, floor keys and values into HTML and SVG attributes. Drop the
+  // characters that can close an attribute or open a tag, in keys and values
+  // alike, and skip the keys that change an object's prototype.
+  _fpCleanImport(value, depth = 0) {
+    if (depth > 12) return null;
+    if (typeof value === "string") return value.replace(/[<>"`]/g, "");
+    if (Array.isArray(value)) return value.map(v => this._fpCleanImport(v, depth + 1));
+    if (value && typeof value === "object") {
+      const out = {};
+      for (const key of Object.keys(value)) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+        out[this._fpCleanImport(key, depth + 1)] = this._fpCleanImport(value[key], depth + 1);
+      }
+      return out;
+    }
+    return value;
+  }
+
   _floorPlanEditorCardBody() {
     const plan = this._getEditingPlan();
     const floors = Object.keys(plan);
@@ -9591,8 +9610,8 @@ ${this._htmlDashboardBody()}`;
           try {
             const parsed = JSON.parse(ev.target.result);
             if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) throw new Error("empty");
-            this._editingPlan = parsed;
-            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(parsed)[0];
+            this._editingPlan = this._fpCleanImport(parsed);
+            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(this._editingPlan)[0];
             this._rerenderFloorPlanCard();
           } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
         };

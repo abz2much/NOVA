@@ -1418,7 +1418,10 @@ if (require.main === module) setTimeout(async () => {
     !_exportThrew]);
 
   const importFile = fpeCardNow.querySelector("#fpnImportFile");
-  const fakeLayout = { "1f": { label: "1st Floor", viewBox: "0 0 320 150", rooms: [{ name: "Imported Room", x: 5, y: 5, w: 40, h: 30, type: "room" }] } };
+  const fakeLayout = { "1f": { label: "1st Floor", viewBox: "0 0 320 150", rooms: [{ name: "Imported Room", x: 5, y: 5, w: 40, h: 30, type: "room" }] },
+    // A hostile floor key and name: neither may add an element to the card.
+    '2f"><img id="fpn-xss" src=x>': { label: 'Up"><img id="fpn-xss2" src=x>', rooms: [{ name: 'Hall"><img id="fpn-xss3" src=x>', x: 1, y: 1, w: 9, h: 9, type: "room" }] },
+    "__proto__": { label: "x" } };
   const fakeFile = new window.File([JSON.stringify(fakeLayout)], "nova-floor-plan.json", { type: "application/json" });
   Object.defineProperty(importFile, "files", { value: [fakeFile], configurable: true });
   importFile.dispatchEvent(new window.Event("change"));
@@ -1433,6 +1436,9 @@ if (require.main === module) setTimeout(async () => {
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: Import loads a layout file into the working copy",
     /IMPORTED ROOM/.test(fpeCardNow.textContent)]);
+  checks.push(["floor plan editor: Import drops characters that could inject markup",
+    !fpeCardNow.querySelector("#fpn-xss, #fpn-xss2, #fpn-xss3")
+    && !fpeCardNow.innerHTML.includes("<img")]);
 
   // Devices on plan (Floor Plan Editor Phase 2): add a device, see its pin,
   // save it, remove it, and confirm the opacity slider persists.

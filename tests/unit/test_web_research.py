@@ -18,6 +18,8 @@ class _Resp:
 
     async def json(self, content_type="application/json"):
         assert content_type is None
+        if isinstance(self._payload, Exception):
+            raise self._payload
         return self._payload
 
     async def __aenter__(self):
@@ -29,7 +31,8 @@ class _Resp:
 
 class _Session:
     def __init__(self, status=200, payload=None, exc=None):
-        self.status, self.payload, self.exc = status, payload or {}, exc
+        self.status, self.exc = status, exc
+        self.payload = {} if payload is None else payload
         self.calls = []
 
     def get(self, url, params=None, timeout=None):
@@ -109,6 +112,34 @@ async def test_duckduckgo_http_error(wr, net, monkeypatch):
     settings(wr, monkeypatch, search_backend="duckduckgo")
     net["session"] = _Session(status=503)
     assert await wr.research(None, "x") == {"query": "x", "error": "search returned HTTP 503"}
+
+
+async def test_duckduckgo_202_with_an_answer_is_used(wr, net, monkeypatch):
+    settings(wr, monkeypatch, search_backend="duckduckgo")
+    net["session"] = _Session(status=202, payload={"Answer": "42"})
+    out = await wr.research(None, "meaning of life")
+    assert out["answer"] == "42" and out["backend"] == "duckduckgo"
+
+
+async def test_duckduckgo_202_bot_check_is_a_clear_error(wr, net, monkeypatch):
+    settings(wr, monkeypatch, search_backend="duckduckgo")
+    net["session"] = _Session(status=202, payload=ValueError("not json"))
+    out = await wr.research(None, "x")
+    assert out["query"] == "x"
+    assert "bot check" in out["error"] and "HTTP 202" in out["error"]
+    assert "not json" not in out["error"]
+
+
+async def test_duckduckgo_202_that_is_not_an_object_is_a_bot_check(wr, net, monkeypatch):
+    settings(wr, monkeypatch, search_backend="duckduckgo")
+    net["session"] = _Session(status=202, payload=["unexpected"])
+    assert "bot check" in (await wr.research(None, "x"))["error"]
+
+
+async def test_duckduckgo_200_that_is_not_json_still_fails(wr, net, monkeypatch):
+    settings(wr, monkeypatch, search_backend="duckduckgo")
+    net["session"] = _Session(status=200, payload=ValueError("bad body"))
+    assert await wr.research(None, "x") == {"query": "x", "error": "lookup failed: bad body"}
 
 
 async def test_network_failure_becomes_an_error(wr, net, monkeypatch):

@@ -263,11 +263,14 @@ async def _reason_about_scene(hass: HomeAssistant, reasoning_client, reasoning_m
     from . import output_language
     # The spoken line follows Nova's language; the JSON keys stay as they are.
     system = _REASONING_RULES + output_language.field_directive(hass, "speak")
-    lines = [f"Camera: {camera_name}", f"Time: {stamp}", f"Detection: {det_type}",
-             f"Vision description: {description}", ""]
-    user = "\n".join(lines)
+    from .prompt_fence import fence_home_data, one_line
+    # The vision description is text from a camera frame (a sign held up to the
+    # lens is text too), so it is fenced as data, like the recent activity.
+    data = f"Vision description: {description}"
     if recent and recent != _QUIET_CONTEXT:
-        user += "\nRecent home activity:\n" + recent
+        data += "\n\nRecent home activity:\n" + recent
+    user = "\n".join([f"Camera: {one_line(camera_name)}", f"Time: {stamp}",
+                      f"Detection: {det_type}", "", fence_home_data(data)])
     try:
         from .providers.activity import execute_chat
         reply = await execute_chat(

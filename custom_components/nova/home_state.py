@@ -12,6 +12,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .prompt_fence import one_line
+
 _LOGGER = logging.getLogger(__name__)
 
 _cache: dict = {"summary": "", "ts": 0.0}
@@ -44,7 +46,7 @@ def _area_name(hass: HomeAssistant, area_id: str) -> str:
 
 
 def _name(state: Any) -> str:
-    return state.attributes.get("friendly_name", state.entity_id)
+    return one_line(state.attributes.get("friendly_name", state.entity_id))
 
 
 def _occupancy_line(hass: HomeAssistant) -> str:
@@ -126,7 +128,7 @@ def _build_summary(hass: HomeAssistant) -> str:
         item = _name(state)
         title = state.attributes.get("media_title")
         if title:
-            item += f" ({title})"
+            item += f" ({one_line(title)})"
         media.append(item)
     if media:
         lines.append("Playing media: " + ", ".join(media[:4]))
