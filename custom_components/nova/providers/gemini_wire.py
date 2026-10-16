@@ -60,6 +60,11 @@ def is_too_large(text: str) -> bool:
     return "too large" in text or ("token count" in text and "exceed" in text)
 
 
+def is_incomplete(data: Any) -> bool:
+    """An interaction cut off by its output limit (thought tokens count)."""
+    return isinstance(data, dict) and str(data.get("status") or "").lower() == "incomplete"
+
+
 def has_safety_words(text: str) -> bool:
     text = text.lower()
     return any(word in text for word in _SAFETY_WORDS)

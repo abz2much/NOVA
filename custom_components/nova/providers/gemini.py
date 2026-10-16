@@ -14,6 +14,7 @@ import json
 import logging
 import socket
 import urllib.request
+from dataclasses import replace
 from typing import Any, ClassVar, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -23,7 +24,7 @@ from . import gemini_wire as wire
 from .base import LLMProvider
 from .capabilities import GEMINI_POLICY, ProviderCapabilities, gemini_vision
 from .errors import ProviderError, ProviderErrorKind, _safe_code, kind_for_http_status
-from .models import ChatRequest, ChatResponse
+from .models import ChatRequest, ChatResponse, Usage
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,13 @@ _OPENER = urllib.request.build_opener(_NoRedirect())
 def _urlopen(request: Request, timeout: float):  # type: ignore[no-untyped-def]
     """The single network seam for native Gemini calls."""
     return _OPENER.open(request, timeout=timeout)
+
+
+def _total_usage(first: Usage, second: Usage) -> Usage:
+    def add(a: Optional[int], b: Optional[int]) -> Optional[int]:
+        return None if a is None and b is None else (a or 0) + (b or 0)
+    return Usage(add(first.input_tokens, second.input_tokens),
+                 add(first.output_tokens, second.output_tokens))
 
 
 class GeminiHTTPError(ProviderError):
@@ -91,7 +99,18 @@ class GeminiProvider(LLMProvider):
                     flatten = True         # history without Gemini's own reasoning
                     continue
                 raise
-        return wire.parse_interaction(data, model=model)
+        response = wire.parse_interaction(data, model=model)
+        if wire.is_incomplete(data) and not response.text and not response.tool_calls:
+            # The budget ran out on thinking before any answer was written.
+            # One retry with a larger budget; both calls are billed, so both
+            # are counted.
+            bigger = replace(request, max_tokens=max(request.max_tokens * 4, 2048))
+            retry = wire.parse_interaction(
+                self._post(wire.build_request(
+                    bigger, model, flatten_tools=flatten, thinking=thinking)),
+                model=model)
+            response = replace(retry, usage=_total_usage(response.usage, retry.usage))
+        return response
 
     def _post(self, body: dict[str, Any]) -> Any:
         http_request = Request(

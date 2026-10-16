@@ -428,7 +428,13 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
         tested: set[tuple[str, str, str]] = set()
         for label, provider_key, model_key in _AI_ROLE_FIELDS:
             provider = str(candidate.get(provider_key) or "")
-            if provider not in ("ollama", "custom"):
+            # A self-hosted role is always checked. A cloud role is checked
+            # when this Apply changes its provider or model, so a wrong model
+            # id or key shows here and not on the first chat. Roles left as
+            # they were are not called again.
+            changed = provider_key in updates or model_key in updates
+            if provider not in ("ollama", "custom") and not (
+                    provider in _AI_CLOUD_PROVIDERS and changed):
                 continue
             model = str(candidate.get(model_key) or "")
             endpoint = str(resolve_provider_endpoint(candidate, provider) or "")
