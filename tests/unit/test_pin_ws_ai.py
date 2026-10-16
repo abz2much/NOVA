@@ -393,6 +393,18 @@ async def test_other_providers_keep_an_empty_list_when_discovery_fails(
     monkeypatch.setattr(ai, "_fetch_models_deduped", deduped)
     res = await _list(ai, _hass(_entry(load)), "groq")
     assert res["models"] == [] and "fallback" not in res
+    assert res["error"] == "model_discovery_unavailable"
+
+
+async def test_a_rejected_key_on_another_provider_keeps_the_one_fixed_error(
+        ai, load, cfg, cache, monkeypatch):
+    disc = load("providers.discovery")
+
+    async def deduped(*a):
+        raise disc.ModelDiscoveryHTTPError(401)
+    monkeypatch.setattr(ai, "_fetch_models_deduped", deduped)
+    res = await _list(ai, _hass(_entry(load)), "groq")
+    assert res == {"provider": "groq", "models": [], "error": "model_discovery_unavailable"}
 
 
 async def test_list_models_for_an_unknown_provider_is_the_same_fixed_error(ai, load, cfg, cache):

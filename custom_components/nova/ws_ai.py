@@ -122,12 +122,14 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
     except Exception as exc:
         discovery.log_discovery_failure(provider, url, exc, logger=_LOGGER)
         # The live list failed. A provider with a built in list offers it, so
-        # a model can still be picked; the reason stays in "error".
+        # a model can still be picked, and its reason code is in "error". Every
+        # other provider keeps the one fixed error and an empty list.
         fallback = discovery.FALLBACK_MODELS.get(provider, ())
         connection.send_result(msg["id"], {
             "provider": provider,
             "models": list(fallback),
-            "error": discovery.failure_reason(exc),
+            "error": (discovery.failure_reason(exc) if fallback
+                      else _SAFE_MODEL_DISCOVERY_ERROR),
             **({"fallback": True} if fallback else {}),
         })
 

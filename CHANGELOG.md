@@ -3,7 +3,7 @@
 Follow up to 8.58.0 and 8.58.1.
 
 ### Fixed
-- **You can pick a Gemini model even when Google's list cannot be fetched.** The model box for Custom only appeared when you changed the dropdown, so when the list was empty and the dropdown was already on Custom, nothing could be chosen or typed. The box now shows whenever the dropdown is on Custom. When Google's list fails, a built in list of Gemini models Google marks stable is shown instead, and the tooltip on the dropdown gives the reason (`key_rejected`, `rate_limited`, `unreachable`, `provider_error`, `not_found` or `bad_response`).
+- **You can pick a Gemini model even when Google's list cannot be fetched.** The model box for Custom only appeared when you changed the dropdown, so when the list was empty and the dropdown was already on Custom, nothing could be chosen or typed. The box now shows whenever the dropdown is on Custom. When Google's list fails, a built in list of Gemini models Google marks stable is shown instead, and the tooltip on the dropdown gives the reason (`key_rejected`, `rate_limited`, `unreachable`, `provider_error`, `not_found` or `bad_response`). Other providers keep their one fixed error.
 - **Apply tested every cloud role every time, not just the ones you changed.** The panel sends every role on each Apply, so 8.58.1 treated all of them as changed. Nova now compares with the saved value.
 - **The changelog said Gemini 3.6 and later ignore temperature.** Google does not say that. Google advises leaving temperature at its default of 1.0 on Gemini 3 and later, because a lower value can cause looping or poorer answers. Nova now leaves it out for those models and sends it to Gemini 2.x and Gemma.
 
