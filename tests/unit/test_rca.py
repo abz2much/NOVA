@@ -530,5 +530,7 @@ def test_analyze_backstop(rca, home, monkeypatch, caplog):
     with caplog.at_level(logging.ERROR):
         res = home.why(rca, "light.porch")
     assert res == {"entity_id": "light.porch", "event": {}, "candidates": [],
-                   "timeline": [], "summary": "analysis failed: disk on fire"}
+                   "timeline": [], "summary": (
+                       "analysis failed: ValueError (details are in the Home Assistant log)")}
+    assert "disk on fire" not in res["summary"]
     assert any("rca.analyze failed" in r.getMessage() for r in caplog.records)

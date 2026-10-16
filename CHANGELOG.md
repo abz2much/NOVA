@@ -1,3 +1,9 @@
+## [8.58.4] Web search handles DuckDuckGo's HTTP 202, and two error messages are shortened
+
+### Fixed
+- **Web search said "the web search failed" whenever DuckDuckGo answered with HTTP 202.** Nova only accepted HTTP 200. It now accepts 202 too and reads the body. If the body is an answer, Nova uses it. If it is a bot check page instead (DuckDuckGo does this to servers it has flagged), Nova says so and suggests trying later or using SearXNG, rather than a general failure.
+- **Two replies could include an exception's own text.** A failed scene pick or activation (`nova.scene_by_intent`) and a failed "why did this change" analysis now return the error type only, as the rest of Nova does. The full detail stays in the Home Assistant log.
+
 ## [8.58.3] Gemini tool calls work on Gemini 2.5 models
 
 Follow up to 8.58.2.
