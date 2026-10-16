@@ -1,3 +1,10 @@
+## [8.58.5] A plan can no longer redirect its own target
+
+### Fixed
+- **A plan step could act on a device other than the one that was checked.** `execute_plan` checks each step against the step's own `entity_id`, but then merged `service_data` over it. A step that named a harmless light could carry a lock, a cover or a whole area in `service_data` and act on that instead. `service_data` can no longer name a target (`entity_id`, `device_id`, `area_id`, `floor_id` or `label_id`). Settings such as brightness still pass through, and each device goes in its own step.
+- **`scene.apply` and `scene.create` are refused in a plan.** `scene.apply` sets other devices' states from a configuration the check cannot read, so it could unlock a lock or open a cover without that device being checked. `scene.turn_on` is unchanged.
+- **A failed plan step returned the exception's own text.** It now returns the error type only, as the rest of Nova does. The detail stays in the log.
+
 ## [8.58.4] Web search handles DuckDuckGo's HTTP 202, more outside text is fenced, and two error messages are shortened
 
 ### Fixed

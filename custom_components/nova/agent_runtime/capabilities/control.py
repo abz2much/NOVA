@@ -661,6 +661,17 @@ _EXECUTE_PLAN_ALLOWED_DOMAINS = {
 }
 
 
+# service_data may carry settings (brightness, temperature) but never the
+# target. The authority check looks at the step's own entity_id, so a second
+# target inside service_data would act on something that was never checked.
+_PLAN_TARGET_KEYS = ("entity_id", "device_id", "area_id", "floor_id", "label_id")
+
+# Services in an allowed domain that set other entities' states from a
+# configuration the authority check cannot read (scene.apply can unlock a
+# lock or open a cover inside one call).
+_EXECUTE_PLAN_BLOCKED_SERVICES = {("scene", "apply"), ("scene", "create")}
+
+
 async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
                              user_id: Optional[str] = None) -> str:
     """
@@ -739,6 +750,26 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
             )
             continue
 
+        if (domain, service) in _EXECUTE_PLAN_BLOCKED_SERVICES:
+            results.append({"step": i + 1, "description": desc, "ok": False,
+                            "error": f"{domain}.{service} is not allowed in a plan "
+                                     "— it can change other devices without each "
+                                     "one being checked. Use separate steps instead"})
+            await hass.async_add_executor_job(
+                lambda rid=row_id: action_log.set_execution(rid, "failed", reason_code="service_not_allowed")
+            )
+            continue
+
+        if not isinstance(extra, dict) or any(k in extra for k in _PLAN_TARGET_KEYS):
+            results.append({"step": i + 1, "description": desc, "ok": False,
+                            "error": "service_data cannot name a target "
+                                     "(entity_id, device_id, area_id, floor_id or "
+                                     "label_id). Put each device in its own step"})
+            await hass.async_add_executor_job(
+                lambda rid=row_id: action_log.set_execution(rid, "failed", reason_code="target_in_service_data")
+            )
+            continue
+
         # Verify entity exists before acting
         if hass.states.get(entity_id) is None:
             results.append({"step": i + 1, "description": desc,
@@ -794,8 +825,10 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
                 await hass.async_add_executor_job(
                     lambda rid=row_id: action_log.mark_not_checkable(rid))
         except Exception as exc:
+            from ...safe_errors import safe_error_message
             results.append({"step": i + 1, "description": desc,
-                            "ok": False, "status": "error", "error": str(exc)})
+                            "ok": False, "status": "error",
+                            "error": safe_error_message(exc, where="execute_plan", log=True)})
             await hass.async_add_executor_job(
                 lambda rid=row_id: action_log.set_execution(rid, "failed", reason_code="service_call_failed")
             )
