@@ -121,9 +121,13 @@ class GeminiProvider(LLMProvider):
                 if thinking and "thinking" in exc.hint and wire.thinking_level_for(model):
                     thinking = False       # a model that takes no thinking level
                     continue
-                if (not flatten and wire.has_tool_turns(history)
-                        and ("signature" in exc.hint or "thought" in exc.hint)):
-                    flatten = True         # history without Gemini's own reasoning
+                if (not flatten and wire.has_tool_turns(history) and not exc.detail
+                        and exc.kind is ProviderErrorKind.INVALID_REQUEST):
+                    # Any other refusal of a request that carries tool turns
+                    # (a signature Gemini will not take, a reply shape a model
+                    # does not accept): once more with the tool turns as plain
+                    # text. A too large or blocked prompt is not retried.
+                    flatten = True
                     continue
                 raise
         response = wire.parse_interaction(data, model=model)

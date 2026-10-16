@@ -157,7 +157,7 @@ def test_recorded_steps_are_replayed_exactly_as_received(pk):
         {"type": "user_input", "content": [{"type": "text", "text": "turn on the light"}]},
         THOUGHT, _text_step("On it."), _call_step(),
         {"type": "function_result", "call_id": "c1", "name": "control_device",
-         "result": [{"type": "text", "text": "ok"}]},
+         "result": "ok"},
     ]
 
 
@@ -482,6 +482,46 @@ def test_a_signature_refusal_retries_once_with_the_tool_turns_as_text(lp, pk, mo
     first, second = (json.loads(r.data)["input"] for r, _ in seen)
     assert any(s["type"] == "function_call" for s in first)
     assert not any(s["type"] in ("function_call", "function_result") for s in second)
+
+
+def test_a_tool_result_is_sent_as_a_plain_string(pk):
+    """A list of content parts is a multimodal function response, which
+    Gemini 2.5 models refuse with HTTP 400."""
+    response = _first_turn(pk, [THOUGHT, _call_step()])
+    _system, sent = pk.gemini_wire.build_input(_history(response))
+    result = [s for s in sent if s["type"] == "function_result"][0]
+    assert result["result"] == "ok"
+
+
+def test_a_multimodal_refusal_retries_once_with_the_tool_turns_as_text(lp, pk, monkeypatch):
+    provider, seen = _provider(
+        lp, pk, monkeypatch,
+        _google_error(400, "invalid_request",
+                      "Multimodal function responses are not supported for this model."),
+        _completed([_text_step("ok")]))
+    history = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"}]
+    assert provider.chat(history)["text"] == "ok"
+    assert len(seen) == 2
+    first, second = (json.loads(r.data)["input"] for r, _ in seen)
+    assert any(s["type"] == "function_result" for s in first)
+    assert not any(s["type"] in ("function_call", "function_result") for s in second)
+
+
+def test_a_rejected_key_with_tool_turns_is_not_retried(lp, pk, monkeypatch):
+    provider, seen = _provider(lp, pk, monkeypatch, _google_error(
+        400, "INVALID_ARGUMENT", "API key not valid. Please pass a valid API key."))
+    history = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"}]
+    with pytest.raises(pk.errors.ProviderError):
+        provider.chat(history)
+    assert len(seen) == 1
 
 
 def test_no_retry_for_an_ordinary_bad_request(lp, pk, monkeypatch):
