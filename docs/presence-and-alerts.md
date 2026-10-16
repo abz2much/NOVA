@@ -13,9 +13,10 @@ covers how to quieten Nova.
   each Home Assistant area.
 - **Whether the house is asleep.** From the sleep state you set, or
   automatically from bedroom occupancy and quiet hours.
-- **What is worth saying.** The observer looks at home events. A cheap first
-  pass decides what deserves a closer look, and most decisions are made
-  locally without a cloud call.
+- **What is worth saying.** With the Observer on (it is off by default), it
+  looks at home events. A cheap first pass decides what deserves a closer
+  look, and most decisions are made locally without a cloud call. Safety
+  alarms do not need it.
 - **How to say it.** Out loud in the right room, on the broadcast speakers, or
   on your phone, depending on urgency, quiet hours, sleep and your settings.
 
@@ -24,9 +25,9 @@ covers how to quieten Nova.
 - [ ] **A person entity for each resident**, with a tracker.
 - [ ] **Areas in Home Assistant**, with motion, occupancy or presence sensors
   assigned to them.
-- [ ] **Bedroom areas and quiet hours** in **Configure**: Routing, "Bedroom
-  areas", and Observer, "Quiet hours start" and "Quiet hours end".
-- [ ] **Your phone**: "Phone notify service" in Configure, Routing, and the
+- [ ] **Bedrooms and quiet hours** in **Configure**: Rooms and speakers,
+  "Bedrooms", and Observer, "Quiet hours start" and "Quiet hours end".
+- [ ] **Your phone**: "Phone notify service" in Configure, Rooms and speakers, and the
   devices in the panel's **Settings → Notifications** card.
 
 ## What counts as someone being here
@@ -41,14 +42,22 @@ covers how to quieten Nova.
 
 ## How alerts reach you
 
+Every proactive message follows the same rules in the same order. The full
+list is in [Safety and security](safety-and-security.md#how-alerts-reach-you).
+
 - **Critical** alerts (smoke, carbon monoxide, a leak, a confirmed intrusion)
-  always speak, on the broadcast speakers, and pass every mute.
-- During **quiet hours**, or while the house is **asleep**, anything less than
-  critical goes to your phone instead of being spoken.
-- With **Notifications only** on, proactive alerts go to your phone instead
-  of the speakers. Reminders, package and camera announcements, scheduled
-  briefings and the infrastructure audit still speak.
-- With **Announcements** off, Nova makes no proactive speech at all.
+  always speak, on the broadcast speakers, go to your phones, and pass every
+  mute.
+- During **quiet hours**, or while the house is **asleep**, nothing is spoken.
+  A **high** alert goes to your phone instead. An everyday (medium or low)
+  alert is dropped. A reminder you set yourself goes to your phone.
+- With **Notifications only** on, every proactive message below critical goes
+  to your phone instead of the speakers, reminders, package and camera
+  announcements, scheduled briefings and the infrastructure audit included.
+  If no phone can take it, Nova speaks it on the source's own speakers.
+- With **Announcements** off, Nova speaks nothing proactive. High alerts still
+  reach your phone. Reminders and briefings you set yourself are not held by
+  this switch.
 
 ## What it learns by itself
 
@@ -72,7 +81,9 @@ covers how to quieten Nova.
 
 - **Shush** (`nova.shush`) mutes an entity or a category: appliances,
   doors_windows, presence, energy, security, climate, lights or schedule. With
-  no arguments, it silences whatever Nova just said.
+  no arguments, it silences whatever Nova just said. Shush, mutes and the
+  Announcements switch hold Observer, left open, appliance, host health and
+  core alerts as well. High ones still reach your phone.
 - **Unshush** (`nova.unshush`) undoes it. With no arguments it clears all
   mutes.
 - Mutes survive a restart. The Command Center's **Muted** card lists them with
@@ -99,10 +110,11 @@ Panel, **Settings → General**:
 
 | Setting | What it does |
 |---|---|
-| Announcements | Master switch for all proactive speech. |
+| Announcements | Master switch for proactive speech. On by default. Your own reminders and briefings ignore it, and high alerts still go to your phone. |
 | Notifications only | Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. |
+| Cards on the Command Center | The rotating cards beside the hologram head. On by default. See [Getting started](getting-started.md#a-tour-of-the-panel). |
 | Sentinel | Doors, windows and locks left open. Garage settings and wording show only when your home has a garage; see Settings → Home & Extras → Home layout → Garage (Auto, Yes or No). |
-| Observer | AI event awareness. |
+| Observer | AI event awareness. Off by default. |
 | Cognition | Local first look at events, deciding what deserves deeper reasoning. |
 | Rich Reasoning | Use the reasoning model first for medium and high priority events. |
 | Sleep state | Auto (occupancy + quiet hours), Awake or Asleep. |
@@ -135,6 +147,31 @@ Only in `/config/nova/config.json`:
 | Setting | What it does |
 |---|---|
 | `cognition_threshold` | How important an event must be before Nova escalates it. |
+
+## The new path, in shadow
+
+Nova is testing a separate path for convenience alerts. It starts with
+anticipation alerts: "usually has activity by now", routine start, departure
+reminder, comings and goings and heading home. For each one, the new path
+works out what it would do from the same alert and the same reading of the
+house, and sends nothing. The current path still decides and delivers.
+
+Open **Logs → Shadow** to see each pattern with how many verdicts agree, and
+the latest alerts with both verdicts (said or held) and their reasons side by
+side. The comparison is kept for 180 days.
+
+- A pattern can switch to the new path only after at least 14 days and 10
+  comparisons, and only when you press **Switch to new**. **Back to current**
+  undoes it.
+- When your last two phone ratings of one pattern are both Not helpful, the
+  view asks whether to stop that pattern. **Stop** silences only that pattern
+  and **Restart** brings it back. **Keep** leaves it on and asks again only
+  after two more Not helpful ratings in a row. Nothing stops on its own.
+- Safety and security alerts never go through the new path: anything
+  critical, intrusion, lockdown and freeze alerts, any alert about a lock, a
+  cover or the alarm, and the "less secure than usual" alert.
+- Ratings come only from the Helpful and Not helpful buttons on your phone,
+  not from the Decisions view.
 
 ## See also
 

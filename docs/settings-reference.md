@@ -23,7 +23,7 @@ need them if you edit that file by hand.
 
 | Setting | Where | What it does |
 | --- | --- | --- |
-| `llm_provider` and the model for each role | Settings → AI Models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama or a custom endpoint, separately for the Main Agent, Classifier, Reasoning, Vision and Camera Reasoning roles. A saved model that is missing from a provider's live list is kept, never quietly replaced. |
+| `llm_provider` and the model for each role | Settings → AI Models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama or a custom endpoint, separately for the Main Agent, Classifier, Reasoning, Vision, Camera Reasoning and Suggestion Review roles. A saved model that is missing from a provider's live list is kept, never quietly replaced. |
 | `ollama_base_url` | Settings → AI Models | The Ollama server used by Ollama roles, for example `http://ollama-host.local:11434`. Nova uses Ollama's own chat interface and can list the server's models and what they can do. |
 | `custom_base_url` | Settings → AI Models | A separate OpenAI compatible endpoint, used only by roles set to the custom provider. It never takes the Ollama address or another provider's key. |
 | Provider credentials | Settings → AI Models, or Configure → Credentials | One key per provider, stored only in `secrets.yaml`. Each role uses only its own provider's key, never another's. |
@@ -34,12 +34,34 @@ need them if you edit that file by hand.
 
 | Setting | Where | What it does |
 | --- | --- | --- |
-| `observer_enabled` | Settings → General → Observer, or Configure → Observer | Lets Nova watch the stream of events in your home and decide what is worth telling you. |
+| `observer_enabled` | Settings → General → Observer, or Configure → Observer | Off by default. Lets Nova watch the stream of events in your home and decide what is worth telling you. |
 | `output_language` | Settings → General → Nova speaks | Auto (the default) follows Home Assistant's language. Pick a language to make Nova speak and write in it, while Home Assistant and the panel stay as they are. Brazilian Portuguese and Traditional Chinese have their own options. Canadian French (`fr-CA`), Latin American Spanish (`es-419`) and Swiss German (`de-CH`) work on Auto, or when saved another way; the picker then shows the code and keeps it. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese. In any other language they stay in English, while text Nova writes itself follows this setting. Fixed messages, such as package announcements, and the panel itself are not changed by this setting. |
-| `announce_notify_only` | Settings → General → Notifications only | Off by default. When on, proactive alerts go to your phone instead of being spoken. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings, the infrastructure audit and hazard alerts are not covered by this switch; hazard speech follows its own quiet hours level. Replies to you are never affected. |
+| `announcements_enabled` | Settings → General → Announcements | On by default. Master switch for proactive speech. Reminders and briefings you set yourself ignore it, and high alerts still go to your phone. |
+| `announce_notify_only` | Settings → General → Notifications only | Off by default. When on, every proactive message below critical goes to your phone instead of being spoken, reminders, package and camera announcements, briefings, the infrastructure audit and hazard alerts included. Critical safety alerts still speak. With no phone that can take a message, Nova speaks it after all. Replies to you are never affected. |
+| `hero_card_cycle` | Settings → General → Cards on the Command Center | On by default. Shows a card of live figures beside the hologram head every 20 seconds while the house is awake. |
 | `voice_phrases` | Settings → Voice Phrases | Things you say, linked to a script, automation, scene, shell command or another allowed service. Holds the on/off switch (`enabled`, on by default) and up to 100 phrases. Saved only through the card, which checks every phrase; the general settings save can't write it. See [Voice phrases](voice-and-speakers.md#voice-phrases). |
 | `voice_confirm_entities` | `config.json` only | Entity ids that must ask first while Voice Confirmation is on, or, written with a leading `!`, never ask. Use it to make a voice phrase's shell command ask first, such as `shell_command.heat_boost`. Reload Nova after editing. |
 | Mutes (`nova.shush` and `nova.unshush`) | The Muted card on the Command Center, or the services | Entity, category and blanket mutes are saved in `nova/output_mutes.json` and survive a restart. The Muted card lists them with an Unmute button and shows a banner while the blanket mute is on. Critical safety alerts are never muted. |
+
+## Off until you set them up
+
+Since 8.41.0 these start off on a new install. An install from before 8.41.0
+keeps the value it already had. See [What Nova includes](product-scope.md).
+
+| Setting | Where | What it does |
+| --- | --- | --- |
+| `recognition_source` | Settings → Cameras → Face recognition source | Off, Both, Frigate only or Double Take only. Nothing listens for faces while it is off. |
+| `search_backend` | Settings → Nova Character & Research → Web research backend | Off, DuckDuckGo or SearXNG. The AI has no web research tool while it is off. |
+| `departure_alerts_enabled` | Settings → Anticipation & Memory → Departure alerts | Leave alerts for calendar events. See [Routines and suggestions](routines-and-suggestions.md). |
+| `auto_bootstrap` | Settings → Anticipation & Memory → Install voice add-ons | Installs Piper, Whisper and openWakeWord at the next restart, and builds the Assist pipeline. Home Assistant OS or Supervised only. |
+
+## Services being retired
+
+`nova.speak`, `nova.process_intent`, `nova.scene_by_intent`, `nova.routine`
+and `nova.replay_policy` still work and will be removed in a later release.
+The first call in each run logs a warning and shows a notice in Settings →
+Repairs naming what to use instead: `tts.speak`, `conversation.process` or
+`script.turn_on`. `nova.replay_policy` now does nothing.
 
 ## Voice ID
 

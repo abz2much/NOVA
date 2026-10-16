@@ -29,9 +29,10 @@ optional.
 3. **Set up Nova.** Enter a key for each cloud provider you use (Groq API key,
    Anthropic API key, OpenAI API key, Gemini API key), your Ollama address,
    or both.
-4. **Choose a provider for each role.** Nova has five roles: Conversation,
+4. **Choose a provider for each role.** Setup has five roles: Conversation,
    Classifier, Reasoning, Camera reasoning and Vision. Vision also offers
-   "Not now (set up later)".
+   "Not now (set up later)". The panel's AI Models card calls Conversation
+   "Main Agent" and adds a sixth role, Suggestion Review.
 5. **Choose a model for each role.** Nova fills in a sensible choice and tests
    each one, including a small test picture for Vision.
 
@@ -66,10 +67,10 @@ There are two places.
 - **The Nova panel, Settings tab.** Most day to day settings, in cards grouped
   by task, with a search box.
 - **Configure.** In **Settings → Devices & Services → Nova → Configure**:
-  - **Core:** the persona, directive, "Address me as", and "Enable home
-    control".
-  - **Routing:** bedroom areas, ground floor areas, the broadcast speaker
-    group and the phone notify service.
+  - **Core:** "Call me", the directive, your own directive, the conversation
+    model, and "Let Nova control the home".
+  - **Rooms and speakers:** bedrooms, ground floor areas, the broadcast
+    speakers and the phone notify service.
   - **Observer:** observer mode, its model tiers and quiet hours.
   - **Credentials:** add or clear each provider's key.
   - **Identity:** who is speaking. See [Voice recognition](voice-recognition.md).
@@ -80,22 +81,26 @@ A few advanced settings have no control in either place and are only set in
 
 ## A tour of the panel
 
-- **Command Center.** The animated core, your areas with live sensors and a
+- **Command Center.** The hologram head, your areas with live sensors and a
   light toggle, Cognitive Core, Goals, Activity, Quick Actions, Operational
   Mode, a Muted card, and camera snapshots on request.
-- **Chat.** Type to Nova from the panel. Any Home Assistant user can use it,
-  and each person has their own thread. To unlock a door, open a garage door
-  or disarm the alarm from here, Nova sends a request to your phone and waits
-  for your tap, so link your phone to your person entity. NEW CHAT clears
-  your thread. See [Safety and security](safety-and-security.md).
 - **Intrusion.** The intrusion status and the Intrusion Log.
+- **Chat.** Type to Nova from the panel. Any Home Assistant user can use it,
+  and each person has their own thread. A message can be up to 1000
+  characters, you can send 20 a minute, and one at a time. To unlock a door,
+  open a cover, garage door or door, disarm the alarm or call off an
+  intrusion from here, Nova sends a request to your phone and waits for your
+  tap, so link your phone to your person entity. NEW CHAT clears your
+  thread. See [Safety and security](safety-and-security.md#chat).
 - **Faces.** The faces recently named and your list of residents. See
   [Cameras and faces](cameras-and-faces.md).
 - **Suggestions.** Learned Opportunities, automations Created by Nova, and
   your Existing Home Assistant Automations. See
   [Routines and suggestions](routines-and-suggestions.md).
 - **Settings.** The setting cards.
-- **Logs.** System Log, Decisions, Spoken History and Actions.
+- **Logs.** System Log, Decisions, Spoken History, Actions and Shadow (the
+  new path for anticipation alerts, see
+  [Presence and alerts](presence-and-alerts.md#the-new-path-in-shadow)).
 - **Diagnostics.** Core services, Setup Doctor, Provider Activity, HOMER (a
   read only helper that looks into "why is this broken" questions), and
   Presence sensors, the live presence, motion and mmWave sensors in each
@@ -104,9 +109,25 @@ A few advanced settings have no control in either place and are only set in
   Person Routines.
 - **Energy.** See [Energy](energy.md).
 
-The Command Center is Nova's only dashboard. Its animated core shows what
-Nova is doing (idle, reasoning or asleep), so it looks the same whether you
-have no cameras or twelve. The Areas card shows every room Nova watches,
+The Command Center is Nova's only dashboard. Its hologram head, a head, neck
+and shoulders drawn in glowing gold lines, shows what Nova is doing (idle,
+thinking or asleep), so it looks the same whether you have no cameras or
+twelve. It breathes, blinks, follows the mouse and can be turned by
+dragging. A browser without WebGL 2 shows a simpler head instead.
+
+While the house is awake, a card of live figures comes round beside the head.
+The first appears about 15 seconds after the page opens. Each card stays for
+15 seconds and a new one comes every 20. The cards are energy, security
+(locks, alarm and doors, counts only), the date and time, who is home, the
+next calendar event, reminders due in the next 24 hours, the weather outside
+and the indoor temperature. A card with nothing to show is skipped. Cards
+stay quiet while the house is asleep, while something is happening on the
+head, when the page is hidden and on every other tab. Tap a card to dismiss
+it. When you ask Nova about energy, a card of the real figures shows at once
+for 30 seconds. Turn the rotation off under **Settings → General → Cards on
+the Command Center**.
+
+The Areas card shows every room Nova watches,
 with icons for what each room has, temperature and humidity trends, and a
 light switch. A first run checklist shows the main setup steps, and the
 Lockdown control asks before it acts.
@@ -127,8 +148,9 @@ of Settings.
 ## What it will never do on its own
 
 - Install an automation without your approval.
-- Unlock a door or open a garage door because of a voice command alone. That
-  always needs a tap on your phone.
+- Unlock a door, or open, toggle or move a garage door or other cover,
+  because of a voice command or a Chat message alone. That always needs a tap
+  on your phone.
 - Replace a model you saved because a provider's model list did not show it.
 
 ## When something is not working

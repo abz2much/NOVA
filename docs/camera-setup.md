@@ -149,7 +149,7 @@ events, while every picture comes from the steady restream:
 This goes in `/config/nova/config.json`. Merge it into the existing settings
 rather than replacing the file. Nova checks it when it loads, so a typo is
 set aside with a notification instead of breaking the panel. Then open
-**Camera Watch → DIAG** on that camera. It should show
+**DIAGNOSE** on that camera's tile on the Command Center. It should show
 `override → camera.bedroom2_restream` and a healthy full size picture, not a
 blank or black tile.
 

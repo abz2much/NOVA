@@ -35,9 +35,10 @@ Nova uses where, the language it speaks, and how it addresses people.
   its room's speaker.
 - **Announcement Speakers.** The speakers whole house broadcasts use, such as
   briefings and Sentinel alerts.
-- **Urgency.** A critical alert goes to the broadcast speakers. Outside
-  critical alerts, quiet hours, sleep and "Notifications only" can send an
-  alert to your phone instead. See [Presence and alerts](presence-and-alerts.md).
+- **Urgency.** A critical alert goes to the broadcast speakers. Below
+  critical, quiet hours, sleep and "Notifications only" stop speech: a high
+  alert goes to your phone instead, and an everyday alert is dropped. See
+  [Presence and alerts](presence-and-alerts.md).
 
 ## The voice
 
@@ -105,8 +106,9 @@ never add or change one.
   handed to the AI to ask, so the Logs tab shows two rows for it: the
   phrase's own row, blocked as "handed to agent", and the row of the tool
   that asked. The card's "Asks first" note is about these looser matches.
-- **Unlock, open and disarm** still need a tap on your phone when asked by
-  voice or in the Chat tab, even when you say the phrase exactly. A phrase
+- **Unlock, open and disarm** (and toggling or setting the position of a
+  cover) still need a tap on your phone when asked by voice or in the Chat
+  tab, even when you say the phrase exactly. A phrase
   can't ask for that tap, so such a phrase runs nothing there: Nova says it
   needs confirming and can't ask for that right now. Say it the usual way
   instead ("unlock the front door"). Saying a phrase exactly never skips any
@@ -178,8 +180,9 @@ What to know:
 - If two satellites hear your yes at the same moment, the one that hears it
   first can take it and nothing runs. Ask again.
 - The question waits 60 seconds and is forgotten on a restart.
-- Unlock, open and disarm, and calling off an intrusion, still need a tap on
-  your phone by voice. A spoken yes never replaces that tap.
+- Unlock, open and disarm, toggling or setting the position of a cover, and
+  calling off an intrusion, still need a tap on your phone by voice. A spoken
+  yes never replaces that tap.
 - A yes runs what a voice phrase, or a scene, script or automation, held. Other
   actions that need confirming (a device, a plan, a mode, or one of Home
   Assistant's own tools) still ask in the reply. For those, say the full
@@ -353,7 +356,8 @@ person's voice again. The token is in the backup, so Nova keeps working.
 
 - Use a speaker you have not assigned to a room.
 - Force a voice of its own.
-- Act on a spoken unlock or garage opening without a tap on your phone. See
+- Act on a spoken unlock, or a spoken garage opening, toggle or position
+  change, without a tap on your phone. See
   [Safety and security](safety-and-security.md).
 
 ## Limits
@@ -389,7 +393,7 @@ Panel, **Settings → General**:
 
 | Setting | What it does |
 |---|---|
-| Announcements | Master switch for all proactive speech. |
+| Announcements | Master switch for proactive speech. Your own reminders and briefings ignore it. |
 | Nova speaks | The language Nova talks and writes in. Auto follows Home Assistant, including its region, such as Brazilian Portuguese, Canadian French, Latin American Spanish, Swiss German or Traditional Chinese. |
 | Language | The panel's language. Auto follows Home Assistant. Fully translated in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional Chinese; other languages are partly translated. |
 
@@ -424,9 +428,9 @@ Panel, **Settings → Voice & Speakers → Voice ID**:
 | Use voice to tell who is speaking (`voice_id_identity`) | A known voice helps decide who is talking. A hint, never a key. Off by default. |
 | Improve voices from everyday use (`voice_id_learning`) | Adds a sample from everyday use when Nova is very sure who spoke. Needs the switch above and app 0.3.0. Off by default. |
 
-In **Configure → Core**, "Address me as" is the default address when no
-person specific one applies. **Configure → Routing** holds the "Broadcast
-speaker group".
+In **Configure → Core**, "Call me" is the default address when no person
+specific one applies. **Configure → Rooms and speakers** holds the
+"Broadcast speakers".
 
 ## See also
 

@@ -17,7 +17,7 @@ inbox, check your calendar and look things up on the web.
 - **Activity history.** Ask "what happened while I was out?" and Nova reads
   Home Assistant's history and logbook to tell you.
 - **Web research.** Current events and facts, through DuckDuckGo or your own
-  SearXNG.
+  SearXNG. Off until you choose a backend.
 
 ## What it needs
 
@@ -28,6 +28,8 @@ inbox, check your calendar and look things up on the web.
 - [ ] **For email:** **Configure → Email**, and the password saved in
   `secrets.yaml` under the key you name there.
 - [ ] **For the calendar:** `calendar.*` entities in Home Assistant.
+- [ ] **For web research:** choose DuckDuckGo or SearXNG under **Settings →
+  Nova Character & Research → Web research backend**.
 - [ ] **Optional: an Ollama server** with an embedding model (for example
   `ollama pull nomic-embed-text`) for search by meaning.
 

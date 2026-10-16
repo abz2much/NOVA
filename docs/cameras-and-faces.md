@@ -9,8 +9,9 @@ is optional.
 
 - **Doorbell and person events.** When the doorbell rings, or a camera sees a
   person, Nova looks at the picture and tells you who or what is there.
-- **Packages and mail.** Nova watches porch cameras for a package or mail,
-  and says when one arrives, is left out, or is taken.
+- **Packages and mail.** Once you turn on Package Watch, Nova watches porch
+  cameras for a package or mail, and says when one arrives, is left out, or
+  is taken.
 - **Scene memory.** If you turn it on, Nova keeps the words its cameras
   produced, so it can answer "where did I last see my keys?" or "what has
   changed in the hallway since yesterday?".
@@ -96,7 +97,7 @@ a security control.
 
 | You see | What it means | What to do |
 |---|---|---|
-| A camera tile is blank or black | The camera gives no still picture | Open **Camera Watch → DIAG** on the Command Center. For Nest, use a restream and `camera_overrides`. |
+| A camera tile is blank or black | The camera gives no still picture | Press **DIAGNOSE** on that camera on the Command Center. For Nest, use a restream and `camera_overrides`. |
 | The porch camera is not watched for packages | Its name has no porch word, or has a wide view word | Rename it, or check its location in **Settings → Cameras**. |
 | A new mailbox sensor is ignored | Sensors are found at start | Reload Nova. |
 | Faces tab says no recognition source | Nova sees no Frigate or Double Take names | Set one up, with MQTT in Home Assistant. |
@@ -110,7 +111,7 @@ Panel, **Settings → Cameras**:
 |---|---|
 | Camera Watch | Looks at the picture on a doorbell press or person event. |
 | Also analyze motion events | Also looks at Frigate detection events that are not doorbell presses. Noisier. Off by default. |
-| Package Watch | Watches porch cameras for packages and mail. |
+| Package Watch | Watches porch cameras for packages and mail. Off until you turn it on (since 8.41.0). |
 | Visitor Learning | Keeps a quiet log of visitors. Never spoken. |
 | Face recognition source | Off (the default), Both (Double Take + Frigate), Frigate only, or Double Take only. Nothing listens for faces while it is off. |
 | Recognition confidence | How sure a face match must be before Nova uses it. |
