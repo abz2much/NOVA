@@ -143,3 +143,55 @@ def test_allowlist_excludes_system_domains(agent):
     for d in ("homeassistant", "shell_command", "python_script", "backup",
              "hassio", "supervisor", "config", "recorder"):
         assert d not in agent._EXECUTE_PLAN_ALLOWED_DOMAINS
+
+
+async def test_service_data_cannot_name_another_target(agent, pol, monkeypatch):
+    """The step is authorised for its own entity_id, so a second target in
+    service_data would act on something that was never checked."""
+    monkeypatch.setattr(pol, "confirm_gate", _allow_gate)
+    hass = _Hass()
+    for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id"):
+        out = json.loads(await agent._exec_execute_plan(hass, {"goal": "x", "steps": [
+            _step("light", "turn_on", "light.kitchen",
+                  service_data={key: "lock.front_door"})]}))
+        assert out["results"][0]["ok"] is False
+        assert "cannot name a target" in out["results"][0]["error"]
+    assert hass.service_calls == []
+
+
+async def test_service_data_settings_still_pass_through(agent, pol, monkeypatch):
+    monkeypatch.setattr(pol, "confirm_gate", _allow_gate)
+    hass = _Hass()
+    out = json.loads(await agent._exec_execute_plan(hass, {"goal": "x", "steps": [
+        _step("light", "turn_on", "light.kitchen", service_data={"brightness": 120})]}))
+    assert out["results"][0]["ok"] is True
+    assert hass.service_calls == [("light", "turn_on",
+                                   {"entity_id": "light.kitchen", "brightness": 120})]
+
+
+async def test_service_data_that_is_not_an_object_is_refused(agent, pol, monkeypatch):
+    monkeypatch.setattr(pol, "confirm_gate", _allow_gate)
+    hass = _Hass()
+    out = json.loads(await agent._exec_execute_plan(hass, {"goal": "x", "steps": [
+        _step("light", "turn_on", "light.kitchen", service_data=["lock.front_door"])]}))
+    assert out["results"][0]["ok"] is False and hass.service_calls == []
+
+
+@pytest.mark.parametrize("service", ["apply", "create"])
+async def test_scene_apply_and_create_are_refused(agent, pol, monkeypatch, service):
+    monkeypatch.setattr(pol, "confirm_gate", _allow_gate)
+    hass = _Hass(known_entities=["scene.evening"])
+    out = json.loads(await agent._exec_execute_plan(hass, {"goal": "x", "steps": [
+        _step("scene", service, "scene.evening",
+              service_data={"entities": {"lock.front_door": "unlocked"}})]}))
+    assert out["results"][0]["ok"] is False
+    assert "not allowed in a plan" in out["results"][0]["error"]
+    assert hass.service_calls == []
+
+
+async def test_scene_turn_on_still_runs(agent, pol, monkeypatch):
+    monkeypatch.setattr(pol, "confirm_gate", _allow_gate)
+    hass = _Hass(known_entities=["scene.evening"])
+    out = json.loads(await agent._exec_execute_plan(hass, {"goal": "x", "steps": [
+        _step("scene", "turn_on", "scene.evening")]}))
+    assert out["results"][0]["ok"] is True
