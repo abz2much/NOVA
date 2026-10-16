@@ -1,3 +1,9 @@
+## [8.58.6] The Executive Assistant and Marketing specialists ask for a yes first
+
+### Changed
+- **The Executive Assistant (Gmail and Calendar) and the Marketing agent (Instagram) now need a yes before they act.** Both can do real things, but Nova called them with no check. From a voice satellite, Nova now says what it would ask and "Shall I go ahead?", and only a spoken yes on that same satellite runs it, once, with the same words. In Chat it needs a tap on your own phone, and with no phone registered it refuses. Nova never calls them on its own. The Security, Homelab and House Manager specialists only report back, so they are unchanged.
+- **The tool list now says these two can change things.** They were marked as read only, which was wrong. This changes what Nova tells a sub agent it can do.
+
 ## [8.58.5] A plan can no longer redirect its own target
 
 ### Fixed

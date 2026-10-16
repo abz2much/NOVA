@@ -80,6 +80,15 @@ _VOICE_BLOCKED_OPENING = _COVER_OPENING | {
 # "nova" names Nova's own action, not a Home Assistant service.
 _SECURITY_STANDDOWN = {("nova", "dismiss_intrusion")}
 
+# Specialists that act in the world (8.58.6): the Executive Assistant works
+# in Gmail and Calendar, the Marketing agent posts for the business. They
+# always need a yes first: a spoken one from a voice satellite, a phone tap
+# from Chat. "nova" names Nova's own action, not a Home Assistant service.
+_SPECIALIST_ACTIONS = {
+    ("nova", "ask_executive_assistant"),
+    ("nova", "ask_marketing_agent"),
+}
+
 
 def _guard_lowering(domain: str, service: str) -> bool:
     """Unlock, open, disarm or standing down: the actions that only a phone
@@ -103,6 +112,8 @@ def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
         return "critical", f"{dom}.{svc} disarms security"
     if pair in _SECURITY_STANDDOWN:
         return "critical", f"{dom}.{svc} stands down an active security response"
+    if pair in _SPECIALIST_ACTIONS:
+        return "medium", f"{dom}.{svc} can send, post or change things outside the home"
     if pair in _HIGH:
         return "high", f"{dom}.{svc} unlocks a door"
     if pair in _MEDIUM:
@@ -258,7 +269,7 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
     if pair in _VOICE_BLOCKED_OPENING and (
             voice or _chat_user() is not None or _voice_satellite_request(hass, device_id)):
         return True
-    if pair in _SECURITY_STANDDOWN:
+    if pair in _SECURITY_STANDDOWN or pair in _SPECIALIST_ACTIONS:
         return True
     if _exact_approved(domain, service, entity_id):
         return False
@@ -278,6 +289,8 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
 def _blocked_reason(standdown: bool, domain: str) -> str:
     if standdown:
         return "stand down a security alert"
+    if domain == "nova":
+        return "send, post or change things for you"
     if domain == "alarm_control_panel":
         return "disarm the alarm"
     return "unlock or open this"
@@ -365,6 +378,9 @@ async def confirm_gate(hass, domain: str, service: str, entity_id: str = "",
     else:
         ent = entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""
     standdown = (domain, service) in _SECURITY_STANDDOWN
+    specialist = (domain, service) in _SPECIALIST_ACTIONS
+    if specialist and _chat_user() is not None:
+        return await _confirm_from_chat(hass, label, ent, _chat_user() or "", False, domain)
     if _guard_lowering(domain, service):
         chat_user = _chat_user()
         if chat_user is not None:
@@ -382,7 +398,7 @@ async def confirm_gate(hass, domain: str, service: str, entity_id: str = "",
         return False, "confirmation unavailable — action denied for safety", "error"
 
     try:
-        protected = standdown or bool(warning) or bool(
+        protected = standdown or specialist or bool(warning) or bool(
             voice_confirm.action_is_protected(hass, domain, service, entity_id))
     except Exception as exc:
         if _low_risk_passes(domain, service, entity_id, warning):
