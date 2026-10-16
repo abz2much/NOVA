@@ -121,13 +121,17 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
         })
     except Exception as exc:
         discovery.log_discovery_failure(provider, url, exc, logger=_LOGGER)
-        connection.send_result(
-            msg["id"], {
-                "provider": provider,
-                "models": [],
-                "error": _SAFE_MODEL_DISCOVERY_ERROR,
-            },
-        )
+        # The live list failed. A provider with a built in list offers it, so
+        # a model can still be picked, and its reason code is in "error". Every
+        # other provider keeps the one fixed error and an empty list.
+        fallback = discovery.FALLBACK_MODELS.get(provider, ())
+        connection.send_result(msg["id"], {
+            "provider": provider,
+            "models": list(fallback),
+            "error": (discovery.failure_reason(exc) if fallback
+                      else _SAFE_MODEL_DISCOVERY_ERROR),
+            **({"fallback": True} if fallback else {}),
+        })
 
 
 _AI_ROLE_FIELDS = (
@@ -426,17 +430,21 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
             return
 
         tested: set[tuple[str, str, str]] = set()
+        warnings: list[str] = []
         for label, provider_key, model_key in _AI_ROLE_FIELDS:
             provider = str(candidate.get(provider_key) or "")
+            model = str(candidate.get(model_key) or "")
             # A self-hosted role is always checked. A cloud role is checked
-            # when this Apply changes its provider or model, so a wrong model
-            # id or key shows here and not on the first chat. Roles left as
-            # they were are not called again.
-            changed = provider_key in updates or model_key in updates
+            # when this Apply really changes its provider or model, so a wrong
+            # model id or key shows here and not on the first chat. The panel
+            # sends every role on every Apply, so "changed" is compared with
+            # the saved value, not with whether the key was sent. Roles left
+            # as they were are not called again.
+            changed = (str(current.get(provider_key) or "") != provider
+                       or str(current.get(model_key) or "") != model)
             if provider not in ("ollama", "custom") and not (
                     provider in _AI_CLOUD_PROVIDERS and changed):
                 continue
-            model = str(candidate.get(model_key) or "")
             endpoint = str(resolve_provider_endpoint(candidate, provider) or "")
             test_key = (provider, endpoint, model)
             if test_key in tested:
@@ -450,6 +458,12 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
                 endpoint,
             )
             if problem is not None:
+                if provider in _AI_CLOUD_PROVIDERS:
+                    # A busy or briefly unreachable cloud provider must not
+                    # stop a save: keep the choice and say it could not be
+                    # checked. Self-hosted roles still stop the save.
+                    warnings.append(f"{label} could not use {model} on {provider}.")
+                    continue
                 connection.send_result(msg["id"], {
                     "ok": False,
                     "error": "connection_test_failed",
@@ -471,9 +485,14 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
 
         runtime.runtime_config.update(persisted_updates)
         invalidate_model_cache()
+        message = "AI settings saved. Nova is reloading."
+        if warnings:
+            message = (f"AI settings saved, but check them: {' '.join(warnings)} "
+                       "Nova is reloading.")
         connection.send_result(msg["id"], {
             "ok": True,
-            "message": "AI settings saved. Nova is reloading.",
+            "message": message,
+            **({"warnings": warnings} if warnings else {}),
         })
         hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
     except ValueError as exc:

@@ -372,6 +372,41 @@ async def test_list_models_failure_is_a_result_with_a_fixed_error(ai, load, cfg,
     assert res == {"provider": "groq", "models": [], "error": "model_discovery_unavailable"}
 
 
+async def test_a_failed_gemini_list_falls_back_to_a_built_in_list_with_the_reason(
+        ai, load, cfg, cache, monkeypatch):
+    disc = load("providers.discovery")
+
+    async def deduped(*a):
+        raise disc.ModelDiscoveryHTTPError(403)
+    monkeypatch.setattr(ai, "_fetch_models_deduped", deduped)
+    res = await _list(ai, _hass(_entry(load)), "gemini")
+    assert res["provider"] == "gemini" and res["fallback"] is True
+    assert res["error"] == "key_rejected"
+    assert res["models"] == list(disc.FALLBACK_MODELS["gemini"])
+    assert "gemini-3.6-flash" in res["models"]
+
+
+async def test_other_providers_keep_an_empty_list_when_discovery_fails(
+        ai, load, cfg, cache, monkeypatch):
+    async def deduped(*a):
+        raise RuntimeError("token=abc")
+    monkeypatch.setattr(ai, "_fetch_models_deduped", deduped)
+    res = await _list(ai, _hass(_entry(load)), "groq")
+    assert res["models"] == [] and "fallback" not in res
+    assert res["error"] == "model_discovery_unavailable"
+
+
+async def test_a_rejected_key_on_another_provider_keeps_the_one_fixed_error(
+        ai, load, cfg, cache, monkeypatch):
+    disc = load("providers.discovery")
+
+    async def deduped(*a):
+        raise disc.ModelDiscoveryHTTPError(401)
+    monkeypatch.setattr(ai, "_fetch_models_deduped", deduped)
+    res = await _list(ai, _hass(_entry(load)), "groq")
+    assert res == {"provider": "groq", "models": [], "error": "model_discovery_unavailable"}
+
+
 async def test_list_models_for_an_unknown_provider_is_the_same_fixed_error(ai, load, cfg, cache):
     res = await _list(ai, _hass(_entry(load)), "nope")
     assert res == {"provider": "nope", "models": [], "error": "model_discovery_unavailable"}

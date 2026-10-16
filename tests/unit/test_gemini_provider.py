@@ -30,6 +30,15 @@ def pk(lp):
     return types.SimpleNamespace(**{n: sys.modules[f"jc.providers.{n}"] for n in names})
 
 
+@pytest.fixture(autouse=True)
+def pauses(pk, monkeypatch):
+    """Retries never really wait; the waits asked for are recorded."""
+    waits: list[float] = []
+    monkeypatch.setattr(pk.gemini, "_pause", waits.append)
+    monkeypatch.setattr(pk.gemini.random, "uniform", lambda a, b: 0.0)
+    return waits
+
+
 def _request(pk, messages, tools=None, max_tokens=64):
     return pk.models.ChatRequest.from_legacy(messages, tools, max_tokens, 0.7)
 
@@ -87,7 +96,7 @@ def test_other_models_get_neither_a_level_nor_extra_room(pk):
     request = _request(pk, [{"role": "user", "content": "x"}], max_tokens=64)
     for model in ("gemini-2.0-flash", "gemma-4-31b-it"):
         config = pk.gemini_wire.build_request(request, model)["generation_config"]
-        assert config == {"max_output_tokens": 64}
+        assert config == {"max_output_tokens": 64, "temperature": 0.7}
 
 
 def test_thinking_can_be_left_out_for_the_retry(pk):
@@ -333,6 +342,10 @@ def _provider(lp, pk, monkeypatch, *replies, model="gemini-3.6-flash"):
     def _urlopen(request, timeout):
         seen.append((request, timeout))
         reply = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(reply, HTTPError):
+            # A fresh error each time: a body can only be read once.
+            raise HTTPError(reply.url, reply.code, reply.msg, reply.headers,
+                            io.BytesIO(reply.fp.getvalue()))
         if isinstance(reply, BaseException):
             raise reply
         return _Response(reply)
@@ -579,3 +592,87 @@ def test_a_second_empty_incomplete_reply_is_returned_empty_without_a_third_call(
     provider, seen = _provider(lp, pk, monkeypatch, _incomplete([THOUGHT]))
     result = provider.chat([{"role": "user", "content": "x"}])
     assert result["text"] == "" and result["tool_calls"] == [] and len(seen) == 2
+
+
+# ── Temperature ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("model", ["gemini-2.5-flash", "gemini-2.0-flash", "gemma-4-31b-it"])
+def test_temperature_is_sent_to_models_that_take_one(pk, model):
+    request = _request(pk, [{"role": "user", "content": "x"}])
+    config = pk.gemini_wire.build_request(request, model)["generation_config"]
+    assert config["temperature"] == 0.7
+
+
+@pytest.mark.parametrize("model", [
+    "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-4-argon",
+    "gemini-flash-latest", "models/gemini-3.6-flash"])
+def test_gemini_3_and_later_are_left_at_googles_default_temperature(pk, model):
+    request = _request(pk, [{"role": "user", "content": "x"}])
+    body = pk.gemini_wire.build_request(request, model)
+    assert "temperature" not in body["generation_config"]
+
+
+# ── Retries ─────────────────────────────────────────────────────────────────
+
+def test_a_busy_google_is_retried_and_the_answer_is_used(lp, pk, monkeypatch, pauses):
+    provider, seen = _provider(lp, pk, monkeypatch,
+                               _google_error(503, "UNAVAILABLE", "overloaded"),
+                               _google_error(429, "RESOURCE_EXHAUSTED", "quota"),
+                               _completed([_text_step("pong")]))
+    result = provider.chat([{"role": "user", "content": "ping"}], max_tokens=32)
+    assert result["text"] == "pong"
+    assert len(seen) == 3 and pauses == [1.0, 2.0]
+
+
+def test_a_dropped_connection_is_retried(lp, pk, monkeypatch, pauses):
+    provider, seen = _provider(lp, pk, monkeypatch,
+                               URLError(ConnectionResetError()),
+                               _completed([_text_step("ok")]))
+    assert provider.chat([{"role": "user", "content": "x"}])["text"] == "ok"
+    assert len(seen) == 2 and pauses == [1.0]
+
+
+def test_there_are_two_retries_and_then_the_error_is_raised(lp, pk, monkeypatch, pauses):
+    provider, seen = _provider(lp, pk, monkeypatch,
+                               _google_error(503, "UNAVAILABLE", "overloaded"))
+    with pytest.raises(pk.errors.ProviderError) as exc:
+        provider.chat([{"role": "user", "content": "x"}])
+    assert exc.value.kind.value == "provider_unavailable"
+    assert len(seen) == 3
+
+
+@pytest.mark.parametrize("error", [
+    _google_error(400, "INVALID_ARGUMENT", "API key not valid."),
+    _google_error(401, "UNAUTHENTICATED", "no"),
+    _google_error(403, "PERMISSION_DENIED", "denied"),
+    _google_error(404, "NOT_FOUND", "no such model"),
+    _google_error(504, "DEADLINE_EXCEEDED", "slow"),
+    URLError(TimeoutError("timed out")),
+])
+def test_other_failures_are_not_retried(lp, pk, monkeypatch, pauses, error):
+    provider, seen = _provider(lp, pk, monkeypatch, error)
+    with pytest.raises(pk.errors.ProviderError):
+        provider.chat([{"role": "user", "content": "x"}])
+    assert len(seen) == 1 and pauses == []
+
+
+def test_retry_after_is_used_but_never_waited_past_the_cap(lp, pk, monkeypatch, pauses):
+    def slow(seconds):
+        error = _google_error(429, "RESOURCE_EXHAUSTED", "quota")
+        error.headers = {"Retry-After": seconds}
+        return error
+    provider, _seen = _provider(lp, pk, monkeypatch, slow("3"), slow("120"),
+                                _completed([_text_step("ok")]))
+    provider.chat([{"role": "user", "content": "x"}])
+    assert pauses == [3.0, pk.gemini.RETRY_AFTER_CAP]
+
+
+def test_no_retry_starts_past_the_total_time_budget(lp, pk, monkeypatch, pauses):
+    clock = iter([0.0, pk.gemini.RETRY_TOTAL_BUDGET + 1])
+    monkeypatch.setattr(pk.gemini, "time", types.SimpleNamespace(
+        monotonic=lambda: next(clock, 999.0), sleep=lambda s: None))
+    provider, seen = _provider(lp, pk, monkeypatch,
+                               _google_error(503, "UNAVAILABLE", "overloaded"))
+    with pytest.raises(pk.errors.ProviderError):
+        provider.chat([{"role": "user", "content": "x"}])
+    assert len(seen) == 1 and pauses == []

@@ -1,5 +1,10 @@
 """Native Gemini adapter (Google's Interactions API).
 
+Google documents the Interactions API as Beta and recommends generateContent
+for stable production use, so its details can change. Everything that depends
+on its wire format is in gemini_wire.py, which is the only file that would
+need to follow a change.
+
 Nova keeps its own history, so each call is one stateless request: ``store``
 is false and the whole conversation is sent as steps, so nothing is kept on
 Google's side for later turns. The wire format lives in gemini_wire.py.
@@ -7,12 +12,15 @@ Google's side for later turns. The wire format lives in gemini_wire.py.
 The transport is the standard library, like native Ollama: no SDK and no
 manifest requirement. The call runs in Home Assistant's executor (see
 activity.py). Redirects are never followed: the key only ever goes to Google.
+A busy Google (429 or 5xx) or a dropped connection is retried twice, briefly.
 """
 from __future__ import annotations
 
 import json
 import logging
+import random
 import socket
+import time
 import urllib.request
 from dataclasses import replace
 from typing import Any, ClassVar, Optional
@@ -29,8 +37,15 @@ from .models import ChatRequest, ChatResponse, Usage
 _LOGGER = logging.getLogger(__name__)
 
 # One request is a few seconds. A request past this is a hang, not a slow
-# success, and there is no retry loop: the caller decides what to do.
+# success, and a hang is never retried.
 GEMINI_TIMEOUT = 60.0
+# A busy Google (429, 500, 502, 503) or a dropped connection is retried twice
+# after a short wait. A bad request, a bad key and a missing model are not.
+# 504 and timeouts are hangs, so they are not retried either.
+RETRY_STATUSES = frozenset({429, 500, 502, 503})
+RETRY_DELAYS = (1.0, 2.0)
+RETRY_AFTER_CAP = 5.0       # a longer Retry-After is not waited for
+RETRY_TOTAL_BUDGET = 30.0   # seconds across all tries; no retry starts past it
 GEMINI_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _ERROR_BODY_BYTES = 4096
 
@@ -41,6 +56,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def _pause(seconds: float) -> None:
+    """The single wait seam for retries (tests replace it)."""
+    time.sleep(seconds)
 
 
 def _urlopen(request: Request, timeout: float):  # type: ignore[no-untyped-def]
@@ -55,12 +75,19 @@ def _total_usage(first: Usage, second: Usage) -> Usage:
                  add(first.output_tokens, second.output_tokens))
 
 
+def _is_transient(exc: ProviderError) -> bool:
+    if getattr(exc, "status", None) in RETRY_STATUSES:
+        return True
+    return exc.kind is ProviderErrorKind.CONNECTION_FAILED
+
+
 class GeminiHTTPError(ProviderError):
     """An HTTP failure from Google. ``hint`` is the lower case error text,
     kept only so the adapter can decide on a retry; it is never part of the
     message."""
 
     hint: str = ""
+    retry_after: Optional[float] = None
 
 
 class GeminiProvider(LLMProvider):
@@ -113,6 +140,28 @@ class GeminiProvider(LLMProvider):
         return response
 
     def _post(self, body: dict[str, Any]) -> Any:
+        """One request with up to two short retries for a busy Google or a
+        dropped connection."""
+        started = time.monotonic()
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            try:
+                return self._post_once(body)
+            except ProviderError as exc:
+                if attempt == len(RETRY_DELAYS) or not _is_transient(exc):
+                    raise
+                delay = RETRY_DELAYS[attempt]
+                after = getattr(exc, "retry_after", None)
+                if after is not None:
+                    delay = min(after, RETRY_AFTER_CAP)
+                delay += random.uniform(0, 0.25)
+                if time.monotonic() - started + delay > RETRY_TOTAL_BUDGET:
+                    raise
+                _LOGGER.info("Gemini busy (%s), retrying in %.1f seconds",
+                             getattr(exc, "status", None) or exc.kind.value, delay)
+                _pause(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _post_once(self, body: dict[str, Any]) -> Any:
         http_request = Request(
             f"{self.base_url}/interactions",
             data=json.dumps(body).encode("utf-8"),
@@ -163,6 +212,11 @@ class GeminiProvider(LLMProvider):
             detail = wire.SAFETY_DETAIL
         error_out = GeminiHTTPError(kind, self.name, status=status, code=code, detail=detail)
         error_out.hint = text.lower()
+        try:
+            after = float(str(exc.headers.get("Retry-After") or "").strip())
+            error_out.retry_after = after if 0 <= after < 3600 else None
+        except (AttributeError, ValueError, TypeError):
+            pass
         return error_out
 
     def capabilities(self, model: Optional[str] = None) -> ProviderCapabilities:

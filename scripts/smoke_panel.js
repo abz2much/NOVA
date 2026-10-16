@@ -2270,6 +2270,10 @@ if (require.main === module) setTimeout(async () => {
   llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
   const unavailableShown = /no models found/.test(llmModelSel.textContent || "");
+  // The dropdown lands on Custom by itself here, and picking an option that is
+  // already selected fires no change event, so the box must already be shown.
+  checks.push(["settings tab: the model box is shown when the dropdown lands on Custom by itself",
+    llmModelSel.value === "__custom__" && llmCustomInput.style.display !== "none"]);
   llmModelSel.value = "__custom__";
   llmModelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   llmCustomInput.value = "manually-entered-model";

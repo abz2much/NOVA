@@ -642,10 +642,27 @@
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
     this._setHtml(selectEl, opts);
-    selectEl.title = this._tx((res && res.truncated)
-      ? "The provider returned more models than fit in one page — list may be incomplete." : "");
+    // When the live list failed and a built in list is shown, the reason code
+    // (for example key_rejected) is in the tooltip.
+    const listNote = (res && res.fallback && res.error)
+      ? String(res.error).slice(0, 48)
+      : this._tx((res && res.truncated)
+        ? "The provider returned more models than fit in one page — list may be incomplete." : "");
+    selectEl.title = this._tx(listNote);
     const row = selectEl.closest(".new-model-row");
-    if (row) this._updateRoleWarning(row);
+    if (row) {
+      // The model box must show whenever the dropdown is on Custom. The
+      // dropdown can land on Custom by itself (an empty list, no saved model),
+      // and picking an option that is already selected fires no change event,
+      // so the box would stay hidden and nothing could be typed.
+      const customInput = row.querySelector(".new-model-custom");
+      if (customInput) {
+        const onCustom = selectEl.value === "__custom__";
+        customInput.style.display = onCustom ? "" : "none";
+        if (onCustom && cur && !customInput.value) customInput.value = cur;
+      }
+      this._updateRoleWarning(row);
+    }
   }
 
   async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {

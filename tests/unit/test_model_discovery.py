@@ -219,3 +219,26 @@ def test_failure_log_contains_only_sanitised_metadata(discovery, caplog):
         "provider-secret", "Bearer",
     ):
         assert secret not in text
+
+
+@pytest.mark.parametrize(("make", "reason"), [
+    (lambda m: m.ModelDiscoveryHTTPError(400), "key_rejected"),
+    (lambda m: m.ModelDiscoveryHTTPError(401), "key_rejected"),
+    (lambda m: m.ModelDiscoveryHTTPError(403), "key_rejected"),
+    (lambda m: m.ModelDiscoveryHTTPError(404), "not_found"),
+    (lambda m: m.ModelDiscoveryHTTPError(429), "rate_limited"),
+    (lambda m: m.ModelDiscoveryHTTPError(503), "provider_error"),
+    (lambda m: TimeoutError(), "unreachable"),
+    (lambda m: ConnectionRefusedError(), "unreachable"),
+    (lambda m: RuntimeError("secret=abc"), "model_discovery_unavailable"),
+])
+def test_a_failure_gets_a_short_fixed_reason(load, make, reason):
+    mod = load("providers.discovery")
+    assert mod.failure_reason(make(mod)) == reason
+
+
+def test_the_gemini_fallback_list_is_plain_model_ids(load):
+    mod = load("providers.discovery")
+    models = mod.FALLBACK_MODELS["gemini"]
+    assert models and len(set(models)) == len(models)
+    assert all(m.startswith("gemini-") and "/" not in m and " " not in m for m in models)

@@ -60,7 +60,9 @@ profiles (Hybrid and Local Text move background work to Ollama), a separate
 OpenAI-compatible endpoint, and an Ollama context length. Changes are staged
 until you press **Apply**. Nova checks them, saves them and reloads itself.
 The check is one small test call for each self-hosted role and for each cloud
-role you changed. If a test fails, nothing is saved.
+role you changed. If a self-hosted role fails its test, nothing is saved. If a
+cloud role fails, the settings are saved and a message names the role to check,
+so a busy provider never stops you saving.
 
 ## Where settings live
 

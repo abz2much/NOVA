@@ -41,6 +41,18 @@ _LOGGER = logging.getLogger(__name__)
 
 SAFE_MODEL_DISCOVERY_ERROR = "model_discovery_unavailable"
 
+# Shown when Gemini's live model list cannot be fetched, so a model can still
+# be picked from a list instead of typed. These are the models Google marks
+# stable on its models page (ai.google.dev/gemini-api/docs/models, checked
+# 16 October 2026). A saved model that is not here is kept as it is.
+FALLBACK_MODELS: dict[str, tuple[str, ...]] = {
+    "gemini": (
+        "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro",
+        "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.6-flash",
+        "gemini-3.8-flash", "gemini-4-argon",
+    ),
+}
+
 MAX_DISCOVERY_PAGES = 5
 MAX_DISCOVERY_MODELS = 500
 MAX_CURSOR_LEN = 2048
@@ -204,6 +216,30 @@ def log_discovery_failure(provider: str, url: str, exc: Exception, *, logger=Non
         status,
         type(exc).__name__,
     )
+
+
+def failure_reason(exc: BaseException) -> str:
+    """A short fixed code for why a model list could not be fetched. Never the
+    exception text, a URL, a key or a response body."""
+    status = getattr(exc, "status", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        if status in (400, 401, 403):
+            return "key_rejected"
+        if status == 404:
+            return "not_found"
+        if status == 429:
+            return "rate_limited"
+        if status >= 500:
+            return "provider_error"
+    if isinstance(exc, ProviderError):
+        if exc.kind is ProviderErrorKind.MALFORMED_RESPONSE:
+            return "bad_response"
+        if exc.kind is ProviderErrorKind.INVALID_ENDPOINT:
+            return "bad_endpoint"
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, OSError)) or any(
+            cls.__name__ == "ClientError" for cls in type(exc).__mro__):
+        return "unreachable"
+    return SAFE_MODEL_DISCOVERY_ERROR
 
 
 # ── Pagination ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.58.1
+ * v8.58.2
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.58.1 ",
+      console.log("%c Nova Panel %c v8.58.2 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4752,10 +4752,27 @@ ${this._htmlDashboardBody()}`;
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
     this._setHtml(selectEl, opts);
-    selectEl.title = this._tx((res && res.truncated)
-      ? "The provider returned more models than fit in one page — list may be incomplete." : "");
+    // When the live list failed and a built in list is shown, the reason code
+    // (for example key_rejected) is in the tooltip.
+    const listNote = (res && res.fallback && res.error)
+      ? String(res.error).slice(0, 48)
+      : this._tx((res && res.truncated)
+        ? "The provider returned more models than fit in one page — list may be incomplete." : "");
+    selectEl.title = this._tx(listNote);
     const row = selectEl.closest(".new-model-row");
-    if (row) this._updateRoleWarning(row);
+    if (row) {
+      // The model box must show whenever the dropdown is on Custom. The
+      // dropdown can land on Custom by itself (an empty list, no saved model),
+      // and picking an option that is already selected fires no change event,
+      // so the box would stay hidden and nothing could be typed.
+      const customInput = row.querySelector(".new-model-custom");
+      if (customInput) {
+        const onCustom = selectEl.value === "__custom__";
+        customInput.style.display = onCustom ? "" : "none";
+        if (onCustom && cur && !customInput.value) customInput.value = cur;
+      }
+      this._updateRoleWarning(row);
+    }
   }
 
   async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {

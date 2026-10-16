@@ -1,3 +1,17 @@
+## [8.58.2] Gemini model picker fixed, Gemini retries, and Apply no longer blocks on a cloud check
+
+Follow up to 8.58.0 and 8.58.1.
+
+### Fixed
+- **You can pick a Gemini model even when Google's list cannot be fetched.** The model box for Custom only appeared when you changed the dropdown, so when the list was empty and the dropdown was already on Custom, nothing could be chosen or typed. The box now shows whenever the dropdown is on Custom. When Google's list fails, a built in list of Gemini models Google marks stable is shown instead, and the tooltip on the dropdown gives the reason (`key_rejected`, `rate_limited`, `unreachable`, `provider_error`, `not_found` or `bad_response`). Other providers keep their one fixed error.
+- **Apply tested every cloud role every time, not just the ones you changed.** The panel sends every role on each Apply, so 8.58.1 treated all of them as changed. Nova now compares with the saved value.
+- **The changelog said Gemini 3.6 and later ignore temperature.** Google does not say that. Google advises leaving temperature at its default of 1.0 on Gemini 3 and later, because a lower value can cause looping or poorer answers. Nova now leaves it out for those models and sends it to Gemini 2.x and Gemma.
+
+### Changed
+- **A busy Google is retried.** A 429, 500, 502 or 503 answer, or a dropped connection, is tried again twice after a short wait (a longer Retry-After from Google is used, up to 5 seconds). A bad key, a bad request, a missing model, a 504 and a timeout are not retried. No retry starts after 30 seconds in total.
+- **A failed cloud check no longer stops Apply.** If a Gemini, Groq, OpenAI or Anthropic role fails its test call, the settings are saved and the message names the role to check. A failed Ollama or custom check still stops the save.
+- **Gemini's use of the Interactions API is labelled Beta** in the code and the guide, because Google documents it as Beta.
+
 ## [8.58.1] Apply now checks a cloud model you change, and a Gemini check script
 
 Follow up to 8.58.0.
