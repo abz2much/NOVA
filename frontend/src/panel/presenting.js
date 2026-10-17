@@ -27,7 +27,7 @@
 
   _presentCycleStart() {
     if (this._presentCycleTimer) return;
-    const every = this._presentCycleMs || 16000;
+    const every = this._presentCycleMs || 9000;
     this._presentCycleTimer = setInterval(() => this._presentAmbient(), every);
     // The first card comes soon after the page opens, not a full round later.
     this._presentFirstTimer = setTimeout(() => this._presentAmbient(), this._presentFirstMs || 15000);
@@ -317,12 +317,12 @@
   }
 
   // The next step comes one cycle after this one started (the timer starts
-  // over here). A card stays 15 seconds and the cycle is 16, so the gap
+  // over here). A card stays 8 seconds and the cycle is 9, so the gap
   // between two steps is only a second.
   _presentRestartCycle() {
     if (!this._presentCycleTimer) return;
     clearInterval(this._presentCycleTimer);
-    this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 16000);
+    this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 9000);
   }
 
   async _presentAmbient() {
@@ -350,7 +350,7 @@
       this._presentTurn = at + 1;
       const now = Date.now() / 1000;
       this._presentRestartCycle();
-      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 15, data });
+      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 8, data });
       return;
     }
   }

@@ -27,15 +27,15 @@
         padding:14px 18px;border:1px solid var(--line-soft);border-radius:16px;background:var(--surface-2);cursor:pointer;text-align:left}
       .hero-stage.presenting .present-card{display:flex}
       .hero-stage.presenting .hero-copy{display:none}
-      .pc-cap{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+      .pc-cap{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
       .pc-big{font-family:var(--font-display);font-weight:500;line-height:1}
       .pc-fig{font-size:clamp(44px,8cqw,84px);letter-spacing:-.02em;
         background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent}
       .pc-fig::after{content:" " attr(data-unit);font-size:clamp(16px,2.4cqw,22px);letter-spacing:0;-webkit-text-fill-color:var(--gold-pale)}
-      .pc-now{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;color:var(--ink-faint)}
+      .pc-now{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.05em;color:var(--ink-dim)}
       .pc-curve{width:100%;height:28px;display:block}
       .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
-      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint)}
+      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:13px;color:var(--ink-dim)}
       .pc-row b{font-weight:500;color:var(--gold-pale)}
       canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
       canvas.core:active{cursor:grabbing}
