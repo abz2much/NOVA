@@ -1,9 +1,11 @@
 """Pin what the local intent router does today (8.7.19, tests only).
 
-LocalIntentRouter is reached in production through nova.process_intent: a
-phrase and an area come in, and it closes covers, locks locks and switches
-lights with no LLM and no policy gate. A nova.speak with expect_response opens
-a ten second window in which a "yes" runs the pending action.
+LocalIntentRouter used to be reached in production through nova.process_intent: a
+phrase and an area came in, and it closed covers, locked locks and switched
+lights with no LLM and no policy gate. A nova.speak with expect_response opened
+a ten second window in which a "yes" ran the pending action. Both services
+were removed in 8.60.0, so nothing calls the router now; these tests keep it
+pinned until it is removed.
 
 These tests drive the real router against FakeHass. The 8.7.19
 test_current_behaviour_* tests here were fixed in 8.7.20: a question or a

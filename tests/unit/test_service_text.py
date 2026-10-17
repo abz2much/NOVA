@@ -35,8 +35,3 @@ def test_service_text_is_uk_english_and_never_says_he():
     words = json.dumps(TEXT).lower()
     for bad in ("analyze ", "analyzes", "summarize", " he ", "recognize", "color", "favorite"):
         assert bad not in words, bad
-
-
-def test_retiring_services_still_say_so():
-    for name in ("speak", "process_intent"):
-        assert TEXT[name]["description"].startswith("Being retired"), name

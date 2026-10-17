@@ -1,11 +1,11 @@
-"""Nova — nova.speak, nova.process_intent support and the infrastructure audit.
+"""Nova — the infrastructure audit and the way it speaks.
 
-nova.speak says a message in one area: it picks the area's speaker, shapes
+The audit says an alert in one area: it picks the area's speaker, shapes
 the voice to the room (light, noise, whether media is playing, how closely
 someone is attending), lowers and then restores the speaker volume around
 the announcement, and records what was said in spoken history.
-services.py registers both services once for the life of the process and
-calls the helpers here. The config entry wires the rest:
+(nova.speak and nova.process_intent used these helpers until 8.60.0.)
+The config entry wires it:
 
     async_setup_entry   ->  await async_setup_proactive_audio(hass, entry)
     async_unload_entry  ->  await async_unload_proactive_audio(hass, entry)
@@ -31,7 +31,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import area_registry as ar, config_validation as cv
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from . import audio_routing, delivery
@@ -47,10 +47,7 @@ from .vision import SpatialContextEngine
 
 _LOGGER = logging.getLogger(__name__)
 
-SERVICE_SPEAK = "speak"
-SERVICE_PROCESS_INTENT = "process_intent"
-
-# The TTS engine nova.speak uses unless the panel sets proactive_tts_entity.
+# The TTS engine the audit speaks with unless the panel sets proactive_tts_entity.
 DEFAULT_TTS_ENTITY = "tts.piper"
 # A last resort player for an area with no speaker at all; empty means none.
 DEFAULT_ANNOUNCE_PLAYER = ""
@@ -73,18 +70,6 @@ WORDS_PER_SECOND = 2.6
 TTS_PADDING_S = 0.9
 TTS_MIN_S = 1.5
 TTS_MAX_S = 30.0
-
-SPEAK_SCHEMA = vol.Schema({
-    vol.Required("message"): cv.string, vol.Required("target_area"): cv.string,
-    vol.Optional("critical", default=False): cv.boolean, vol.Optional("user_id"): cv.string,
-    vol.Optional("expect_response", default=False): cv.boolean,
-    vol.Optional("confirm_intent"): cv.string,
-})
-
-PROCESS_INTENT_SCHEMA = vol.Schema({
-    vol.Required("phrase"): cv.string, vol.Required("target_area"): cv.string,
-    vol.Optional("user_id"): cv.string,
-})
 
 # One controller for every announcement. Its own quiet hours (22 to 7) are
 # only a fallback: telemetry passes the household's.
@@ -321,7 +306,7 @@ async def _announce(
     targets, mode = _resolve_targets(hass, runtime, area_id)
     if not targets:
         _LOGGER.warning(
-            "nova.speak: no speaker resolved for area '%s' (no area speaker and "
+            "Nova audio: no speaker resolved for area '%s' (no area speaker and "
             "no broadcast/default fallback) — nothing to announce on", area_id)
         return False
 
@@ -329,7 +314,7 @@ async def _announce(
         _build_telemetry(hass, area_id, targets, critical))
     level = float(profile["volume"])
     before = _current_volumes(hass, targets)
-    _LOGGER.debug("nova.speak: area=%s mode=%s style=%s volume=%.2f targets=%s",
+    _LOGGER.debug("Nova audio: area=%s mode=%s style=%s volume=%.2f targets=%s",
                   area_id, mode, profile["style"], level, targets)
 
     spoken_on: list[str] = []
@@ -338,18 +323,18 @@ async def _announce(
             try:
                 await _set_volume(hass, target, level)
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("nova.speak: failed to set volume for %s", target)
+                _LOGGER.exception("Nova audio: failed to set volume for %s", target)
         spoken_on = await _speak_tts(hass, runtime, targets, message, profile)
         await asyncio.sleep(_estimate_duration(message, float(profile["speech_rate"])))
     except Exception:  # noqa: BLE001
-        _LOGGER.exception("nova.speak: announcement failed in area '%s'", area_id)
+        _LOGGER.exception("Nova audio: announcement failed in area '%s'", area_id)
         spoken_on = []
     finally:
         for target, previous in before.items():
             try:
                 await _set_volume(hass, target, previous)
             except Exception:  # noqa: BLE001
-                _LOGGER.exception("nova.speak: failed to restore volume for %s", target)
+                _LOGGER.exception("Nova audio: failed to restore volume for %s", target)
 
     if not spoken_on:
         return False
@@ -407,8 +392,9 @@ def _entity_locks(runtime: NovaRuntime) -> EntityLockRegistry:
 
 
 def _intent_router(hass: HomeAssistant, runtime: NovaRuntime) -> LocalIntentRouter:
-    """The entry's single router, so a reply window nova.speak opens is
-    still there when process_intent brings the answer."""
+    """The entry's single router. Nothing calls it since 8.60.0 (nova.speak and
+    nova.process_intent were its only users); it goes with the other unused
+    pieces in a later release."""
     if runtime.intent_router is None:
         runtime.intent_router = LocalIntentRouter(
             hass, ledger=_state_ledger(runtime), mutex=_entity_locks(runtime))
@@ -416,8 +402,8 @@ def _intent_router(hass: HomeAssistant, runtime: NovaRuntime) -> LocalIntentRout
 
 
 def _alert_buffer(runtime: NovaRuntime) -> AlertBuffer:
-    """Holds nova.speak calls made while the entry is still starting, for
-    replay in order once it is ready. A reload brings a new one."""
+    """The startup gate: the audit waits until it is ready. A reload brings a
+    new one. (It used to hold nova.speak calls too, until 8.60.0.)"""
     if runtime.alert_buffer is None:
         runtime.alert_buffer = AlertBuffer()
     return runtime.alert_buffer
@@ -450,31 +436,6 @@ def _boot_ready(runtime: NovaRuntime) -> bool:
     return _alert_buffer(runtime).ready
 
 
-async def _dispatch_speak(hass: HomeAssistant, runtime: NovaRuntime, data: dict) -> None:
-    """Carry out one nova.speak call (live, or replayed from the buffer).
-    An unknown area is logged and skipped. With expect_response and a
-    confirm_intent, a short window opens for a spoken yes or no."""
-    target = data["target_area"]
-    area_id = _resolve_area_id(hass, target)
-    if area_id is None:
-        _LOGGER.warning("nova.speak: unknown area %r — ignoring", target)
-        return
-    if data.get("user_id"):
-        # Kept for per person delivery later; only logged for now.
-        _LOGGER.debug("nova.speak: addressed to user_id=%s", data.get("user_id"))
-
-    await _announce(hass, runtime, data["message"], area_id, data.get("critical", False))
-
-    confirm = data.get("confirm_intent")
-    if not (data.get("expect_response", False) and confirm):
-        return
-    try:
-        await _intent_router(hass, runtime).open_feedback_window(
-            {"intent": confirm, "area": area_id})
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("nova.speak: failed to open feedback window")
-
-
 async def _deliver_audit(hass: HomeAssistant, runtime: NovaRuntime, message: str,
                          target: str, critical: bool) -> None:
     """Send one audit alert through delivery, so shush, the Announcements
@@ -485,7 +446,7 @@ async def _deliver_audit(hass: HomeAssistant, runtime: NovaRuntime, message: str
 
     async def say_in_area(words: str) -> bool:
         if area_id is None:
-            _LOGGER.warning("nova.speak: unknown area %r — ignoring", target)
+            _LOGGER.warning("Nova audio: unknown area %r — ignoring", target)
             return False
         return await _announce(hass, runtime, words, area_id, critical)
 
@@ -496,19 +457,16 @@ async def _deliver_audit(hass: HomeAssistant, runtime: NovaRuntime, message: str
 
 
 def _boot_begin(runtime: NovaRuntime) -> None:
-    """Start holding nova.speak calls until ready. Safe to call again on a
-    reload."""
+    """Close the startup gate until ready. Safe to call again on a reload."""
     _alert_buffer(runtime).begin()
 
 
 async def mark_boot_ready(hass: HomeAssistant, runtime: NovaRuntime) -> None:
-    """Open the gate and replay the held nova.speak calls in order."""
+    """Open the startup gate. Nothing is held any more, so nothing is replayed."""
     async def replay(data: dict) -> None:
-        await _dispatch_speak(hass, runtime, data)
+        return None
 
-    count = await _alert_buffer(runtime).mark_ready(replay)
-    if count:
-        _LOGGER.info("Nova ready — replayed %d buffered alert(s)", count)
+    await _alert_buffer(runtime).mark_ready(replay)
 
 
 # ── Entry setup and unload (called from __init__.py) ────────────────────────
@@ -525,14 +483,14 @@ async def _audit_alert(hass, entry, runtime, fault_log, verdict, honorific) -> N
     from . import nova_config
     area = str(nova_config.runtime_get(hass, entry, AUDIT_AREA_KEY, "") or "").strip()
     if area:
-        # Through delivery rather than nova.speak, which is being retired.
+        # Through delivery, so shush, quiet hours and sleep apply.
         hass.async_create_task(_deliver_audit(
             hass, runtime, message, area, bool(verdict["critical"])))
     await hass.async_add_executor_job(fault_log.commit_event, verdict["message"], tags)
 
 
 async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Hold nova.speak until this setup finishes, schedule the audit (its
+    """Close the startup gate, schedule the audit (its
     timer callbacks go to the entry's NovaResources, which cancels them on
     unload), check the state ledger, then release the held calls."""
     runtime = get_runtime(entry)

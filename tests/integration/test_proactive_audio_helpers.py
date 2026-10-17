@@ -1,4 +1,4 @@
-"""nova.speak's helpers against a real Home Assistant: area lookup, speaker
+"""The audit's speaking helpers against a real Home Assistant: area lookup, speaker
 choice, the light and noise readings that shape the voice, ducking and
 restoring volume, the tts.speak retry, spoken history, the audit's history
 phrase and habit sampling, and the state ledger check at start up.
@@ -8,7 +8,6 @@ registered here."""
 import types
 
 import pytest
-import voluptuous as vol
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -98,22 +97,12 @@ def test_tts_options_and_entity(pa):
 
 
 def test_constants(pa):
-    assert (pa.SERVICE_SPEAK, pa.SERVICE_PROCESS_INTENT) == ("speak", "process_intent")
     assert pa.AUDIT_AREA_KEY == "infrastructure_audit_area"
     assert pa.AUDIT_SENSORS_KEY == "infrastructure_audit_sensors"
     assert pa.AUDIT_INTERVAL.total_seconds() == 900
     assert pa.AUDIT_STARTUP_DELAY.total_seconds() == 60
     assert pa.PREDICTOR_AUTOEXECUTE is False
     assert pa.DEFAULT_ANNOUNCE_PLAYER == "" and pa.MEDIA_DUCK_LEVEL == 0.10
-
-
-def test_schemas(pa):
-    assert pa.SPEAK_SCHEMA({"message": "hi", "target_area": "a"}) == {
-        "message": "hi", "target_area": "a", "critical": False, "expect_response": False}
-    with pytest.raises(vol.Invalid):
-        pa.SPEAK_SCHEMA({"message": "hi"})
-    assert pa.PROCESS_INTENT_SCHEMA({"phrase": "p", "target_area": "a", "user_id": "u"}) == {
-        "phrase": "p", "target_area": "a", "user_id": "u"}
 
 
 def test_history_phrase(pa):
@@ -389,43 +378,3 @@ async def test_deliver_audit(hass, pa, monkeypatch):
         ("infrastructure", "Disk full", "infrastructure", "critical"),
         ("infrastructure", "Disk low", "infrastructure", "high")]
     assert said == [("words", "den", True), False]
-
-
-async def test_dispatch_speak_opens_a_feedback_window(hass, pa, monkeypatch):
-    spoken, windows = [], []
-
-    async def announce(hass, runtime, message, area_id, critical):
-        spoken.append((message, area_id, critical))
-    monkeypatch.setattr(pa, "_announce", announce)
-    monkeypatch.setattr(pa, "_resolve_area_id", lambda hass, t: None if t == "x" else t)
-
-    async def window(payload):
-        windows.append(payload)
-    router = types.SimpleNamespace(open_feedback_window=window)
-    monkeypatch.setattr(pa, "_intent_router", lambda hass, runtime: router)
-
-    await pa._dispatch_speak(hass, _runtime(), {"message": "m", "target_area": "x"})
-    assert spoken == []
-    await pa._dispatch_speak(hass, _runtime(), {"message": "m", "target_area": "den",
-                                                "user_id": "u", "critical": True,
-                                                "expect_response": True})
-    assert spoken == [("m", "den", True)] and windows == []
-    await pa._dispatch_speak(hass, _runtime(), {"message": "m", "target_area": "den",
-                                                "expect_response": True,
-                                                "confirm_intent": "lock_up"})
-    assert windows == [{"intent": "lock_up", "area": "den"}]
-
-
-async def test_dispatch_speak_survives_a_failed_window(hass, pa, monkeypatch):
-    async def announce(*a):
-        return True
-    monkeypatch.setattr(pa, "_announce", announce)
-    monkeypatch.setattr(pa, "_resolve_area_id", lambda hass, t: t)
-
-    async def broken(payload):
-        raise RuntimeError("router down")
-    monkeypatch.setattr(pa, "_intent_router", lambda hass, runtime: types.SimpleNamespace(
-        open_feedback_window=broken))
-    await pa._dispatch_speak(hass, _runtime(), {"message": "m", "target_area": "den",
-                                                "expect_response": True,
-                                                "confirm_intent": "i"})

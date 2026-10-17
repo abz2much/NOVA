@@ -1,3 +1,9 @@
+## [8.60.0] nova.speak and nova.process_intent are removed
+
+### Removed
+- **`nova.speak` and `nova.process_intent` are gone.** They were retired in 8.40.0 and each call raised a Repairs notice. Use `tts.speak` to say something and `conversation.process` to run a phrase. The yes/no window that `nova.speak` could open went with them. Your spoken confirmations (locks, the Executive Assistant, Marketing) are separate and are unchanged, and so are continued conversations.
+- **The infrastructure audit is unchanged.** It still speaks its alerts the same way. A few internal pieces that only these two services used (the local intent router, its entity lock registry and the startup hold for `nova.speak` calls) are now unused and will go in a later release.
+
 ## [8.59.0] Three retired services are removed
 
 ### Removed

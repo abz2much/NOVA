@@ -1,4 +1,4 @@
-"""Hold ``nova.speak`` requests that arrive while the config entry starts up.
+"""A startup gate. It used to hold ``nova.speak`` requests (removed in 8.60.0) while the config entry starts up.
 
 Requests are copied into a bounded FIFO. Once the integration reports it is
 ready, everything held is replayed, oldest first, through a caller-supplied

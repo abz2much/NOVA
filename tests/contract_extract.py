@@ -91,9 +91,7 @@ def services_contract() -> dict:
 
 # Since Phase 4 every Nova service is registered by services.py, once, through
 # its _register(name, handler, schema) helper (which wraps
-# hass.services.async_register with a has_service guard). speak and
-# process_intent pass proactive_audio's SERVICE_* names and SPEAK_SCHEMA /
-# PROCESS_INTENT_SCHEMA, which live in proactive_audio.py.
+# hass.services.async_register with a has_service guard).
 _SERVICES_MODULE = COMP / "services.py"
 _SERVICE_NAME_MODULES = (COMP / "services.py", COMP / "proactive_audio.py")
 
@@ -133,9 +131,7 @@ def registered_services() -> list:
 def service_schema_keys() -> dict:
     """{service: {field: "required"|"optional"}} from the vol.Schema each
     service is registered with in services.py; services registered without
-    a schema map to None. speak and process_intent are left out, as before
-    Phase 4: their schemas are proactive_audio's SPEAK_SCHEMA and
-    PROCESS_INTENT_SCHEMA, pinned by the PHACC contract test instead."""
+    a schema map to None."""
     out = {}
     for name, schema in service_registrations():
         if isinstance(schema, ast.Name):

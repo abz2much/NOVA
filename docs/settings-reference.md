@@ -55,12 +55,10 @@ keeps the value it already had. See [What Nova includes](product-scope.md).
 | `departure_alerts_enabled` | Settings → Anticipation & Memory → Departure alerts | Leave alerts for calendar events. See [Routines and suggestions](routines-and-suggestions.md). |
 | `auto_bootstrap` | Settings → Anticipation & Memory → Install voice add-ons | Installs Piper, Whisper and openWakeWord at the next restart, and builds the Assist pipeline. Home Assistant OS or Supervised only. |
 
-## Services being retired
+## Removed services
 
-`nova.speak` and `nova.process_intent` still work and will be removed in a
-later release. The first call in each run logs a warning and shows a notice in
-Settings → Repairs naming what to use instead: `tts.speak` or
-`conversation.process`.
+`nova.speak` and `nova.process_intent` were removed in 8.60.0. Use `tts.speak`
+to say something and `conversation.process` to run a phrase.
 
 `nova.scene_by_intent`, `nova.routine` and `nova.replay_policy` were removed in
 8.59.0. Use `scene.turn_on`, `script.turn_on` or an automation instead.

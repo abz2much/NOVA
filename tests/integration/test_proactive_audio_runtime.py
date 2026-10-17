@@ -1,20 +1,14 @@
 """Phase 3B Final: proactive audio owned by the loaded entry, against a real
 Home Assistant (PHACC).
 
-Drives the real setup, the real nova.speak / nova.process_intent services
-and the real unload to prove:
+Drives the real setup and the real unload to prove (nova.speak and
+nova.process_intent were removed in 8.60.0, so the router is built directly):
 
 * the intent router, state ledger, entity-lock registry and alert buffer are
   NovaRuntime fields, built lazily and reused within one loaded entry,
-* the domain-level service handlers resolve the loaded entry's runtime and
-  fail with NovaRuntimeUnavailable when it is gone, without building
-  anything outside the entry,
-* nova.speak buffers into the entry's own alert buffer until ready, but
-  only while the entry is still setting up (Phase 4),
 * the audit timers' unsubs belong to NovaResources, and the audit flag is
   the runtime's,
-* Nova-shaped data planted in hass.data has no effect, and nothing is
-  mirrored into hass.data,
+* nothing is mirrored into hass.data,
 * unload releases every object, repeated unload is safe, and a reload
   builds new ones.
 
@@ -48,25 +42,6 @@ def spoken(monkeypatch):
     return calls
 
 
-@pytest.fixture
-def routed(monkeypatch):
-    """Record intent routing on the router instance used, touching nothing."""
-    from custom_components.nova.intent import LocalIntentRouter
-    calls = []
-
-    async def _voice(self, phrase):
-        calls.append(("voice", self, phrase))
-        return {"handled": False}
-
-    async def _route(self, phrase, target_area, *, user_id=None):
-        calls.append(("route", self, phrase))
-        return {"ok": True}
-
-    monkeypatch.setattr(LocalIntentRouter, "handle_voice_response", _voice)
-    monkeypatch.setattr(LocalIntentRouter, "route", _route)
-    return calls
-
-
 @contextmanager
 def _runtime_missing(entry):
     """Simulate a loaded entry that lost its runtime, then put it back."""
@@ -82,20 +57,14 @@ def _no_domain_level_objects(hass):
     assert DOMAIN not in hass.data
 
 
-async def _intent(hass, phrase="lights on"):
-    await hass.services.async_call(
-        DOMAIN, "process_intent", {"phrase": phrase, "target_area": "office"},
-        blocking=True)
-
-
-async def _speak(hass, message="hello"):
-    await hass.services.async_call(
-        DOMAIN, "speak", {"message": message, "target_area": "office"}, blocking=True)
+def _build_router(hass, runtime):
+    from custom_components.nova import proactive_audio
+    return proactive_audio._intent_router(hass, runtime)
 
 
 # ── Ownership and laziness ──────────────────────────────────────────────────
 
-async def test_objects_are_built_lazily_on_the_entry_runtime(hass, routed):
+async def test_objects_are_built_lazily_on_the_entry_runtime(hass):
     entry = await _setup(hass)
     runtime = entry.runtime_data
     # Setup itself needs the buffer (boot guard) and the ledger (recovery).
@@ -104,92 +73,25 @@ async def test_objects_are_built_lazily_on_the_entry_runtime(hass, routed):
     # The router and its lock registry wait for first use.
     assert runtime.intent_router is None and runtime.entity_locks is None
 
-    await _intent(hass)
-    assert runtime.intent_router is not None
+    router = _build_router(hass, runtime)
+    assert runtime.intent_router is router
     assert runtime.entity_locks is not None
-    assert routed[-1][1] is runtime.intent_router
     _no_domain_level_objects(hass)
 
 
-async def test_objects_are_reused_within_one_loaded_entry(hass, routed):
+async def test_objects_are_reused_within_one_loaded_entry(hass):
     from custom_components.nova import proactive_audio
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    await _intent(hass, "one")
-    router, ledger, locks = runtime.intent_router, runtime.state_ledger, runtime.entity_locks
-    await _intent(hass, "two")
-    assert {id(c[1]) for c in routed} == {id(router)}
+    router = _build_router(hass, runtime)
+    ledger, locks = runtime.state_ledger, runtime.entity_locks
+    assert _build_router(hass, runtime) is router
     assert proactive_audio._intent_router(hass, runtime) is router
     assert proactive_audio._state_ledger(runtime) is ledger
     assert proactive_audio._entity_locks(runtime) is locks
     assert proactive_audio._alert_buffer(runtime) is runtime.alert_buffer
     # The router uses the entry's own ledger and lock registry.
     assert router.ledger is ledger and router.mutex is locks
-
-
-async def test_speak_buffers_in_the_entry_buffer_until_ready(hass, spoken):
-    from homeassistant.config_entries import ConfigEntryState
-    from custom_components.nova import proactive_audio
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    runtime.alert_buffer.begin()                  # re-gate, as a reload does
-    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
-
-    await _speak(hass, "queued")
-    assert spoken == []
-    assert runtime.alert_buffer._queue.qsize() == 1
-
-    entry.mock_state(hass, ConfigEntryState.LOADED)
-    await proactive_audio.mark_boot_ready(hass, runtime)
-    assert [(c[0], c[1]) for c in spoken] == [(runtime, "queued")]
-    assert runtime.alert_buffer._queue.qsize() == 0
-
-
-async def test_loaded_speak_never_buffers(hass, spoken):
-    """Phase 4: a LOADED entry speaks at once, even with a gated buffer."""
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    runtime.alert_buffer.begin()
-    await _speak(hass, "now")
-    assert [(c[0], c[1]) for c in spoken] == [(runtime, "now")]
-    assert runtime.alert_buffer._queue.qsize() == 0
-
-
-async def test_speak_dispatches_with_the_entry_runtime(hass, spoken):
-    entry = await _setup(hass)
-    await _speak(hass, "now")
-    assert [(c[0], c[1]) for c in spoken] == [(entry.runtime_data, "now")]
-
-
-@pytest.mark.parametrize("service", ["speak", "process_intent"])
-async def test_services_fail_visibly_without_the_runtime(hass, spoken, routed, service):
-    from custom_components.nova.runtime import NovaRuntimeUnavailable
-    entry = await _setup(hass)
-    with _runtime_missing(entry) as runtime:
-        runtime.alert_buffer.begin()
-        with pytest.raises(NovaRuntimeUnavailable):
-            if service == "speak":
-                await _speak(hass)
-            else:
-                await _intent(hass)
-        # Nothing was buffered, routed or built anywhere else.
-        assert runtime.alert_buffer._queue.qsize() == 0
-        assert spoken == [] and routed == []
-        assert runtime.intent_router is None
-        _no_domain_level_objects(hass)
-
-
-async def test_planted_hass_data_has_no_effect(hass, spoken, routed):
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    hass.data[DOMAIN] = {entry.entry_id: "damaged", "_intent_router": object()}
-    try:
-        await _speak(hass, "still works")
-        await _intent(hass)
-    finally:
-        hass.data.pop(DOMAIN)
-    assert [(c[0], c[1]) for c in spoken] == [(runtime, "still works")]
-    assert routed[-1][1] is runtime.intent_router
 
 
 # ── Timers and the audit flag ───────────────────────────────────────────────
@@ -327,12 +229,12 @@ async def test_prosody_reads_the_household_quiet_hours(hass, monkeypatch, quiet)
 
 # ── Unload and reload ───────────────────────────────────────────────────────
 
-async def test_unload_releases_everything_and_repeats_safely(hass, routed):
+async def test_unload_releases_everything_and_repeats_safely(hass):
     from custom_components.nova import proactive_audio
     from custom_components.nova.runtime import clear_runtime
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    await _intent(hass)
+    _build_router(hass, runtime)
     assert all(getattr(runtime, f) is not None for f in PROACTIVE_FIELDS)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -341,9 +243,6 @@ async def test_unload_releases_everything_and_repeats_safely(hass, routed):
         assert getattr(runtime, field) is None, field
     assert runtime.audit_running is False
     assert runtime.resources._unsubs == []        # audit timers cancelled
-    # Phase 4: the services outlive the entry.
-    assert hass.services.has_service(DOMAIN, "speak")
-    assert hass.services.has_service(DOMAIN, "process_intent")
     assert not hasattr(entry, "runtime_data")
     _no_domain_level_objects(hass)
 
@@ -353,18 +252,17 @@ async def test_unload_releases_everything_and_repeats_safely(hass, routed):
     _no_domain_level_objects(hass)
 
 
-async def test_reload_builds_new_objects(hass, routed):
+async def test_reload_builds_new_objects(hass):
     entry = await _setup(hass)
     old = entry.runtime_data
-    await _intent(hass)
+    _build_router(hass, old)
     old_objects = [getattr(old, f) for f in PROACTIVE_FIELDS]
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     new = entry.runtime_data
     assert new is not old
-    await _intent(hass)
+    _build_router(hass, new)
     for field, before in zip(PROACTIVE_FIELDS, old_objects):
         assert getattr(new, field) is not None, field
         assert getattr(new, field) is not before, field
-    assert routed[-1][1] is new.intent_router

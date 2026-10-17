@@ -66,7 +66,7 @@ class NovaRuntime:
     # Whether this entry started the observer. Change it only through
     # set_observer_running().
     observer_running: bool = False
-    # Proactive audio (nova.speak / nova.process_intent). proactive_audio.py
+    # Proactive audio (the infrastructure audit). proactive_audio.py
     # builds each object lazily on first use and drops them on unload, so a
     # reload always starts with fresh ones.
     intent_router: LocalIntentRouter | None = None

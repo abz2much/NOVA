@@ -169,10 +169,8 @@ def clear_voice_setup(hass: HomeAssistant) -> None:
 
 # Each retired service, with what to use instead. None means the feature
 # behind it is gone and the call does nothing.
-RETIRED_SERVICES: dict[str, str | None] = {
-    "speak": "tts.speak",
-    "process_intent": "conversation.process",
-}
+# Empty since 8.60.0: nothing is being retired right now.
+RETIRED_SERVICES: dict[str, str | None] = {}
 
 _retired_seen: set[str] = set()
 

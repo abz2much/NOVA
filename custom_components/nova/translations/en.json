@@ -508,54 +508,6 @@
         }
       }
     },
-    "speak": {
-      "name": "Speak",
-      "description": "Being retired: use tts.speak instead. Speaks a message in an area, shaped to the room: Nova checks light, noise and playing media, sets volume, pace and style to suit, lowers any media while speaking and restores it after.",
-      "fields": {
-        "message": {
-          "name": "Message",
-          "description": "What Nova should say."
-        },
-        "target_area": {
-          "name": "Area",
-          "description": "Where to speak. Decides which speakers and sensors are used."
-        },
-        "critical": {
-          "name": "Critical",
-          "description": "Speak at full volume with authority, ignoring quiet hours and lowering media. For safety and security alerts."
-        },
-        "user_id": {
-          "name": "User",
-          "description": "Optional person this is for. Reserved: passed along and logged only."
-        },
-        "expect_response": {
-          "name": "Wait for a reply",
-          "description": "Listen briefly after speaking without needing the wake word. Use with the confirmation intent to act on a yes."
-        },
-        "confirm_intent": {
-          "name": "Confirmation intent",
-          "description": "The local command to run if the reply is a yes, for example \"secure_area\" or \"lights_off\"."
-        }
-      }
-    },
-    "process_intent": {
-      "name": "Run a phrase locally",
-      "description": "Being retired: ask Nova through conversation.process instead. Matches a spoken or typed phrase to a local Nova command, with no cloud call. If a nova.speak reply window is open, a yes completes the waiting action; otherwise the phrase is treated as a new command, such as \"lock the back door\" or \"turn it off\".",
-      "fields": {
-        "phrase": {
-          "name": "Phrase",
-          "description": "The phrase to act on."
-        },
-        "target_area": {
-          "name": "Area",
-          "description": "The area used to work out what \"it\" or \"here\" means and where to act."
-        },
-        "user_id": {
-          "name": "User",
-          "description": "Optional person this is for."
-        }
-      }
-    },
     "remember": {
       "name": "Remember",
       "description": "Teaches Nova a lasting fact or preference to use in conversation, for example that bin day is Tuesday. It is kept in the knowledge store and shown in the panel's Memory page.",

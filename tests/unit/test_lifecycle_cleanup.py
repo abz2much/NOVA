@@ -316,7 +316,7 @@ def test_services_yaml_documents_test_routing():
 def test_every_registered_service_is_in_services_yaml():
     doc = yaml.safe_load((COMP / "services.yaml").read_text())
     registered = _registered_services()
-    assert "test_routing" in registered and "speak" in registered
+    assert "test_routing" in registered and "nap" in registered
     assert registered == set(doc)
 
 
