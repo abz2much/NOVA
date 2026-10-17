@@ -234,22 +234,6 @@
     "observer_stop": {
       "fields": {}
     },
-    "process_intent": {
-      "fields": {
-        "phrase": {
-          "required": true,
-          "selector": "text"
-        },
-        "target_area": {
-          "required": true,
-          "selector": "area"
-        },
-        "user_id": {
-          "required": false,
-          "selector": "text"
-        }
-      }
-    },
     "remember": {
       "fields": {
         "key": {
@@ -321,36 +305,6 @@
           "selector": "select"
         },
         "entity_id": {
-          "required": false,
-          "selector": "text"
-        }
-      }
-    },
-    "speak": {
-      "fields": {
-        "confirm_intent": {
-          "required": false,
-          "selector": "text"
-        },
-        "critical": {
-          "default": false,
-          "required": false,
-          "selector": "boolean"
-        },
-        "expect_response": {
-          "default": false,
-          "required": false,
-          "selector": "boolean"
-        },
-        "message": {
-          "required": true,
-          "selector": "text"
-        },
-        "target_area": {
-          "required": true,
-          "selector": "area"
-        },
-        "user_id": {
           "required": false,
           "selector": "text"
         }

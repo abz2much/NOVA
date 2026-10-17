@@ -1,6 +1,6 @@
 """Phase 4: Nova's services live for the process lifetime (PHACC).
 
-async_setup registers all 29 nova.* services once, at integration scope.
+async_setup registers all 27 nova.* services once, at integration scope.
 Config-entry setup, unload, reload and setup failure never add or remove
 them. Every call resolves the loaded entry and its NovaRuntime at call
 time, so this file drives the real lifecycle to prove:
@@ -12,8 +12,6 @@ time, so this file drives the real lifecycle to prove:
 * each lifecycle state rejects calls with its translated error, before any
   delegate, bus event or proactive object is touched,
 * a LOADED entry without a runtime still raises NovaRuntimeUnavailable,
-* nova.speak buffers only in the narrow SETUP_IN_PROGRESS boot window and
-  replays in order, and nothing outside it creates a buffer,
 * safety paths (lockdown) are unchanged,
 * the shipped blueprints validate while nova.analyze_on_event is
   registered, and no Nova state appears in hass.data.
@@ -36,7 +34,6 @@ from homeassistant.setup import async_setup_component
 from .conftest import MockConfigEntry
 from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
     DOMAIN,
-    PROACTIVE_FIELDS,
     _add_entry,
     _no_real_config,
     _restore_nova_config,
@@ -45,7 +42,7 @@ from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
 )
 from .test_wiring_smoke import _make_entry
 
-SERVICE_COUNT = 29
+SERVICE_COUNT = 27
 
 # Minimal valid data for every service, so a rejection is the lifecycle
 # check's and never schema validation's.
@@ -67,13 +64,11 @@ VALID_DATA = {
     "observer_start": {},
     "observer_status": {},
     "observer_stop": {},
-    "process_intent": {"phrase": "lights on", "target_area": "office"},
     "remember": {"key": "k", "value": "v"},
     "restore": {},
     "sentinel_start": {},
     "sentinel_stop": {},
     "shush": {},
-    "speak": {"message": "hello", "target_area": "office"},
     "test_notify": {},
     "test_routing": {},
     "test_tts": {},
@@ -141,7 +136,7 @@ def _delegates_recorded():
         (automation_creator, "create_automation"), (observer, "start"), (observer, "stop"),
         (notify_targets, "async_send_configured_notifications"),
         (doorbell_training, "scan_backlog"), (package_monitor, "periodic_check"),
-        (proactive_audio, "_dispatch_speak"), (tts_helper, "async_announce"),
+        (tts_helper, "async_announce"),
     ]
     sync_targets = [
         (services, "purge_old_records"), (services, "get_stats"),
@@ -211,7 +206,7 @@ async def test_integration_setup_registers_all_services_without_an_entry(hass):
     await hass.async_block_till_done()
     assert set(_services(hass)) == set(VALID_DATA)
     assert len(_services(hass)) == SERVICE_COUNT
-    for name in ("analyze_camera", "speak", "lockdown"):
+    for name in ("analyze_camera", "nap", "lockdown"):
         assert await _rejected(hass, name) == "no_entry"
 
 
@@ -382,17 +377,6 @@ async def test_reloaded_handlers_use_the_new_runtime_config(hass, monkeypatch):
     assert seen == ["notify.first", "notify.second"]
 
 
-async def test_reloaded_speak_uses_the_new_runtime(hass, spoken):
-    entry = await _setup(hass)
-    first = entry.runtime_data
-    await _call(hass, "speak")
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    await _call(hass, "speak")
-    assert [r for r, _ in spoken] == [first, entry.runtime_data]
-    assert entry.runtime_data is not first
-
-
 # ── Lifecycle rejection ─────────────────────────────────────────────────────
 
 async def test_no_entry_raises_no_entry(hass):
@@ -408,7 +392,7 @@ async def test_multiple_entries_raise_multiple_entries(hass):
     for _ in range(2):
         MockConfigEntry(domain=DOMAIN, data=dict(_make_entry().data)).add_to_hass(hass)
     with _delegates_recorded() as delegates:
-        for service in ("nap", "speak", "process_intent", "lockdown"):
+        for service in ("nap", "lockdown"):
             assert await _rejected(hass, service) == "multiple_entries", service
     assert delegates == []
 
@@ -458,7 +442,7 @@ async def test_real_setup_in_progress_rejects_ordinary_services(hass):
     async def _during_setup(hass_, runtime):
         seen["state"] = entry.state
         with _delegates_recorded() as delegates:
-            for service in ("nap", "process_intent"):
+            for service in ("nap", "lockdown"):
                 seen[service] = await _rejected(hass, service)
         seen["delegates"] = delegates
         return []
@@ -468,7 +452,7 @@ async def test_real_setup_in_progress_rejects_ordinary_services(hass):
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert seen == {"state": ConfigEntryState.SETUP_IN_PROGRESS, "nap": "reloading",
-                    "process_intent": "reloading",
+                    "lockdown": "reloading",
                     "delegates": []}
 
 
@@ -480,7 +464,7 @@ async def test_real_unload_in_progress_rejects_services(hass):
     async def _during_unload(hass_, entry_):
         seen["state"] = entry.state
         with _delegates_recorded() as delegates:
-            seen["speak"] = await _rejected(hass, "speak")
+            seen["nap"] = await _rejected(hass, "nap")
             seen["lockdown"] = await _rejected(hass, "lockdown")
         seen["delegates"] = delegates
         await real(hass_, entry_)
@@ -490,7 +474,7 @@ async def test_real_unload_in_progress_rejects_services(hass):
         assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert seen == {"state": ConfigEntryState.UNLOAD_IN_PROGRESS,
-                    "speak": "reloading", "lockdown": "reloading", "delegates": []}
+                    "nap": "reloading", "lockdown": "reloading", "delegates": []}
 
 
 async def test_loaded_entry_without_runtime_raises_runtime_unavailable(hass):
@@ -501,7 +485,7 @@ async def test_loaded_entry_without_runtime_raises_runtime_unavailable(hass):
     try:
         assert entry.state is ConfigEntryState.LOADED
         with _delegates_recorded() as delegates:
-            for service in ("nap", "lockdown", "speak", "process_intent"):
+            for service in ("nap", "lockdown"):
                 with pytest.raises(NovaRuntimeUnavailable):
                     await _call(hass, service)
     finally:
@@ -532,20 +516,27 @@ async def test_services_return_none_and_keep_their_events(hass):
     assert {"running", "sleeping", "sleep_reason", "bedroom_areas"} <= set(events[1][1])
 
 
-async def test_a_retired_service_still_runs_and_raises_one_notice(hass, monkeypatch, spoken):
+async def test_a_retired_service_still_runs_and_raises_one_notice(hass, monkeypatch):
+    """Nothing is retired right now, so mark one service retired for the test."""
     from homeassistant.helpers import issue_registry as ir
     from custom_components.nova import repair_notices
     monkeypatch.setattr(repair_notices, "_retired_seen", set())
+    monkeypatch.setitem(repair_notices.RETIRED_SERVICES, "observer_status", "script.turn_on")
     await _setup(hass)
-    data = {"message": "hello", "target_area": "office"}
-    assert await _call(hass, "speak", data) is None
-    assert await _call(hass, "speak", data) is None
+    events = []
+
+    @callback
+    def _record(event):
+        events.append(dict(event.data))
+    hass.bus.async_listen("nova_observer_status", _record)
+    assert await _call(hass, "observer_status") is None
+    assert await _call(hass, "observer_status") is None
     await hass.async_block_till_done()
-    assert len(spoken) == 2                       # still works, twice
-    issue = ir.async_get(hass).async_get_issue(DOMAIN, "retired_service_speak")
+    assert len(events) == 2                       # still works, twice
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, "retired_service_observer_status")
     assert issue is not None and issue.translation_key == "retired_service"
-    assert issue.translation_placeholders == {"service": "nova.speak",
-                                              "replacement": "tts.speak"}
+    assert issue.translation_placeholders == {"service": "nova.observer_status",
+                                              "replacement": "script.turn_on"}
 
 
 async def test_ordinary_services_raise_no_retirement_notice(hass, monkeypatch):
@@ -587,122 +578,6 @@ async def test_lockdown_after_unload_does_not_rebuild_a_manager(hass, monkeypatc
     assert await _rejected(hass, "lockdown") == "not_loaded"
     assert cognitive_core._CORE.lockdown_mgr is None and cognitive_core._CORE.hass is None
     assert built == [] and requested == [True]
-
-
-async def test_speak_and_intent_after_unload_rebuild_nothing(hass, spoken, built):
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
-    built.clear()
-    for service in ("speak", "process_intent"):
-        assert await _rejected(hass, service) == "not_loaded"
-    for field in PROACTIVE_FIELDS:
-        assert getattr(runtime, field) is None, field
-    assert built == [] and spoken == []
-    assert_no_nova_state_in_hass_data(hass)
-
-
-# ── nova.speak boot buffer ──────────────────────────────────────────────────
-
-async def test_speak_buffers_in_the_boot_window_and_replays_in_order(hass, spoken):
-    """A real setup: calls made after the boot gate opens its buffer and
-    before setup marks it ready are queued and replayed in order."""
-    from custom_components.nova import proactive_audio
-    during = {}
-
-    async def _during_setup(hass_, runtime):
-        during["state"] = entry.state
-        during["runtime"] = runtime
-        for message in ("first", "second", "third"):
-            assert await _call(hass, "speak", {"message": message,
-                                               "target_area": "office"}) is None
-        during["queued"] = runtime.alert_buffer._queue.qsize()
-        during["spoken"] = list(spoken)
-        return []
-
-    entry = await _add_entry(hass)
-    with patch.object(proactive_audio, "_reconcile_state_ledger", _during_setup):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    runtime = entry.runtime_data
-    assert during["state"] is ConfigEntryState.SETUP_IN_PROGRESS
-    assert during["runtime"] is runtime
-    assert during["queued"] == 3 and during["spoken"] == []
-    assert spoken == [(runtime, "first"), (runtime, "second"), (runtime, "third")]
-    assert runtime.alert_buffer.ready and runtime.alert_buffer._queue.qsize() == 0
-
-
-async def test_speak_before_the_runtime_exists_is_rejected(hass, spoken, built):
-    from custom_components import nova
-    seen = {}
-
-    async def _recognition(hass_):
-        seen["runtime"] = hasattr(entry, "runtime_data")
-        seen["key"] = await _rejected(hass, "speak")
-        seen["built"] = list(built)
-        return []
-
-    entry = await _add_entry(hass)
-    with patch.object(nova, "register_recognition_listener", _recognition):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert seen == {"runtime": False, "key": "reloading", "built": []}
-    assert spoken == []
-
-
-async def test_speak_before_the_buffer_exists_creates_none(hass, spoken, built):
-    from custom_components import nova
-    seen = {}
-    real_panel = nova.async_register_panel
-
-    async def _panel(hass_):
-        runtime = entry.runtime_data
-        seen["buffer_before"] = runtime.alert_buffer
-        seen["key"] = await _rejected(hass, "speak")
-        seen["buffer_after"] = runtime.alert_buffer
-        seen["built"] = list(built)
-        await real_panel(hass_)
-
-    entry = await _add_entry(hass)
-    with patch.object(nova, "async_register_panel", _panel):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert seen["buffer_before"] is None and seen["buffer_after"] is None
-    assert seen["key"] == "reloading"
-    assert "AlertBuffer" not in seen["built"]
-    assert spoken == []
-
-
-async def test_speak_with_a_ready_buffer_during_setup_is_rejected(hass, spoken):
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    assert runtime.alert_buffer.ready
-    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
-    try:
-        assert await _rejected(hass, "speak") == "reloading"
-    finally:
-        entry.mock_state(hass, ConfigEntryState.LOADED)
-    assert runtime.alert_buffer._queue.qsize() == 0 and spoken == []
-
-
-@pytest.mark.parametrize("state,key", [
-    (ConfigEntryState.UNLOAD_IN_PROGRESS, "reloading"),
-    (ConfigEntryState.SETUP_ERROR, "setup_failed"),
-    (ConfigEntryState.NOT_LOADED, "not_loaded"),
-])
-async def test_speak_never_buffers_outside_setup_in_progress(hass, spoken, state, key):
-    """Even with the runtime present and its buffer gated, only
-    SETUP_IN_PROGRESS may queue."""
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    runtime.alert_buffer.begin()
-    entry.mock_state(hass, state)
-    try:
-        assert await _rejected(hass, "speak") == key
-    finally:
-        entry.mock_state(hass, ConfigEntryState.LOADED)
-    assert runtime.alert_buffer._queue.qsize() == 0 and spoken == []
 
 
 # ── Blueprints ──────────────────────────────────────────────────────────────

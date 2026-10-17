@@ -1,7 +1,7 @@
 """The nova.* Home Assistant services.
 
 async_setup() in __init__.py calls async_setup_services() once per Home
-Assistant run, so all 29 services exist from the first setup until Home
+Assistant run, so all 27 services exist from the first setup until Home
 Assistant stops. Setting up, unloading, reloading or failing a config entry
 never adds or removes one.
 
@@ -20,11 +20,6 @@ ServiceValidationError:
 A LOADED entry without a runtime is a lifecycle fault, not a user error, and
 raises NovaRuntimeUnavailable from get_runtime.
 
-The one exception is nova.speak during startup: while the entry is
-SETUP_IN_PROGRESS and its runtime's alert buffer is not ready yet, the call
-is queued in that buffer and replayed in order once setup marks it ready
-(proactive_audio.mark_boot_ready).
-
 Nothing in this module reads or writes hass.data.
 """
 from __future__ import annotations
@@ -39,7 +34,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from . import proactive_audio, repair_notices
+from . import repair_notices
 from .audio_routing import broadcast_target
 from .briefing import async_briefing
 from .camera import async_analyze_camera, async_auto_analyze_on_event
@@ -56,19 +51,12 @@ from .const import (
     DOMAIN,
 )
 from .database import get_stats, purge_old_records
-from .proactive_audio import (
-    PROCESS_INTENT_SCHEMA,
-    SERVICE_PROCESS_INTENT,
-    SERVICE_SPEAK,
-    SPEAK_SCHEMA,
-)
 from .reminders import async_add_reminder_service
 from .repair_notices import RETIRED_SERVICES
 from .runtime import (
     NovaConfigEntry,
     NovaRuntime,
     get_runtime,
-    lifecycle_runtime,
     lifecycle_runtime_config,
     set_observer_running,
 )
@@ -125,28 +113,6 @@ def async_resolve_loaded(hass: HomeAssistant) -> tuple[NovaConfigEntry, NovaRunt
     """The loaded entry and its runtime, looked up for this call only."""
     entry = async_get_loaded_entry(hass)
     return entry, get_runtime(entry)
-
-
-@callback
-def _boot_alert_buffer(hass: HomeAssistant):
-    """The startup alert buffer nova.speak should queue into, if any.
-
-    Only when there is exactly one Nova entry, it is SETUP_IN_PROGRESS, its
-    runtime already exists and that runtime's buffer is not ready yet. This
-    never creates a buffer."""
-    entries = _nova_entries(hass)
-    if len(entries) != 1:
-        return None
-    entry = entries[0]
-    if entry.state is not ConfigEntryState.SETUP_IN_PROGRESS:
-        return None
-    runtime = lifecycle_runtime(entry)
-    if runtime is None:
-        return None
-    buffer = runtime.alert_buffer
-    if buffer is None or buffer.ready:
-        return None
-    return buffer
 
 
 # ── Voice and speaker settings, read per call ───────────────────────────────
@@ -853,35 +819,3 @@ def async_setup_services(hass: HomeAssistant) -> None:
     _register("test_notify", _test_notify)
     _register("test_tts", _test_tts)
     _register("test_routing", _test_routing)
-
-    # ── Proactive audio ─────────────────────────────────────────────────────
-
-    async def _speak(call: ServiceCall) -> None:
-        # Startup window only: queue the call in this entry's own gated
-        # buffer, to be replayed in order once setup finishes.
-        buffer = _boot_alert_buffer(hass)
-        if buffer is not None:
-            buffer.enqueue(dict(call.data))
-            _LOGGER.info("nova.speak buffered — Nova still initialising")
-            return
-        entry, runtime = async_resolve_loaded(hass)
-        await proactive_audio._dispatch_speak(hass, runtime, call.data)
-
-    async def _process_intent(call: ServiceCall) -> None:
-        entry, runtime = async_resolve_loaded(hass)
-        phrase: str = call.data["phrase"]
-        target: str = call.data["target_area"]
-        user_id: str | None = call.data.get("user_id")
-        area_id = proactive_audio._resolve_area_id(hass, target) or target
-        router = proactive_audio._intent_router(hass, runtime)
-        # An open confirmation window takes the phrase as its answer first;
-        # otherwise it is a new local command.
-        answered = await router.handle_voice_response(phrase)
-        if answered.get("handled"):
-            _LOGGER.info("nova.process_intent: confirmed → %s", answered)
-            return
-        result = await router.route(phrase, area_id, user_id=user_id)
-        _LOGGER.info("nova.process_intent: %r → %s", phrase, result)
-
-    _register(SERVICE_SPEAK, _speak, SPEAK_SCHEMA)
-    _register(SERVICE_PROCESS_INTENT, _process_intent, PROCESS_INTENT_SCHEMA)

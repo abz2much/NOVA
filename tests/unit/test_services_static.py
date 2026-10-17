@@ -1,6 +1,6 @@
 """Phase 4 process-lifetime service registration — the static half.
 
-services.py registers Nova's 29 services once, from async_setup at
+services.py registers Nova's 27 services once, from async_setup at
 integration scope. Registration survives reload, unload and setup failure,
 so every handler must resolve the loaded entry and its NovaRuntime per call.
 The PHACC half (tests/integration/test_services_lifecycle.py) drives the
@@ -8,11 +8,10 @@ real lifecycle; this file proves from source that:
 
 * every registration lives in services.py, and nothing removes a service,
 * __init__.py defines async_setup, which calls async_setup_services,
-* the 29 names and schemas are the pinned contract, and lockdown, remember,
+* the 27 names and schemas are the pinned contract, and lockdown, remember,
   forget and create_automation stay schema-less,
 * registration captures no entry, client, sentinel or runtime config, and
   every ordinary handler calls the loaded-entry resolver first,
-* nova.speak buffers only through the narrow SETUP_IN_PROGRESS check,
 * no Nova state or registration flag goes into hass.data,
 * nova.lockdown passes the lifecycle check before touching cognitive_core,
 * the service-state error translations are aligned in every language.
@@ -107,7 +106,7 @@ def test_all_service_registrations_are_in_services_py():
 
 def test_every_service_is_registered_exactly_once():
     names = [name for name, _ in ce.service_registrations()]
-    assert len(names) == 29 and len(set(names)) == 29
+    assert len(names) == 27 and len(set(names)) == 27
 
 
 # ── 2. async_setup ──────────────────────────────────────────────────────────
@@ -176,22 +175,16 @@ PINNED_SCHEMAS = {
     'observer_start': None,
     'observer_status': None,
     'observer_stop': None,
-    'process_intent': 'PROCESS_INTENT_SCHEMA',
     'remember': "vol.Schema({vol.Required('key'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Required('value'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Optional('subject'): cv.string, vol.Optional('kind'): vol.In(['fact', 'preference', 'event', 'profile']), vol.Optional('ttl_seconds'): vol.All(vol.Coerce(float), vol.Range(min=0, max=31536000))})",
     'restore': "vol.Schema({vol.Optional('archive'): str})",
     'sentinel_start': None,
     'sentinel_stop': None,
     'shush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string, vol.Optional('all'): cv.boolean})",
-    'speak': 'SPEAK_SCHEMA',
     'test_notify': None,
     'test_routing': None,
     'test_tts': None,
     'train_doorbell_backlog': "vol.Schema({vol.Optional('limit', default=40): vol.All(vol.Coerce(int), vol.Range(min=1, max=500))})",
     'unshush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string})",
-}
-PINNED_PROACTIVE_SCHEMAS = {
-    'PROCESS_INTENT_SCHEMA': "vol.Schema({vol.Required('phrase'): cv.string, vol.Required('target_area'): cv.string, vol.Optional('user_id'): cv.string})",
-    'SPEAK_SCHEMA': "vol.Schema({vol.Required('message'): cv.string, vol.Required('target_area'): cv.string, vol.Optional('critical', default=False): cv.boolean, vol.Optional('user_id'): cv.string, vol.Optional('expect_response', default=False): cv.boolean, vol.Optional('confirm_intent'): cv.string})",
 }
 
 
@@ -201,24 +194,10 @@ def test_every_schema_is_exactly_the_pre_phase_4_schema():
     assert current == PINNED_SCHEMAS
 
 
-def test_proactive_audio_schemas_are_unchanged():
-    tree = ast.parse((COMP / "proactive_audio.py").read_text(encoding="utf-8"))
-    current = {n.targets[0].id: ast.unparse(n.value) for n in tree.body
-               if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
-               and n.targets[0].id in PINNED_PROACTIVE_SCHEMAS}
-    assert current == PINNED_PROACTIVE_SCHEMAS
-
-
 def test_names_and_schemas_match_the_pinned_contract():
     fixture = ce.load_fixture("services")
     assert set(ce.registered_services()) == set(fixture["documented"])
     assert ce.canonical(ce.service_schema_keys()) == ce.canonical(fixture["registered_schemas"])
-
-
-def test_speak_and_process_intent_keep_their_schemas():
-    regs = dict(ce.service_registrations())
-    assert ast.unparse(regs["speak"]) == "SPEAK_SCHEMA"
-    assert ast.unparse(regs["process_intent"]) == "PROCESS_INTENT_SCHEMA"
 
 
 def test_create_automation_stays_schema_less():
@@ -304,7 +283,7 @@ def test_handler_reads_dependencies_only_from_the_resolved_runtime(service):
 
 # ── 7. Ordinary handlers resolve the loaded entry first ─────────────────────
 
-@pytest.mark.parametrize("service", sorted(set(ce.registered_services()) - {"speak"}))
+@pytest.mark.parametrize("service", sorted(ce.registered_services()))
 def test_ordinary_handler_resolves_the_loaded_entry_first(service):
     first = _body(_handlers()[service])[0]
     assert ast.unparse(first) == f"entry, runtime = {RESOLVER}(hass)", service
@@ -341,28 +320,6 @@ def test_state_errors_cover_every_lifecycle_state():
         "MIGRATION_ERROR": "setup_failed",
         "FAILED_UNLOAD": "setup_failed",
     }
-
-
-def test_speak_buffers_only_through_the_boot_window_then_resolves():
-    body = [ast.unparse(s) for s in _body(_handlers()["speak"])]
-    assert body[0] == "buffer = _boot_alert_buffer(hass)"
-    assert body[1].startswith("if buffer is not None:")
-    assert body[2] == f"entry, runtime = {RESOLVER}(hass)"
-    assert body[3] == "await proactive_audio._dispatch_speak(hass, runtime, call.data)"
-    window = ast.unparse(_func(_SERVICES_TREE, "_boot_alert_buffer"))
-    assert "entry.state is not ConfigEntryState.SETUP_IN_PROGRESS" in window
-    assert "runtime = lifecycle_runtime(entry)" in window
-    assert "buffer = runtime.alert_buffer" in window
-    assert "if buffer is None or buffer.ready" in window
-    # It never builds a buffer (proactive_audio._alert_buffer would).
-    calls = {ast.unparse(n.func) for n in ast.walk(_func(_SERVICES_TREE, "_boot_alert_buffer"))
-             if isinstance(n, ast.Call)}
-    assert not {c for c in calls if c.endswith("_alert_buffer") or c.endswith("AlertBuffer")}
-
-
-def test_process_intent_needs_a_loaded_entry():
-    src = ast.unparse(_handlers()["process_intent"])
-    assert "_boot_alert_buffer" not in src and "SETUP_IN_PROGRESS" not in src
 
 
 # ── 8. hass.data ────────────────────────────────────────────────────────────

@@ -266,55 +266,6 @@ check_packages:
         entity:
           domain: camera
 
-speak:
-  fields:
-    message:
-      required: true
-      example: "The back door is still open."
-      selector:
-        text:
-          multiline: true
-    target_area:
-      required: true
-      example: office
-      selector:
-        area:
-    critical:
-      required: false
-      default: false
-      selector:
-        boolean:
-    user_id:
-      required: false
-      selector:
-        text:
-    expect_response:
-      required: false
-      default: false
-      selector:
-        boolean:
-    confirm_intent:
-      required: false
-      selector:
-        text:
-
-process_intent:
-  fields:
-    phrase:
-      required: true
-      example: "switch it off"
-      selector:
-        text:
-    target_area:
-      required: true
-      example: office
-      selector:
-        area:
-    user_id:
-      required: false
-      selector:
-        text:
-
 remember:
   fields:
     key:
