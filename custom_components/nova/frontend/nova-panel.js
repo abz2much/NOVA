@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.63.0
+ * v8.64.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.63.0 ",
+      console.log("%c Nova Panel %c v8.64.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -8294,7 +8294,7 @@ ${this._htmlDashboardBody()}`;
 
   _presentCycleStart() {
     if (this._presentCycleTimer) return;
-    const every = this._presentCycleMs || 16000;
+    const every = this._presentCycleMs || 9000;
     this._presentCycleTimer = setInterval(() => this._presentAmbient(), every);
     // The first card comes soon after the page opens, not a full round later.
     this._presentFirstTimer = setTimeout(() => this._presentAmbient(), this._presentFirstMs || 15000);
@@ -8584,12 +8584,12 @@ ${this._htmlDashboardBody()}`;
   }
 
   // The next step comes one cycle after this one started (the timer starts
-  // over here). A card stays 15 seconds and the cycle is 16, so the gap
+  // over here). A card stays 8 seconds and the cycle is 9, so the gap
   // between two steps is only a second.
   _presentRestartCycle() {
     if (!this._presentCycleTimer) return;
     clearInterval(this._presentCycleTimer);
-    this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 16000);
+    this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 9000);
   }
 
   async _presentAmbient() {
@@ -8617,7 +8617,7 @@ ${this._htmlDashboardBody()}`;
       this._presentTurn = at + 1;
       const now = Date.now() / 1000;
       this._presentRestartCycle();
-      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 15, data });
+      this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 8, data });
       return;
     }
   }
@@ -10080,15 +10080,15 @@ ${this._htmlDashboardBody()}`;
         padding:14px 18px;border:1px solid var(--line-soft);border-radius:16px;background:var(--surface-2);cursor:pointer;text-align:left}
       .hero-stage.presenting .present-card{display:flex}
       .hero-stage.presenting .hero-copy{display:none}
-      .pc-cap{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+      .pc-cap{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
       .pc-big{font-family:var(--font-display);font-weight:500;line-height:1}
       .pc-fig{font-size:clamp(44px,8cqw,84px);letter-spacing:-.02em;
         background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent}
       .pc-fig::after{content:" " attr(data-unit);font-size:clamp(16px,2.4cqw,22px);letter-spacing:0;-webkit-text-fill-color:var(--gold-pale)}
-      .pc-now{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;color:var(--ink-faint)}
+      .pc-now{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.05em;color:var(--ink-dim)}
       .pc-curve{width:100%;height:28px;display:block}
       .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
-      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint)}
+      .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-mono);font-size:13px;color:var(--ink-dim)}
       .pc-row b{font-weight:500;color:var(--gold-pale)}
       canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
       canvas.core:active{cursor:grabbing}

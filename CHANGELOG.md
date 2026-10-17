@@ -1,3 +1,9 @@
+## [8.64.0] The Command Center rotation is faster and its cards are easier to read
+
+### Changed
+- **The small grey text on the cards is easier to read.** The caption (for example LOCKED), the row labels (Security alarm, Doors) and the small time line now use a lighter grey (contrast 5.8, it was 3.1) and are slightly bigger (11.5 and 13 pixels, were 10.5 and 12). The bright figures are unchanged, and so is the rest of the panel.
+- **Each step of the rotation now lasts 8 seconds, not 15.** A card stays on for 8 seconds and the next step follows one second later (the cycle is 9 seconds, it was 16). The greeting steps move at the same pace. The first card still comes about 15 seconds after the page opens.
+
 ## [8.63.0] The Command Center greets you in different ways
 
 ### Changed

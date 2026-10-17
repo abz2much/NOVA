@@ -1151,7 +1151,7 @@ if (require.main === module) setTimeout(async () => {
           goneAtOnce && seenTicks >= 3 && /^T\d+$/.test(tt) && tt !== "T0" && ticks === after]);
         elNew._presentCycleMs = 40;
         // The next card comes one cycle after the last one STARTED (so a card that
-        // is tapped away early does not push the next one later), and each stays 15 s.
+        // is tapped away early does not push the next one later), and each stays 8 s.
         elNew._presentKinds = () => ({ clk: { html: () => `<div class="pc-cap">NEXT</div>`, ambient: async () => ({}) } });
         if (shown()) card().click();
         clearInterval(elNew._presentCycleTimer);   // a quick first tick to get a card up, then the real cycle
@@ -1160,19 +1160,19 @@ if (require.main === module) setTimeout(async () => {
         const seenCards = [], realOn = elNew._onPresentCard.bind(elNew);
         elNew._onPresentCard = (c) => { seenCards.push(c); return realOn(c); };
         await tick(120);
-        const gap15 = seenCards.length ? Math.round(seenCards[0].expires - seenCards[0].created) : -1;
+        const gapCard = seenCards.length ? Math.round(seenCards[0].expires - seenCards[0].created) : -1;
         card().click();                              // tapped away early
         await tick(100);
         const tooSoon = shown();
         await tick(400);
         const comesBack = shown();
         elNew._onPresentCard = realOn;
-        checks.push(["ambient: an on screen card stays 15 seconds", gap15 === 15]);
+        checks.push(["ambient: an on screen card stays 8 seconds", gapCard === 8]);
         checks.push(["ambient: the next card comes one cycle after the last one started, even if that one was tapped away early",
           tooSoon === false && comesBack === true]);
         const built = fs.readFileSync(path.join(__dirname, "..", "custom_components/nova/frontend/nova-panel.js"), "utf8");
-        checks.push(["ambient: the cycle is 16 seconds, so the next step follows a 15 second card after one second",
-          /this\._presentCycleMs \|\| 16000/.test(built) && !/\|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
+        checks.push(["ambient: the cycle is 9 seconds, so the next step follows an 8 second card after one second",
+          /this\._presentCycleMs \|\| 9000/.test(built) && !/\|\| 16000/.test(built) && !/\|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
         elNew._presentKinds = only("energy");
         elNew._presentCycleMs = 40;
         clearInterval(elNew._presentCycleTimer);
