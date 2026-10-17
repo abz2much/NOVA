@@ -1300,5 +1300,12 @@
   "Disarmed": "Vypnuto",
   "Triggered": "Spuštěno",
   "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "nainstaluje Piper, Whisper a openWakeWord a při příštím restartu sestaví hlasový kanál (Home Assistant OS nebo Supervised)",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Posílat proaktivní upozornění do telefonu místo jejich vyslovení. Kritická bezpečnostní upozornění se dál vyslovují"
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Posílat proaktivní upozornění do telefonu místo jejich vyslovení. Kritická bezpečnostní upozornění se dál vyslovují",
+  "Hi, I'm Nova.": "Ahoj, jsem Nova.",
+  "Nova here.": "Tady Nova.",
+  "At your service.": "K vašim službám.",
+  "All good here.": "Tady je všechno v pořádku.",
+  "Good morning.": "Dobré ráno.",
+  "Good afternoon.": "Dobré odpoledne.",
+  "Good evening.": "Dobrý večer."
 }

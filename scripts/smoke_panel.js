@@ -933,6 +933,7 @@ if (require.main === module) setTimeout(async () => {
       const allKinds = elNew._presentKinds.bind(elNew);
       const only = (...names) => () => { const k = allKinds(); return Object.fromEntries(names.map(n => [n, k[n]])); };
       elNew._presentKinds = only("energy");
+      elNew._presentGreetEvery = 0;   // the greeting step has its own checks below
       let energyCalls = 0, fixture = {
         status: { configured: true, solar: { w: 2500 }, battery: { pct: 80 } },
         today: { configured: true, solar_kwh: 11.2, grid_export_kwh: 3.1, home_kwh: 7.4 },
@@ -952,7 +953,7 @@ if (require.main === module) setTimeout(async () => {
         && t2.includes("3.1 kWh") && t2.includes("7.4 kWh") && t2.includes("2,500 W")]);
       card().click();
       await tick(200);
-      checks.push(["ambient: after a tap it comes round again, so the hero is not only ever Hello", shown()]);
+      checks.push(["ambient: after a tap it comes round again, so the hero is not only ever one greeting", shown()]);
       // Rotation: each kind of card takes its turn, and one with nothing to
       // show is skipped.
       const realKinds = elNew._presentKinds.bind(elNew);
@@ -1170,11 +1171,52 @@ if (require.main === module) setTimeout(async () => {
         checks.push(["ambient: the next card comes one cycle after the last one started, even if that one was tapped away early",
           tooSoon === false && comesBack === true]);
         const built = fs.readFileSync(path.join(__dirname, "..", "custom_components/nova/frontend/nova-panel.js"), "utf8");
-        checks.push(["ambient: the gap between cards is 20 seconds", /this\._presentCycleMs \|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
+        checks.push(["ambient: the cycle is 16 seconds, so the next step follows a 15 second card after one second",
+          /this\._presentCycleMs \|\| 16000/.test(built) && !/\|\| 20000/.test(built) && !/\|\| 90000/.test(built)]);
         elNew._presentKinds = only("energy");
         elNew._presentCycleMs = 40;
         clearInterval(elNew._presentCycleTimer);
         elNew._presentCycleTimer = setInterval(() => elNew._presentAmbient(), 40);
+      }
+      // The hero's greeting is a step in the rotation: every third step is a
+      // fresh greeting (never the same twice running), and a time of day
+      // greeting only comes up at its own hours.
+      {
+        clearInterval(elNew._presentCycleTimer);
+        if (shown()) card().click();
+        await tick(30);
+        const names = (n) => { elNew._presentGreetEvery = n;
+          const was = elNew._presentKinds;
+          elNew._presentKinds = () => ({ a: {}, b: {}, c: {}, d: {} });
+          const out = elNew._presentSteps().map(x => x[0]).join(",");
+          elNew._presentKinds = was; return out; };
+        const every3 = names(3), none = names(0);
+        elNew._presentGreetEvery = 3;
+        elNew._presentTurn = 0;
+        elNew._heroGreeting = "Hello.";
+        await elNew._presentAmbient();
+        const greetStep = !elNew._presenting && !shown() && elNew._heroGreeting !== "Hello." && elNew._presentTurn === 1;
+        await elNew._presentAmbient();
+        const cardStep = shown() && card().textContent.includes("Solar made");
+        elNew._presentGreetEvery = 0;
+        clearInterval(elNew._presentCycleTimer);
+        card().click();
+        elNew._presentCycleTimer = setInterval(() => elNew._presentAmbient(), 40);
+        const poolAt = (h) => { const seen = new Set(); elNew._heroGreeting = ""; for (let i = 0; i < 300; i++) seen.add(elNew._pickGreeting(h)); return seen; };
+        const morning = poolAt(8), afternoon = poolAt(14), evening = poolAt(19), night = poolAt(3);
+        let repeats = 0;
+        elNew._heroGreeting = "";
+        for (let i = 0; i < 300; i++) { const g = elNew._pickGreeting(8); if (g === elNew._heroGreeting) repeats++; elNew._heroGreeting = g; }
+        checks.push(["greeting: it is a step in the rotation, in front of every third card",
+          every3 === "greeting,a,b,c,greeting,d" && none === "a,b,c,d"]);
+        checks.push(["greeting: its step changes the hero word and shows no card, and the next step is a card", greetStep && cardStep]);
+        checks.push(["greeting: the time of day greeting only comes up at its own hours",
+          morning.has("Good morning.") && !morning.has("Good evening.") && !morning.has("Good afternoon.")
+          && afternoon.has("Good afternoon.") && !afternoon.has("Good morning.")
+          && evening.has("Good evening.") && !evening.has("Good afternoon.")
+          && !night.has("Good morning.") && !night.has("Good afternoon.") && !night.has("Good evening.")]);
+        checks.push(["greeting: Hi, I'm Nova is in the pool and it is never the same twice in a row",
+          morning.has("Hi, I'm Nova.") && morning.has("Hello.") && repeats === 0]);
       }
       card().click();
       elNew._liveData.config.hero_card_cycle = false;
@@ -1206,6 +1248,7 @@ if (require.main === module) setTimeout(async () => {
       checks.push(["ambient: off the Command Center the cycle stops and reads nothing", energyCalls === before && !elNew._presentCycleTimer]);
       elNew._presentCycleMs = 0; elNew._presentFirstMs = 0;
       delete elNew._presentKinds;
+      delete elNew._presentGreetEvery;
       elNew._hass.callWS = realWS;
     }
     elNew._liveData.status.sleep = sleepWas;
@@ -4427,10 +4470,11 @@ if (require.main === module) setTimeout(async () => {
     !!elNew.shadowRoot.getElementById("areasGrid") && !elNew.shadowRoot.getElementById("solarPanel")]);
   global.cancelAnimationFrame = _realCaf;
 
-  // The hero types its state word (Hello / Thinking / Goodnight) next to the
+  // The hero types its state word (a greeting / Thinking / Goodnight) next to the
   // head. The scrolling marquee behind it is gone.
   {
-    const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
+    // At rest the word is a greeting from the rotation's pool.
+    const words = { idle: elNew._heroGreeting, reasoning: "Thinking…", asleep: "Goodnight." };
     const want = words[elNew._coreState()];
     // The word is typed a letter at a time; a busy machine can take longer
     // than a fixed pause, so wait (up to 10 s) for it to finish.

@@ -52,7 +52,10 @@
     };
     if (lineEl) this._setText(lineEl, lines[state][0]);
     if (subEl) this._setText(subEl, lines[state][1]);
-    const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
+    // At rest the hero word is a greeting, picked once here and changed by the
+    // rotation (see _presentAmbient), so it is no longer always "Hello".
+    if (!this._heroGreeting) this._heroGreeting = this._pickGreeting();
+    const words = { idle: this._heroGreeting, reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
     this._typeHeroWord(words[state]);

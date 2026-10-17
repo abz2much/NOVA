@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.62.0
+ * v8.63.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.62.0 ",
+      console.log("%c Nova Panel %c v8.63.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -6301,7 +6301,10 @@ ${this._htmlDashboardBody()}`;
     };
     if (lineEl) this._setText(lineEl, lines[state][0]);
     if (subEl) this._setText(subEl, lines[state][1]);
-    const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
+    // At rest the hero word is a greeting, picked once here and changed by the
+    // rotation (see _presentAmbient), so it is no longer always "Hello".
+    if (!this._heroGreeting) this._heroGreeting = this._pickGreeting();
+    const words = { idle: this._heroGreeting, reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
     this._typeHeroWord(words[state]);
@@ -8266,8 +8269,9 @@ ${this._htmlDashboardBody()}`;
   // While the Command Center is open and the house is awake, the cards also
   // come round by themselves, one kind after another (the "Cards on the
   // Command Center" setting, on by default), so the hero is not only ever
-  // "Hello". Energy is the first kind; its figures are read with the Energy
-  // tab's own commands.
+  // one greeting. The greeting is a step in the same rotation: every few
+  // cards the hero word changes to a fresh one (see _pickGreeting). Energy is
+  // the first kind; its figures are read with the Energy tab's own commands.
   // When Nova answers an energy question it publishes a small card of the
   // real figures (nova/subscribe_presentation). The head turns towards the
   // card and the hero copy gives way to it; after the card expires, or when
@@ -8290,7 +8294,7 @@ ${this._htmlDashboardBody()}`;
 
   _presentCycleStart() {
     if (this._presentCycleTimer) return;
-    const every = this._presentCycleMs || 20000;
+    const every = this._presentCycleMs || 16000;
     this._presentCycleTimer = setInterval(() => this._presentAmbient(), every);
     // The first card comes soon after the page opens, not a full round later.
     this._presentFirstTimer = setTimeout(() => this._presentAmbient(), this._presentFirstMs || 15000);
@@ -8552,16 +8556,59 @@ ${this._htmlDashboardBody()}`;
       + (rows.length ? `<div class="pc-rows">${rows.map(([label, value]) => `<div class="pc-row"><span>${label}</span><b>${value}</b></div>`).join("")}</div>` : "");
   }
 
+  // The hero word's greetings. The hour decides which time of day greeting can
+  // come up (none late at night), and it is never the same one twice in a row.
+  _pickGreeting(hour = new Date().getHours()) {
+    // A map with a label each, so the panel's string list picks every greeting up.
+    const g = { hello: "Hello.", intro: "Hi, I'm Nova.", here: "Nova here.", service: "At your service.",
+      calm: "All good here.", morning: "Good morning.", afternoon: "Good afternoon.", evening: "Good evening." };
+    const pool = [g.hello, g.intro, g.here, g.service, g.calm];
+    if (hour >= 5 && hour < 12) pool.push(g.morning);
+    else if (hour >= 12 && hour < 18) pool.push(g.afternoon);
+    else if (hour >= 18 && hour < 22) pool.push(g.evening);
+    const options = pool.filter((g) => g !== this._heroGreeting);
+    return options[Math.floor(Math.random() * options.length)];
+  }
+
+  // One round of the rotation: every kind of card, with a fresh greeting in
+  // front of every third one, so the hero's own word is part of the rotation
+  // and is not just what the head says between cards.
+  _presentSteps() {
+    const every = this._presentGreetEvery === undefined ? 3 : this._presentGreetEvery;
+    const steps = [];
+    Object.entries(this._presentKinds()).forEach(([kind, def], i) => {
+      if (every > 0 && i % every === 0) steps.push(["greeting", null]);
+      steps.push([kind, def]);
+    });
+    return steps;
+  }
+
+  // The next step comes one cycle after this one started (the timer starts
+  // over here). A card stays 15 seconds and the cycle is 16, so the gap
+  // between two steps is only a second.
+  _presentRestartCycle() {
+    if (!this._presentCycleTimer) return;
+    clearInterval(this._presentCycleTimer);
+    this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 16000);
+  }
+
   async _presentAmbient() {
     const cfg = this._liveData?.config || {};
     if (cfg.hero_card_cycle === false || this._currentTab !== "dashboard") return;
     if (this._presenting || this._coreState() !== "idle" || document.hidden) return;
     const token = this._presentToken;
-    const kinds = Object.entries(this._presentKinds());
-    // Each round starts at the next kind; one with nothing to show is skipped.
-    for (let i = 0; i < kinds.length; i++) {
-      const at = ((this._presentTurn || 0) + i) % kinds.length;
-      const [kind, def] = kinds[at];
+    const steps = this._presentSteps();
+    // Each round starts at the next step; a card with nothing to show is skipped.
+    for (let i = 0; i < steps.length; i++) {
+      const at = ((this._presentTurn || 0) + i) % steps.length;
+      const [kind, def] = steps[at];
+      if (kind === "greeting") {
+        this._presentTurn = at + 1;
+        this._heroGreeting = this._pickGreeting();
+        this._typeHeroWord(this._heroGreeting);
+        this._presentRestartCycle();
+        return;
+      }
       let data = null;
       try { data = await def.ambient(); } catch (_) { /* no card of this kind this time */ }
       // Gone, or busy with a real card, while the figures were being read.
@@ -8569,12 +8616,7 @@ ${this._htmlDashboardBody()}`;
       if (!data || !def.html(data)) continue;
       this._presentTurn = at + 1;
       const now = Date.now() / 1000;
-      // Each one stays 15 seconds, and the next comes 20 seconds after this one
-      // started (the timer starts over here), so the head is alone for 5.
-      if (this._presentCycleTimer) {
-        clearInterval(this._presentCycleTimer);
-        this._presentCycleTimer = setInterval(() => this._presentAmbient(), this._presentCycleMs || 20000);
-      }
+      this._presentRestartCycle();
       this._onPresentCard({ v: 1, kind, id: `ambient-${kind}-${Date.now()}`, created: now, expires: now + 15, data });
       return;
     }

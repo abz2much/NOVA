@@ -1,3 +1,11 @@
+## [8.63.0] The Command Center greets you in different ways
+
+### Changed
+- **The hero word is no longer always "Hello."** It now picks from a short list: "Hello.", "Hi, I'm Nova.", "Nova here.", "At your service.", "All good here.", and "Good morning.", "Good afternoon." or "Good evening." at the right hours. It never picks the same one twice in a row. "Thinking…" and "Goodnight." are unchanged.
+- **The greeting is now part of the rotation.** Before, the head sat alone for 5 seconds between cards and said "Hello." Now the rotation has a greeting step in front of every third card, and a card is followed by the next step after one second (the cycle is 16 seconds, a card stays 15).
+- **Translations:** the new greetings are translated in the eleven complete panel languages. In the other nine they stay English for now, like "Hello." and "Goodnight."
+- **Unchanged:** the "Cards on the Command Center" setting still turns the rotation off. With it off, the hero keeps one greeting, picked when the page opens.
+
 ## [8.62.0] Tool and service errors no longer pass raw error text on
 
 ### Changed
