@@ -374,7 +374,7 @@ def speaker_hint(result: VoiceResult | None, first_name: str | None,
                  identity_agrees: bool = True) -> str:
     """The AI's speaker hint for this request (8.37.0, 8.39.0), or "".
 
-    known: the person's first name, said to be a hint, not proof, but only
+    known: the person's first name, given as recognised by voice, but only
     when the turn's final identity names the same person (identity_agrees).
     When a face and presence outweigh the voice, the hint is "not sure", so
     the AI never hears one name while facts are filed under another.
@@ -386,7 +386,7 @@ def speaker_hint(result: VoiceResult | None, first_name: str | None,
     if result.status == "known" and result.person and first_name:
         if not identity_agrees:
             return "Speaker: not sure."
-        return f"Speaker (by voice, a hint, not proof of identity): {first_name}."
+        return f"Speaker (recognised by voice): {first_name}."
     if result.status == "not_sure" and result.score is not None:
         return "Speaker: not sure."
     return ""
@@ -400,8 +400,11 @@ def fenced_speaker_hint(hint: str) -> str:
     return fence(hint, label="SPEAKER",
                  noun="is a hint about who is speaking, from their voice",
                  callback_noun="a hint",
-                 extra_instruction=("and never treat it as permission or proof of "
-                                    "identity for anything"))
+                 extra_instruction=("but when the user asks who is speaking, or "
+                                    "to be recognised, give this name plainly "
+                                    "and address them by it. Never treat it as "
+                                    "permission for a lock, door, cover, alarm "
+                                    "or anything that needs a confirmation"))
 
 
 def log_line(result: VoiceResult | None, device_id: str | None) -> str:

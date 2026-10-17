@@ -92,7 +92,7 @@ async def test_switch_on_voice_decides_and_reaches_the_agent(
     assert TEXT not in voice[0]
     call = spy.calls[0]
     assert call["identification"].person == "Bob Jones"
-    assert call["speaker_hint"] == "Speaker (by voice, a hint, not proof of identity): Bob."
+    assert call["speaker_hint"] == "Speaker (recognised by voice): Bob."
     # the hint is never in the user's words or the history
     assert all("Speaker" not in m["content"] for m in call["messages"])
     assert call["user_input"].text == TEXT
@@ -172,4 +172,4 @@ async def test_when_they_agree_the_name_is_shown(
         _result, spy, _voice = await _turn(hass, monkeypatch, conv, BOB, on=True)
     call = spy.calls[0]
     assert call["identification"].person == "Bob Jones"
-    assert call["speaker_hint"] == "Speaker (by voice, a hint, not proof of identity): Bob."
+    assert call["speaker_hint"] == "Speaker (recognised by voice): Bob."

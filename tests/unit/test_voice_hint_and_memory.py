@@ -10,7 +10,7 @@ import pytest
 
 from fakes import FakeHass, FakeUserInput
 
-HINT = "Speaker (by voice, a hint, not proof of identity): Bob."
+HINT = "Speaker (recognised by voice): Bob."
 
 
 class _Client:

@@ -1,3 +1,8 @@
+## [8.58.8] Nova answers "who am I?" with the name Voice ID gave
+
+### Changed
+- **Nova hedged even when Voice ID named the speaker.** The hint told the AI the name was "a hint, not proof of identity", and the AI repeated that to a plain "who am I?" ("I cannot verify it"). The hint now reads "recognised by voice", and when someone asks who is speaking the AI is told to give the name plainly and use it. Nothing about safety changed: the name is still never permission for a lock, door, cover, alarm or anything that needs a confirmation, and those still need your phone. When Voice ID is unsure, the hint is still "not sure".
+
 ## [8.58.7] The Faces tab survives a restart, and camera bytes are checked
 
 ### Fixed
