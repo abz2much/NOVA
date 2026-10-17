@@ -61,3 +61,10 @@ def safe_error_message(exc: BaseException, *, where: str = "",
         if text:
             return f"{name}: {text}"[:_MAX_LEN]
     return f"{name} (details are in the Home Assistant log)"
+
+
+def tool_error_text(exc: BaseException, where: str) -> str:
+    """The error text for an agent tool reply: logged in full, type name only
+    in the reply. A Home Assistant error keeps its own text, which Home
+    Assistant's chat log hands the model for any of its own tools too."""
+    return safe_error_message(exc, where=where, log=True, keep_ha_text=True)

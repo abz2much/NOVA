@@ -7,6 +7,8 @@ from typing import Optional
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -67,7 +69,7 @@ async def _exec_set_mode(hass: HomeAssistant, args: dict, device_id: Optional[st
             })
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "set_mode")})
 
 
 async def _exec_acknowledge_alert(hass: HomeAssistant, args: dict,
@@ -94,7 +96,7 @@ async def _exec_acknowledge_alert(hass: HomeAssistant, args: dict,
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "failed",
                                              reason_code="acknowledge_failed"))
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "acknowledge_alert")})
 
 
 async def _exec_dismiss_intrusion(hass: HomeAssistant, args: dict,
@@ -160,4 +162,4 @@ async def _exec_dismiss_intrusion(hass: HomeAssistant, args: dict,
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "failed",
                                              reason_code="dismiss_failed"))
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "dismiss_intrusion")})

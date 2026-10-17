@@ -8,6 +8,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
 from . import memory as _memory
 
 # The whole agent logs as ...nova.agent, the name it always had, so filters
@@ -229,7 +230,7 @@ async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:
     try:
         area, members = _area_members(hass, wanted)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "get_area_devices")})
     if area is None:
         return json.dumps({"error": f"Area '{wanted}' not found"})
     return json.dumps({"area": area.name, "device_count": len(members),
@@ -284,4 +285,4 @@ async def _exec_activity_history(hass: HomeAssistant, args: dict) -> str:
                 hass, entity=entity, area=args.get("area"), hours=hours)
         return json.dumps(found)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "activity_history")})

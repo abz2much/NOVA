@@ -7,6 +7,8 @@ import time
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -18,7 +20,7 @@ async def _exec_who_do_you_see(hass: HomeAssistant, args: dict) -> str:
         from ... import recognition
         return json.dumps(await hass.async_add_executor_job(recognition.who_do_you_see, hass))
     except Exception as exc:
-        return json.dumps({"error": str(exc), "seen": [], "any": False})
+        return json.dumps({"error": tool_error_text(exc, "who_do_you_see"), "seen": [], "any": False})
 
 
 async def _analyze_camera(hass, entity_id: str, prompt: str, announce: bool,
@@ -78,7 +80,7 @@ async def _exec_look_at_camera(hass: HomeAssistant, args: dict) -> str:
                 pass
         return _shape_look_at_camera_result(result, entity_id)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "look_at_camera")})
 
 
 _SCENE_OFF = ("Scene memory is off. Turn on Scene memory in Settings if you "
@@ -128,7 +130,7 @@ async def _exec_where_last_seen(hass: HomeAssistant, args: dict) -> str:
             "note": "From a past camera description, not a live view.",
         })
     except Exception as exc:
-        return json.dumps({"error": str(exc), "found": False})
+        return json.dumps({"error": tool_error_text(exc, "where_last_seen"), "found": False})
 
 
 async def _exec_what_changed(hass: HomeAssistant, args: dict) -> str:
@@ -162,4 +164,4 @@ async def _exec_what_changed(hass: HomeAssistant, args: dict) -> str:
                        note="Word level comparison of past camera descriptions.")
         return json.dumps(out)
     except Exception as exc:
-        return json.dumps({"error": str(exc), "found": False})
+        return json.dumps({"error": tool_error_text(exc, "what_changed"), "found": False})

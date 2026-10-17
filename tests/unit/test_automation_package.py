@@ -43,6 +43,7 @@ ALLOWED_INTERNAL = {
 ALLOWED_OUTSIDE = {"action_log", "decision_record", "nova_config", "identity",
                    "knowledge", "person_patterns", "runtime", "websocket",
                    "audio_routing",  # shared entity-to-area resolver
+                   "safe_errors",   # short safe error text
                    "cognitive",   # Phase 8: pure routine scoring
                    "persistence",   # Phase 9: schema owner
                    "paths"}   # v8.5.0: config directory owner

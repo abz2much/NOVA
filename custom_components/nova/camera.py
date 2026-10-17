@@ -30,6 +30,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, Event, callback
 from homeassistant.components.camera import async_get_image as camera_get_image
 from homeassistant.helpers import entity_registry as er, device_registry as dr
 
+from .safe_errors import safe_error_message
 from .camera_backends import find_backend
 from .const import DEFAULT_VISION_MODEL, DOMAIN
 from .database import save_message
@@ -921,7 +922,7 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
             return {"success": False, "error": friendly, "camera": camera_name}
         _LOGGER.error("Nova vision error (%s/%s): %s", vision_provider, vision_model, exc)
         _nova_log(f"{camera_name}: vision error ({vision_provider}/{vision_model}) — {exc}")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": safe_error_message(exc)}
 
     det_type = _guess_detection_type(prompt, analysis)
     reasoning_provider = _cfg_opt(hass, "camera_reasoning_provider", "groq") or "groq"

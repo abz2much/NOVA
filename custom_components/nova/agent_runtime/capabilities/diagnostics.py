@@ -6,6 +6,8 @@ import logging
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -22,7 +24,7 @@ async def _exec_cognitive_status(hass: HomeAssistant, args: dict) -> str:
             analyzer.get_stats)
         return json.dumps(status)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "cognitive_status")})
 
 
 async def _exec_connectivity_status(hass: HomeAssistant, args: dict) -> str:
@@ -31,7 +33,7 @@ async def _exec_connectivity_status(hass: HomeAssistant, args: dict) -> str:
         from ... import connectivity
         return json.dumps(connectivity.status())
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "connectivity_status")})
 
 
 async def _exec_root_cause(hass: HomeAssistant, args: dict) -> str:
@@ -81,4 +83,4 @@ async def _exec_system_diagnostics(hass: HomeAssistant, args: dict) -> str:
         res = await diagnostics.run_service_health(hass)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "system_diagnostics")})

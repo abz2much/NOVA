@@ -338,7 +338,7 @@ def test_agenda_never_raises_on_gather_failure(cm, cfg, fake_hass, monkeypatch):
         raise RuntimeError("calendar exploded")
     monkeypatch.setattr(cm, "gather_events", boom)
     assert cm.agenda(fake_hass) == {"events": [], "conflicts": [], "count": 0,
-                                    "error": "calendar exploded"}
+                                    "error": "RuntimeError (details are in the Home Assistant log)"}
 
 
 def test_agenda_config_failure_uses_default(cm, fake_hass, load, monkeypatch):

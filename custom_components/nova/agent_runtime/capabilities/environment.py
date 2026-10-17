@@ -6,6 +6,8 @@ import logging
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -31,7 +33,7 @@ async def _exec_wellbeing_context(hass: HomeAssistant, args: dict) -> str:
         res = await hass.async_add_executor_job(biometrics.wellbeing_context, hass)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "wellbeing_context")})
 
 
 async def _exec_energy_status(hass: HomeAssistant, args: dict) -> str:
@@ -40,7 +42,7 @@ async def _exec_energy_status(hass: HomeAssistant, args: dict) -> str:
         from ... import energy
         return json.dumps(await hass.async_add_executor_job(energy.power_status, hass))
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "energy_status")})
 
 
 async def _exec_solar_status(hass: HomeAssistant, args: dict) -> str:
@@ -52,7 +54,7 @@ async def _exec_solar_status(hass: HomeAssistant, args: dict) -> str:
         res = await solar.solar_status(hass)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "solar_status")})
 
 
 async def _exec_energy_report(hass: HomeAssistant, args: dict) -> str:
@@ -64,7 +66,7 @@ async def _exec_energy_report(hass: HomeAssistant, args: dict) -> str:
         res = await solar.daily_report(hass)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "energy_report")})
 
 
 async def _exec_energy_outlook(hass: HomeAssistant, args: dict) -> str:
@@ -80,7 +82,7 @@ async def _exec_energy_outlook(hass: HomeAssistant, args: dict) -> str:
         res = await energy_outlook.energy_outlook_status(hass, hours=hours)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "energy_outlook")})
 
 
 async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
@@ -92,7 +94,7 @@ async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
         from ... import hazard_monitor
         return json.dumps(await hazard_monitor.scan_now(hass))
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "hazard_report")})
 
 
 _FORECAST_KINDS = ("hourly", "daily", "twice_daily")
@@ -160,4 +162,4 @@ async def _exec_weather_forecast(hass: HomeAssistant, args: dict) -> str:
             "note": _FORECAST_NOTE,
         })
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "weather_forecast")})

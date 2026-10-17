@@ -43,6 +43,15 @@ class AutomationWriteError(Exception):
         self.reason_code = reason_code
 
 
+def _reply_text(exc: BaseException) -> str:
+    """Reply text for a failed install. An AutomationWriteError is Nova's own
+    message; anything else is reduced to its type name (full detail is logged)."""
+    if isinstance(exc, AutomationWriteError):
+        return str(exc)
+    from ..safe_errors import safe_error_message
+    return safe_error_message(exc)
+
+
 class _AlreadyInstalled(Exception):
     """The exact automation is already in automations.yaml."""
 
@@ -443,7 +452,7 @@ async def create_automation(
     except Exception as exc:
         _LOGGER.error("Nova automation creation failed: %s", exc)
         await _audit_failure(getattr(exc, "reason_code", "") or "write_or_reload_failed")
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": _reply_text(exc)}
 
 
 def _named_alias(hass: HomeAssistant, alias: str, details: Any) -> str:
@@ -588,4 +597,4 @@ async def install_approved_suggestion(
                 "alias": result["alias"], "suggestion_id": suggestion_id}
     except Exception as exc:
         _LOGGER.exception("install_approved_suggestion failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": _reply_text(exc)}

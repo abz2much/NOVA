@@ -11,6 +11,7 @@ import logging
 
 from homeassistant.core import HomeAssistant, ServiceCall
 
+from .safe_errors import safe_error_message
 from .const import NOVA_PERSONA  # noqa: F401
 from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
@@ -90,7 +91,7 @@ async def async_summarise(hass: HomeAssistant, call: ServiceCall, groq_client,
         summary = result.text.strip()
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("Nova: conversation summary failed: %s", exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": safe_error_message(exc)}
 
     if store:
         await hass.async_add_executor_job(

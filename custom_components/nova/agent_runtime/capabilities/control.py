@@ -9,6 +9,7 @@ from typing import Optional
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
 from ..presentation import display_name
 from .home import area_entity_ids
 
@@ -402,7 +403,8 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict,
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
         )
-        return json.dumps({"error": str(exc), "status": "error", "success": False,
+        return json.dumps({"error": tool_error_text(exc, "run_scene_script"),
+                            "status": "error", "success": False,
                             "entity_id": entity_id})
 
 
@@ -553,7 +555,7 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict,
         except Exception as exc:
             # Phase 3: an immediate service-call exception is now recorded,
             # not silently swallowed.
-            failed.append({"entity_id": eid, "error": str(exc)})
+            failed.append({"entity_id": eid, "error": tool_error_text(exc, "bulk_control")})
             await hass.async_add_executor_job(
                 lambda rid=row_id: action_log.set_execution(rid, "failed", reason_code="service_call_failed")
             )

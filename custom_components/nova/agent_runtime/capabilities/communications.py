@@ -6,6 +6,8 @@ import logging
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -27,7 +29,7 @@ async def _exec_web_research(hass: HomeAssistant, args: dict) -> str:
             pass
         return json.dumps(result)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "web_research")})
 
 
 async def _exec_calendar_agenda(hass: HomeAssistant, args: dict) -> str:
@@ -37,7 +39,7 @@ async def _exec_calendar_agenda(hass: HomeAssistant, args: dict) -> str:
         horizon = int(args.get("horizon_hours", 24) or 24)
         return json.dumps(comms.agenda(hass, horizon))
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "calendar_agenda")})
 
 
 async def _exec_read_email(hass: HomeAssistant, args: dict) -> str:
@@ -51,4 +53,4 @@ async def _exec_read_email(hass: HomeAssistant, args: dict) -> str:
             hass, limit=limit, unread_only=unread_only, folder=folder)
         return json.dumps(result)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "read_email")})

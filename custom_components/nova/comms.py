@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
+from .safe_errors import safe_error_message
 
 _DEFAULT_TIGHT_GAP_MIN = 15
 
@@ -161,4 +162,5 @@ def agenda(hass, horizon_hours: int = 24) -> dict:
 
         return {"events": lines, "conflicts": conflicts, "count": len(kept)}
     except Exception as exc:  # noqa: BLE001 - the agenda must never raise
-        return {"events": [], "conflicts": [], "count": 0, "error": str(exc)}
+        return {"events": [], "conflicts": [], "count": 0,
+                "error": safe_error_message(exc, where="agenda", log=True)}

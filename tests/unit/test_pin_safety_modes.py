@@ -169,7 +169,7 @@ async def test_a_dismiss_that_errors_is_audited_as_failed_and_keeps_the_investig
         raise RuntimeError("disk full")
     monkeypatch.setattr(intrusion, "dismiss_intrusion", boom)
     res = json.loads(await sm._exec_dismiss_intrusion(FakeHass(), {}, user_id="u1"))
-    assert res == {"error": "disk full"}
+    assert res == {"error": "RuntimeError (details are in the Home Assistant log)"}
     assert core.safety_mgr._investigation is not None
     assert audit["execution"] == [(1, "failed", "dismiss_failed")]
 
@@ -194,7 +194,8 @@ async def test_a_failed_acknowledge_is_audited_as_failed(sm, intrusion, audit, c
     monkeypatch.setattr(intrusion, "acknowledge",
                         lambda reason="": (_ for _ in ()).throw(RuntimeError("x")))
     res = json.loads(await sm._exec_acknowledge_alert(FakeHass(), {}))
-    assert res == {"error": "x"} and intrusion.is_acknowledged() is False
+    assert res == {"error": "RuntimeError (details are in the Home Assistant log)"}
+    assert intrusion.is_acknowledged() is False
     assert audit["start"][0]["source"] == "chat"
     assert audit["execution"] == [(1, "failed", "acknowledge_failed")]
 

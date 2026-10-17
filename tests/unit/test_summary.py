@@ -179,7 +179,7 @@ async def test_model_failure(env, fake_hass):
     env.history = MSGS
     env.chat_exc = RuntimeError("provider unreachable")
     res = await env.mod.async_summarise(fake_hass, _call(), None, "x", "tts.voice", [])
-    assert res == {"success": False, "error": "provider unreachable"}
+    assert res == {"success": False, "error": "RuntimeError (details are in the Home Assistant log)"}
     assert env.stored == [] and env.spoken == []
 
 
@@ -190,7 +190,7 @@ async def test_reply_without_text_is_a_failure(env, fake_hass, monkeypatch):
         return {"text": "dict, not an object"}
     sys.modules["jc.providers.activity"].execute_chat = odd
     res = await env.mod.async_summarise(fake_hass, _call(), None, "x", None, [])
-    assert res["success"] is False and "text" in res["error"]
+    assert res["success"] is False and res["error"].startswith("AttributeError")
 
 
 async def test_language_block_receives_the_built_prompt(env, fake_hass, load, monkeypatch):
