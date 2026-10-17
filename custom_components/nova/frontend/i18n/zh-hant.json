@@ -1295,5 +1295,12 @@
   "Disarmed": "已解除",
   "Triggered": "已觸發",
   "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "在下次重新啟動時安裝 Piper、Whisper 和 openWakeWord 並建立語音管線（僅限 Home Assistant OS 或 Supervised）",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "將主動警報推送到手機，而不是播報出來。關鍵安全警報仍會播報"
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "將主動警報推送到手機，而不是播報出來。關鍵安全警報仍會播報",
+  "Hi, I'm Nova.": "你好，我是 Nova。",
+  "Nova here.": "Nova 在這裡。",
+  "At your service.": "隨時為您效勞。",
+  "All good here.": "這裡一切正常。",
+  "Good morning.": "早安。",
+  "Good afternoon.": "午安。",
+  "Good evening.": "晚上好。"
 }

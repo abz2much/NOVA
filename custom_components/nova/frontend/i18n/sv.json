@@ -1300,5 +1300,12 @@
   "Disarmed": "Avlarmad",
   "Triggered": "Utlöst",
   "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installerar Piper, Whisper och openWakeWord och bygger röstpipelinen vid nästa omstart (Home Assistant OS eller Supervised)",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Skicka proaktiva varningar till telefonen i stället för att säga dem. Kritiska säkerhetsvarningar sägs fortfarande högt"
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Skicka proaktiva varningar till telefonen i stället för att säga dem. Kritiska säkerhetsvarningar sägs fortfarande högt",
+  "Hi, I'm Nova.": "Hej, jag är Nova.",
+  "Nova here.": "Nova här.",
+  "At your service.": "Till din tjänst.",
+  "All good here.": "Allt är lugnt här.",
+  "Good morning.": "God morgon.",
+  "Good afternoon.": "God eftermiddag.",
+  "Good evening.": "God kväll."
 }

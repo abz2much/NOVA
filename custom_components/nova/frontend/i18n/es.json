@@ -1300,5 +1300,12 @@
   "Disarmed": "Desarmada",
   "Triggered": "Disparada",
   "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instala Piper, Whisper y openWakeWord y crea la canalización de voz en el próximo reinicio (Home Assistant OS o Supervised)",
-  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Envía las alertas proactivas al móvil en lugar de decirlas. Las alertas de seguridad críticas se siguen anunciando"
+  "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak": "Envía las alertas proactivas al móvil en lugar de decirlas. Las alertas de seguridad críticas se siguen anunciando",
+  "Hi, I'm Nova.": "Hola, soy Nova.",
+  "Nova here.": "Aquí Nova.",
+  "At your service.": "A tu servicio.",
+  "All good here.": "Todo en orden.",
+  "Good morning.": "Buenos días.",
+  "Good afternoon.": "Buenas tardes.",
+  "Good evening.": "Buenas noches."
 }
