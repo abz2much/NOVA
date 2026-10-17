@@ -11,6 +11,7 @@ the agent:
 * commands for one device, every device of a kind, or every device of a
   kind in a room;
 * scenes and scripts by name, and "goodnight";
+* "full banter", "dry banter" or "plain banter", which sets the banter level;
 * the appliance monitor, "and ..." follow ups, and a bare device name.
 
 Every command first asks policy whether it may run without a confirmation.
@@ -256,6 +257,8 @@ _READ_ONLY_RE = re.compile(
     r"|\b(?:read[\s-]?only|just\s+(?:list|tell|show))\b")
 
 _GOODNIGHT_RE = r"^good\s*night(?:\s+nova)?$"
+_BANTER_RE = (r"^(?:(?:hey\s+)?nova,?\s+)?(plain|dry|full)\s+banter"
+              r"(?:\s+please)?(?:,?\s+nova)?$")
 _FOLLOW_UP_RE = r"^(?:also|and|now)\s+"
 _APPLIANCE_RE = (r"(?:let\s+me\s+know|tell\s+me|notify\s+me|alert\s+me)"
                  r".*(?:when|if).*(?:laundry|wash|dryer|dry|dishwasher|dishes)"
@@ -1403,6 +1406,51 @@ async def _goodnight(hass, addr: str, device_id):
         success=True)
 
 
+_BANTER_NAMES = ("plain", "dry", "full")
+_BANTER_REPLIES = (
+    "Plain banter{addr}. Facts only from here.",
+    "Dry banter{addr}. As you were.",
+    "Full banter{addr}. Do try to keep up.",
+)
+
+
+def _level(value, default: int = 1) -> int:
+    try:
+        return max(0, min(2, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+async def _banter(hass, word: str, addr: str) -> LocalResult:
+    """"Full banter", "dry banter", "plain banter": save the banter level
+    where the panel saves it (the live runtime config and config.json), and
+    say so. A mode with its own tone (movie is plain, party is full) still
+    wins until it ends, so the reply says that and the setting is saved
+    anyway."""
+    from . import modes, nova_config
+    level = _BANTER_NAMES.index(word)
+    forced = modes.mode_banter_level()
+    forced = None if forced is None else _level(forced)
+    if _level(nova_config.get("banter_level", None)) == level and forced in (None, level):
+        return LocalResult(text=f"Already on {word} banter{addr}.", success=True)
+    try:
+        from .runtime import domain_runtime_config
+        domain_runtime_config(hass)["banter_level"] = level
+    except Exception as exc:
+        _LOGGER.debug("Banter: no live runtime config: %s", exc)
+    saved = await hass.async_add_executor_job(nova_config.set, "banter_level", level)
+    _LOGGER.info("Local: banter level set to %d by request", level)
+    if forced is not None and forced != level:
+        text = (f"Saved{addr}. {modes.active_mode().capitalize()} mode keeps me on "
+                f"{_BANTER_NAMES[forced]} banter until it ends.")
+    else:
+        text = _BANTER_REPLIES[level].format(addr=addr)
+    if not saved:
+        _LOGGER.warning("Banter level %d applied but not saved to disk", level)
+        text += " I couldn't save it, so it resets on restart."
+    return LocalResult(text=text, success=True)
+
+
 def _action_args(action: str, groups: tuple) -> dict:
     """Numbers spoken with the command: a brightness, a temperature or a
     volume."""
@@ -1540,6 +1588,10 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
     if re.search(_GOODNIGHT_RE, normalized):
         outcome = await _goodnight(hass, addr, device_id)
         return None if outcome is _DEFER else outcome
+
+    banter = re.search(_BANTER_RE, normalized)
+    if banter:
+        return await _banter(hass, banter.group(1), addr)
 
     outcome = await _single(hass, normalized, honorific, aliases, device_id)
     if outcome is _DEFER:

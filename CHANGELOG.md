@@ -1,3 +1,11 @@
+## [8.65.0] Change Nova's banter by voice
+
+### Added
+- **Say "full banter", "dry banter" or "plain banter".** Nova changes its banter level and answers in kind, for example "Full banter, sir. Do try to keep up." It works by voice and in the Chat tab, with or without "Nova" in front, and needs no AI, so it also works offline.
+- **It saves the same setting as the panel.** The Banter level under Settings changes too, and the choice survives a restart.
+- **A mode with its own tone still wins.** In movie mode, for example, Nova saves your choice and says "Saved, sir. Movie mode keeps me on plain banter until it ends." Your level applies once the mode ends.
+- **Unchanged:** urgent and serious messages are always plain, whatever the level.
+
 ## [8.64.0] The Command Center rotation is faster and its cards are easier to read
 
 ### Changed
