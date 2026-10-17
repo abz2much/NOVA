@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
 from ...persistence.files import CORRUPT, OK, read_json, write_json_atomic
 from ... import paths
 from typing import Optional
@@ -271,7 +272,7 @@ async def _exec_ignore(hass: HomeAssistant, args: dict) -> str:
         )
         return json.dumps(result)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "ignore")})
 
 
 async def _exec_unignore(hass: HomeAssistant, args: dict) -> str:
@@ -281,7 +282,7 @@ async def _exec_unignore(hass: HomeAssistant, args: dict) -> str:
         result = cognitive_core.unignore(args.get("entity_pattern", ""))
         return json.dumps(result)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "unignore")})
 
 
 async def _exec_search_documents(hass: HomeAssistant, args: dict) -> str:
@@ -306,7 +307,7 @@ async def _exec_search_documents(hass: HomeAssistant, args: dict) -> str:
             pass
         return json.dumps({"results": hits})
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "search_documents")})
 
 
 async def _exec_ingest_documents(hass: HomeAssistant, args: dict) -> str:
@@ -325,4 +326,4 @@ async def _exec_ingest_documents(hass: HomeAssistant, args: dict) -> str:
             pass
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "ingest_documents")})

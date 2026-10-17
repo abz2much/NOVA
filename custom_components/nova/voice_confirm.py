@@ -31,6 +31,7 @@ from typing import Optional, Sequence
 
 from homeassistant.core import callback
 
+from .safe_errors import safe_error_message
 from .answers import NO as _SHARED_NO, YES as _SHARED_YES
 
 _LOGGER = logging.getLogger(__name__)
@@ -519,7 +520,7 @@ async def ask_followup(hass, question: str, *, turn_context: str = "",
         await _start_listening(hass, satellite)
     except Exception as exc:
         _LOGGER.warning("voice_confirm.ask_followup failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": safe_error_message(exc)}
     return {"ok": True, "mode": "gated", "satellite": satellite}
 
 
@@ -538,7 +539,7 @@ async def announce_test(hass, satellite: Optional[str] = None) -> dict:
             {"entity_id": target, "message": "Nova voice output test."},
             blocking=True)
     except Exception as exc:
-        return {"ok": False, "error": str(exc),
+        return {"ok": False, "error": safe_error_message(exc, where="announce_test", log=True),
                 "note": "assist_satellite.announce failed — use gated mode."}
     return {"ok": True, "satellite": target,
             "note": "Announce fired. If you heard it on your speaker, native "

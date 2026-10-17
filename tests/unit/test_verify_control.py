@@ -347,7 +347,7 @@ async def test_bulk_control_records_immediate_exceptions_not_swallowed(agent, fa
     import json
     result = json.loads(out)
     assert result["count"] == 1
-    assert result["failed"] == [{"entity_id": "light.b", "error": "light.b offline"}]
+    assert result["failed"] == [{"entity_id": "light.b", "error": "RuntimeError (details are in the Home Assistant log)"}]
     fake_hass.close_pending()
 
 

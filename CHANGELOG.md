@@ -1,3 +1,10 @@
+## [8.62.0] Tool and service errors no longer pass raw error text on
+
+### Changed
+- **The AI's tool replies and a few service results now give a short safe error.** When a tool failed, the reply carried the raw error text, which can include file paths, host names or library detail. It now says the error type, for example "KeyError (details are in the Home Assistant log)", and the full error goes to the log. Home Assistant's own error messages are kept as they are, because Home Assistant gives the AI the same text for its own tools. Nova's own fixed messages (for example from the automation installer) are kept too.
+- **Where this applies:** all the agent tools (control, home, cameras, memory, environment, safety modes, communications, automation, diagnostics) and the results of the camera analysis, goals, follow ups, agenda, conversation summary, voice confirmation test and automation install.
+- **Not changed:** the error detail on the panel's health pages (setup health, service health, speech to text, embeddings). It is short, already hides your host address, and tells you why something is down.
+
 ## [8.61.0] The unused local voice command code is removed
 
 ### Removed

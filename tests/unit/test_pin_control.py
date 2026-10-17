@@ -287,7 +287,7 @@ async def test_bulk_lock_only_touches_unlocked_locks_and_counts_failures(ctl, ha
     res = json.loads(await ctl._exec_bulk_control(hass, {"domain": "lock", "action": "lock"}))
     assert _calls(hass) == [("lock", "lock", {"entity_id": "lock.back_door"})]
     assert res["count"] == 1 and res["total"] == 2
-    assert res["failed"] == [{"entity_id": "lock.shed", "error": "out of range"}]
+    assert res["failed"] == [{"entity_id": "lock.shed", "error": "RuntimeError (details are in the Home Assistant log)"}]
     assert "1 failed" in res["message"]
     hass.close_pending()
 

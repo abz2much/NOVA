@@ -79,7 +79,8 @@ async def test_tool_failure_is_json_not_a_raise(load, monkeypatch):
     async def status(hass, hours=2):
         raise RuntimeError("boom")
     monkeypatch.setattr(eo, "energy_outlook_status", status)
-    assert json.loads(await env._exec_energy_outlook(FakeHass(), {})) == {"error": "boom"}
+    assert json.loads(await env._exec_energy_outlook(FakeHass(), {})) == {
+        "error": "RuntimeError (details are in the Home Assistant log)"}
 
 
 # ── the proactive hook ─────────────────────────────────────────────────────

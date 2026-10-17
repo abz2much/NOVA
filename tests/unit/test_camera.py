@@ -952,7 +952,8 @@ async def test_analyse_vision_errors(cam, env, monkeypatch):
     env.cfg.update(vision_provider="groq", vision_model="text-only")
     env.chat.replies[:] = [RuntimeError("rate limited")]
     res = await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
-    assert res == {"success": False, "error": "rate limited"}
+    assert res == {"success": False,
+                   "error": "RuntimeError (details are in the Home Assistant log)"}
     assert env.logs[-1] == ("CAMERA", "Porch: vision error (groq/text-only) — rate limited")
     monkeypatch.setattr(cam, "_vision_model_rejects_images", lambda exc: True)
     env.chat.replies[:] = [RuntimeError("400")]

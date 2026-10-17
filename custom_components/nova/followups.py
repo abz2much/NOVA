@@ -14,6 +14,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
 
+from .safe_errors import safe_error_message
 from . import paths
 from .persistence import sqlite as _store
 
@@ -84,7 +85,7 @@ def schedule(instruction: str, delay_minutes: float, *, context: str = "",
         return {"id": new_id, "due_ts": _stamp(due), "instruction": text}
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Nova follow-ups: could not schedule: %s", exc)
-        return {"error": str(exc)}
+        return {"error": safe_error_message(exc)}
 
 
 def pending(*, now: Optional[datetime] = None, due_only: bool = False,

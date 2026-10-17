@@ -18,6 +18,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
 
+from .safe_errors import safe_error_message
 from . import paths
 from .persistence import sqlite as _store
 
@@ -140,7 +141,7 @@ def create(title: str, outcome: str, steps: Optional[list] = None, *,
                 "next_check_ts": stamp, "deadline_ts": deadline_ts}
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Nova goals: could not create goal: %s", exc)
-        return {"error": str(exc)}
+        return {"error": safe_error_message(exc)}
 
 
 def get(goal_id: int, *, db_path: Optional[str] = None) -> Optional[dict]:
@@ -238,7 +239,7 @@ def update(goal_id: int, *, status: Optional[str] = None,
         return {"ok": True, "id": int(goal_id)}
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Nova goals: update of #%s failed: %s", goal_id, exc)
-        return {"error": str(exc)}
+        return {"error": safe_error_message(exc)}
 
 
 def cancel(goal_id: int, *, db_path: Optional[str] = None) -> bool:

@@ -7,6 +7,8 @@ from typing import Optional
 
 from homeassistant.core import HomeAssistant
 
+from ...safe_errors import tool_error_text
+
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
@@ -29,7 +31,7 @@ async def _exec_manage_autonomy(hass: HomeAssistant, args: dict) -> str:
             "note": "Every offer waits for a yes; these are acceptance counts only.",
             "grants": status.get("autonomy_grants", [])})
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "manage_autonomy")})
 
 
 async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
@@ -42,7 +44,7 @@ async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
             return json.dumps({"message": "No pending suggestions. I need more data to identify patterns."})
         return json.dumps(suggestions)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "review_suggestions")})
 
 
 async def _exec_approve_suggestion(
@@ -60,7 +62,7 @@ async def _exec_approve_suggestion(
             request_device_id=device_id or None)
         return json.dumps(res)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "approve_suggestion")})
 
 
 async def _exec_dismiss_suggestion(hass: HomeAssistant, args: dict) -> str:
@@ -72,4 +74,4 @@ async def _exec_dismiss_suggestion(hass: HomeAssistant, args: dict) -> str:
             get_analyzer().dismiss_suggestion, sid)
         return json.dumps({"success": ok, "suggestion_id": sid})
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": tool_error_text(exc, "dismiss_suggestion")})
