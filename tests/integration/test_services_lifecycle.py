@@ -1,6 +1,6 @@
 """Phase 4: Nova's services live for the process lifetime (PHACC).
 
-async_setup registers all 29 nova.* services once, at integration scope.
+async_setup registers all 27 nova.* services once, at integration scope.
 Config-entry setup, unload, reload and setup failure never add or remove
 them. Every call resolves the loaded entry and its NovaRuntime at call
 time, so this file drives the real lifecycle to prove:
@@ -42,7 +42,7 @@ from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
 )
 from .test_wiring_smoke import _make_entry
 
-SERVICE_COUNT = 29
+SERVICE_COUNT = 27
 
 # Minimal valid data for every service, so a rejection is the lifecycle
 # check's and never schema validation's.

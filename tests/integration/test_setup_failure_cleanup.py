@@ -66,10 +66,10 @@ def _capture_owners():
 
 
 def _assert_services_reject(hass) -> None:
-    """All 29 services are still registered and a call reports the failed
+    """All 27 services are still registered and a call reports the failed
     setup instead of running."""
     from custom_components.nova.services import async_get_loaded_entry
-    assert len(hass.services.async_services().get(DOMAIN, {})) == 29
+    assert len(hass.services.async_services().get(DOMAIN, {})) == 27
     with pytest.raises(ServiceValidationError) as err:
         async_get_loaded_entry(hass)
     assert err.value.translation_key == "setup_failed"
