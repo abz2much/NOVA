@@ -85,23 +85,6 @@ database_purge:
 
 database_stats:
 
-replay_policy:
-  fields:
-    kind:
-      required: true
-      example: intrusion
-      selector:
-        text:
-    min_samples:
-      required: false
-      example: 25
-      selector:
-        number:
-          min: 1
-          max: 100000
-          mode: box
-
-
 briefing:
   fields:
     announce:
@@ -141,32 +124,6 @@ briefing:
           min: 1
           max: 48
           unit_of_measurement: hours
-
-scene_by_intent:
-  fields:
-    intent:
-      required: true
-      example: "cosy film night"
-      selector:
-        text:
-    announce:
-      required: false
-      default: true
-      selector:
-        boolean:
-
-routine:
-  fields:
-    name:
-      required: true
-      selector:
-        select:
-          options:
-            - goodnight
-            - goodmorning
-            - leaving
-            - arriving
-          custom_value: true
 
 add_reminder:
   fields:

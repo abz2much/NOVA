@@ -48,12 +48,11 @@ def _text(stem: str = "Nova, write a short poem about the sea") -> str:
 @pytest.fixture(autouse=True)
 def _no_real_config_state(tmp_path, monkeypatch):
     """Setup's remaining fixed /config state files, pointed at tmp."""
-    from custom_components.nova import cognitive_core, modes, reasoning_cache, routines
+    from custom_components.nova import cognitive_core, modes, reasoning_cache
     monkeypatch.setattr(cognitive_core, "LOCKDOWN_STATE_PATH",
                         str(tmp_path / "lockdown_state.json"))
     monkeypatch.setattr(modes, "MODE_STATE_PATH", str(tmp_path / "mode_state.json"))
     monkeypatch.setattr(reasoning_cache, "CACHE_PATH", tmp_path / "reasoning_cache.json")
-    monkeypatch.setattr(routines, "ROUTINE_FILE", str(tmp_path / "routines.yaml"))
 
 
 @pytest.fixture

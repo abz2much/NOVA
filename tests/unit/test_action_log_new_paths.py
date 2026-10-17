@@ -156,34 +156,6 @@ async def test_sleep_prompt_no_devices_creates_no_row(load, fake_hass, isolated_
     assert page["requests"] == []
 
 
-# ── scenes.py: scene-by-intent is one logged action ──────────────────────────
-
-async def test_scene_by_intent_logs_one_action(load, fake_hass, isolated_db, al):
-    scenes_mod = load("scenes")
-    fake_hass.states.set("scene.movie_night", "scening", friendly_name="Movie Night")
-    fake_hass.services.register("scene", "turn_on")
-
-    call = types.SimpleNamespace(
-        data={"intent": "movie time", "announce": False},
-        context=types.SimpleNamespace(user_id="user-1"),
-    )
-
-    class _Groq:
-        def chat(self, messages, max_tokens=40, temperature=0.2):
-            return {"text": "scene.movie_night"}
-
-    result = await scenes_mod.async_activate_by_intent(
-        fake_hass, call, _Groq(), "sir", None, [])
-    assert result["success"] is True
-
-    page = al.page_requests(limit=10, db_path=isolated_db)
-    assert len(page["requests"]) == 1
-    row = page["requests"][0]
-    assert row["action"] == "scene_by_intent"
-    assert row["source"] == "ha_service"
-    assert row["targets"][0]["execution_result"] == "unverified"  # ran, not checkable (8.24.0)
-
-
 # ── cognitive_core.py: LockdownManager.engage — locks + covers, one request ─
 
 @pytest.fixture

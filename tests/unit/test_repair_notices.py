@@ -166,10 +166,10 @@ def test_a_retired_service_warns_once_per_run_and_names_the_replacement(rn, reti
 
 
 def test_a_service_with_no_replacement_says_the_call_does_nothing(rn, retired):
-    rn.note_retired_service(object(), "replay_policy", None)
+    rn.note_retired_service(object(), "some_old_service", None)
     (issue_id, kw), = retired.created
     assert kw["translation_key"] == "retired_service_no_effect"
-    assert kw["translation_placeholders"] == {"service": "nova.replay_policy"}
+    assert kw["translation_placeholders"] == {"service": "nova.some_old_service"}
 
 
 def test_every_retired_service_has_its_notice_text():
@@ -189,4 +189,4 @@ def test_retired_service_notices_never_raise(rn, monkeypatch):
             raise RuntimeError("registry down")
     monkeypatch.setattr(rn, "ir", _Broken())
     monkeypatch.setattr(rn, "_retired_seen", set())
-    rn.note_retired_service(object(), "routine", "script.turn_on")
+    rn.note_retired_service(object(), "speak", "tts.speak")

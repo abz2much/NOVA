@@ -30,7 +30,6 @@ from homeassistant.helpers.typing import ConfigType
 from .const import CONF_HONORIFIC, DEFAULT_HONORIFIC, DOMAIN
 from .camera import async_auto_analyze_on_event, register_event_listeners
 from .briefing import async_briefing
-from .routines import list_routines
 from .reminders import ReminderWatcher
 from .recognition import register_recognition_listener
 from .sentinel import NovaSentinel
@@ -1053,8 +1052,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     await _attempt("Nova voice recognition registration failed (non-fatal): %s",
                    partial(_register_voice_recognition, hass))
 
-    _LOGGER.info("Nova online. Good day, %s. Routines available: %s",
-                 honorific, ", ".join(list_routines()))
+    _LOGGER.info("Nova online. Good day, %s.", honorific)
     return True
 
 

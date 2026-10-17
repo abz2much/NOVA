@@ -326,20 +326,6 @@
       "name": "Conversation store figures",
       "description": "Counts what the conversation store holds and sends the figures as a nova_db_stats event."
     },
-    "replay_policy": {
-      "name": "Replay policy",
-      "description": "Being retired. Replay was removed in 8.40.0, so this does nothing; it goes in a later release.",
-      "fields": {
-        "kind": {
-          "name": "Kind",
-          "description": "The kind of decision, for example intrusion."
-        },
-        "min_samples": {
-          "name": "Minimum samples",
-          "description": "How many judged decisions were needed before a threshold was suggested."
-        }
-      }
-    },
     "briefing": {
       "name": "Give a briefing",
       "description": "Nova puts together a briefing for the moment and reads it out: the time, weather, who is home, events overnight, open doors, the calendar and unusual energy use.",
@@ -371,30 +357,6 @@
         "hours": {
           "name": "Hours of events",
           "description": "How many hours of events to cover."
-        }
-      }
-    },
-    "scene_by_intent": {
-      "name": "Scene from a description",
-      "description": "Being retired: ask Nova through conversation.process instead. Nova picks the scene that best fits a description such as \"cosy film night\" or \"time for bed\".",
-      "fields": {
-        "intent": {
-          "name": "Description",
-          "description": "The mood or activity you want."
-        },
-        "announce": {
-          "name": "Speak the choice",
-          "description": "Say which scene was picked."
-        }
-      }
-    },
-    "routine": {
-      "name": "Run a routine",
-      "description": "Being retired: use a Home Assistant script (script.turn_on) instead. Runs a named routine such as goodnight, goodmorning, leaving or arriving, with Nova narrating each step. Your own routines can go in /config/nova_routines.yaml.",
-      "fields": {
-        "name": {
-          "name": "Routine",
-          "description": "The routine to run."
         }
       }
     },

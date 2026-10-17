@@ -1,6 +1,6 @@
 """Phase 4 process-lifetime service registration — the static half.
 
-services.py registers Nova's 32 services once, from async_setup at
+services.py registers Nova's 29 services once, from async_setup at
 integration scope. Registration survives reload, unload and setup failure,
 so every handler must resolve the loaded entry and its NovaRuntime per call.
 The PHACC half (tests/integration/test_services_lifecycle.py) drives the
@@ -8,14 +8,13 @@ real lifecycle; this file proves from source that:
 
 * every registration lives in services.py, and nothing removes a service,
 * __init__.py defines async_setup, which calls async_setup_services,
-* the 32 names and schemas are the pinned contract, and lockdown, remember,
+* the 29 names and schemas are the pinned contract, and lockdown, remember,
   forget and create_automation stay schema-less,
 * registration captures no entry, client, sentinel or runtime config, and
   every ordinary handler calls the loaded-entry resolver first,
 * nova.speak buffers only through the narrow SETUP_IN_PROGRESS check,
 * no Nova state or registration flag goes into hass.data,
-* nova.routine still delegates through routines.py's safety path, and
-  nova.lockdown passes the lifecycle check before touching cognitive_core,
+* nova.lockdown passes the lifecycle check before touching cognitive_core,
 * the service-state error translations are aligned in every language.
 
 Focused run:
@@ -108,7 +107,7 @@ def test_all_service_registrations_are_in_services_py():
 
 def test_every_service_is_registered_exactly_once():
     names = [name for name, _ in ce.service_registrations()]
-    assert len(names) == 32 and len(set(names)) == 32
+    assert len(names) == 29 and len(set(names)) == 29
 
 
 # ── 2. async_setup ──────────────────────────────────────────────────────────
@@ -179,10 +178,7 @@ PINNED_SCHEMAS = {
     'observer_stop': None,
     'process_intent': 'PROCESS_INTENT_SCHEMA',
     'remember': "vol.Schema({vol.Required('key'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Required('value'): vol.All(cv.string, vol.Strip, vol.Length(min=1)), vol.Optional('subject'): cv.string, vol.Optional('kind'): vol.In(['fact', 'preference', 'event', 'profile']), vol.Optional('ttl_seconds'): vol.All(vol.Coerce(float), vol.Range(min=0, max=31536000))})",
-    'replay_policy': "vol.Schema({vol.Required('kind'): str, vol.Optional('min_samples'): vol.All(int, vol.Range(min=1, max=100000))})",
     'restore': "vol.Schema({vol.Optional('archive'): str})",
-    'routine': "vol.Schema({vol.Required('name'): cv.string})",
-    'scene_by_intent': "vol.Schema({vol.Required('intent'): cv.string, vol.Optional('announce', default=True): cv.boolean})",
     'sentinel_start': None,
     'sentinel_stop': None,
     'shush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string, vol.Optional('all'): cv.boolean})",
@@ -383,19 +379,6 @@ def test_services_and_init_never_touch_hass_data():
 
 
 # ── 9 & 10. Safety paths ────────────────────────────────────────────────────
-
-def test_routine_delegates_through_its_existing_safety_path():
-    handler = _handlers()["routine"]
-    calls = [ast.unparse(n.func) for n in ast.walk(handler) if isinstance(n, ast.Call)]
-    assert "async_run_routine" in calls
-    assert not [c for c in calls if c.endswith("async_call")]
-    routines = (COMP / "routines.py").read_text(encoding="utf-8")
-    # Since 8.24.0 the routine reaches the confirmation gate through the one
-    # authority check, policy.authorize / authorize_now.
-    for guard in ("policy.authorize_now(", "policy.authorize(",
-                  "action_log.start_many(", "action_log.set_execution("):
-        assert guard in routines, guard
-
 
 def test_lockdown_resolves_lifecycle_before_cognitive_core():
     stmts = _body(_handlers()["lockdown"])

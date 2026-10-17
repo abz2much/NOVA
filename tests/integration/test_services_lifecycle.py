@@ -1,6 +1,6 @@
 """Phase 4: Nova's services live for the process lifetime (PHACC).
 
-async_setup registers all 32 nova.* services once, at integration scope.
+async_setup registers all 29 nova.* services once, at integration scope.
 Config-entry setup, unload, reload and setup failure never add or remove
 them. Every call resolves the loaded entry and its NovaRuntime at call
 time, so this file drives the real lifecycle to prove:
@@ -14,7 +14,7 @@ time, so this file drives the real lifecycle to prove:
 * a LOADED entry without a runtime still raises NovaRuntimeUnavailable,
 * nova.speak buffers only in the narrow SETUP_IN_PROGRESS boot window and
   replays in order, and nothing outside it creates a buffer,
-* safety paths (routine confirmation and audit, lockdown) are unchanged,
+* safety paths (lockdown) are unchanged,
 * the shipped blueprints validate while nova.analyze_on_event is
   registered, and no Nova state appears in hass.data.
 
@@ -45,7 +45,7 @@ from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
 )
 from .test_wiring_smoke import _make_entry
 
-SERVICE_COUNT = 32
+SERVICE_COUNT = 29
 
 # Minimal valid data for every service, so a rejection is the lifecycle
 # check's and never schema validation's.
@@ -69,10 +69,7 @@ VALID_DATA = {
     "observer_stop": {},
     "process_intent": {"phrase": "lights on", "target_area": "office"},
     "remember": {"key": "k", "value": "v"},
-    "replay_policy": {"kind": "doorbell"},
     "restore": {},
-    "routine": {"name": "goodnight"},
-    "scene_by_intent": {"intent": "relax"},
     "sentinel_start": {},
     "sentinel_stop": {},
     "shush": {},
@@ -139,8 +136,7 @@ def _delegates_recorded():
 
     async_targets = [
         (services, "async_analyze_camera"), (services, "async_auto_analyze_on_event"),
-        (services, "async_briefing"), (services, "async_activate_by_intent"),
-        (services, "async_run_routine"), (services, "async_add_reminder_service"),
+        (services, "async_briefing"), (services, "async_add_reminder_service"),
         (services, "async_summarise"), (cognitive_core, "request_lockdown"),
         (automation_creator, "create_automation"), (observer, "start"), (observer, "stop"),
         (notify_targets, "async_send_configured_notifications"),
@@ -412,7 +408,7 @@ async def test_multiple_entries_raise_multiple_entries(hass):
     for _ in range(2):
         MockConfigEntry(domain=DOMAIN, data=dict(_make_entry().data)).add_to_hass(hass)
     with _delegates_recorded() as delegates:
-        for service in ("routine", "speak", "process_intent", "lockdown"):
+        for service in ("nap", "speak", "process_intent", "lockdown"):
             assert await _rejected(hass, service) == "multiple_entries", service
     assert delegates == []
 
@@ -422,7 +418,7 @@ async def test_unloaded_entry_raises_not_loaded(hass):
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
-    assert await _rejected(hass, "routine") == "not_loaded"
+    assert await _rejected(hass, "nap") == "not_loaded"
 
 
 async def test_failed_setup_raises_setup_failed(hass):
@@ -431,7 +427,7 @@ async def test_failed_setup_raises_setup_failed(hass):
                side_effect=RuntimeError("boom")):
         assert await hass.config_entries.async_setup(entry.entry_id) is False
     await hass.async_block_till_done()
-    assert await _rejected(hass, "routine") == "setup_failed"
+    assert await _rejected(hass, "nap") == "setup_failed"
 
 
 @pytest.mark.parametrize("service", sorted(VALID_DATA))
@@ -462,7 +458,7 @@ async def test_real_setup_in_progress_rejects_ordinary_services(hass):
     async def _during_setup(hass_, runtime):
         seen["state"] = entry.state
         with _delegates_recorded() as delegates:
-            for service in ("nap", "process_intent", "routine"):
+            for service in ("nap", "process_intent"):
                 seen[service] = await _rejected(hass, service)
         seen["delegates"] = delegates
         return []
@@ -472,7 +468,7 @@ async def test_real_setup_in_progress_rejects_ordinary_services(hass):
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert seen == {"state": ConfigEntryState.SETUP_IN_PROGRESS, "nap": "reloading",
-                    "process_intent": "reloading", "routine": "reloading",
+                    "process_intent": "reloading",
                     "delegates": []}
 
 
@@ -505,7 +501,7 @@ async def test_loaded_entry_without_runtime_raises_runtime_unavailable(hass):
     try:
         assert entry.state is ConfigEntryState.LOADED
         with _delegates_recorded() as delegates:
-            for service in ("nap", "routine", "lockdown", "speak", "process_intent"):
+            for service in ("nap", "lockdown", "speak", "process_intent"):
                 with pytest.raises(NovaRuntimeUnavailable):
                     await _call(hass, service)
     finally:
@@ -536,24 +532,20 @@ async def test_services_return_none_and_keep_their_events(hass):
     assert {"running", "sleeping", "sleep_reason", "bedroom_areas"} <= set(events[1][1])
 
 
-async def test_a_retired_service_still_runs_and_raises_one_notice(hass, monkeypatch):
+async def test_a_retired_service_still_runs_and_raises_one_notice(hass, monkeypatch, spoken):
     from homeassistant.helpers import issue_registry as ir
     from custom_components.nova import repair_notices
     monkeypatch.setattr(repair_notices, "_retired_seen", set())
     await _setup(hass)
-    events = []
-
-    @callback
-    def _record(event):
-        events.append(dict(event.data))
-    hass.bus.async_listen("nova_replay_result", _record)
-    assert await _call(hass, "replay_policy") is None
-    assert await _call(hass, "replay_policy") is None
+    data = {"message": "hello", "target_area": "office"}
+    assert await _call(hass, "speak", data) is None
+    assert await _call(hass, "speak", data) is None
     await hass.async_block_till_done()
-    assert [e["ready"] for e in events] == [False, False]
-    issue = ir.async_get(hass).async_get_issue(DOMAIN, "retired_service_replay_policy")
-    assert issue is not None and issue.translation_key == "retired_service_no_effect"
-    assert issue.translation_placeholders == {"service": "nova.replay_policy"}
+    assert len(spoken) == 2                       # still works, twice
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, "retired_service_speak")
+    assert issue is not None and issue.translation_key == "retired_service"
+    assert issue.translation_placeholders == {"service": "nova.speak",
+                                              "replacement": "tts.speak"}
 
 
 async def test_ordinary_services_raise_no_retirement_notice(hass, monkeypatch):
@@ -568,45 +560,6 @@ async def test_ordinary_services_raise_no_retirement_notice(hass, monkeypatch):
 
 
 # ── Safety paths ────────────────────────────────────────────────────────────
-
-async def test_protected_routine_step_still_needs_confirmation_and_audit(hass, monkeypatch):
-    from custom_components.nova import action_log, policy, routines
-    unlocked, gates, audit = [], [], []
-
-    async def _unlock(call):
-        unlocked.append(dict(call.data))
-    hass.services.async_register("lock", "unlock", _unlock)
-    # The lock reads a state, so the live check (8.46.0) hands it to the gate.
-    hass.states.async_set("lock.front_door", "locked")
-
-    async def _gate(hass_, domain, svc, entity, label):
-        gates.append((domain, svc, entity))
-        return False, "not approved", "denied"
-
-    monkeypatch.setattr(routines, "_load_routines", lambda: {
-        "secure": [{"service": "lock.unlock", "data": {"entity_id": "lock.front_door"}}]})
-    monkeypatch.setattr(policy, "requires_confirmation", lambda *a, **k: True)
-    monkeypatch.setattr(policy, "confirm_gate", _gate)
-    monkeypatch.setattr(action_log, "start_many",
-                        lambda *a, **k: audit.append(("start_many", a[1], a[2])) or {0: 7})
-    monkeypatch.setattr(action_log, "mark_awaiting_approval",
-                        lambda rid: audit.append(("awaiting", rid)))
-    monkeypatch.setattr(action_log, "set_approval",
-                        lambda rid, ar, **k: audit.append(("approval", rid, ar)))
-    monkeypatch.setattr(action_log, "set_execution",
-                        lambda rid, result, **k: audit.append(("execution", rid, result)))
-
-    entry = await _setup(hass)
-    for _ in range(2):                  # before and after a reload
-        audit.clear()
-        assert await _call(hass, "routine", {"name": "secure"}) is None
-        assert audit == [("start_many", "routine:secure", "routine"), ("awaiting", 7),
-                         ("approval", 7, "denied"), ("execution", 7, "blocked")]
-        assert await hass.config_entries.async_reload(entry.entry_id)
-        await hass.async_block_till_done()
-    assert gates == [("lock", "unlock", "lock.front_door")] * 2
-    assert unlocked == []
-
 
 async def test_lockdown_after_unload_does_not_rebuild_a_manager(hass, monkeypatch):
     from custom_components.nova import cognitive_core

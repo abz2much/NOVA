@@ -172,9 +172,6 @@ def clear_voice_setup(hass: HomeAssistant) -> None:
 RETIRED_SERVICES: dict[str, str | None] = {
     "speak": "tts.speak",
     "process_intent": "conversation.process",
-    "scene_by_intent": "conversation.process",
-    "routine": "script.turn_on",
-    "replay_policy": None,
 }
 
 _retired_seen: set[str] = set()

@@ -38,5 +38,5 @@ def test_service_text_is_uk_english_and_never_says_he():
 
 
 def test_retiring_services_still_say_so():
-    for name in ("replay_policy", "scene_by_intent", "routine", "speak", "process_intent"):
+    for name in ("speak", "process_intent"):
         assert TEXT[name]["description"].startswith("Being retired"), name

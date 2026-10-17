@@ -3,11 +3,11 @@ call sites, not just present in the classifier.
 
 Context (Sept 2026 audit): policy.classify() and voice_confirm.action_is_protected()
 correctly rated scene/script/automation activation as needing confirmation, but
-neither agent._exec_run_scene_script nor routines.async_run_routine ever called
-policy.confirm_gate() / policy.requires_confirmation() -- the classification had
-no enforcement point, so the fix changed nothing for those two call sites in
-practice. These tests exercise the call sites themselves (mocking policy's gate
-functions), not the classifier logic (covered in tests/test_policy.py).
+agent._exec_run_scene_script never called policy.confirm_gate() /
+policy.requires_confirmation() -- the classification had no enforcement point.
+(routines.async_run_routine had the same gap; that service was removed in 8.59.0.)
+These tests exercise the call site itself (mocking policy's gate functions),
+not the classifier logic (covered in tests/test_policy.py).
 """
 from __future__ import annotations
 
@@ -19,11 +19,6 @@ import pytest
 @pytest.fixture
 def agent(load):
     return load("agent")
-
-
-@pytest.fixture
-def routines(load):
-    return load("routines")
 
 
 @pytest.fixture
@@ -79,84 +74,3 @@ async def test_run_scene_script_uses_trigger_for_automation(agent, policy, monke
 
     assert fake_hass.service_calls == [
         ("automation", "trigger", {"entity_id": "automation.night_mode"})]
-
-
-# -- routines.async_run_routine -----------------------------------------------
-
-class _Call:
-    """Minimal ServiceCall stand-in -- async_run_routine only reads .data."""
-    def __init__(self, data):
-        self.data = data
-
-
-async def test_routine_step_blocked_when_confirmation_required_and_denied(
-        routines, policy, monkeypatch, fake_hass):
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
-
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
-                                device_id="", target_name=""):
-        return False, "not yet confirmed", "rejected"
-
-    monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)
-
-    monkeypatch.setattr(routines, "_load_routines", lambda: {
-        "test_routine": [
-            {"service": "scene.turn_on", "data": {"entity_id": "scene.welcome"}},
-        ]
-    })
-
-    result = await routines.async_run_routine(
-        fake_hass, _Call({"name": "test_routine"}), "sir", None, [])
-
-    assert result["success"] is False
-    assert result["steps_executed"] == 0
-    assert fake_hass.service_calls == []  # step must not have actually run
-
-
-async def test_routine_step_runs_when_not_protected(routines, policy, monkeypatch, fake_hass):
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": False)
-
-    async def fail_confirm_gate(*a, **k):  # must not even be called
-        raise AssertionError("confirm_gate should be skipped when not protected")
-
-    monkeypatch.setattr(policy, "confirm_gate", fail_confirm_gate)
-
-    monkeypatch.setattr(routines, "_load_routines", lambda: {
-        "test_routine": [
-            {"service": "light.turn_off", "target": {"entity_id": "all"}},
-        ]
-    })
-
-    result = await routines.async_run_routine(
-        fake_hass, _Call({"name": "test_routine"}), "sir", None, [])
-
-    assert result["success"] is True
-    assert result["steps_executed"] == 1
-    assert fake_hass.service_calls == [("light", "turn_off", {})]
-
-
-async def test_routine_optional_protected_step_skipped_not_errored(
-        routines, policy, monkeypatch, fake_hass):
-    """An optional step (e.g. the default goodnight scene) that needs
-    confirmation is skipped quietly, not counted as a routine failure."""
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
-
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
-                                device_id="", target_name=""):
-        return False, "not yet confirmed", "rejected"
-
-    monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)
-
-    monkeypatch.setattr(routines, "_load_routines", lambda: {
-        "test_routine": [
-            {"service": "scene.turn_on", "data": {"entity_id": "scene.nighttime"},
-             "optional": True},
-        ]
-    })
-
-    result = await routines.async_run_routine(
-        fake_hass, _Call({"name": "test_routine"}), "sir", None, [])
-
-    assert result["success"] is True   # optional block doesn't count as an error
-    assert result["steps_executed"] == 0
-    assert fake_hass.service_calls == []

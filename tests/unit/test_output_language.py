@@ -326,7 +326,7 @@ def test_every_person_facing_caller_adds_the_directive():
 
 
 def test_structured_and_internal_callers_are_untouched():
-    for fname in ("suggestion_review.py", "package_monitor.py", "scenes.py",
+    for fname in ("suggestion_review.py", "package_monitor.py",
                   "camera_coverage.py", "classifier.py", "setup_probe.py",
                   "agent_runtime/loop.py", "llm_provider.py", "cognitive_core.py"):
         src = core_text() if fname == "cognitive_core.py" else (COMP / fname).read_text()
@@ -384,22 +384,6 @@ async def test_camera_reasoning_only_the_spoken_field_follows_the_language(
     setting["value"] = ""
     await cam._reason_about_scene(fake_hass, object(), "m", "Front", "a person at the door", "person")
     assert "Language" not in _system(sent)             # English: prompt unchanged
-
-
-async def test_scene_pick_is_a_classifier_and_is_never_given_the_directive(
-        load, fake_hass, setting, monkeypatch):
-    scenes = load("scenes")
-    sent = _capture(monkeypatch, "scene.movie")
-    fake_hass.config.language = "en"
-    setting["value"] = "de"
-    fake_hass.states.set("scene.movie", "scening", friendly_name="Movie")
-    call = types.SimpleNamespace(data={"intent": "movie night", "announce": False})
-    try:
-        await scenes.async_activate_by_intent(fake_hass, call, object(), "sir", None, [])
-    except Exception:
-        pass
-    assert sent, "the scene picker did not call the model"
-    assert "Language" not in _system(sent) and "German" not in _system(sent)
 
 
 # ── Chinese scripts ─────────────────────────────────────────────────────────

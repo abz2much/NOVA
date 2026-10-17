@@ -286,51 +286,10 @@
         }
       }
     },
-    "replay_policy": {
-      "fields": {
-        "kind": {
-          "required": true,
-          "selector": "text"
-        },
-        "min_samples": {
-          "max": 100000,
-          "min": 1,
-          "required": false,
-          "selector": "number"
-        }
-      }
-    },
     "restore": {
       "fields": {
         "archive": {
           "required": false,
-          "selector": "text"
-        }
-      }
-    },
-    "routine": {
-      "fields": {
-        "name": {
-          "options": [
-            "goodnight",
-            "goodmorning",
-            "leaving",
-            "arriving"
-          ],
-          "required": true,
-          "selector": "select"
-        }
-      }
-    },
-    "scene_by_intent": {
-      "fields": {
-        "announce": {
-          "default": true,
-          "required": false,
-          "selector": "boolean"
-        },
-        "intent": {
-          "required": true,
           "selector": "text"
         }
       }
@@ -496,19 +455,8 @@
       "ttl_seconds": "optional",
       "value": "required"
     },
-    "replay_policy": {
-      "kind": "required",
-      "min_samples": "optional"
-    },
     "restore": {
       "archive": "optional"
-    },
-    "routine": {
-      "name": "required"
-    },
-    "scene_by_intent": {
-      "announce": "optional",
-      "intent": "required"
     },
     "sentinel_start": null,
     "sentinel_stop": null,

@@ -57,11 +57,13 @@ keeps the value it already had. See [What Nova includes](product-scope.md).
 
 ## Services being retired
 
-`nova.speak`, `nova.process_intent`, `nova.scene_by_intent`, `nova.routine`
-and `nova.replay_policy` still work and will be removed in a later release.
-The first call in each run logs a warning and shows a notice in Settings →
-Repairs naming what to use instead: `tts.speak`, `conversation.process` or
-`script.turn_on`. `nova.replay_policy` now does nothing.
+`nova.speak` and `nova.process_intent` still work and will be removed in a
+later release. The first call in each run logs a warning and shows a notice in
+Settings → Repairs naming what to use instead: `tts.speak` or
+`conversation.process`.
+
+`nova.scene_by_intent`, `nova.routine` and `nova.replay_policy` were removed in
+8.59.0. Use `scene.turn_on`, `script.turn_on` or an automation instead.
 
 ## Voice ID
 

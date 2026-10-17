@@ -160,7 +160,7 @@ SERVICE_CALLERS = {
     "agent_runtime/capabilities/environment.py", "automation/installation.py",
     "cognitive_core.py", "continued_conversation.py", "intent/intent_router.py",
     "local_engine.py", "mode_scene.py", "notify_targets.py",
-    "proactive_audio.py", "routines.py", "scenes.py", "services.py", "tts_helper.py",
+    "proactive_audio.py", "services.py", "tts_helper.py",
     "voice_confirm.py",
     # v8.3.0: one persistent_notification.create for the first run welcome.
     # Admin UI notice only: nothing spoken, no device actuated.
@@ -181,7 +181,7 @@ SERVICE_CALLERS = {
 }
 ANNOUNCERS = {
     "camera.py", "cognitive_core.py", "conversation.py",
-    "reminders.py", "routines.py", "scenes.py",
+    "reminders.py",
     "services.py", "summary.py", "voice_confirm.py",
     # 8.7.18: ws_repeat_spoken, the panel's Repeat button and the only
     # announcer in the websocket layer, moved from websocket.py.
