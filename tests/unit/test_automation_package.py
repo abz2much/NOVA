@@ -71,7 +71,7 @@ def test_package_module_exists(name):
 def test_package_init_is_unchanged_and_home_assistant_free():
     tree = ast.parse((PKG / "__init__.py").read_text(encoding="utf-8"))
     imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
-    assert imported == {"__future__", "mutex", "predictor"}, imported
+    assert imported == {"__future__", "predictor"}, imported
 
 
 @pytest.mark.parametrize("name", NEW_MODULES)

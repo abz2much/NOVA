@@ -14,11 +14,10 @@ Speaker choice uses audio_routing's room and general speakers, then the
 whole house speakers; the voice shaping is this module's own.
 
 Every object here belongs to the loaded entry. Its NovaRuntime holds the
-intent router, state ledger, entity lock registry and boot alert buffer
-(each built on first use, dropped on unload, built again on reload) and the
-flag that stops audit ticks overlapping. The entry's NovaResources holds the
-audit timer callbacks. services.py looks up the loaded entry's runtime on
-every call; nothing here is built outside the entry's lifetime.
+boot alert buffer (built on first use, dropped on unload, built again on
+reload) and the flag that stops audit ticks overlapping. The entry's
+NovaResources holds the audit timer callbacks; nothing here is built outside
+the entry's lifetime.
 """
 from __future__ import annotations
 
@@ -36,13 +35,11 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 
 from . import audio_routing, delivery
 from .audio import NoiseGate, ProsodyController
-from .automation import EntityLockRegistry, PredictiveHabitMatrix
+from .automation import PredictiveHabitMatrix
 from .boot_guard import AlertBuffer
 from .const import CONF_BROADCAST_GROUP, CONF_HONORIFIC, DEFAULT_HONORIFIC, DOMAIN
 from .diagnostics import FaultLog, InfrastructureTriage
-from .intent import LocalIntentRouter
 from .runtime import NovaRuntime, get_runtime, lifecycle_runtime
-from .state_ledger import StateLedger
 from .vision import SpatialContextEngine
 
 _LOGGER = logging.getLogger(__name__)
@@ -379,57 +376,12 @@ async def _run_predictor(hass: HomeAssistant, predictor: PredictiveHabitMatrix) 
 
 # ── Objects owned by the entry's runtime ───────────────────────────────────
 
-def _state_ledger(runtime: NovaRuntime) -> StateLedger:
-    if runtime.state_ledger is None:
-        runtime.state_ledger = StateLedger()
-    return runtime.state_ledger
-
-
-def _entity_locks(runtime: NovaRuntime) -> EntityLockRegistry:
-    if runtime.entity_locks is None:
-        runtime.entity_locks = EntityLockRegistry()
-    return runtime.entity_locks
-
-
-def _intent_router(hass: HomeAssistant, runtime: NovaRuntime) -> LocalIntentRouter:
-    """The entry's single router. Nothing calls it since 8.60.0 (nova.speak and
-    nova.process_intent were its only users); it goes with the other unused
-    pieces in a later release."""
-    if runtime.intent_router is None:
-        runtime.intent_router = LocalIntentRouter(
-            hass, ledger=_state_ledger(runtime), mutex=_entity_locks(runtime))
-    return runtime.intent_router
-
-
 def _alert_buffer(runtime: NovaRuntime) -> AlertBuffer:
     """The startup gate: the audit waits until it is ready. A reload brings a
     new one. (It used to hold nova.speak calls too, until 8.60.0.)"""
     if runtime.alert_buffer is None:
         runtime.alert_buffer = AlertBuffer()
     return runtime.alert_buffer
-
-
-async def _reconcile_state_ledger(
-    hass: HomeAssistant, runtime: NovaRuntime,
-) -> list[dict]:
-    """At start up, compare each outstanding important action with the
-    device's state now, warn about any that did not finish (a crash or
-    power cut), then compact the ledger. Returns the mismatches."""
-    ledger = _state_ledger(runtime)
-    outstanding = await hass.async_add_executor_job(ledger.pending_intents)
-    unfinished: list[dict] = []
-    for intent in outstanding:
-        state = hass.states.get(intent["entity_id"])
-        now = None if state is None else state.state
-        if str(now) == intent["desired_state"]:
-            continue
-        unfinished.append({**intent, "actual": now})
-        _LOGGER.warning(
-            "State ledger: %s was meant to be '%s' before shutdown but is '%s' — "
-            "a prior action may have been interrupted",
-            intent.get("entity_id"), intent.get("desired_state"), now)
-    await hass.async_add_executor_job(ledger.compact)
-    return unfinished
 
 
 def _boot_ready(runtime: NovaRuntime) -> bool:
@@ -525,10 +477,6 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
     runtime.resources.add_unsubs(unsubs)
     _LOGGER.debug("Proactive audio scheduled (audit every %s)", AUDIT_INTERVAL)
 
-    try:
-        await _reconcile_state_ledger(hass, runtime)
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("State ledger reconciliation failed")
     await mark_boot_ready(hass, runtime)
 
 
@@ -540,8 +488,5 @@ async def async_unload_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) 
     runtime = lifecycle_runtime(entry)
     if runtime is None:
         return
-    runtime.intent_router = None
-    runtime.state_ledger = None
-    runtime.entity_locks = None
     runtime.alert_buffer = None
     runtime.audit_running = False

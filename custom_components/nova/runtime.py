@@ -31,18 +31,15 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-    from .automation import EntityLockRegistry
     from .automation.attribution import AutomationContextTracker
     from .automation.inventory import AutomationInventory
     from .boot_guard import AlertBuffer
-    from .intent import LocalIntentRouter
     from .llm_provider import LLMProvider
     from .providers.manager import ProviderManager
     from .reminders import ReminderWatcher
     from .resources import NovaResources
     from .scheduler import NovaScheduler
     from .sentinel import NovaSentinel
-    from .state_ledger import StateLedger
     from .stt import NovaVoiceIdStt
 
 
@@ -67,11 +64,8 @@ class NovaRuntime:
     # set_observer_running().
     observer_running: bool = False
     # Proactive audio (the infrastructure audit). proactive_audio.py
-    # builds each object lazily on first use and drops them on unload, so a
-    # reload always starts with fresh ones.
-    intent_router: LocalIntentRouter | None = None
-    state_ledger: StateLedger | None = None
-    entity_locks: EntityLockRegistry | None = None
+    # builds it lazily on first use and drops it on unload, so a reload
+    # always starts with a fresh one.
     alert_buffer: AlertBuffer | None = None
     # True while a proactive-audio infrastructure audit is in progress, so a
     # slow announcement never overlaps the next tick.

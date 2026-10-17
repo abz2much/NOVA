@@ -1,18 +1,17 @@
 """Phase 3B Final: proactive audio owned by the loaded entry, against a real
 Home Assistant (PHACC).
 
-Drives the real setup and the real unload to prove (nova.speak and
-nova.process_intent were removed in 8.60.0, so the router is built directly):
+Drives the real setup and the real unload to prove:
 
-* the intent router, state ledger, entity-lock registry and alert buffer are
-  NovaRuntime fields, built lazily and reused within one loaded entry,
+* the alert buffer (the startup gate) is a NovaRuntime field, built lazily and
+  reused within one loaded entry,
 * the audit timers' unsubs belong to NovaResources, and the audit flag is
   the runtime's,
 * nothing is mirrored into hass.data,
 * unload releases every object, repeated unload is safe, and a reload
   builds new ones.
 
-Announcements and intent routing are replaced with recorders: no speaker or
+Announcements are replaced with recorders: no speaker or
 device is operated, and there are no lock, alarm or cover entities here.
 """
 from contextlib import contextmanager
@@ -57,41 +56,17 @@ def _no_domain_level_objects(hass):
     assert DOMAIN not in hass.data
 
 
-def _build_router(hass, runtime):
-    from custom_components.nova import proactive_audio
-    return proactive_audio._intent_router(hass, runtime)
-
-
 # ── Ownership and laziness ──────────────────────────────────────────────────
 
-async def test_objects_are_built_lazily_on_the_entry_runtime(hass):
-    entry = await _setup(hass)
-    runtime = entry.runtime_data
-    # Setup itself needs the buffer (boot guard) and the ledger (recovery).
-    assert runtime.alert_buffer is not None and runtime.alert_buffer.ready is True
-    assert runtime.state_ledger is not None
-    # The router and its lock registry wait for first use.
-    assert runtime.intent_router is None and runtime.entity_locks is None
-
-    router = _build_router(hass, runtime)
-    assert runtime.intent_router is router
-    assert runtime.entity_locks is not None
-    _no_domain_level_objects(hass)
-
-
-async def test_objects_are_reused_within_one_loaded_entry(hass):
+async def test_the_startup_gate_is_built_on_the_entry_runtime(hass):
     from custom_components.nova import proactive_audio
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    router = _build_router(hass, runtime)
-    ledger, locks = runtime.state_ledger, runtime.entity_locks
-    assert _build_router(hass, runtime) is router
-    assert proactive_audio._intent_router(hass, runtime) is router
-    assert proactive_audio._state_ledger(runtime) is ledger
-    assert proactive_audio._entity_locks(runtime) is locks
+    # Setup builds the gate and opens it once the entry is ready.
+    assert runtime.alert_buffer is not None and runtime.alert_buffer.ready is True
+    # It is reused within one loaded entry.
     assert proactive_audio._alert_buffer(runtime) is runtime.alert_buffer
-    # The router uses the entry's own ledger and lock registry.
-    assert router.ledger is ledger and router.mutex is locks
+    _no_domain_level_objects(hass)
 
 
 # ── Timers and the audit flag ───────────────────────────────────────────────
@@ -234,7 +209,6 @@ async def test_unload_releases_everything_and_repeats_safely(hass):
     from custom_components.nova.runtime import clear_runtime
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    _build_router(hass, runtime)
     assert all(getattr(runtime, f) is not None for f in PROACTIVE_FIELDS)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -255,14 +229,12 @@ async def test_unload_releases_everything_and_repeats_safely(hass):
 async def test_reload_builds_new_objects(hass):
     entry = await _setup(hass)
     old = entry.runtime_data
-    _build_router(hass, old)
     old_objects = [getattr(old, f) for f in PROACTIVE_FIELDS]
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     new = entry.runtime_data
     assert new is not old
-    _build_router(hass, new)
     for field, before in zip(PROACTIVE_FIELDS, old_objects):
         assert getattr(new, field) is not None, field
         assert getattr(new, field) is not before, field

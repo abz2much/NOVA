@@ -1,7 +1,7 @@
 """The audit's speaking helpers against a real Home Assistant: area lookup, speaker
 choice, the light and noise readings that shape the voice, ducking and
 restoring volume, the tts.speak retry, spoken history, the audit's history
-phrase and habit sampling, and the state ledger check at start up.
+phrase and habit sampling.
 
 No real speaker is driven: media_player and tts services are recorders
 registered here."""
@@ -339,25 +339,6 @@ async def test_predictor_records_occupied_areas_and_logs(hass, pa, monkeypatch, 
     recorded.clear()
     await pa._run_predictor(hass, predictor)
     assert recorded == []
-
-
-async def test_ledger_reconcile_reports_mismatches_and_compacts(hass, pa, caplog):
-    hass.states.async_set("lock.a", "locked")
-    hass.states.async_set("lock.b", "unlocked")
-    compacted = []
-    ledger = types.SimpleNamespace(
-        pending_intents=lambda: [
-            {"entity_id": "lock.a", "desired_state": "locked"},
-            {"entity_id": "lock.b", "desired_state": "locked"},
-            {"entity_id": "lock.gone", "desired_state": "locked"}],
-        compact=lambda: compacted.append(True))
-    runtime = types.SimpleNamespace(state_ledger=ledger)
-    with caplog.at_level("WARNING"):
-        out = await pa._reconcile_state_ledger(hass, runtime)
-    assert out == [{"entity_id": "lock.b", "desired_state": "locked", "actual": "unlocked"},
-                   {"entity_id": "lock.gone", "desired_state": "locked", "actual": None}]
-    assert compacted == [True]
-    assert "lock.b was meant to be 'locked'" in caplog.text
 
 
 async def test_deliver_audit(hass, pa, monkeypatch):

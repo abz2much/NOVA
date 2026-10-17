@@ -1,3 +1,9 @@
+## [8.61.0] The unused local voice command code is removed
+
+### Removed
+- **Code left over from `nova.speak` and `nova.process_intent` is gone.** Those services were removed in 8.60.0, and nothing else used the local intent router, the entity lock registry or the state ledger, so they are deleted. The state ledger's startup check goes too: it only ever tracked actions the router took, and the 8.60.0 start already cleared anything left over. Nothing about the audit, your spoken confirmations or continued conversations changes.
+- **Your `state_ledger.jsonl` is left on disk.** Nothing reads it any more. It is still included in Nova backups.
+
 ## [8.60.0] nova.speak and nova.process_intent are removed
 
 ### Removed
