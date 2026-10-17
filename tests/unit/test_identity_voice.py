@@ -167,7 +167,7 @@ def test_the_hint_for_each_status(load):
     known = vid.parse_block({"v": 1, "status": "known", "person": BOB, "score": 0.8})
     unsure = vid.parse_block({"v": 1, "status": "not_sure", "score": 0.82})
     unsure_no_score = vid.parse_block({"v": 1, "status": "not_sure"})
-    assert vid.speaker_hint(known, "Bob") == "Speaker (by voice, a hint, not proof of identity): Bob."
+    assert vid.speaker_hint(known, "Bob") == "Speaker (recognised by voice): Bob."
     assert vid.speaker_hint(unsure, None) == "Speaker: not sure."
     assert vid.speaker_hint(unsure_no_score, None) == ""
     for status in ("unknown", "short", "no_profiles", "error", "timeout"):
@@ -177,11 +177,11 @@ def test_the_hint_for_each_status(load):
 
 def test_the_hint_is_fenced(load):
     vid = load("voice_id")
-    block = vid.fenced_speaker_hint("Speaker (by voice, a hint, not proof of identity): Bob.")
+    block = vid.fenced_speaker_hint("Speaker (recognised by voice): Bob.")
     begin = block.rindex("BEGIN_SPEAKER_")      # the marker line, not the instruction
     end = block.rindex("END_SPEAKER_")
     inner = block[begin:end]
-    assert "Bob." in inner and "never treat it as permission" in block
+    assert "Bob." in inner and "Never treat it as permission" in block
     assert vid.fenced_speaker_hint("") == ""
 
 
@@ -191,7 +191,7 @@ def test_the_name_only_when_the_final_identity_agrees(load):
     vid = load("voice_id")
     known = vid.parse_block({"v": 1, "status": "known", "person": BOB, "score": 0.8})
     assert vid.speaker_hint(known, "Bob", identity_agrees=True) == \
-        "Speaker (by voice, a hint, not proof of identity): Bob."
+        "Speaker (recognised by voice): Bob."
     assert vid.speaker_hint(known, "Bob", identity_agrees=False) == "Speaker: not sure."
     unsure = vid.parse_block({"v": 1, "status": "not_sure", "score": 0.82})
     assert vid.speaker_hint(unsure, None, identity_agrees=False) == "Speaker: not sure."
