@@ -157,44 +157,6 @@ async def test_nothing_is_spoken_at_night(sweep, fake_hass, speakers, clock, jam
     assert ("not fully secured" in speakers["pushed"][0][1]) is jammed
 
 
-# ── the voice "secure" reply ────────────────────────────────────────────────
-
-def _router(load, fake_hass):
-    ir = load("intent.intent_router")
-    r = ir.LocalIntentRouter(fake_hass)
-    r._area_of = lambda eid: "hall"
-    r.verify_delay = 0
-    return r
-
-
-async def test_the_voice_reply_checks_what_it_secured(load, cc, fake_hass, al, records,
-                                                      speakers):
-    obey(fake_hass, "lock.back")
-    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
-    fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
-    out = await _router(load, fake_hass).execute({"intent": "secure_area"}, "hall")
-    assert sorted(out["entities"]) == ["lock.back", "lock.front"]
-    await fake_hass.drain()
-    rows = _rows(al)
-    assert rows["lock.front"]["execution_result"] == "verified"
-    assert rows["lock.back"]["execution_result"] == "unverified"
-    (rec,) = records("voice_secure")
-    assert rec["observation"]["secured"] == ["lock.front"]
-    assert rec["observation"]["not_secured_after_check"] == ["lock.back"]
-    assert [t for t, _ in speakers["pushed"]] == ["voice_secure_failed"]
-    assert "Back" in speakers["pushed"][0][1]
-
-
-async def test_a_voice_reply_that_secured_everything_raises_nothing(load, cc, fake_hass, al,
-                                                                    speakers):
-    obey(fake_hass)
-    fake_hass.states.set("cover.garage", "open", device_class="garage")
-    await _router(load, fake_hass).execute({"intent": "secure_area"}, "hall")
-    await fake_hass.drain()
-    assert _rows(al)["cover.garage"]["execution_result"] == "verified"
-    assert speakers["pushed"] == [] and speakers["spoken"] == []
-
-
 # ── scenes and scripts ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("eid", ["scene.movie", "script.bedtime"])

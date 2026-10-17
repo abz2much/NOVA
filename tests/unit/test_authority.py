@@ -107,7 +107,6 @@ def test_the_scan_finds_the_known_call_sites():
     names = {(p.relative_to(ROOT).as_posix(), n) for p, _t, n, _f, _l, _ln in _service_calls()}
     for expected in (("agent_runtime/capabilities/control.py", "_exec_control_device"),
                      ("core_lockdown.py", "secure_device"),
-                     ("intent/intent_router.py", "_call_domain_in_area"),
                      ("core_delivery.py", "_execute_action_data")):
         assert expected in names, expected
 
@@ -264,65 +263,11 @@ async def test_it_fails_closed(readable, pol, fake_hass, monkeypatch, load):
     assert p.authorize_now(fake_hass, _req(p, "light", "turn_on", "chat")).allowed
 
 
-# ── the voice "secure" reply and the offers executor ────────────────────────
+# ── the offers executor ─────────────────────────────────────────────────────
 
 @pytest.fixture
 def al(load):
     return load("action_log")
-
-
-def _router(load, fake_hass):
-    ir = load("intent.intent_router")
-    r = ir.LocalIntentRouter(fake_hass)
-    r._area_of = lambda eid: "hall"
-    return r
-
-
-async def test_the_voice_secure_reply_locks_and_closes_and_logs(load, fake_hass, al, pol):
-    fake_hass.states.set("lock.front", "unlocked")
-    fake_hass.states.set("cover.garage", "open", device_class="garage")
-    r = _router(load, fake_hass)
-    out = await r.execute({"intent": "secure_area"}, "hall")
-    assert out["executed"] and sorted(out["entities"]) == ["cover.garage", "lock.front"]
-    rows = [t for p_ in al.page_requests()["requests"] for t in p_["targets"]]
-    assert {(t["entity_id"], t["execution_result"]) for t in rows} == {
-        ("cover.garage", "accepted"), ("lock.front", "accepted")}
-    assert {p_["source"] for p_ in al.page_requests()["requests"]} == {"voice"}
-
-
-async def test_the_voice_reply_holds_a_device_that_needs_confirmation(
-        load, fake_hass, al, pol, monkeypatch):
-    p, fake = pol
-    fake.enabled = True
-    monkeypatch.setattr(load("voice_confirm"), "action_is_protected",
-                        lambda hass, d, s, e="": e == "lock.front")
-    fake_hass.states.set("lock.front", "unlocked")
-    fake_hass.states.set("lock.back", "unlocked")
-    r = _router(load, fake_hass)
-    out = await r.execute({"intent": "secure_area"}, "hall")
-    assert out["entities"] == ["lock.back"]
-    rows = {t["entity_id"]: t["execution_result"]
-            for p_ in al.page_requests()["requests"] for t in p_["targets"]}
-    assert rows == {"lock.back": "accepted", "lock.front": "blocked"}
-    assert [c[2]["entity_id"] for c in fake_hass.service_calls] == [["lock.back"]]
-
-
-async def test_the_voice_reply_sends_nothing_to_what_is_already_secure(
-        load, fake_hass, al, pol):
-    """8.46.0: the live check. A locked lock gets no command but still counts
-    as secure in the reply; an unreadable one is held and logged why."""
-    fake_hass.states.set("lock.front", "locked")
-    fake_hass.states.set("lock.back", "unlocked")
-    fake_hass.states.set("lock.side", "unavailable")
-    r = _router(load, fake_hass)
-    out = await r.execute({"intent": "secure_area"}, "hall")
-    assert out["executed"] and sorted(out["entities"]) == ["lock.back", "lock.front"]
-    assert [c[2]["entity_id"] for c in fake_hass.service_calls] == [["lock.back"]]
-    rows = {t["entity_id"]: (t["execution_result"], t["reason_code"])
-            for p_ in al.page_requests()["requests"] for t in p_["targets"]}
-    assert rows == {"lock.back": ("accepted", None),
-                    "lock.front": ("blocked", "already_secure"),
-                    "lock.side": ("blocked", "device_unreadable")}
 
 
 async def test_an_offer_nova_runs_on_its_own_may_not_unlock(load, fake_hass, al, pol):

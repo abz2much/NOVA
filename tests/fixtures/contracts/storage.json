@@ -261,12 +261,6 @@
     ],
     "tables": []
   },
-  "state_ledger": {
-    "paths": [
-      "nova/state_ledger.jsonl"
-    ],
-    "tables": []
-  },
   "ws_log": {
     "paths": [
       "nova/nova.log"

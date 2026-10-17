@@ -29,7 +29,6 @@ FLOORS = {
     "automation": 81,
     "diagnostics": 77,
     "agent_runtime": 74,
-    "intent": 35,
 }
 
 # Per file floors, for top level files that are not part of a package.
@@ -50,7 +49,6 @@ FLOORS = {
 # those six files sit three and a half points under their measured coverage,
 # rounded down (measured in the comments; before 8.7.19 in brackets).
 FILE_FLOORS = {
-    "intent/intent_router.py": 83,                      # 87.2% (30.8%)
     "agent_runtime/capabilities/safety_modes.py": 83,   # 87.2% (59.0%)
     "agent_runtime/capabilities/control.py": 88,        # 92.1% (89.1%)
     "ws_modes.py": 77,                                  # 80.9% (0.0%)

@@ -105,10 +105,6 @@ def test_every_yes_no_question_reads_the_shared_list(answers, load):
     vc = load("voice_confirm")
     assert answers.YES <= set(vc._YES) and answers.NO <= set(vc._NO)
     assert set(vc._YES) - answers.YES == {"unlock it", "open it"}
-    ir = load("intent.intent_router")
-    assert all(ir.is_affirmative(w) for w in answers.YES)
-    assert not any(ir.is_affirmative(w) for w in answers.NO)
-    assert ir.is_affirmative("close it") and not ir.is_affirmative("unlock it")
 
 
 async def test_a_held_request_reads_the_shared_list(load):

@@ -158,7 +158,7 @@ def test_the_coordinator_never_speaks_notifies_or_calls_a_service():
 SERVICE_CALLERS = {
     "__init__.py", "agent_runtime/capabilities/control.py",
     "agent_runtime/capabilities/environment.py", "automation/installation.py",
-    "cognitive_core.py", "continued_conversation.py", "intent/intent_router.py",
+    "cognitive_core.py", "continued_conversation.py",
     "local_engine.py", "mode_scene.py", "notify_targets.py",
     "proactive_audio.py", "services.py", "tts_helper.py",
     "voice_confirm.py",

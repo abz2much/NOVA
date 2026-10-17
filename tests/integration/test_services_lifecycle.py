@@ -144,7 +144,6 @@ def _delegates_recorded():
         (knowledge, "forget"), (output_gate, "shush"), (output_gate, "unshush"),
         (output_gate, "status"), (sleep_detection, "set_nap"),
         (backup, "create_backup"), (backup, "restore_backup"), (action_log, "start"),
-        (proactive_audio, "_intent_router"),
         (proactive_audio, "_alert_buffer"),
     ]
     with pytest.MonkeyPatch.context() as mp:
@@ -189,7 +188,7 @@ def built(monkeypatch):
     """Count every proactive-audio object construction."""
     from custom_components.nova import proactive_audio
     made: list[str] = []
-    for name in ("AlertBuffer", "LocalIntentRouter", "StateLedger", "EntityLockRegistry"):
+    for name in ("AlertBuffer",):
         real = getattr(proactive_audio, name)
 
         def _make(*a, _real=real, _name=name, **k):
@@ -445,10 +444,9 @@ async def test_real_setup_in_progress_rejects_ordinary_services(hass):
             for service in ("nap", "lockdown"):
                 seen[service] = await _rejected(hass, service)
         seen["delegates"] = delegates
-        return []
 
     entry = await _add_entry(hass)
-    with patch.object(proactive_audio, "_reconcile_state_ledger", _during_setup):
+    with patch.object(proactive_audio, "mark_boot_ready", _during_setup):
         assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert seen == {"state": ConfigEntryState.SETUP_IN_PROGRESS, "nap": "reloading",

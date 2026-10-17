@@ -28,7 +28,7 @@ FIELDS = [
     "client", "llm_provider_name", "sentinel", "reminder_watcher",
     "scheduler", "resources", "automation_contexts", "automation_inventory",
     "providers", "runtime_config", "schema_version", "observer_running",
-    "intent_router", "state_ledger", "entity_locks", "alert_buffer",
+    "alert_buffer",
     "audit_running", "provider_holds", "voice_id", "presentation",
 ]
 
@@ -193,7 +193,7 @@ def test_unload_releases_runtime():
 
 def test_proactive_audio_objects_default_to_unbuilt(rt):
     runtime = _runtime(rt)
-    for name in ("intent_router", "state_ledger", "entity_locks", "alert_buffer"):
+    for name in ("alert_buffer",):
         assert getattr(runtime, name) is None, name
     assert runtime.audit_running is False
 
@@ -205,16 +205,11 @@ def test_proactive_audio_objects_live_on_the_runtime():
     for key in ("'_intent_router'", "'_state_ledger'", "'_entity_locks'",
                 "'_alert_buffer'", "ALERT_BUFFER_KEY", "'_audit_running'"):
         assert key not in src, key
-    # Each object is built lazily on its runtime field.
-    for field, cls in (("state_ledger", "StateLedger"),
-                       ("entity_locks", "EntityLockRegistry"),
-                       ("alert_buffer", "AlertBuffer")):
-        assert f"if runtime.{field} is None:\n        runtime.{field} = {cls}()" in src, field
-    assert "if runtime.intent_router is None:" in src
-    # Unload forgets all four.
+    # It is built lazily on its runtime field.
+    assert "if runtime.alert_buffer is None:\n        runtime.alert_buffer = AlertBuffer()" in src
+    # Unload forgets it.
     unload = ast.unparse(_func(COMP / "proactive_audio.py", "async_unload_proactive_audio"))
-    for field in ("intent_router", "state_ledger", "entity_locks", "alert_buffer"):
-        assert f"runtime.{field} = None" in unload, field
+    assert "runtime.alert_buffer = None" in unload
 
 
 def test_proactive_audio_registers_no_services():

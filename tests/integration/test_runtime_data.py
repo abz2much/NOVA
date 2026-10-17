@@ -26,8 +26,8 @@ from .test_wiring_smoke import DOMAIN, _make_entry
 
 RUNTIME_OBJECTS = ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
                    "automation_contexts", "automation_inventory", "runtime_config",
-                   "intent_router", "state_ledger", "entity_locks", "alert_buffer")
-PROACTIVE_FIELDS = ("intent_router", "state_ledger", "entity_locks", "alert_buffer")
+                   "alert_buffer")
+PROACTIVE_FIELDS = ("alert_buffer",)
 LEGACY_AUDIO_KEYS = ("_intent_router", "_state_ledger", "_entity_locks", "_alert_buffer")
 
 
@@ -56,11 +56,10 @@ def _restore_nova_config(hass):
 @pytest.fixture(autouse=True)
 def _no_real_config(tmp_path, monkeypatch):
     """Nova's setup path still has a few fixed /config paths: the secrets
-    file, the intrusion log and snapshot dirs, the persistent log and the
-    state ledger. Point them all at this test's tmp dir so nothing here reads
+    file, the intrusion log and snapshot dirs, and the persistent log. Point them all at this test's tmp dir so nothing here reads
     or writes the real /config. monkeypatch restores every value (and cache)
     afterwards."""
-    from custom_components.nova import ha_secrets, intrusion, proactive_audio, ws_log
+    from custom_components.nova import ha_secrets, intrusion, ws_log
     monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
     monkeypatch.setattr(ha_secrets, "_SECRETS_CACHE", None)
     monkeypatch.setattr(intrusion, "LOG_PATH", tmp_path / "intrusion_log.json")
@@ -70,9 +69,6 @@ def _no_real_config(tmp_path, monkeypatch):
     monkeypatch.setattr(intrusion, "_log_loaded", False)
     # _LOG_FILE belongs to ws_log; a patch on websocket would do nothing.
     monkeypatch.setattr(ws_log, "_LOG_FILE", tmp_path / "nova.log")
-    real_ledger = proactive_audio.StateLedger
-    ledger_path = str(tmp_path / "state_ledger.jsonl")
-    monkeypatch.setattr(proactive_audio, "StateLedger", lambda: real_ledger(ledger_path))
     yield
     # Log lines queued during the test must land in tmp, not after restore.
     ws_log._LOG_QUEUE.join()
@@ -180,7 +176,6 @@ async def test_setup_creates_no_hass_data_bridge(hass):
 async def test_runtime_mutations_never_write_hass_data(hass):
     """Observer state, the automation inventory and the proactive-audio
     objects all change on the runtime alone."""
-    from custom_components.nova import proactive_audio
     from custom_components.nova.runtime import set_observer_running
 
     entry = await _setup(hass)
@@ -188,9 +183,8 @@ async def test_runtime_mutations_never_write_hass_data(hass):
     set_observer_running(entry, True)
     assert runtime.observer_running is True
     set_observer_running(entry, False)
-    proactive_audio._intent_router(hass, runtime)
     assert runtime.automation_inventory is not None
-    assert runtime.alert_buffer is not None and runtime.intent_router is not None
+    assert runtime.alert_buffer is not None
     assert_no_nova_state_in_hass_data(hass, runtime)
 
 
@@ -369,18 +363,13 @@ async def test_failed_observer_start_clears_runtime(hass):
 
 
 async def test_proactive_audio_objects_are_entry_owned(hass):
-    """Phase 3B: the four proactive-audio objects are the entry's NovaRuntime
-    fields, never hass.data keys or values. Unload drops
-    them; a reload builds new ones."""
-    from custom_components.nova import proactive_audio
-
+    """Phase 3B: the proactive-audio object (the startup gate) is the entry's
+    NovaRuntime field, never a hass.data key or value. Unload drops it; a
+    reload builds a new one."""
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    router = proactive_audio._intent_router(hass, runtime)   # built lazily, on first use
-    ledger, locks, buffer = runtime.state_ledger, runtime.entity_locks, runtime.alert_buffer
-    assert runtime.intent_router is router
-    assert router is not None and ledger is not None and locks is not None
-    assert buffer.ready is True
+    buffer = runtime.alert_buffer
+    assert buffer is not None and buffer.ready is True
 
     assert_no_nova_state_in_hass_data(hass, runtime)
 
@@ -394,7 +383,6 @@ async def test_proactive_audio_objects_are_entry_owned(hass):
     await hass.async_block_till_done()
     fresh = entry.runtime_data
     assert fresh is not runtime
-    assert fresh.state_ledger is not ledger
     assert fresh.alert_buffer is not buffer
     assert fresh.alert_buffer.ready is True
 

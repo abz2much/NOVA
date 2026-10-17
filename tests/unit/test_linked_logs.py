@@ -73,21 +73,6 @@ async def test_lockdown_checks_link_to_the_same_request(cc, fake_hass, logs, mon
             == rows["lockdown engaged"]["evidence"]["request_ids"])
 
 
-async def test_a_voice_reply_check_shows_its_action_log_request(load, fake_hass, logs):
-    dr, requests = logs
-    obey(fake_hass)
-    ir = load("intent.intent_router")
-    r = ir.LocalIntentRouter(fake_hass)
-    r._area_of = lambda eid: "hall"
-    r.verify_delay = 0
-    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
-    await r.execute({"intent": "secure_area"}, "hall")
-    await fake_hass.drain()
-    (rec,) = dr.recent(kind="voice_secure")
-    (rid,) = rec["evidence"]["request_ids"]
-    assert requests()[rid]["source"] == "voice"
-
-
 async def test_nothing_else_about_the_decision_changes(cc, fake_hass, logs, clock):
     # The ids are added to evidence; the decision and its facts are as before.
     dr, _ = logs
