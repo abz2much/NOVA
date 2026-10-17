@@ -1,3 +1,9 @@
+## [8.59.0] Three retired services are removed
+
+### Removed
+- **`nova.scene_by_intent`, `nova.routine` and `nova.replay_policy` are gone.** They were retired earlier and each call raised a Repairs notice. `nova.replay_policy` already did nothing. Use `scene.turn_on`, `script.turn_on` or an automation instead (`conversation.process` can pick a scene from a phrase). `nova.speak` and `nova.process_intent` are unchanged and still work.
+- **Your `nova_routines.yaml` is left alone.** If you had saved routines, the file stays on disk and is still included in Nova backups. Nothing reads it now.
+
 ## [8.58.8] Nova answers "who am I?" with the name Voice ID gave
 
 ### Changed

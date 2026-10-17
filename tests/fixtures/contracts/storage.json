@@ -243,12 +243,6 @@
     ],
     "tables": []
   },
-  "routines": {
-    "paths": [
-      "nova_routines.yaml"
-    ],
-    "tables": []
-  },
   "scene_memory": {
     "paths": [
       "nova/scene_memory.db"

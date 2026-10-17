@@ -1,7 +1,7 @@
 """The nova.* Home Assistant services.
 
 async_setup() in __init__.py calls async_setup_services() once per Home
-Assistant run, so all 32 services exist from the first setup until Home
+Assistant run, so all 29 services exist from the first setup until Home
 Assistant stops. Setting up, unloading, reloading or failing a config entry
 never adds or removes one.
 
@@ -64,7 +64,6 @@ from .proactive_audio import (
 )
 from .reminders import async_add_reminder_service
 from .repair_notices import RETIRED_SERVICES
-from .routines import async_run_routine
 from .runtime import (
     NovaConfigEntry,
     NovaRuntime,
@@ -73,7 +72,6 @@ from .runtime import (
     lifecycle_runtime_config,
     set_observer_running,
 )
-from .scenes import async_activate_by_intent
 from .summary import async_summarise
 
 _LOGGER = logging.getLogger(__name__)
@@ -282,7 +280,7 @@ async def _log_action(hass: HomeAssistant, kind: str, call: ServiceCall, job):
 
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
-    """Register the 32 services. Safe to call again: a name that is already
+    """Register the 29 services. Safe to call again: a name that is already
     registered keeps its handler. Handlers look up the entry, runtime,
     client and settings on each call; nothing is captured here."""
 
@@ -458,16 +456,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         honorific, tts, speakers = _voice(hass, entry, "briefing")
         await async_briefing(hass, call, runtime.client, honorific, tts, speakers)
 
-    async def _scene_intent(call: ServiceCall) -> None:
-        entry, runtime = async_resolve_loaded(hass)
-        honorific, tts, speakers = _voice(hass, entry, "chat")
-        await async_activate_by_intent(hass, call, runtime.client, honorific, tts, speakers)
-
-    async def _routine(call: ServiceCall) -> None:
-        entry, runtime = async_resolve_loaded(hass)
-        honorific, tts, speakers = _voice(hass, entry, "routine")
-        await async_run_routine(hass, call, honorific, tts, speakers)
-
     async def _add_reminder(call: ServiceCall) -> None:
         entry, runtime = async_resolve_loaded(hass)
         honorific, tts, speakers = _voice(hass, entry, "reminder")
@@ -492,14 +480,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
             vol.Optional("hours", default=12): vol.All(int, vol.Range(min=1, max=48)),
         }),
     )
-    _register(
-        "scene_by_intent", _scene_intent,
-        vol.Schema({
-            vol.Required("intent"): cv.string,
-            vol.Optional("announce", default=True): cv.boolean,
-        }),
-    )
-    _register("routine", _routine, vol.Schema({vol.Required("name"): cv.string}))
     _register(
         "add_reminder", _add_reminder,
         vol.Schema({
@@ -559,16 +539,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entry, runtime = async_resolve_loaded(hass)
         hass.bus.async_fire("nova_db_stats", await hass.async_add_executor_job(get_stats))
 
-    async def _replay_policy(call: ServiceCall) -> None:
-        """Replay went in 8.40.0. Kept one more release so automations
-        calling it don't break: it only fires the result event saying so."""
-        entry, runtime = async_resolve_loaded(hass)
-        hass.bus.async_fire("nova_replay_result", {
-            "kind": str(call.data.get("kind", "")).strip(),
-            "ready": False,
-            "reason": "Replay was removed in Nova 8.40.0",
-        })
-
     _register("backup", _nova_backup)
     _register("restore", _nova_restore, vol.Schema({vol.Optional("archive"): str}))
     _register(
@@ -576,13 +546,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         vol.Schema({vol.Optional("days", default=30): vol.All(int, vol.Range(min=1, max=365))}),
     )
     _register("database_stats", _db_stats)
-    _register(
-        "replay_policy", _replay_policy,
-        vol.Schema({
-            vol.Required("kind"): str,
-            vol.Optional("min_samples"): vol.All(int, vol.Range(min=1, max=100000)),
-        }),
-    )
 
     # ── Sentinel, observer and quiet ────────────────────────────────────────
 

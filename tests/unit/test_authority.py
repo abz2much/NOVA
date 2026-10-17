@@ -108,8 +108,7 @@ def test_the_scan_finds_the_known_call_sites():
     for expected in (("agent_runtime/capabilities/control.py", "_exec_control_device"),
                      ("core_lockdown.py", "secure_device"),
                      ("intent/intent_router.py", "_call_domain_in_area"),
-                     ("core_delivery.py", "_execute_action_data"),
-                     ("scenes.py", "async_activate_by_intent")):
+                     ("core_delivery.py", "_execute_action_data")):
         assert expected in names, expected
 
 

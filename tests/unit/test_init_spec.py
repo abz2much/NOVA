@@ -260,7 +260,6 @@ def _install(monkeypatch, load, world: World):
             _nest_device_to_camera=lambda hass, dev: world.nest_map.get(dev),
             _camera_friendly_name=lambda hass, eid: "Porch"),
         "briefing": _mod("briefing", async_briefing=asyn("async_briefing")),
-        "routines": _mod("routines", list_routines=lambda: ["wake", "sleep"]),
         "reminders": _mod("reminders", ReminderWatcher=Reminders),
         "recognition": _mod("recognition", register_recognition_listener=asyn(
             "register_recognition_listener", lambda hass: [sync("unsub.recognition")])),
@@ -558,7 +557,7 @@ async def test_setup_builds_the_runtime_and_wires_everything(env, caplog):
     assert env.entry.update_listener is env.nova._async_update_listener
     assert env.entry.on_unload == ["update-unsub"]
     assert set(env.hass.listeners) == {"nest_event", "frigate_event", "automation_triggered"}
-    assert "Nova online. Good day, sir. Routines available: wake, sleep" in caplog.text
+    assert "Nova online. Good day, sir." in caplog.text
     assert "Nova Observer mode disabled. Enable via addon config → observer_enabled=true" \
         in caplog.text
 
