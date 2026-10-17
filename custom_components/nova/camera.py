@@ -458,9 +458,19 @@ def _content(image) -> bytes:
     return b""
 
 
+def _is_image(body: bytes) -> bool:
+    """Whether the bytes start like a JPEG, PNG, WebP or GIF. A camera that
+    answers with an error page or a cut off reply is not sent to the vision
+    model as a picture (8.58.7)."""
+    head = bytes(body[:12])
+    return (head.startswith(b"\xff\xd8") or head.startswith(b"\x89PNG\r\n\x1a\n")
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+            or head[:4] == b"GIF8")
+
+
 def _usable(image, min_size: int = MIN_IMAGE_SIZE) -> Optional[bytes]:
     body = _content(image)
-    if len(body) > min_size and not _looks_blank(body):
+    if len(body) > min_size and _is_image(body) and not _looks_blank(body):
         return body
     return None
 
@@ -651,10 +661,10 @@ async def _get_best_image(hass: HomeAssistant, entity_id: str) -> Optional[bytes
             _LOGGER.debug("Nova: backend '%s' failed: %s, trying a snapshot",
                           backend.name, exc)
         else:
-            if body:
+            if body and _is_image(body):
                 _LOGGER.debug("Nova: backend '%s' gave %d bytes", backend.name, len(body))
                 return body
-            _LOGGER.debug("Nova: backend '%s' had no image, trying a snapshot",
+            _LOGGER.debug("Nova: backend '%s' had no usable image, trying a snapshot",
                           backend.name)
 
     first = None
@@ -726,7 +736,8 @@ async def _capture_frame_sequence(hass: HomeAssistant, entity_id: str, count: in
     for index in range(total):
         try:
             body = _content(await camera_get_image(hass, source, timeout=10))
-            if len(body) > MIN_IMAGE_SIZE and not _looks_blank(body):
+            if (len(body) > MIN_IMAGE_SIZE and _is_image(body)
+                    and not _looks_blank(body)):
                 frames.append(_downscale_jpeg(body, max_dim))
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Nova: frame %d of %s failed: %s", index, entity_id, exc)

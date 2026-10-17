@@ -213,6 +213,110 @@ def remember_recognition(camera_name: str, name: str, confidence: float,
         misses = 0
     _RECOGNITION_CACHE[camera_entity] = {"name": name, "confidence": confidence,
                                          "ts": stamp, "unknown_count": misses}
+    _schedule_save()
+
+
+# ── keeping the recognition log across a restart (8.58.7) ───────────────────
+# Names, cameras, scores and times only, never an image. Written at most once
+# every SAVE_EVERY_S seconds, and only after restore() has run at setup, so
+# nothing is written until Nova has loaded what was saved.
+FACE_LOG_FILE = "recent_faces.json"
+SAVE_EVERY_S = 30
+SAVE_KEEP = 100
+_HASS = None
+_SAVE_HANDLE = None
+
+
+def _log_path() -> str:
+    from . import paths
+    return paths.nova_path(FACE_LOG_FILE)
+
+
+def _stamp_out(entry: dict) -> dict:
+    return {"camera_entity": entry["camera_entity"], "name": entry["name"],
+            "confidence": entry["confidence"], "source": entry.get("source") or "",
+            "ts": entry["ts"].replace(tzinfo=timezone.utc).isoformat()}
+
+
+def _write_log(rows: list) -> None:
+    from .persistence.files import write_json_atomic
+    write_json_atomic(_log_path(), {"faces": rows}, indent=2, mode=0o600)
+
+
+def _read_log() -> list:
+    """Saved sightings from the last day, oldest first. Anything unreadable or
+    odd is dropped; a missing or corrupt file gives an empty list."""
+    from .persistence.files import OK, read_json
+    res = read_json(_log_path())
+    items = res.value.get("faces") if res.status == OK and isinstance(res.value, dict) else None
+    now = _utcnow()
+    kept: list = []
+    for raw in items if isinstance(items, list) else []:
+        try:
+            ts = datetime.fromisoformat(str(raw["ts"]))
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None) if ts.tzinfo else ts
+            camera = str(raw["camera_entity"])
+            name = str(raw["name"])
+            if (not name or not camera.startswith("camera.") or ts > now
+                    or (now - ts).total_seconds() > RECENT_FACES_MAX_AGE_S):
+                continue
+            kept.append({"camera_entity": camera, "name": name[:80],
+                         "confidence": float(raw.get("confidence") or 0.0), "ts": ts,
+                         "source": str(raw.get("source") or "")[:20]})
+        except Exception:  # noqa: BLE001
+            continue
+    return kept[-SAVE_KEEP:]
+
+
+def _save_now() -> None:
+    global _SAVE_HANDLE
+    _SAVE_HANDLE = None
+    hass = _HASS
+    if hass is None:
+        return
+    try:
+        rows = [_stamp_out(e) for e in list(_FACE_LOG)[-SAVE_KEEP:]]
+        hass.async_add_executor_job(_write_log, rows)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("recognition: could not save the recent faces: %s", exc)
+
+
+def _arm() -> None:
+    global _SAVE_HANDLE
+    if _HASS is not None and _SAVE_HANDLE is None:
+        _SAVE_HANDLE = _HASS.loop.call_later(SAVE_EVERY_S, _save_now)
+
+
+def _schedule_save() -> None:
+    """Ask for a save in SAVE_EVERY_S seconds, from any thread."""
+    hass = _HASS
+    if hass is None or _SAVE_HANDLE is not None:
+        return
+    try:
+        hass.loop.call_soon_threadsafe(_arm)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def restore(hass) -> None:
+    """Load the saved sightings into the log (older than anything new), then
+    start saving. Never raises."""
+    global _HASS
+    try:
+        saved = await hass.async_add_executor_job(_read_log)
+        if saved and not _FACE_LOG:
+            _FACE_LOG.extend(saved)
+            last: dict = {}
+            for entry in saved:
+                last[entry["camera_entity"]] = entry
+            for camera_entity, entry in last.items():
+                _RECOGNITION_CACHE.setdefault(camera_entity, {
+                    "name": entry["name"], "confidence": entry["confidence"],
+                    "ts": entry["ts"], "unknown_count": 0})
+        _LOGGER.debug("recognition: restored %d recent sightings", len(saved))
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("recognition: could not restore the recent faces: %s", exc)
+    _HASS = hass
 
 
 def note_person_detected(camera_name: str) -> None:
@@ -455,6 +559,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
     Frigate person detection. Returns the unsubscribe callables, none when
     MQTT is missing or not set up."""
     unsubs: list = []
+    await restore(hass)
     try:
         from homeassistant.components import mqtt
     except ImportError:
