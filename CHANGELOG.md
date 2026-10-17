@@ -1,3 +1,9 @@
+## [8.58.7] The Faces tab survives a restart, and camera bytes are checked
+
+### Fixed
+- **The Faces tab was empty after a restart.** Nova kept its list of recent sightings in memory only, so it started blank until someone was seen again. It now saves the last 100 sightings (name, camera, score and time, never an image) to `recent_faces.json` in Nova's folder, at most every 30 seconds, and loads them back at startup. Anything older than a day, or unreadable, is dropped. A resident seen a minute before a restart still counts for the three minute stand down window afterwards, the same as before the restart.
+- **A camera could send something that was not a picture to the vision model.** A reply that is an error page or a cut off download was passed on if it was big enough. Nova now only uses bytes that start like a JPEG, PNG, WebP or GIF, from a camera backend or a snapshot. If a backend sends something else, Nova falls back to a normal snapshot, and then to the stream wake and one retry it already did.
+
 ## [8.58.6] The Executive Assistant and Marketing specialists ask for a yes first
 
 ### Changed

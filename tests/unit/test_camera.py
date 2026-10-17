@@ -296,10 +296,10 @@ async def test_best_image_backend_first(cam, grab, monkeypatch, fake_hass):
 
         async def fetch_best_image(self, hass, eid, cache):
             seen["cache"] = cache
-            return b"BACKEND"
+            return b"\xff\xd8BACKEND"
     monkeypatch.setattr(cam, "find_backend", lambda h, e: Backend())
     snaps = grab()
-    assert await cam._get_best_image(fake_hass, "camera.a") == b"BACKEND"
+    assert await cam._get_best_image(fake_hass, "camera.a") == b"\xff\xd8BACKEND"
     assert seen["cache"] is cam._EVENT_CACHE and snaps.calls == []
 
 
@@ -349,9 +349,28 @@ async def test_best_image_blank_or_failed(cam, grab, fake_hass):
     assert await cam._get_best_image(fake_hass, "camera.a") is None
     grab(RuntimeError("no"), _img(GOOD))
     assert await cam._get_best_image(fake_hass, "camera.a") == GOOD
-    grab(None, _img(b"x" * 2001))
-    assert await cam._get_best_image(fake_hass, "camera.a") == b"x" * 2001
-    grab(_img(None), _img(b"x" * 2000))
+    grab(None, _img(b"\xff\xd8" + b"x" * 2001))
+    assert await cam._get_best_image(fake_hass, "camera.a") == b"\xff\xd8" + b"x" * 2001
+    grab(_img(None), _img(b"\xff\xd8" + b"x" * 1998))
+    assert await cam._get_best_image(fake_hass, "camera.a") is None
+
+
+async def test_bytes_that_are_not_an_image_are_never_used(cam, grab, monkeypatch, fake_hass):
+    """An error page or a cut off reply is not a picture (8.58.7)."""
+    html = b"<html>" + b"x" * 5000
+    assert cam._is_image(GOOD) and not cam._is_image(html) and not cam._is_image(b"")
+    assert cam._is_image(b"\x89PNG\r\n\x1a\n" + b"0") and cam._is_image(b"RIFF\0\0\0\0WEBP")
+
+    class Backend:
+        name = "frigate"
+
+        async def fetch_best_image(self, hass, eid, cache):
+            return html
+    monkeypatch.setattr(cam, "find_backend", lambda h, e: Backend())
+    grab(_img(GOOD))
+    assert await cam._get_best_image(fake_hass, "camera.a") == GOOD   # fell through to a snapshot
+    monkeypatch.setattr(cam, "find_backend", lambda h, e: None)
+    grab(_img(html), _img(html))
     assert await cam._get_best_image(fake_hass, "camera.a") is None
 
 
