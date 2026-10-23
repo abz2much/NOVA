@@ -37,12 +37,9 @@ def _tool_result_turn(message: dict, turns: list[dict]) -> None:
         "content": message.get("content") or "",
     }
     last = turns[-1] if turns else None
-    holds_only_results = bool(
-        last and last["role"] == "user"
-        and isinstance(last["content"], list) and last["content"]
-        and all(item.get("type") == "tool_result" for item in last["content"])
-    )
-    if holds_only_results:
+    if (last is not None and last["role"] == "user"
+            and isinstance(last["content"], list) and last["content"]
+            and all(item.get("type") == "tool_result" for item in last["content"])):
         last["content"].append(block)
     else:
         turns.append({"role": "user", "content": [block]})
