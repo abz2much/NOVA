@@ -24,6 +24,9 @@ import pytest
 
 import contract_extract as ce
 from ws_sources import ws_tree
+import pathlib
+import subprocess
+from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 _WRITE = os.environ.get("NOVA_WRITE_CONTRACTS") == "1"
 
@@ -239,3 +242,28 @@ def test_panel_label_suggestions_reach_the_panel():
     start = src.index("  _data() {\n    const live = this._liveData;")
     body = src[start:src.index("\n  }\n", start)]
     assert "available_labels: live.config?.available_labels || []" in body
+
+
+# ── repository files people see ───────────────────────────────────────────────
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def test_the_old_examples_are_gone_outside_tests():
+    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    shown = [f for f in files if not f.startswith(("tests/", "scripts/smoke_panel.js", "scripts/late_text_check.js"))
+             and f != "CHANGELOG.md" and f.endswith((".py", ".js", ".json", ".md", ".yaml", ".svg"))]
+    old = ("sam owns", "Sam owns", "car.jeep", "the Jeep", "Biscuit", "chase lamp", "'chase'",
+           "camera.workshop", "Nova-AIO", "nova-aio", "AIO principle", "home_cove", "kitchen_dog",
+           "thermo_lock", "core_switch", "server_root_storage", "basement_freeze_sensor",
+           "chaise", "is next to the garage")
+    hits = []
+    for f in shown:
+        text = (ROOT / f).read_text(encoding="utf-8", errors="ignore")
+        hits += [(f, w) for w in old if w in text]
+    allowed = {("custom_components/nova/core_common.py", "thermo_lock")}   # the migration's old list
+    assert [h for h in hits if h not in allowed] == []
+
+
+def test_the_installed_copy_carries_the_licence():
+    assert (ROOT / "custom_components/nova/LICENSE").read_text() == (ROOT / "LICENSE").read_text()

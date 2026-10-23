@@ -14,7 +14,7 @@ import pytest
 from homeassistant.core import Context
 
 from .test_chat_turn import _setup_nova, _speech
-from .test_voice_id_phase2b import (  # noqa: F401 - the fixture is used by name
+from .test_voice_id_turn import (  # noqa: F401 - the fixture is used by name
     DEVICE, TEXT, VoiceApp, _log, _set_app, _voice_turn, isolated,
 )
 
@@ -198,7 +198,7 @@ async def test_a_duplicate_on_a_second_satellite_is_never_learned(
         try:
             entity = stt.async_get_speech_to_text_entity(hass, "stt.nova_voice_id")
             assert isinstance(entity, nova_stt.NovaVoiceIdStt)
-            from .test_voice_id_phase2b import _meta, _stream
+            from .test_voice_id_turn import _meta, _stream
             from custom_components.nova import conversation as nova_conv
             nova_conv._dedup_cache.clear()
             import time as _time

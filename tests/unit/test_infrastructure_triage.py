@@ -15,6 +15,8 @@ import sys
 import pytest
 
 from fakes import FakeHass  # tests/conftest.py puts this on sys.path
+import subprocess
+from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 _MONITOR = (pathlib.Path(__file__).resolve().parents[2]
             / "custom_components" / "nova" / "diagnostics" / "monitor.py")
@@ -234,3 +236,46 @@ def test_lead_in_follows_the_honorific(honorific, lead):
 def test_lead_in_without_honorific_when_critical():
     message = _run(_home(disk="99"), honorific="")["message"]
     assert message.startswith("Infrastructure attention is required. Disk use")
+
+
+# ── the audit's sensor list ───────────────────────────────────────────────────
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _audit_sensors_fn(load):
+    """proactive_audio cannot be imported whole here, so its _audit_sensors is
+    compiled on its own, with the real nova_config next to it."""
+    import ast
+    load("nova_config")
+    src = (ROOT / "custom_components/nova/proactive_audio.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    keep = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name == "_audit_sensors")
+            or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "AUDIT_SENSORS_KEY"
+                                                    for t in n.targets))]
+    ns = {"__name__": "jc._audit", "__package__": "jc"}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "proactive_audio.py", "exec"), ns)
+    return ns["_audit_sensors"]
+
+
+@pytest.mark.parametrize("raw,want", [
+    (None, []), ([], []), ("", []), ("[]", []), ("{not json", []), (5, []),
+    (["sensor.disk_use", "", 3, "binary_sensor.switch"], ["sensor.disk_use", "binary_sensor.switch"]),
+    ('["sensor.disk_use"]', ["sensor.disk_use"]),
+])
+def test_the_audit_reads_its_sensor_list(load, monkeypatch, raw, want):
+    fn = _audit_sensors_fn(load)
+    nc = load("nova_config")
+    seen = []
+
+    def _get(h, e, k, d=None):
+        seen.append(k)
+        return raw if raw is not None else d
+    monkeypatch.setattr(nc, "runtime_get", _get)
+    assert fn(None, None) == want
+    assert seen == ["infrastructure_audit_sensors"]
+
+
+def test_the_audit_is_given_the_list(load):
+    src = (ROOT / "custom_components/nova/proactive_audio.py").read_text(encoding="utf-8")
+    assert "sensors=_audit_sensors(hass, entry)" in src

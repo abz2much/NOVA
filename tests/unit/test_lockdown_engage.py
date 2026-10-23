@@ -341,3 +341,17 @@ async def test_lockdown_records_its_checks_linked_to_the_lockdown(load, cc, fake
     refs = {r["ref"] for r in rows}
     assert len(refs) == 1 and next(iter(refs)).startswith("lockdown:")
     assert by["could not check"]["interpretation"] == {"assessment": "unverified"}
+
+
+# ── arming does not name a fridge door ────────────────────────────────────────
+
+async def test_arming_with_the_fridge_open_does_not_name_the_fridge(cc, fake_hass):
+    mgr = cc.LockdownManager(fake_hass, {})
+    fake_hass.states.set("binary_sensor.fridge_door", "on", device_class="door",
+                         friendly_name="Fridge door")
+    fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window",
+                         friendly_name="Kitchen window")
+    action = await mgr.engage("test")
+    assert "Kitchen window" in action["message"]
+    assert "Fridge" not in action["message"]
+    assert "binary_sensor.fridge_door" not in mgr.exempt_windows

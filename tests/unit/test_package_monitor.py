@@ -461,3 +461,66 @@ async def test_a_press_that_shows_a_parcel_announces_it(pm, said, fake_hass):
     await _press(pm, fake_hass, "A courier is leaving a parcel on the step")
     assert len(said) == 1 and "package has been delivered" in said[0]
     assert pm._STATE[BELL]["package"] is True
+
+
+# ── a package taken while away ────────────────────────────────────────────────
+
+@pytest.fixture
+def pm_hh(load, monkeypatch):
+    if "aiohttp" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
+    mod = load("package_monitor")
+    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST):
+        d.clear()
+    yield mod
+    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST):
+        d.clear()
+
+
+@pytest.fixture
+def pkg(pm_hh, load, monkeypatch):
+    sw = {"quiet": False, "spoken": [], "pushed": []}
+    monkeypatch.setattr(pm_hh, "_in_quiet_hours", lambda h: sw["quiet"])
+    monkeypatch.setattr(pm_hh, "_announcements_on", lambda h: True)
+    monkeypatch.setattr(pm_hh, "_log", lambda *a, **k: None)
+    monkeypatch.setattr(pm_hh, "_now_mono", lambda: 1000.0)
+
+    async def _announce(hass, msg, *a, **k):
+        sw["spoken"].append(msg)
+        return True
+    monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
+    # 8.44.0: package messages go out through delivery.py.
+    from conftest import route_delivery
+    route_delivery(load, monkeypatch, quiet=lambda h: sw["quiet"], pushed=sw["pushed"])
+    return sw
+
+
+async def _package_then_gone(pm_hh, hass):
+    cam = "camera.front_door"
+    for present in (True, False):
+        await pm_hh.evaluate(hass, None, "Sir", "tts.x", ["media_player.y"], cam,
+                          {"package": present, "mail": False,
+                           "count": 1 if present else 0, "description": ""})
+
+
+async def test_a_package_taken_while_away_reaches_the_phones(pm_hh, pkg, fake_hass):
+    fake_hass.states.set("person.abi", "not_home")
+    await _package_then_gone(pm_hh, fake_hass)
+    assert len(pkg["pushed"]) == 1 and "while no one is home" in pkg["pushed"][0]
+    # The spoken line is unchanged.
+    assert pkg["spoken"][-1] == pkg["pushed"][0]
+
+
+async def test_in_quiet_hours_it_is_pushed_but_not_spoken(pm_hh, pkg, fake_hass):
+    pkg["quiet"] = True
+    fake_hass.states.set("person.abi", "not_home")
+    await _package_then_gone(pm_hh, fake_hass)
+    assert len(pkg["pushed"]) == 1 and pkg["spoken"] == []
+    assert "while no one is home" in pkg["pushed"][-1]
+
+
+@pytest.mark.parametrize("state", ["home", "unknown"])
+async def test_nothing_is_pushed_unless_the_residents_are_away(pm_hh, pkg, fake_hass, state):
+    fake_hass.states.set("person.abi", state)
+    await _package_then_gone(pm_hh, fake_hass)
+    assert pkg["pushed"] == []

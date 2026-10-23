@@ -13,6 +13,9 @@ import math
 import types
 
 import pytest
+import pathlib
+import subprocess
+from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 # A made up home point well away from Ireland, so the region defaults are
 # the "anywhere else" ones.
@@ -241,3 +244,10 @@ async def test_status_describes_the_watch(hz, settings):
     # No country set and the home is outside Ireland: the custom source.
     assert st["source"] == "custom"
     assert st["in_ireland"] is False
+
+
+# ── the user agent ────────────────────────────────────────────────────────────
+
+def test_the_hazard_user_agent_says_nova(load):
+    ua = load("hazard_monitor")._USER_AGENT
+    assert ua == "Nova Home Assistant hazard monitor (github.com/abz2much/nova)"

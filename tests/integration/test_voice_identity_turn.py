@@ -14,7 +14,7 @@ import pytest
 from homeassistant.core import Context
 
 from .test_chat_turn import _setup_nova, _speech
-from .test_voice_id_phase2b import (  # noqa: F401 - the fixture is used by name
+from .test_voice_id_turn import (  # noqa: F401 - the fixture is used by name
     DEVICE, TEXT, VoiceApp, _log, _set_app, _voice_turn, isolated,
 )
 
