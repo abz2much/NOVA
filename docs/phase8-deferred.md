@@ -17,42 +17,12 @@ removed, keep every public name, message, key, command schema and stored
 value, keep behaviour identical unless a fix is agreed, then rescan. Start
 from the largest files in each table.
 
-## Integration code: 48 files, 923 lines in runs
+## Integration code: 18 files, 134 lines in runs
 
-Small files, 6 to 40 copied lines each.
+Small files, 6 to 11 copied lines each.
 
 | File | Lines in runs | Longest run |
 |---|---|---|
-| `mode_scene.py` | 40 | 18 |
-| `agent_runtime/ha_tools.py` | 40 | 14 |
-| `automation/installation.py` | 40 | 9 |
-| `core_common.py` | 39 | 20 |
-| `memory.py` | 36 | 9 |
-| `agent_runtime/registry.py` | 36 | 18 |
-| `agent_runtime/capabilities/memory.py` | 36 | 11 |
-| `agent_runtime/capabilities/diagnostics.py` | 33 | 17 |
-| `directive_helper.py` | 31 | 16 |
-| `conversation.py` | 31 | 18 |
-| `providers/anthropic.py` | 31 | 25 |
-| `agent_runtime/grants.py` | 31 | 15 |
-| `automation/trials.py` | 30 | 8 |
-| `core_delivery.py` | 28 | 20 |
-| `core_autonomy.py` | 27 | 11 |
-| `memory_thread.py` | 26 | 16 |
-| `person_patterns.py` | 26 | 14 |
-| `agent_runtime/capabilities/communications.py` | 26 | 12 |
-| `core_state.py` | 25 | 15 |
-| `agent_runtime/capabilities/automation.py` | 21 | 8 |
-| `agent_runtime/capabilities/safety_modes.py` | 19 | 12 |
-| `websocket.py` | 18 | 6 |
-| `providers/routing.py` | 18 | 12 |
-| `agent_runtime/dispatcher.py` | 17 | 11 |
-| `ws_voice.py` | 16 | 16 |
-| `cognitive/coordinator.py` | 15 | 9 |
-| `provider_activity.py` | 14 | 8 |
-| `agent_runtime/delegation.py` | 14 | 8 |
-| `panel_register.py` | 13 | 7 |
-| `proactive_audio.py` | 12 | 6 |
 | `cognitive_core.py` | 11 | 11 |
 | `providers/errors.py` | 9 | 9 |
 | `automation/patterns.py` | 9 | 9 |
