@@ -46,5 +46,4 @@ speaker, and it would behave unevenly in any room without one.
 ## See also
 
 - [How Nova works](how-nova-works.md): what Nova does today
-- [Phase 8: work left for later](phase8-deferred.md): the independent rewrite of Nova's code, and what is left of it. This is housekeeping, not a feature idea
 - [CHANGELOG](../CHANGELOG.md): what has changed
