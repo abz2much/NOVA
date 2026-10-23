@@ -820,14 +820,13 @@ def _clock_time(stamp) -> str:
 
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_activity_log",
-    vol.Optional("hours", default=24): int,
     vol.Optional("limit", default=50): int,
+    vol.Optional("hours", default=24): int,
 })
 @websocket_api.async_response
-async def ws_get_activity_log(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
-) -> None:
-    """Recent activity rows, shaped for the panel's feed."""
+async def ws_get_activity_log(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                              msg: dict[str, Any]) -> None:
+    """The latest activity rows, shaped for the panel's feed."""
     try:
         from .database import get_recent_activity
         rows = await hass.async_add_executor_job(
@@ -988,13 +987,12 @@ async def _refresh_after_write(hass: HomeAssistant, runtime, key: str, value) ->
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/update_config",
-    vol.Required("key"): str,
     vol.Required("value"): vol.Any(bool, str, int, float, None),
+    vol.Required("key"): str,
 })
 @websocket_api.async_response
-async def ws_update_config(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
-) -> None:
+async def ws_update_config(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
+                           msg: dict[str, Any]) -> None:
     """Change one setting from the panel.
 
     The value goes into NovaRuntime.runtime_config, not entry.options, since
@@ -1315,11 +1313,11 @@ _DOCUMENT_ACTIONS = {
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/documents",
+    vol.Optional("content"): str,        # base64, for upload
+    vol.Optional("filename"): str,
+    vol.Optional("query"): str,
     vol.Required("action"): vol.In(["status", "ingest", "search", "upload",
                                     "scan_watch", "delete"]),
-    vol.Optional("query"): str,
-    vol.Optional("filename"): str,
-    vol.Optional("content"): str,        # base64, for upload
 })
 @websocket_api.async_response
 async def ws_documents(
