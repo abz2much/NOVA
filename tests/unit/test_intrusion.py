@@ -1,349 +1,357 @@
-"""Tests for intrusion snapshots + false-alarm call-off (v6.68.0). Covers the
-call-off suppression window (safety-relevant: a call-off must actually suppress
-escalation), false-alarm recording, snapshot capture, and the status shape."""
+"""intrusion.py: calling an alert off, acknowledging it, and the snapshots.
+
+Safety relevant: a call-off must really hold escalation for its cooldown and
+then let go; an acknowledgement holds only the no answer escalation and is
+not a call-off; snapshots stay in the private folder and are never served
+from an unauthenticated path. Learning and the event log are covered in
+test_intrusion_spec.py and test_intrusion_log.py.
+"""
+from __future__ import annotations
+
+import base64
 import pathlib
+import sys
 import time
+import types
+from datetime import timedelta
 
 import pytest
 
+T0 = 1_700_000_000.0
+JPEG = b"\xff\xd8\xff\xe0 fake frame"
+
 
 @pytest.fixture
-def intr(load, tmp_path, monkeypatch):
-    m = load("intrusion")
-    # isolate snapshot dir + reset module state each test
-    monkeypatch.setattr(m, "SNAPSHOT_DIR", str(tmp_path / "snaps"))
-    m._called_off_until = 0.0
-    m._last_snapshot = {}
-    m._false_alarms = []
-    return m
+def clock():
+    return {"now": T0}
 
 
-# ── call-off suppression ─────────────────────────────────────────────────────
+@pytest.fixture
+def judged(monkeypatch):
+    """Decision Record verdicts asked for by a call-off, kept in a list
+    instead of being written anywhere."""
+    calls: list = []
+    fake = types.ModuleType("jc.decision_record")
+    fake.set_outcome = lambda rid, verdict, source="": calls.append((rid, verdict, source)) or True
+    fake.set_outcome_recent = lambda *a, **k: calls.append(("recent",) + a) or True
+    monkeypatch.setitem(sys.modules, "jc.decision_record", fake)
+    monkeypatch.setattr(sys.modules["jc"], "decision_record", fake, raising=False)
+    return calls
 
-def test_not_called_off_by_default(intr):
+
+@pytest.fixture
+def intr(load, tmp_path, monkeypatch, clock, judged):
+    """intrusion.py on a clock the test moves, with every piece of module
+    state fresh and every folder inside tmp_path."""
+    mod = load("intrusion")
+    monkeypatch.setattr(mod, "time", types.SimpleNamespace(
+        time=lambda: clock["now"], localtime=time.localtime))
+    monkeypatch.setattr(mod, "SNAPSHOT_DIR", str(tmp_path / "private"))
+    monkeypatch.setattr(mod, "_LEGACY_SNAPSHOT_DIR", str(tmp_path / "public"))
+    monkeypatch.setattr(mod, "LOG_PATH", tmp_path / "events.json")
+    fresh = {"_called_off_until": 0.0, "_acknowledged_ts": 0.0, "_last_snapshot": {},
+             "_false_alarms": [], "_log": [], "_log_loaded": False,
+             "_last_decision_id": None}
+    for name, value in fresh.items():
+        monkeypatch.setattr(mod, name, value)
+    return mod
+
+
+def private_dir(intr) -> pathlib.Path:
+    return pathlib.Path(intr.SNAPSHOT_DIR)
+
+
+def install(monkeypatch, name: str, **attrs):
+    """Stand in for a Home Assistant module for one test only."""
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    monkeypatch.setitem(sys.modules, name, module)
+    return module
+
+
+# ── a fresh start ───────────────────────────────────────────────────────────
+
+def test_nothing_is_held_at_start(intr):
     assert intr.is_called_off() is False
+    assert intr.is_acknowledged() is False
+    assert intr.false_alarm_count() == 0
+    assert intr.last_snapshot() is None
+    st = intr.status()
+    assert {"last_snapshot", "called_off", "acknowledged", "suppressed_for",
+            "false_alarms_24h"} <= set(st)
+    assert (st["called_off"], st["acknowledged"], st["suppressed_for"]) == (False, False, 0)
 
 
-def test_dismiss_suppresses_escalation(intr):
-    res = intr.dismiss_intrusion("it was the cat")
-    assert res["ok"] is True
-    assert res["suppressed_seconds"] > 0
-    assert intr.is_called_off() is True          # escalation now suppressed
+# ── calling an alert off ────────────────────────────────────────────────────
 
-
-def test_calloff_expires(intr, monkeypatch):
-    intr.dismiss_intrusion()
+def test_a_call_off_holds_escalation_and_says_for_how_long(intr):
+    reply = intr.dismiss_intrusion("the cat")
+    assert reply["ok"] is True
+    assert reply["suppressed_seconds"] == int(intr._CALLOFF_COOLDOWN) > 0
+    assert reply["recorded"]["reason"] == "the cat"
     assert intr.is_called_off() is True
-    # jump past the cooldown (capture real now first to avoid recursion)
-    future = time.time() + intr._CALLOFF_COOLDOWN + 5
-    monkeypatch.setattr(intr.time, "time", lambda: future)
-    assert intr.is_called_off() is False
+    st = intr.status()
+    assert st["called_off"] is True
+    assert st["suppressed_for"] == int(intr._CALLOFF_COOLDOWN)
 
 
-def test_clear_calloff_resets(intr):
+@pytest.mark.parametrize("seconds_from_end, held", [
+    (-599.0, True),   # just after the call-off
+    (-1.0, True),     # one second before the cooldown ends
+    (0.0, False),     # exactly at the end: released
+    (5.0, False),
+])
+def test_a_call_off_ends_with_its_cooldown(intr, clock, seconds_from_end, held):
+    intr.dismiss_intrusion()
+    clock["now"] = T0 + intr._CALLOFF_COOLDOWN + seconds_from_end
+    assert intr.is_called_off() is held
+
+
+def test_clearing_lifts_a_call_off(intr):
     intr.dismiss_intrusion()
     assert intr.is_called_off() is True
     intr.clear_calloff()
     assert intr.is_called_off() is False
 
 
-# ── false-alarm recording ────────────────────────────────────────────────────
+def test_a_call_off_judges_the_alert_it_belongs_to(intr, judged):
+    intr.set_last_decision_id(42)
+    intr.dismiss_intrusion()
+    assert judged[0] == (42, "wrong", "dismiss_intrusion")
 
-def test_false_alarm_recorded(intr):
+
+# ── false alarm memory ──────────────────────────────────────────────────────
+
+def test_each_call_off_is_remembered_as_a_false_alarm(intr):
     intr.dismiss_intrusion("cat again")
     assert intr.false_alarm_count() == 1
+    assert intr._false_alarms[-1]["reason"] == "cat again"
+    assert intr._false_alarms[-1]["ts"] == int(T0)
 
 
-def test_false_alarm_count_windowed(intr, monkeypatch):
+def test_only_false_alarms_inside_the_window_are_counted(intr, clock):
+    intr.dismiss_intrusion("long ago")
+    clock["now"] += 200_000
+    intr.dismiss_intrusion("today")
+    assert intr.false_alarm_count(within_seconds=86_400) == 1
+    assert intr.false_alarm_count(within_seconds=300_000) == 2
+    assert intr.status()["false_alarms_24h"] == 1
+
+
+def test_the_false_alarm_list_is_capped_keeping_the_newest(intr, clock):
+    for n in range(60):
+        clock["now"] = T0 + n
+        intr.dismiss_intrusion(f"n{n}")
+    assert len(intr._false_alarms) == 50
+    assert intr._false_alarms[0]["reason"] == "n10"
+    assert intr._false_alarms[-1]["reason"] == "n59"
+
+
+# ── acknowledging ───────────────────────────────────────────────────────────
+
+def test_an_acknowledgement_holds_without_calling_off(intr):
+    reply = intr.acknowledge("I'm looking")
+    assert reply["ok"] is True
+    assert reply["held_seconds"] == int(intr._ACK_WINDOW)
+    assert intr.is_acknowledged() is True
+    # Fresh evidence must still be able to escalate: not a false alarm.
+    assert intr.is_called_off() is False
+    assert intr.false_alarm_count() == 0
+    assert intr.status()["acknowledged"] is True
+
+
+@pytest.mark.parametrize("offset, held", [(-1.0, True), (0.0, False), (5.0, False)])
+def test_an_acknowledgement_runs_out(intr, clock, offset, held):
+    intr.acknowledge()
+    clock["now"] = T0 + intr._ACK_WINDOW + offset
+    assert intr.is_acknowledged() is held
+
+
+def test_clearing_lifts_an_acknowledgement_too(intr):
+    intr.acknowledge()
     intr.dismiss_intrusion()
-    # an old false alarm outside the window shouldn't count
-    intr._false_alarms.insert(0, {"ts": int(time.time()) - 200000, "reason": "old"})
-    assert intr.false_alarm_count(within_seconds=86400) == 1   # only the recent one
-
-
-def test_false_alarm_list_capped(intr):
-    for _ in range(60):
-        intr.dismiss_intrusion()
-    assert len(intr._false_alarms) <= 50
-
-
-# ── snapshot capture ─────────────────────────────────────────────────────────
-
-async def test_capture_snapshot_writes_file(intr, tmp_path):
-    class _Img:
-        content = b"\xff\xd8\xff\xe0jpegbytes"
-    class _Hass:
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    hass = _Hass()
-
-    import sys, types
-    cam_mod = types.ModuleType("homeassistant.components.camera")
-    async def _get_image(h, entity, timeout=10):
-        return _Img()
-    cam_mod.async_get_image = _get_image
-    sys.modules["homeassistant.components.camera"] = cam_mod
-    try:
-        info = await intr.capture_snapshot(hass, "camera.dining_room")
-    finally:
-        sys.modules.pop("homeassistant.components.camera", None)
-
-    assert info is not None
-    assert info["camera"] == "camera.dining_room"
-    # No unauthenticated URL is ever produced (v7.102.0) — /config/www's
-    # /local/... path is served with no auth at all; snapshots reach the
-    # panel only via the authenticated nova/intrusion websocket command.
-    assert "url" not in info
-    import os
-    assert os.path.exists(info["path"])
-    assert intr.last_snapshot()["camera"] == "camera.dining_room"
-
-
-def test_snapshot_dir_is_not_under_config_www(load):
-    """The real (unpatched) SNAPSHOT_DIR must never be under /config/www —
-    Home Assistant serves that whole tree at /local/... with no
-    authentication at all. Checked against the module's own source constant,
-    not a test's redirected path, so this can't pass by accident."""
-    m = load("intrusion")
-    assert "/www/" not in m._snapshot_dir()
-    src = pathlib.Path(m.__file__).read_text(encoding="utf-8")
-    assert 'paths.nova_path("intrusion")' in src
-
-
-async def test_capture_snapshot_no_entity_returns_none(intr):
-    class _Hass: ...
-    assert await intr.capture_snapshot(_Hass(), "") is None
-
-
-async def test_capture_snapshot_never_raises(intr):
-    class _Hass:
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    import sys, types
-    cam_mod = types.ModuleType("homeassistant.components.camera")
-    async def _boom(h, entity, timeout=10):
-        raise RuntimeError("camera offline")
-    cam_mod.async_get_image = _boom
-    sys.modules["homeassistant.components.camera"] = cam_mod
-    try:
-        assert await intr.capture_snapshot(_Hass(), "camera.x") is None   # no crash
-    finally:
-        sys.modules.pop("homeassistant.components.camera", None)
-
-
-# ── base64 read-back (panel delivery path) ────────────────────────────────────
-
-async def test_get_snapshot_b64_roundtrip(intr):
-    import base64, os
-    class _Hass:
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    os.makedirs(intr.SNAPSHOT_DIR, exist_ok=True)
-    path = os.path.join(intr.SNAPSHOT_DIR, "x.jpg")
-    with open(path, "wb") as f:
-        f.write(b"jpegbytes")
-    out = await intr.get_snapshot_b64(_Hass(), path)
-    assert base64.b64decode(out) == b"jpegbytes"
-
-
-async def test_get_snapshot_b64_missing_file_returns_none(intr):
-    class _Hass:
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    assert await intr.get_snapshot_b64(_Hass(), "/does/not/exist.jpg") is None
-
-
-async def test_get_snapshot_b64_refuses_path_outside_snapshot_dir(intr, tmp_path):
-    """A path pointing outside SNAPSHOT_DIR must never be read, even though
-    today every caller supplies paths from our own stored metadata — this is
-    defense in depth against a future caller passing something untrusted."""
-    import os
-    class _Hass:
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    outside = tmp_path / "outside.jpg"
-    outside.write_bytes(b"not yours")
-    assert await intr.get_snapshot_b64(_Hass(), str(outside)) is None
-
-
-# ── legacy snapshot migration ─────────────────────────────────────────────────
-
-def test_migrate_legacy_snapshots_moves_files_and_repoints_log(intr, tmp_path, monkeypatch):
-    import os
-    legacy = tmp_path / "legacy"
-    legacy.mkdir()
-    (legacy / "a.jpg").write_bytes(b"one")
-    monkeypatch.setattr(intr, "_LEGACY_SNAPSHOT_DIR", str(legacy))
-    intr._log = [{"id": "evt_1", "snapshot_path": str(legacy / "a.jpg")}]
-    intr._log_loaded = True
-
-    result = intr.migrate_legacy_snapshots()
-
-    assert result == {"moved": 1, "skipped": 0}
-    assert os.path.exists(os.path.join(intr.SNAPSHOT_DIR, "a.jpg"))
-    assert not os.path.exists(str(legacy / "a.jpg"))          # moved, not copied
-    assert intr._log[0]["snapshot_path"] == os.path.join(intr.SNAPSHOT_DIR, "a.jpg")
-
-
-def test_migrate_legacy_snapshots_noop_when_nothing_legacy(intr, tmp_path, monkeypatch):
-    monkeypatch.setattr(intr, "_LEGACY_SNAPSHOT_DIR", str(tmp_path / "never_existed"))
-    assert intr.migrate_legacy_snapshots() == {"moved": 0, "skipped": 0}
-
-
-def test_migrate_legacy_snapshots_does_not_overwrite_or_delete_existing_destination(
-        intr, tmp_path, monkeypatch):
-    """If a file with the same name already exists at the destination, the
-    legacy copy is left in place — never overwritten, never deleted."""
-    import os
-    legacy = tmp_path / "legacy"
-    legacy.mkdir()
-    (legacy / "a.jpg").write_bytes(b"legacy-bytes")
-    monkeypatch.setattr(intr, "_LEGACY_SNAPSHOT_DIR", str(legacy))
-    os.makedirs(intr.SNAPSHOT_DIR, exist_ok=True)
-    with open(os.path.join(intr.SNAPSHOT_DIR, "a.jpg"), "wb") as f:
-        f.write(b"already-here")
-
-    result = intr.migrate_legacy_snapshots()
-
-    assert result == {"moved": 0, "skipped": 1}
-    assert (legacy / "a.jpg").exists()                         # not deleted
-    with open(os.path.join(intr.SNAPSHOT_DIR, "a.jpg"), "rb") as f:
-        assert f.read() == b"already-here"                     # not overwritten
-
-
-# ── notification image (signed, short-lived, media_source-backed) ────────────
-
-async def test_get_notification_image_url_no_media_dir_returns_none(intr):
-    class _Config:
-        media_dirs = {}
-    class _Hass:
-        config = _Config()
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    assert await intr.get_notification_image_url(_Hass(), "/some/path.jpg") is None
-
-
-async def test_get_notification_image_url_missing_snapshot_path_returns_none(intr):
-    class _Hass: ...
-    assert await intr.get_notification_image_url(_Hass(), "") is None
-
-
-async def test_get_notification_image_url_signs_and_schedules_cleanup(
-        intr, tmp_path, monkeypatch):
-    """The happy path: the private snapshot is copied into the configured
-    local media directory under an unguessable name, the resulting /media/...
-    path is signed (never the raw, unsigned path), and a cleanup callback is
-    scheduled rather than the file being left indefinitely."""
-    import os, sys, types
-
-    media_root = tmp_path / "media"
-    media_root.mkdir()
-    src = tmp_path / "src.jpg"
-    src.write_bytes(b"jpegbytes")
-
-    class _Config:
-        media_dirs = {"local": str(media_root)}
-    class _Hass:
-        config = _Config()
-        async def async_add_executor_job(self, fn, *a):
-            return fn(*a)
-    hass = _Hass()
-
-    signed_calls = []
-    def _fake_sign_path(h, path, expiry):
-        signed_calls.append((path, expiry))
-        return path + "?authSig=faketoken"
-
-    scheduled = []
-    def _fake_call_later(h, delay, cb):
-        scheduled.append((delay, cb))
-        return lambda: None
-
-    auth_mod = types.ModuleType("homeassistant.components.http.auth")
-    auth_mod.async_sign_path = _fake_sign_path
-    event_mod = types.ModuleType("homeassistant.helpers.event")
-    event_mod.async_call_later = _fake_call_later
-    sys.modules["homeassistant.components.http.auth"] = auth_mod
-    sys.modules["homeassistant.helpers.event"] = event_mod
-    try:
-        url = await intr.get_notification_image_url(hass, str(src))
-    finally:
-        sys.modules.pop("homeassistant.components.http.auth", None)
-        sys.modules.pop("homeassistant.helpers.event", None)
-
-    assert url is not None
-    assert url.startswith("/media/local/nova_intrusion/")
-    assert "?authSig=faketoken" in url
-    assert len(signed_calls) == 1
-    signed_path, _expiry = signed_calls[0]
-    assert "?" not in signed_path                    # the UNSIGNED path was what got signed
-    assert signed_path.startswith("/media/local/nova_intrusion/")
-    # The copy actually exists on disk, under a name that isn't the source's.
-    copied_files = os.listdir(str(media_root / "nova_intrusion"))
-    assert len(copied_files) == 1
-    assert copied_files[0] != "src.jpg"
-    with open(str(media_root / "nova_intrusion" / copied_files[0]), "rb") as f:
-        assert f.read() == b"jpegbytes"
-    # Cleanup was scheduled, not skipped.
-    assert len(scheduled) == 1
-
-
-# ── status shape ─────────────────────────────────────────────────────────────
-
-def test_status_shape(intr):
-    st = intr.status()
-    assert set(("last_snapshot", "called_off", "suppressed_for", "false_alarms_24h")) <= set(st)
-    assert st["called_off"] is False
-
-
-# ── agent tool registration ──────────────────────────────────────────────────
-
-def test_dismiss_intrusion_tool_registered(load):
-    agent = load("agent")
-    names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert "dismiss_intrusion" in names
-    assert "dismiss_intrusion" in agent._TOOL_MAP
-
-
-# ── acknowledge (hold auto-escalation without cancelling) v6.69.0 ────────────
-
-def test_acknowledge_holds_escalation(intr):
-    assert intr.is_acknowledged() is False
-    res = intr.acknowledge("I'm looking")
-    assert res["ok"] is True
-    assert intr.is_acknowledged() is True
-
-
-def test_acknowledge_expires(intr, monkeypatch):
-    intr.acknowledge()
-    assert intr.is_acknowledged() is True
-    future = time.time() + intr._ACK_WINDOW + 5
-    monkeypatch.setattr(intr.time, "time", lambda: future)
-    assert intr.is_acknowledged() is False
-
-
-def test_acknowledge_is_not_calloff(intr):
-    # acknowledging must NOT suppress evidence-based escalation (not a false alarm)
-    intr.acknowledge()
-    assert intr.is_acknowledged() is True
-    assert intr.is_called_off() is False           # distinct states
-
-
-def test_clear_resets_acknowledge(intr):
-    intr.acknowledge()
     intr.clear_calloff()
     assert intr.is_acknowledged() is False
+    assert intr.is_called_off() is False
 
 
-def test_status_includes_acknowledged(intr):
-    st = intr.status()
-    assert "acknowledged" in st and st["acknowledged"] is False
+# ── the agent can do both ───────────────────────────────────────────────────
 
-
-# ── acknowledge tool registration ────────────────────────────────────────────
-
-def test_acknowledge_tool_registered(load):
+@pytest.mark.parametrize("tool", ["dismiss_intrusion", "acknowledge_alert"])
+def test_the_agent_offers_the_tool(load, tool):
     agent = load("agent")
-    names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert "acknowledge_alert" in names
-    assert "acknowledge_alert" in agent._TOOL_MAP
+    offered = {spec["function"]["name"] for spec in agent.NOVA_TOOLS}
+    assert tool in offered
+    assert tool in agent._TOOL_MAP
+
+
+# ── capturing a snapshot ────────────────────────────────────────────────────
+
+async def test_a_capture_is_saved_privately_and_has_no_public_url(
+        intr, fake_hass, monkeypatch):
+    asked = []
+
+    async def grab(hass, entity, timeout=10):
+        asked.append((entity, timeout))
+        return types.SimpleNamespace(content=JPEG)
+    install(monkeypatch, "homeassistant.components.camera", async_get_image=grab)
+
+    info = await intr.capture_snapshot(fake_hass, "camera.dining_room")
+
+    assert asked == [("camera.dining_room", 10)]
+    assert info["camera"] == "camera.dining_room"
+    assert info["ts"] == int(T0)
+    # A /local/ address is served with no login at all; snapshots reach the
+    # panel only through the admin websocket, so no URL is ever made here.
+    assert "url" not in info
+    saved = pathlib.Path(info["path"])
+    assert saved.parent == private_dir(intr)
+    assert saved.name == f"intrusion_dining_room_{int(T0)}.jpg"
+    assert saved.read_bytes() == JPEG
+    assert intr.last_snapshot()["camera"] == "camera.dining_room"
+    assert intr.status()["last_snapshot"] == info
+
+
+def test_the_real_snapshot_folder_is_never_under_www(load):
+    """Checked against the module's own default, not a test's redirected
+    folder, so it cannot pass by accident: Home Assistant serves the whole of
+    /config/www at /local/ without authentication."""
+    mod = load("intrusion")
+    assert "/www/" not in mod._snapshot_dir()
+    source = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
+    assert 'paths.nova_path("intrusion")' in source
+
+
+async def test_no_camera_means_no_capture(intr, fake_hass):
+    assert await intr.capture_snapshot(fake_hass, "") is None
+    assert intr.last_snapshot() is None
+
+
+async def test_a_camera_failure_is_swallowed(intr, fake_hass, monkeypatch):
+    async def offline(hass, entity, timeout=10):
+        raise RuntimeError("camera offline")
+    install(monkeypatch, "homeassistant.components.camera", async_get_image=offline)
+    assert await intr.capture_snapshot(fake_hass, "camera.den") is None
+    assert intr.last_snapshot() is None
+    assert not private_dir(intr).exists()
+
+
+# ── reading a snapshot back for the panel ───────────────────────────────────
+
+async def test_a_saved_snapshot_reads_back_as_base64(intr, fake_hass):
+    private_dir(intr).mkdir(parents=True)
+    still = private_dir(intr) / "x.jpg"
+    still.write_bytes(JPEG)
+    encoded = await intr.get_snapshot_b64(fake_hass, str(still))
+    assert base64.b64decode(encoded) == JPEG
+
+
+async def test_a_missing_snapshot_reads_as_none(intr, fake_hass):
+    private_dir(intr).mkdir(parents=True)
+    assert await intr.get_snapshot_b64(fake_hass, str(private_dir(intr) / "gone.jpg")) is None
+
+
+@pytest.mark.parametrize("where", ["beside", "climb_out"])
+async def test_nothing_outside_the_private_folder_is_ever_read(intr, fake_hass, tmp_path, where):
+    """Defence in depth: today every path comes from Nova's own records, but a
+    future caller passing something untrusted must still be refused, whether
+    it names another file outright or climbs out with '..'."""
+    private_dir(intr).mkdir(parents=True)
+    secret = tmp_path / "secret.jpg"
+    secret.write_bytes(b"not yours")
+    path = str(secret) if where == "beside" else str(private_dir(intr) / ".." / "secret.jpg")
+    assert await intr.get_snapshot_b64(fake_hass, path) is None
+
+
+# ── moving old public snapshots ─────────────────────────────────────────────
+
+def _old_still(intr, name: str, data: bytes) -> pathlib.Path:
+    public = pathlib.Path(intr._LEGACY_SNAPSHOT_DIR)
+    public.mkdir(parents=True, exist_ok=True)
+    still = public / name
+    still.write_bytes(data)
+    return still
+
+
+def test_old_snapshots_move_and_the_log_follows_them(intr):
+    old = _old_still(intr, "a.jpg", b"one")
+    intr._log = [{"id": "evt_1", "snapshot_path": str(old)}]
+    intr._log_loaded = True
+
+    assert intr.migrate_legacy_snapshots() == {"moved": 1, "skipped": 0}
+
+    new = private_dir(intr) / "a.jpg"
+    assert new.read_bytes() == b"one"
+    assert not old.exists()                          # moved, not duplicated
+    assert intr._log[0]["snapshot_path"] == str(new)
+
+
+def test_with_no_old_folder_nothing_happens(intr):
+    assert intr.migrate_legacy_snapshots() == {"moved": 0, "skipped": 0}
+    assert not private_dir(intr).exists()
+
+
+def test_a_name_clash_leaves_both_files_untouched(intr):
+    old = _old_still(intr, "a.jpg", b"legacy-bytes")
+    private_dir(intr).mkdir(parents=True)
+    (private_dir(intr) / "a.jpg").write_bytes(b"already-here")
+
+    assert intr.migrate_legacy_snapshots() == {"moved": 0, "skipped": 1}
+
+    assert old.read_bytes() == b"legacy-bytes"       # not deleted
+    assert (private_dir(intr) / "a.jpg").read_bytes() == b"already-here"   # not overwritten
+
+
+# ── the picture on a phone notification ─────────────────────────────────────
+
+async def test_without_a_media_folder_there_is_no_picture(intr, fake_hass):
+    fake_hass.config.media_dirs = {}
+    assert await intr.get_notification_image_url(fake_hass, "/some/path.jpg") is None
+
+
+async def test_without_a_snapshot_there_is_no_picture(intr, fake_hass):
+    assert await intr.get_notification_image_url(fake_hass, "") is None
+
+
+async def test_the_picture_is_a_signed_short_lived_copy(intr, fake_hass, tmp_path, monkeypatch):
+    """The private still is duplicated into the media folder under a name nobody
+    can guess, the /media/ path is signed (never handed out unsigned), and a
+    timer is set to delete the copy rather than leave it there."""
+    media = tmp_path / "media"
+    media.mkdir()
+    source = tmp_path / "source.jpg"
+    source.write_bytes(JPEG)
+    fake_hass.config.media_dirs = {"local": str(media)}
+    signed: list = []
+    timers: list = []
+
+    def sign(hass, path, expiry):
+        signed.append((path, expiry))
+        return f"{path}?authSig=test-token"
+
+    def later(hass, delay, callback):
+        timers.append((delay, callback))
+        return lambda: None
+    install(monkeypatch, "homeassistant.components.http.auth", async_sign_path=sign)
+    install(monkeypatch, "homeassistant.helpers.event", async_call_later=later)
+
+    url = await intr.get_notification_image_url(fake_hass, str(source))
+
+    prefix = "/media/local/nova_intrusion/"
+    assert url.startswith(prefix)
+    assert url.endswith("?authSig=test-token")
+    assert len(signed) == 1
+    unsigned, expiry = signed[0]
+    assert "?" not in unsigned and unsigned.startswith(prefix)
+    assert expiry == timedelta(minutes=60)
+    copies = list((media / "nova_intrusion").iterdir())
+    assert len(copies) == 1
+    assert copies[0].name != "source.jpg"
+    assert copies[0].read_bytes() == JPEG
+    assert source.exists()                           # the private still is left alone
+    assert len(timers) == 1
+    delay, expire = timers[0]
+    assert delay == 3600
+    await expire(None)
+    assert not copies[0].exists()                    # the timer removes the copy
