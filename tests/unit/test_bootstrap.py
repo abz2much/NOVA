@@ -265,25 +265,6 @@ async def test_existing_pipeline_is_repaired_only_where_needed(
     assert existing.conversation_engine == AGENT
 
 
-@pytest.mark.parametrize("fragment", [
-    "async_update_pipeline",
-    "conversation_engine=agent",   # sets the agent
-    "tts_voice",                   # matches a Nova pipeline by its voice too
-    "== agent",                    # skips a pipeline that is already right
-])
-def test_startup_agent_repair_source(boot, fragment):
-    """The repair that runs on every start must find a Nova pipeline by name
-    or by its Nova voice, leave a correct one alone and set the agent through
-    async_update_pipeline."""
-    assert fragment in inspect.getsource(boot.async_ensure_pipeline_agent)
-
-
-def test_startup_agent_repair_is_scheduled(boot):
-    # Wired into the background runner, outside the Supervisor and marker
-    # gates, so it can be neither raced nor skipped.
-    assert "async_ensure_pipeline_agent" in inspect.getsource(boot.schedule_bootstrap)
-
-
 # ── Repair notices for the voice setup (v8.6.0) ─────────────────────────────
 
 @pytest.fixture

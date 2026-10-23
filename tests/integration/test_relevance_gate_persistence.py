@@ -1,17 +1,9 @@
-"""PHACC-tier behavioral proof for the Phase 1 relevance-gate fix (real
-conversation stack — see tests/unit/test_conversation_relevance_gate_persistence.py
-for the source-level ordering/formula guards, which are the primary,
-always-runnable coverage; this file is the real end-to-end companion for
-environments where pytest-homeassistant-custom-component is installed, per
-tests/integration/conftest.py — NOT part of the normal local dev loop, run
-in a separate `.venv-integration` per test_wiring_smoke.py's docstring.
+"""The relevance gate decides before anything is remembered, driven through
+the real conversation stack (PHACC). Run with the integration suite in its own
+environment, per test_wiring_smoke.py's docstring.
 
-Presence-gate and dedup suppression (requirement 6) are deliberately NOT
-re-verified here — Phase 1 does not touch that code at all, and the unit
-test file already proves, byte-for-byte, that those blocks are untouched and
-still precede the relevance decision. Re-deriving their real-world trigger
-conditions (device/area registry state, dedup timing) here would add risk
-without adding proof value for what Phase 1 actually changed.
+Presence gate and dedup suppression are not checked here; the dedup is
+covered in test_conversation_spec.py.
 """
 from unittest.mock import AsyncMock, patch
 

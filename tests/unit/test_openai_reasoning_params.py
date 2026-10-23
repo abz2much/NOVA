@@ -65,3 +65,16 @@ def test_custom_provider_is_unchanged(lp):
     provider, sent = _provider(lp, "CustomProvider", "gpt-5-mini")
     provider.complete(_request(lp))
     assert sent["max_tokens"] == 64 and sent["temperature"] == 0.0
+
+
+def test_provider_extras_are_sent_with_the_request(lp):
+    provider, sent = _provider(lp, "OpenAIProvider", "gpt-4o")
+    provider._extra_body = lambda: {"think": False}
+    provider.complete(_request(lp))
+    assert sent["extra_body"] == {"think": False}
+
+
+def test_no_extras_means_no_extra_body(lp):
+    provider, sent = _provider(lp, "OpenAIProvider", "gpt-4o")
+    provider.complete(_request(lp))
+    assert "extra_body" not in sent

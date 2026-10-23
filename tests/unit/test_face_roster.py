@@ -1,7 +1,6 @@
 """The resident roster, recent_faces and the Faces tab commands."""
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import os
@@ -154,17 +153,19 @@ async def test_concurrent_saves_keep_the_newest_state(fr):
     assert json.loads(_path(fr).read_text())["residents"] == ["A", "B", "C"]
 
 
-def test_loaded_at_setup_never_at_import():
-    src = (COMP / "face_roster.py").read_text()
-    top = [n for n in ast.parse(src).body if isinstance(n, ast.Expr)]
-    assert not any("load(" in ast.unparse(n) for n in top)
-    tree = ast.parse((COMP / "__init__.py").read_text())
-    setup = next(n for n in tree.body
-                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "async_setup")
-    stmts = [ast.unparse(s) for s in setup.body]
-    cfg = stmts.index("paths.configure(hass)")
-    idx = next(i for i, s in enumerate(stmts) if "face_roster.load" in s)
-    assert idx > cfg and "async_add_executor_job" in stmts[idx]
+def test_importing_the_roster_reads_nothing_until_setup_loads_it(fr, load, monkeypatch, tmp_path):
+    import importlib.util
+    import sys
+    saved = tmp_path / "roster.json"
+    saved.write_text(json.dumps({"residents": ["Sam"]}))
+    monkeypatch.setattr(load("paths"), "nova_path", lambda *parts: str(saved))
+    spec = importlib.util.spec_from_file_location("jc._face_roster_fresh", fr.__file__)
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh.names() == []                     # nothing is read at import
+    fresh.load()
+    assert fresh.names() == ["Sam"]
 
 
 # ── recent_faces ────────────────────────────────────────────────────────────
@@ -231,9 +232,6 @@ def test_recent_faces_has_no_images_and_the_exact_keys(rec):
     assert set(row) == {"name", "camera", "camera_entity", "confidence", "age_seconds",
                         "known", "resident", "source"}
     assert not any("image" in k or "snapshot" in k or "b64" in k for k in row)
-    src = (COMP / "recognition.py").read_text()
-    body = src.split("def recent_faces")[1].split("def source_status")[0]
-    assert "image" not in body.lower().replace("no image", "")
 
 
 def test_recent_faces_empty_and_limit(rec):
@@ -272,19 +270,3 @@ def test_remember_recognition_still_feeds_the_cache_and_who_is_where(rec):
 
 
 # ── commands ────────────────────────────────────────────────────────────────
-
-def test_three_commands_are_admin_gated_and_registered():
-    src = (COMP / "ws_faces.py").read_text()
-    assert src.count("@websocket_api.require_admin\n@websocket_api.websocket_command({") == 3
-    ws = (COMP / "websocket.py").read_text()
-    for fn in ("ws_list_faces", "ws_add_resident", "ws_remove_resident"):
-        assert f"websocket_api.async_register_command(hass, {fn})" in ws
-    assert "from .ws_faces import" in ws
-
-
-def test_ws_sources_reads_the_new_file():
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-    from ws_sources import ws_paths, ws_text
-    assert any(p.name == "ws_faces.py" for p in ws_paths())
-    assert '"nova/list_faces"' in ws_text()

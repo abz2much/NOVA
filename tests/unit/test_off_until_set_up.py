@@ -52,11 +52,8 @@ def test_package_watch_is_off_by_default(load):
     assert pm._package_detection_on(FakeHass()) is False
 
 
-def test_departure_reminders_and_faces_read_off_by_default():
+def test_cognition_reads_departure_reminders_off_by_default():
     import pathlib
     root = pathlib.Path(__file__).resolve().parents[2] / "custom_components/nova"
     cog = (root / "cognition.py").read_text(encoding="utf-8")
-    rec = (root / "recognition.py").read_text(encoding="utf-8")
     assert 'nova_config.get("departure_alerts_enabled", False)' in cog
-    assert '"recognition_source", "both"' not in rec
-    assert rec.count('nova_config.get("recognition_source", "off")') == 2

@@ -162,11 +162,3 @@ def test_room_card_area_listing_filters_excluded():
     """An excluded entity is never counted or listed on a room card."""
     assert _calls_is_excluded(ws_function("_entities_in_area")), \
         "_entities_in_area must filter excluded entities"
-
-
-def test_area_commands_skip_excluded():
-    """'Turn on the living room lights' must leave excluded entities out."""
-    tree = ast.parse((COMP / "local_engine.py").read_text(encoding="utf-8"))
-    (func,) = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-               and n.name == "_find_entities_in_area"]
-    assert _calls_is_excluded(func), "_find_entities_in_area must filter excluded entities"

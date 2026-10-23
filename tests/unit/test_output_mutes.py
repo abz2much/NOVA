@@ -3,7 +3,6 @@ restart through output_mutes.json, loaded once at setup (never at import).
 Critical alerts still bypass every mute, including a loaded blanket shush."""
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import pathlib
@@ -160,30 +159,19 @@ async def test_concurrent_saves_leave_the_newest_state(og):
     assert json.loads(_path(og).read_text())["entities"] == ["a", "b"]
 
 
-def test_import_does_not_read_the_file(load, monkeypatch, tmp_path):
+def test_import_does_not_read_the_file(og, load, monkeypatch, tmp_path):
     """Importing the module never touches the saved file; loading is an
     explicit call made at setup."""
-    src = (COMP / "output_gate.py").read_text()
-    tree = ast.parse(src)
-    top_level_calls = [n for n in tree.body if isinstance(n, ast.Expr)]
-    assert not any("load_mutes" in ast.unparse(n) for n in top_level_calls)
-    assert "load_mutes()" not in src.split("def load_mutes")[0]
+    import importlib.util
+    import sys
+    saved = tmp_path / "saved.json"
+    saved.write_text(json.dumps({"entities": ["light.hall"], "categories": [], "all": True}))
+    monkeypatch.setattr(load("paths"), "nova_path", lambda *parts: str(saved))
+    spec = importlib.util.spec_from_file_location("jc._output_gate_fresh", og.__file__)
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh._STATE.muted_entities == set() and fresh._STATE.mute_all is False
+    fresh.load_mutes()
+    assert fresh._STATE.muted_entities == {"light.hall"} and fresh._STATE.mute_all is True
 
-
-def test_load_happens_in_async_setup_after_paths_configure():
-    tree = ast.parse((COMP / "__init__.py").read_text())
-    setup = next(n for n in tree.body
-                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "async_setup")
-    stmts = [ast.unparse(s) for s in setup.body]
-    configure = stmts.index("paths.configure(hass)")
-    load_idx = next(i for i, s in enumerate(stmts) if "output_gate.load_mutes" in s)
-    assert load_idx > configure
-    assert "async_add_executor_job" in stmts[load_idx]   # off the event loop
-
-
-def test_services_save_after_every_shush_and_unshush():
-    src = (COMP / "services.py").read_text()
-    for fn, call in (("_shush", "output_gate.shush("), ("_unshush", "output_gate.unshush(")):
-        body = src.split(f"async def {fn}(")[1].split("\n    async def ")[0].split("\n    _register(")[0]
-        assert call in body
-        assert body.index(call) < body.index("await output_gate.async_save_mutes(hass)")

@@ -1,4 +1,4 @@
-"""Pin what the camera commands in ws_cameras.py do today (8.7.22, tests only).
+"""What the camera commands in ws_cameras.py do.
 
 nova/camera_snapshot, nova/rename_camera, nova/camera_location,
 nova/camera_diagnostics, nova/compute_camera_coverage and nova/mmwave_overview.
@@ -22,7 +22,7 @@ from typing import Optional
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api
+from ws_kit import _Conn, _stub_ws_api
 
 
 @pytest.fixture

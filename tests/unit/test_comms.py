@@ -40,19 +40,6 @@ def at(minutes):
 
 # ── _parse ───────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("raw,expected", [
-    ("2026-03-02", datetime(2026, 3, 2)),
-    ("2026-03-02T08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
-    ("2026-03-02 08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
-    ("2026-03-02T08:15", datetime(2026, 3, 2, 8, 15)),
-    ("  2026-03-02  ", datetime(2026, 3, 2)),
-    ("2026-03-02 later", datetime(2026, 3, 2)),
-])
-def test_parse_valid(cm, raw, expected):
-    got = cm._parse(raw)
-    assert got == expected and got.tzinfo is None
-
-
 @pytest.mark.parametrize("raw", [None, "", "nonsense", "2026-13-40", "T", "12:00 noon"])
 def test_parse_invalid(cm, raw):
     assert cm._parse(raw) is None
@@ -75,10 +62,16 @@ def ha_zone(monkeypatch):
     ("2026-03-02T08:15:30+02:00", datetime(2026, 3, 2, 7, 15, 30)),
     ("2026-03-02T08:15:30-07:00", datetime(2026, 3, 2, 16, 15, 30)),
     ("2026-03-02T08:15:30.987654+0000", datetime(2026, 3, 2, 9, 15, 30)),
+    # Times with no offset are taken as they are.
+    ("2026-03-02", datetime(2026, 3, 2)),
+    ("2026-03-02T08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
     ("2026-03-02 08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
+    ("2026-03-02T08:15", datetime(2026, 3, 2, 8, 15)),
+    ("  2026-03-02  ", datetime(2026, 3, 2)),
+    ("2026-03-02 later", datetime(2026, 3, 2)),
 ])
-def test_parse_converts_offsets_to_ha_local_time(cm, ha_zone, raw, expected):
-    # Regression (8.49.2): offsets were dropped, so a UTC time read an hour out.
+def test_parse_reads_dates_and_converts_offsets_to_ha_local_time(cm, ha_zone, raw, expected):
+    # Offsets were once dropped, so a UTC time read an hour out.
     got = cm._parse(raw)
     assert got == expected and got.tzinfo is None
 

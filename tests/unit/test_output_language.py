@@ -110,9 +110,6 @@ def test_single_names_table_everywhere(load):
     ol = load("output_language")
     ctx = load("agent_runtime.context")
     assert ctx._LANG_NAMES is ol.LANG_NAMES
-    cc = core_text()
-    assert "hass.config.language" not in cc          # no second copy of the logic
-    assert "_LANG_NAMES = {" not in (COMP / "agent_runtime" / "context.py").read_text()
 
 
 def test_resolver_is_a_leaf_module():
@@ -308,21 +305,12 @@ async def _call_summary(summary, fake_hass, monkeypatch):
     return await summary.async_summarise(fake_hass, call, object(), "sir", None, [])
 
 
-def test_every_person_facing_caller_adds_the_directive():
-    """Static proof for the callers that need heavy fakes to run: each one
-    appends the language block to its system prompt."""
-    expect = {
-        "briefing.py": "output_language.with_language(hass, system)",
-        "proactive_briefing.py": "output_language.with_language(hass, system)",
-        "camera.py": "output_language.with_language(hass, system)",
-        "sentinel.py": "output_language.with_language(self.hass, system)",
-        "summary.py": "output_language.with_language(hass, system)",
-    }
-    for fname, needle in expect.items():
-        assert needle in (COMP / fname).read_text(), fname
-    assert 'output_language.field_directive(hass, "speak")' in (COMP / "camera.py").read_text()
-    assert 'output_language.field_directive(hass, "message")' in \
-        (COMP / "cognitive" / "coordinator.py").read_text()
+def test_the_briefings_add_the_directive():
+    """The two briefings need heavy fakes to run, so their system prompts are
+    checked in the source. The summary, Sentinel, camera and observer prompts
+    are checked by running them, below."""
+    for fname in ("briefing.py", "proactive_briefing.py"):
+        assert "output_language.with_language(hass, system)" in (COMP / fname).read_text(), fname
 
 
 def test_structured_and_internal_callers_are_untouched():

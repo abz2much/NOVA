@@ -1,4 +1,4 @@
-"""Nova Voice ID 8.36.0 on a real Home Assistant (PHACC).
+"""Nova Voice ID on a real Home Assistant (PHACC).
 
 The voice result travels from the STT entity to the turn in one task, as in
 HA's pipeline; the turn logs it and changes nothing else; a recording turn is

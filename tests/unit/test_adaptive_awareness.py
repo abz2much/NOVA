@@ -254,9 +254,6 @@ async def test_rating_prompt_is_silent_and_carries_the_buttons(aa, monkeypatch, 
 
 
 def test_ignore_tool_no_longer_judges_anything(load):
-    import inspect
-    mem = load("agent_runtime.capabilities.memory")
-    assert "adaptive_awareness" not in inspect.getsource(mem._exec_ignore)
     assert not hasattr(load("adaptive_awareness"), "note_ignored")
 
 

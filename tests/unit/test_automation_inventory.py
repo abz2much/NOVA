@@ -108,6 +108,7 @@ def test_reload_refreshes_and_close_unsubscribes(load, monkeypatch):
     inv = inv_mod.AutomationInventory(hass)
     inv.start()
     assert inv.get("automation.first") is not None
+    assert list(callbacks) == ["automation_reloaded"]          # nothing else, no state_changed
 
     current.append(_Automation("automation.second", "second", "Second", {}))
     callbacks["automation_reloaded"](types.SimpleNamespace())

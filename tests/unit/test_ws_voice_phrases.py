@@ -1,4 +1,4 @@
-"""Pin the Voice Phrases card's commands in ws_voice_phrases.py (8.32.0).
+"""The Voice Phrases card's commands in ws_voice_phrases.py.
 
 nova/voice_phrases_list, _save, _delete, _set_enabled and _test. The handlers
 run against the real voice_phrases module and a dict standing in for
@@ -12,7 +12,7 @@ import sys
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api, store  # noqa: F401
+from ws_kit import _Conn, _stub_ws_api, store  # noqa: F401
 
 
 @pytest.fixture

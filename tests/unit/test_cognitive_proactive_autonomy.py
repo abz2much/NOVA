@@ -574,3 +574,16 @@ def test_current_behaviour_offer_area_reads_entity_id_not_the_entity_ids_proacti
     offer = {"type": "proactive_lights", "action_data": {
         "domain": "light", "service": "turn_on", "entity_ids": ["light.lounge"]}}
     assert cc._offer_area(fake_hass, offer) is None
+
+
+# ── the heating offer waits until nobody is home ──────────────────────────────
+
+async def test_the_heating_offer_waits_until_nobody_is_known_to_be_home(load, fake_hass):
+    cp = load("core_proactive")
+    mgr = cp.ProactiveManager(fake_hass, {"honorific": "sir"})
+    fake_hass.states.set("climate.hall", "heat", hvac_action="heating")
+    offers = await mgr.tick(sleeping=False, anyone_home=False, nobody_home=False)
+    assert not [o for o in offers if o["type"] == "proactive_hvac"]
+    mgr._last_check = 0
+    offers = await mgr.tick(sleeping=False, anyone_home=False, nobody_home=True)
+    assert [o["type"] for o in offers if o["type"] == "proactive_hvac"] == ["proactive_hvac"]

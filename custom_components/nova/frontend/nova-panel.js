@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.68.0
+ * v8.69.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.68.0 ",
+      console.log("%c Nova Panel %c v8.69.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1557,15 +1557,19 @@ ${this._htmlDashboardBody()}`;
   // the controls on the Settings tab.
   _htmlIntrusion() {
     return `
-        <div class="panel"> <div class="panel-head">
-            <div class="panel-title">Intrusion</div> <div class="panel-meta" id="newIntrStatus">—</div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion</div>
+            <div class="panel-meta" id="newIntrStatus">—</div>
           </div>
           <div class="stub-body">Last intrusion snapshot and false-alarm call-off. When Nova confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".</div>
           <div id="newIntrBody"><div class="stub-body">Loading…</div></div>
         </div>
 
-        <div class="panel"> <div class="panel-head">
-            <div class="panel-title">Intrusion Log</div> <div class="panel-meta" id="newIlogLearn">—</div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion Log</div>
+            <div class="panel-meta" id="newIlogLearn">—</div>
           </div>
           <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
           <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
@@ -1623,10 +1627,12 @@ ${this._htmlDashboardBody()}`;
     const waits = [["60", "1 min"], ["120", "2 min"], ["180", "3 min"], ["300", "5 min"], ["600", "10 min"]];
     const vision = this._liveData?.config?.intrusion_vision_confirm !== false;
     parts.push(`
-      <div class="cfg-row"> <label>Auto-escalate if no response after</label>
+      <div class="cfg-row">
+        <label>Auto-escalate if no response after</label>
         <select class="cfg-field" data-cfg-key="intrusion_response_timeout">${this._optSelect(waits, String(this._intrTimeout || 120))}</select>
       </div>
-      <div class="cfg-row"> <label>Confirm Frigate person with Nova vision before alarming</label>
+      <div class="cfg-row">
+        <label>Confirm Frigate person with Nova vision before alarming</label>
         <button class="toggle-btn ${vision ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${vision ? "false" : "true"}">${vision ? "ON" : "OFF"}</button>
       </div>
       <div class="mode-grid">
@@ -1688,7 +1694,8 @@ ${this._htmlDashboardBody()}`;
     const row = e => {
       const label = e.label || "", on = v => (label === v ? " mode-chip-on" : "");
       return `<div class="new-ilog-item" data-ev="${this._esc(e.id)}">
-        <div class="cfg-row"> <span class="${tone[e.kind] || "diag-off"}">${this._esc((e.kind || "").toUpperCase())}</span>
+        <div class="cfg-row">
+          <span class="${tone[e.kind] || "diag-off"}">${this._esc((e.kind || "").toUpperCase())}</span>
           <span class="toggle-desc">${this._esc(new Date((e.ts || 0) * 1000).toLocaleString())}</span>
         </div>
         <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>

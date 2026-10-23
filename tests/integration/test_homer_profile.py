@@ -11,7 +11,7 @@ Companions to the unit-level proofs:
     Audit Log write in any HOMER tool handler)
 
 Here the same scripted-LLM-client technique used by
-test_phase3_ambiguity_and_verification.py drives the REAL run_agent()
+test_agent_ambiguity_and_verification.py drives the REAL run_agent()
 against a real hass: a real light.turn_on service is registered so an
 attempt to actuate it would genuinely fire, and the real Action Audit Log
 (action_log.py, its own SQLite file under tmp_path) proves no row is

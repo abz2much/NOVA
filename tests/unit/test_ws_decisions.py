@@ -1,4 +1,4 @@
-"""Pin what the decision commands in ws_decisions.py do today (8.7.22, tests only).
+"""What the decision commands in ws_decisions.py do.
 
 nova/root_cause, nova/get_calibration, nova/list_decisions, nova/get_decision,
 nova/set_decision_outcome, nova/run_analysis and
@@ -16,7 +16,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api
+from ws_kit import _Conn, _stub_ws_api
 
 
 @pytest.fixture
@@ -116,6 +116,34 @@ async def test_get_of_a_missing_decision_is_not_found(dec, records):
 def test_bounding_keeps_short_values_and_walks_lists(dec):
     out = dec._bound_decision_strings({"a": ["x" * 501, 3, ("y",)], "b": None})
     assert out == {"a": ["x" * 500 + "…", 3, ["y"]], "b": None}
+
+
+def test_a_short_string_passes_through_unchanged(dec):
+    assert dec._bound_decision_strings("Gym") == "Gym"
+
+
+def test_an_oversized_string_is_cut_to_the_cap_with_a_marker(dec):
+    cap = dec._DECISION_FIELD_MAX_CHARS
+    long = "x" * (cap + 50)
+    out = dec._bound_decision_strings(long)
+    assert len(out) == cap + 1  # cap chars + the "…" marker
+    assert out.endswith("…")
+    assert out[:-1] == long[:cap]
+
+
+def test_bounding_recurses_into_nested_dicts_and_lists(dec):
+    cap = dec._DECISION_FIELD_MAX_CHARS
+    long = "y" * (cap + 10)
+    out = dec._bound_decision_strings({"a": long, "b": [long, {"c": long}], "d": 3, "e": None})
+    assert out["a"].endswith("…") and len(out["a"]) == cap + 1
+    assert out["b"][0].endswith("…")
+    assert out["b"][1]["c"].endswith("…")
+    assert out["d"] == 3 and out["e"] is None  # non strings pass through untouched
+
+
+def test_a_string_exactly_at_the_cap_is_not_cut(dec):
+    exact = "z" * dec._DECISION_FIELD_MAX_CHARS
+    assert dec._bound_decision_strings(exact) == exact
 
 
 @pytest.mark.parametrize("handler,code", [("ws_list_decisions", "list_decisions_failed"),

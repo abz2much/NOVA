@@ -302,7 +302,7 @@ async def test_a_saved_county_list_still_wins_without_any_county_ui(hm, cfg):
 
 
 async def test_ws_hazard_returns_the_new_data(hm, cfg, load, monkeypatch):
-    from test_pin_ws_update_config import _Conn, _stub_ws_api
+    from ws_kit import _Conn, _stub_ws_api
     _stub_ws_api(monkeypatch)
     sys.modules.pop("jc.ws_modes", None)
     ws = load("ws_modes")

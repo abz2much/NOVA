@@ -1,4 +1,4 @@
-"""Pin what the Faces tab commands in ws_faces.py do today (8.7.22, tests only).
+"""What the Faces tab commands in ws_faces.py do.
 
 nova/list_faces, nova/add_resident and nova/remove_resident. The roster is
 what the opt in face_stand_down trusts: a recognised resident can stop a new
@@ -14,7 +14,7 @@ import sys
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api
+from ws_kit import _Conn, _stub_ws_api
 
 
 @pytest.fixture

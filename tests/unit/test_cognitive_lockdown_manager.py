@@ -849,6 +849,50 @@ async def test_ensure_lockdown_registers_one_listener_and_adopts_an_armed_alarm_
     assert emitted == []                                                            # a reboot is not announced
 
 
+async def test_ensure_lockdown_reads_the_saved_state_in_the_executor_before_the_alarm_sync(
+        cc, fake_hass, emitted, monkeypatch, caplog):
+    cc._CORE.config = {"lockdown_auto_on_arm": True, "security_alarm_entity": ALARM}
+    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.bus.async_listen = lambda event, handler: (lambda: None)
+    in_executor, loads = [False], []
+    real_run = fake_hass.async_add_executor_job
+
+    async def run(func, *args):
+        in_executor[0] = True
+        try:
+            return await real_run(func, *args)
+        finally:
+            in_executor[0] = False
+    fake_hass.async_add_executor_job = run
+    real_load = cc.LockdownManager._load_state
+
+    def load(self):
+        loads.append(in_executor[0])
+        real_load(self)
+    monkeypatch.setattr(cc.LockdownManager, "_load_state", load)
+    caplog.set_level("DEBUG", logger="custom_components.nova")
+    await cc.ensure_lockdown(fake_hass, cc._CORE.config)
+    fake_hass.close_pending()
+    assert loads == [True]                                                          # off the event loop
+    assert cc.is_lockdown() is True
+    assert "created on demand" not in caplog.text                                   # the normal setup path
+
+
+async def test_ensure_lockdown_logs_a_failed_create_and_leaves_no_manager(
+        cc, fake_hass, monkeypatch, caplog):
+    cc._CORE.config = {"security_alarm_entity": ALARM}
+    fake_hass.bus.async_listen = lambda event, handler: (lambda: None)
+
+    def broken(*_a, **_k):
+        raise OSError("disk gone")
+    monkeypatch.setattr(cc._m_lockdown, "LockdownManager", broken)
+    await cc.ensure_lockdown(fake_hass, cc._CORE.config)
+    fake_hass.close_pending()
+    assert cc._CORE.lockdown_mgr is None
+    assert cc.is_lockdown() is False
+    assert "Lockdown manager create failed: disk gone" in caplog.text
+
+
 async def test_request_lockdown_announces_and_a_manual_lift_while_armed_suppresses(
         cc, fake_hass, emitted):
     cc._CORE.config = {"security_alarm_entity": ALARM}
@@ -1059,3 +1103,130 @@ async def test_the_failed_check_says_a_lock_is_still_unlocked(cc, fake_hass, sle
     await mgr._verify_secured("lock.front", "lock", "Front")
     assert emitted[0][0]["message"] == ("Sir, I tried to secure Front during lockdown "
                                         "but it's still unlocked.")
+
+
+# ── a lock unlocked twice during lockdown, end to end ─────────────────────────
+
+# During an active lockdown, a lock someone unlocks is locked again. A second
+# unlock is a critical alert through the real event listener, the lock is never
+# exempt (not even from an old state file), and nothing ever sends it an unlock.
+
+LOCK = "lock.front_door"
+
+
+
+
+@pytest.fixture
+def announced(cc, monkeypatch):
+    seen = []
+
+    async def fake_emit(hass, config, action, sleeping):
+        seen.append(action)
+    monkeypatch.setattr(cc, "_emit_action", fake_emit)
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    return seen
+
+
+@pytest.fixture
+def no_wait(cc, monkeypatch):
+    async def fake_sleep(_s):
+        return None
+    monkeypatch.setattr(cc.asyncio, "sleep", fake_sleep)
+
+
+def _event(old, new, hass=None):
+    """A lock state change. As in Home Assistant, the state machine already
+    reads the new state when the event arrives (the live check, 8.46.0)."""
+    if hass is not None:
+        hass.states.set(LOCK, new, friendly_name="Front Door")
+    return types.SimpleNamespace(data={
+        "entity_id": LOCK, "old_state": FakeState(LOCK, old, {"friendly_name": "Front Door"}),
+        "new_state": FakeState(LOCK, new, {"friendly_name": "Front Door"})})
+
+
+async def _lockdown_with_the_door_locked_by_nova(cc, hass):
+    hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
+    cc._CORE.hass = hass
+    cc._CORE.config = {}
+    mgr = cc._ensure_lockdown_mgr(hass)
+    await mgr.engage("night", auto=False)
+    hass.close_pending()
+    hass.states.set(LOCK, "locked", friendly_name="Front Door")
+    hass.service_calls.clear()
+    return mgr
+
+
+async def test_the_second_unlock_is_a_critical_alert_and_the_lock_is_never_adopted(
+        cc, fake_hass, announced):
+    mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
+
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": LOCK})]
+    assert announced == []
+    fake_hass.close_pending()
+
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    assert announced == [{"type": "lockdown_breach", "urgency": "critical", "auto_act": True,
+                          "message": "Sir, Front Door was unlocked again during lockdown "
+                                     "after I locked it. Please check it."}]
+    assert "leave it open" not in announced[0]["message"]
+    assert LOCK not in mgr.exempt_windows
+    assert len(service_calls(fake_hass, "lock", "lock")) == 1        # not locked a second time
+    assert service_calls(fake_hass, "lock", "unlock") == []          # and never unlocked
+    assert mgr.active is True
+
+
+async def test_a_lock_is_never_exempt_after_a_restart(cc, fake_hass, announced, tmp_path):
+    mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    fake_hass.close_pending()
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    assert LOCK not in mgr.exempt_windows
+
+    # A state file written by 8.7.19 or earlier, with the lock adopted.
+    import json
+    path = cc._lockdown_state_path()
+    state = json.load(open(path))
+    state["exempt_windows"] = [LOCK, "binary_sensor.bathroom_window"]
+    json.dump(state, open(path, "w"))
+    restored = cc.LockdownManager(fake_hass, {})                      # Nova starts again
+    assert restored.active is True
+    assert restored.exempt_windows == {"binary_sensor.bathroom_window"}   # windows still kept
+    fake_hass.service_calls.clear()
+    fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
+    alert = await restored.handle_state_change(
+        LOCK, FakeState(LOCK, "locked"), FakeState(LOCK, "unlocked", {"friendly_name": "Front Door"}))
+    assert alert is None                                               # relocked like any lock
+    assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": LOCK})]
+    fake_hass.close_pending()
+
+
+async def test_the_relock_check_raises_one_critical_alert_and_sends_nothing(
+        cc, fake_hass, announced, no_wait):
+    mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))          # relocked, check scheduled
+    pending_checks = list(fake_hass._tasks)
+    fake_hass._tasks = []
+    fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
+    for check in pending_checks:                                       # 25 s later: still unlocked
+        await check
+    assert [a["urgency"] for a in announced] == ["critical"]
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))          # the second unlock event
+    assert [a["urgency"] for a in announced] == ["critical"]           # one alert, not two
+    assert len(service_calls(fake_hass, "lock", "lock")) == 1
+    assert service_calls(fake_hass, "lock", "unlock") == []
+    assert mgr.active is True
+
+
+async def test_a_new_lockdown_starts_with_no_adopted_locks(cc, fake_hass, announced):
+    mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    fake_hass.close_pending()
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
+    await mgr.disengage("morning", manual=True)
+    fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
+    fake_hass.service_calls.clear()
+    await mgr.engage("night again")
+    fake_hass.close_pending()
+    assert LOCK not in mgr.exempt_windows
+    assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": LOCK})]

@@ -997,3 +997,172 @@ async def test_a_vision_timeout_is_inconclusive_so_the_camera_is_trusted_and_it_
     action = await safety._investigate_step(clock["now"], True, False)
     assert action["type"] == "intrusion_confirmed"
     assert "a person is on camera" in action["message"] and "confirmed by vision" not in action["message"]
+
+
+# ── household cases: trackers, bypass, unresolved notices, exclusions ─────────
+
+ALARM_hh = "alarm_control_panel.home_security"
+
+
+@pytest.fixture
+def cc(load):
+    return load("cognitive_core")
+
+
+@pytest.fixture
+def home_clock(cc, monkeypatch):
+    t = {"now": 1000.0}
+    monkeypatch.setattr(cc.time, "time", lambda: t["now"])
+    return t
+
+
+async def _tick(safety, hass, sleeping=False, anyone_home=False):
+    actions = await safety.tick(sleeping=sleeping, anyone_home=anyone_home)
+    hass.close_pending()
+    return [a for a in actions if str(a.get("type", "")).startswith("intrusion")]
+
+
+async def _walk(safety, hass, home_clock):
+    """A resident walks hall, kitchen, landing and back, 40 seconds apart."""
+    seen = []
+    for eid in ("binary_sensor.hall_motion", "binary_sensor.kitchen_motion",
+                "binary_sensor.landing_motion", "binary_sensor.hall_motion",
+                "binary_sensor.kitchen_motion"):
+        hass.states.set(eid, "on", device_class="motion")
+        seen += await _tick(safety, hass, anyone_home=True)
+        home_clock["now"] += 40
+    return seen
+
+
+async def test_a_tv_tracker_reading_home_does_not_stop_armed_away(cc, fake_hass, home_clock):
+    safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM_hh})
+    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set("device_tracker.living_room_tv", "home")
+    fake_hass.states.set(ALARM_hh, "armed_away")
+    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+    seen = await _tick(safety, fake_hass)
+    assert [a["type"] for a in seen] == ["intrusion_investigating"]
+    assert not seen[0].get("phone_only")
+
+
+async def test_custom_bypass_with_residents_home_never_confirms_on_motion(
+        cc, fake_hass, home_clock):
+    safety = cc.SafetyManager(fake_hass, {
+        "honorific": "sir", "security_alarm_entity": ALARM_hh,
+        "intrusion_requires_confinement": True})
+    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set(ALARM_hh, "armed_custom_bypass")
+    fake_hass.states.set("binary_sensor.back_door", "on", device_class="door")
+    seen = await _walk(safety, fake_hass, home_clock)
+    assert seen and not [a for a in seen if a["type"] == "intrusion_confirmed"], seen
+    first = [a for a in seen if a["type"] == "intrusion_investigating"]
+    assert first and first[0].get("phone_only") is True
+
+
+async def test_custom_bypass_still_confirms_when_the_alarm_goes_off(cc, fake_hass, home_clock):
+    safety = cc.SafetyManager(fake_hass, {
+        "honorific": "sir", "security_alarm_entity": ALARM_hh,
+        "intrusion_requires_confinement": True})
+    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set(ALARM_hh, "armed_custom_bypass")
+    fake_hass.states.set("binary_sensor.back_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+    await _tick(safety, fake_hass, anyone_home=True)
+    home_clock["now"] += 30
+    fake_hass.states.set(ALARM_hh, "triggered")
+    seen = await _tick(safety, fake_hass, anyone_home=True)
+    assert [a["type"] for a in seen] == ["intrusion_confirmed"]
+
+
+@pytest.fixture
+def routed(cc, load, monkeypatch):
+    """Delivery with fake speakers and a fake phone push."""
+    hab = load("habituation")
+    monkeypatch.setattr(hab, "is_quiet", lambda k: False)
+    monkeypatch.setattr(hab, "record", lambda *a, **k: None)
+    pushes, spoken = [], []
+
+    async def _push(hass, config, message, action_type, snap=None, *,
+                    request_id=None, extra_data=None):
+        pushes.append(action_type)
+    monkeypatch.setattr(cc, "_push_notification", _push)
+
+    async def _push_all(hass, config, message, action_type, snap=None, *,
+                        request_id=None, **kw):
+        pushes.append(action_type)
+    monkeypatch.setattr(cc, "_notify_all_devices", _push_all)
+
+    tts = types.ModuleType("jc.tts_helper")
+    tts.resolve_tts_for_context = lambda *a, **k: "tts.x"
+
+    async def _announce(hass, message, *a, **k):
+        spoken.append(message)
+    tts.async_announce = _announce
+    ar = types.ModuleType("jc.audio_routing")
+    ar.observer_speak_target = lambda *a, **k: (["media_player.x"], "broadcast")
+    monkeypatch.setitem(sys.modules, "jc.tts_helper", tts)
+    monkeypatch.setitem(sys.modules, "jc.audio_routing", ar)
+    sd = types.ModuleType("jc.sleep_detection")
+    sd._in_quiet_hours = lambda *a: False
+    monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
+    return pushes, spoken
+
+
+async def test_the_unresolved_notice_with_residents_home_goes_to_phones_only(
+        cc, routed, fake_hass, home_clock):
+    pushes, spoken = routed
+    safety = cc.SafetyManager(fake_hass, {
+        "honorific": "sir", "security_alarm_entity": ALARM_hh,
+        "intrusion_requires_confinement": True})
+    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set(ALARM_hh, "armed_home")
+    fake_hass.states.set("binary_sensor.back_door", "on", device_class="door")
+    seen = await _walk(safety, fake_hass, home_clock)
+    unresolved = [a for a in seen if a["type"] == "intrusion_unresolved"]
+    assert len(unresolved) == 1 and unresolved[0].get("phone_only") is True
+    await cc._emit_action(fake_hass, {}, unresolved[0], sleeping=False)
+    assert spoken == [] and pushes == ["intrusion_unresolved"]
+
+
+async def test_the_unresolved_notice_when_away_still_speaks(cc, routed, fake_hass, home_clock):
+    pushes, spoken = routed
+    safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM_hh})
+    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set(ALARM_hh, "armed_away")
+    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
+    # Motion lingers in one room: no route through the house, so after the
+    # response timeout it is the unresolved notice, not a confirmation.
+    seen = []
+    for _ in range(6):
+        fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+        seen += await _tick(safety, fake_hass)
+        home_clock["now"] += 30
+    unresolved = [a for a in seen if a["type"] == "intrusion_unresolved"]
+    assert len(unresolved) == 1 and not unresolved[0].get("phone_only"), seen
+    await cc._emit_action(fake_hass, {}, unresolved[0], sleeping=False)
+    assert len(spoken) == 1 and pushes == ["intrusion_unresolved"]
+
+
+async def test_an_unknown_person_does_not_start_an_away_alert(cc, fake_hass, home_clock):
+    safety = cc.SafetyManager(fake_hass, {"honorific": "sir"})
+    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set("person.rachel", "unknown")
+    fake_hass.states.set("binary_sensor.back_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+    assert await _tick(safety, fake_hass) == []
+
+
+async def test_an_excluded_motion_sensor_never_starts_an_investigation(
+        cc, load, fake_hass, home_clock, monkeypatch):
+    ef = load("entity_filter")
+    monkeypatch.setattr(ef, "_exclusion_config",
+                        lambda hass: ({"binary_sensor.virtual_occupancy"}, set(), set()))
+    safety = cc.SafetyManager(fake_hass, {"honorific": "sir"})
+    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.virtual_occupancy", "on", device_class="occupancy")
+    assert await _tick(safety, fake_hass) == []
+    # A real sensor still does.
+    fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+    assert [a["type"] for a in await _tick(safety, fake_hass)] == ["intrusion_investigating"]

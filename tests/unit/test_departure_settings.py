@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-from test_pin_ws_update_config import _entry, _hass, _stub_ws_api, _update
+from ws_kit import _entry, _hass, _stub_ws_api, _update
 
 KEY = "departure_excluded_calendars"
 

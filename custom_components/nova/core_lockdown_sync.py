@@ -95,7 +95,20 @@ async def ensure_lockdown(hass: HomeAssistant, config: dict) -> None:
         core.hass = hass
     if not core.config:
         core.config = config or {}
-    _ensure_lockdown_mgr(hass)
+    # Setup wires lockdown before the cognitive core starts, so building the
+    # manager here is the normal path. It reads its saved state from disk,
+    # so it is built in the executor, and the restored state is in place
+    # before the alarm sync below.
+    if core.lockdown_mgr is None:
+        try:
+            mgr = await core.hass.async_add_executor_job(
+                _m_lockdown.LockdownManager, core.hass, core.config or {})
+        except Exception as exc:
+            _LOGGER.error("Lockdown manager create failed: %s", exc)
+        else:
+            if core.lockdown_mgr is None:
+                core.lockdown_mgr = mgr
+                _LOGGER.debug("Lockdown manager created at setup")
     if core.alarm_unsub is None:
         core.alarm_unsub = hass.bus.async_listen("state_changed", _on_lockdown_state)
         _LOGGER.info("Lockdown listener registered (alarm sync + breach enforcement)")

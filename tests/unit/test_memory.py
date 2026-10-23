@@ -125,3 +125,33 @@ def test_get_conversation_context_output_is_fenced(mem, monkeypatch):
     assert "BEGIN_MEMORY_" in content and "END_MEMORY_" in content
     assert "16x20x1" in content
     assert "## Relevant past conversations" in content
+
+
+# ── Connections are closed when a query fails ───────────────────────────────
+
+@pytest.mark.parametrize("call", [
+    lambda m: m.store_memory("a longer note", role="user", conversation_id="c"),
+    lambda m: m.search_memory("note", k=3),
+    lambda m: m._find_sibling("turn-1", None, None, "user"),
+    lambda m: m.get_memory_stats(),
+])
+def test_a_failing_query_still_closes_the_connection(mem, monkeypatch, call):
+    assert mem.store_memory("warm up", role="user") is True     # FTS ready
+    closed = []
+
+    class Broken:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("disk I/O error")
+
+        def close(self):
+            closed.append(True)
+            self._conn.close()
+
+    real_connect = mem._store.connect
+    monkeypatch.setattr(mem._store, "connect",
+                        lambda *a, **kw: Broken(real_connect(*a, **kw)))
+    call(mem)
+    assert closed == [True]

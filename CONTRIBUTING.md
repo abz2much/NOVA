@@ -1,85 +1,105 @@
 # Contributing to Nova
 
-Thanks for your interest in improving Nova. This document covers the repository
-layout, the development workflow, and the release process.
+Thanks for helping with Nova. This guide covers how the repository is laid
+out, the checks a change must pass, the rules for panel text, and how a
+release is made.
 
-## Repository layout
+## Layout
 
 ```
-nova/                             repo root (HACS integration repository)
-├── hacs.json                        HACS metadata
+nova/                                   repository root (a HACS integration)
+├── hacs.json                           HACS metadata
 ├── README.md  CHANGELOG.md  LICENSE
-├── .github/                         funding, issue templates, CI
-├── scripts/bump_version.sh          one-command version bump
-├── scripts/build_panel.py           builds the dashboard from frontend/src/
-├── frontend/src/                    dashboard source (panel parts)
-└── custom_components/nova/        the integration (domain: nova)
+├── .github/                            CI workflows, issue forms, funding
+├── docs/                               user guides and the settings reference
+├── mypy.ini                            type checking settings
+├── pytest.ini                          test settings
+├── scripts/
+│   ├── audit.py                        static checks: compile, imports, names, architecture
+│   ├── build_panel.py                  builds the panel from frontend/src/
+│   ├── bump_version.sh                 sets a new version everywhere it appears
+│   ├── coverage_floors.py              fails when a module's coverage drops below its floor
+│   ├── smoke_panel.js                  loads the built panel under jsdom and clicks through it
+│   ├── panel_strings.js                the list of English panel strings for translation
+│   ├── late_text_check.js              checks text drawn after the first render is translated
+│   ├── live_gemini_probe.py            optional live check of the Gemini adapter, with your key
+│   └── live_vision_probe.py            optional live check of the model tests, with your keys
+├── frontend/src/                       panel source, in ordered parts
+├── tests/
+│   ├── unit/                           fast tests with stand ins for Home Assistant
+│   ├── integration/                    tests against a real Home Assistant (PHACC)
+│   ├── evaluation/                     scenario runs of the reasoning loop (run.py)
+│   └── fixtures/                       pinned contracts and sample data
+└── custom_components/nova/             the integration (domain nova)
     ├── manifest.json
-    ├── __init__.py and modules
-    └── frontend/nova-panel.js     the built dashboard (generated, do not edit)
+    ├── translations/                   setup dialog text, en.json is the source
+    └── frontend/
+        ├── nova-panel.js               the built panel (generated, do not edit)
+        └── i18n/                       panel languages and string lists
 ```
 
-HACS installs `custom_components/nova/` into Home Assistant. The integration
-runs in-process; the config flow (or a migrated legacy config) sets it up.
-
-## Code standard
-
-This project holds to senior+ engineering output:
-
-- **4-pass audit before every release:** (1) syntax, (2) integration references,
-  (3) all modules parse, (4) version bump + package.
-- **Simulate tests internally** before shipping — the codebase carries standalone
-  test harnesses for the reasoning loop, the Local Mind decision matrix, the
-  package state machine, cognition salience tiering, and the speech composer.
-- **Honest caveats** documented with every change. Verification before speculation.
-- No careless mistakes, and no apologies in place of fixes.
+HACS installs `custom_components/nova/` into Home Assistant.
 
 ## Local checks
 
+These are the checks CI runs (`.github/workflows/validate.yml`). Run them from
+the repository root before you open a pull request.
+
+Unit tests, coverage, audit and types:
+
 ```bash
-# Python syntax across all integration modules
-cd custom_components/nova
-for f in *.py; do python3 -c "import ast; ast.parse(open('$f').read())" || echo "FAIL $f"; done
+pip install pytest pytest-asyncio pyflakes pyyaml mypy==2.3.1 pytest-cov==7.1.0 voluptuous wyoming==1.10.2
+python scripts/audit.py
+python -m mypy
+python -m pytest tests/ -q --cov=custom_components/nova --cov-report=json:coverage.json
+python scripts/coverage_floors.py coverage.json
+python tests/evaluation/run.py
+```
 
-# Architecture: cycles, package dependency direction, compatibility modules
-python3 ../../scripts/audit.py
+Integration tests need the real `homeassistant` package, which clashes with the
+stand ins the unit tests use, so run them in their own virtual environment.
+Install the packages listed in the `integration` job of `validate.yml`, then:
 
-# Types (from the repo root; needs `pip install mypy`)
-(cd ../.. && python3 -m mypy)
+```bash
+python -m pytest tests/integration/ -q
+```
 
-# Dashboard: edit frontend/src/, rebuild, then check the built file
-python3 ../../scripts/build_panel.py
-node --check frontend/nova-panel.js
+The panel. Edit `frontend/src/`, never the built file, then:
 
-# Unit tests, panel strings and late text checks (from the repo root)
-(cd ../.. && python3 -m pytest tests/unit -q)
-(cd ../.. && NODE_PATH=node_modules node scripts/panel_strings.js --check)
-(cd ../.. && NODE_PATH=node_modules node scripts/late_text_check.js)
+```bash
+python3 scripts/build_panel.py
+python3 scripts/build_panel.py --check
+node --check custom_components/nova/frontend/nova-panel.js
+npm install --prefix /tmp/jsdomtest --no-save jsdom@29.1.1
+export NODE_PATH=/tmp/jsdomtest/node_modules
+node scripts/smoke_panel.js
+node scripts/panel_strings.js --check
+node scripts/late_text_check.js
 ```
 
 ## Panel text and translations
 
 The panel's languages live in `custom_components/nova/frontend/i18n/<lang>.json`,
-keyed by the exact English text. CI fails if a language is missing a key, so
+keyed by the exact English text. CI fails when a language is missing a key, so
 when you add or change panel text:
 
-1. Write fixed text as a whole string. If a value sits inside the text, use
+1. Write fixed text as one whole string. When a value sits inside the text, use
    `this._t("{count} RECENT", { count })` for plain text, or `this._tHtml(...)`
-   in markup. Use one template per plural form.
-   Text set after the first render must go through `this._setHtml(el, html)`,
+   in markup. Use one template for each plural form.
+2. Text set after the first render goes through `this._setHtml(el, html)`,
    `this._setText(el, text)`, or `this._tx(text)` for a title or a dialog
-   message. `tests/unit/test_panel_late_text.py` fails on a direct
-   `innerHTML`, `textContent`, `title` or `confirm()`; where one is truly
-   needed, say why on the line with `// i18n-ok: <reason>`.
-2. Run `NODE_PATH=node_modules node scripts/panel_strings.js --write` to update
-   `frontend/i18n/panel_strings.json`.
-3. Add each new string, with its translation, to every language file. Keep
-   every `{placeholder}` and symbol (→, ·, %, icons) exactly as in the English.
-4. Delete the keys for text you removed. `python -m pytest tests/unit/test_panel_i18n.py`
-   shows any that are left.
+   message. `scripts/late_text_check.js` and `tests/unit/test_panel_late_text.py`
+   fail on a direct `innerHTML`, `textContent`, `title` or `confirm()`. Where one
+   is really needed, give the reason on the same line with `// i18n-ok: <reason>`.
+3. Run `node scripts/panel_strings.js --write` (with jsdom on `NODE_PATH`) to
+   update `frontend/i18n/panel_strings.json`.
+4. Add each new string, with its translation, to every language file. Keep each
+   `{placeholder}` and symbol (→, ·, %, icons) exactly as in the English.
+5. Remove the keys for text you took out. `python -m pytest tests/unit/test_panel_i18n.py`
+   lists any that are left.
 
-Never add to `frontend/i18n/baseline.json`. It lists the strings that were
-untranslated when the checks began, and it may only shrink. A brand or
+Never add to `frontend/i18n/baseline.json`. It lists the strings that had no
+translation when the checks began, and it may only get shorter. A brand or
 technical word that stays in English (LLM, TTS) goes in the "panel" part of
 `frontend/i18n/keep_english.json`.
 
@@ -91,21 +111,27 @@ Assistant's own word for each menu and feature, and its form of "you".
 
 ## Releasing
 
-Bump the version everywhere it appears with one command:
+Set the new version with one command:
 
 ```bash
-./scripts/bump_version.sh 6.3.3
+bash scripts/bump_version.sh 8.69.0
 ```
 
-This updates the integration `manifest.json` and the panel version in
-`frontend/src/panel/core.js`, then rebuilds `nova-panel.js`. Then commit, tag
-(`git tag v6.3.3`), and push the tag — the validation workflow runs on every push.
+It updates `manifest.json` and the panel version in `frontend/src/panel/core.js`,
+then rebuilds `nova-panel.js`. Add a section for the version at the top of
+`CHANGELOG.md`, headed `## [8.69.0] Short title`.
 
-After updating on a live system, hard-refresh the browser (`Ctrl+Shift+R`) so the
-cached dashboard JavaScript reloads.
+HACS offers Nova's GitHub releases. When a change to the version in
+`manifest.json` reaches `main`, `.github/workflows/release.yml` creates the tag
+`v8.69.0` and its release, with that version's CHANGELOG section as the notes.
+It does nothing when that release already exists, and it can also be run by
+hand from the Actions tab.
+
+After updating a live system, hard refresh the browser (`Ctrl+Shift+R`) so the
+cached panel reloads.
 
 ## Pull requests
 
-Keep changes focused, include a short rationale, and note any limitations. If a
-change touches the reasoning pipeline, the camera/Nest paths, or cognition
-salience, please describe how you verified it.
+Keep each change focused, say why it is needed, and note any limits. Add a test
+that fails without the change. If it touches the reasoning loop, cameras or
+safety alerts, say how you checked it.

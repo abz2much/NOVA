@@ -1,7 +1,6 @@
-"""Phase 3 PHACC coverage — deterministic ambiguity handling and honest
-action verification, driven against a REAL Home Assistant instance (real
-entity/service registration, real hass.services.async_call), not the
-hand-rolled fakes used by tests/unit/.
+"""Ambiguity handling and honest action verification, driven against a REAL
+Home Assistant instance (real entity/service registration, real
+hass.services.async_call), not the hand-rolled fakes used by tests/unit/.
 
 Companions to the unit-level proofs:
   tests/unit/test_agent_run_agent_ambiguity_dispatch.py (dispatch logic,

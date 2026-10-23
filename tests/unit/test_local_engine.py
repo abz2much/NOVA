@@ -16,6 +16,7 @@ import types
 import pytest
 
 from fakes import FakeHass
+from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 
 @pytest.fixture
@@ -1097,3 +1098,11 @@ async def test_a_bare_device_name_reads_its_state(le, env):
 
 async def test_nothing_matched(le, env):
     assert await le.try_local(FakeHass(), "what are your capabilities") is None
+
+
+# ── speech corrections ────────────────────────────────────────────────────────
+
+def test_the_chaise_word_fix_is_gone(load):
+    corrections = load("local_engine")._STT_CORRECTIONS
+    assert "chaise" not in corrections and "chase" not in corrections
+    assert corrections["lamp"] == "light"                       # the rest is unchanged

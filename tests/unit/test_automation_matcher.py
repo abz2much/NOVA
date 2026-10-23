@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import types
+import yaml
 
 
 def _module(load):
@@ -136,3 +137,126 @@ def test_installed_presence_release_is_exact(load):
 
     result = matcher.classify(candidate, [_record("automation.office", existing)])
     assert result["status"] == "already_automated"
+
+
+# ── matching with templates, blueprints and names ─────────────────────────────
+
+def test_match_payload_carries_names_only_in_matches(load):
+    matcher = load("automation.matching")
+    existing = _record_p5("automation.sunset", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]})
+    out = matcher.classify({"triggers": [{"trigger": "time", "at": "20:00:00"}],
+                            "actions": [{"action": "light.turn_on",
+                                         "entity_id": "light.porch"}]}, [existing])
+    assert set(out) == {"status", "matches", "reason"}
+    assert out["matches"] == [{"entity_id": "automation.sunset",
+                               "name": "automation.sunset"}]
+
+
+def _record_p5(entity_id, raw_config, refs=()):
+    return types.SimpleNamespace(entity_id=entity_id, name=entity_id,
+                                 raw_config=raw_config, referenced_entities=tuple(refs))
+
+
+_PORCH = {"triggers": [{"trigger": "time", "at": "20:00:00"}],
+          "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+
+
+def test_templated_target_is_never_proof_of_new(load):
+    matcher = load("automation.matching")
+    templated = _record_p5("automation.dynamic", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on",
+                     "target": {"entity_id": "{{ states.light | map(attribute='entity_id') | list }}"}}]})
+    out = matcher.classify(_PORCH, [templated])
+    assert out["status"] == "unknown_overlap"
+    assert out["matches"][0]["entity_id"] == "automation.dynamic"
+
+
+def test_template_strings_are_not_entity_ids(load):
+    matcher = load("automation.matching")
+    effects = matcher.action_effects({
+        "triggers": [{"trigger": "sun"}],
+        "actions": [{"action": "light.turn_on",
+                     "entity_id": "{{ 'light.porch' if is_state('sun.sun', 'below_horizon') else 'light.hall' }}"}]})
+    assert effects == set()
+
+
+def test_opaque_blueprint_with_no_references_is_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = _record_p5("automation.bp", {"use_blueprint": {"path": "x.yaml", "input": {}}})
+    assert matcher.classify(_PORCH, [blueprint])["status"] == "unknown_overlap"
+    metadata_only = _record_p5("automation.meta", None)
+    assert matcher.classify(_PORCH, [metadata_only])["status"] == "unknown_overlap"
+
+
+def test_templated_candidate_is_never_new_or_a_duplicate(load):
+    matcher = load("automation.matching")
+    candidate = {"triggers": [{"trigger": "template",
+                               "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+                 "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+    similar = _record_p5("automation.other", {
+        "triggers": [{"trigger": "template",
+                      "value_template": "{{ states('sun.sun') == 'below_horizon' }}"}],
+        "actions": [{"action": "light.turn_off", "entity_id": "light.hall"}]})
+    assert matcher.classify(candidate, [])["status"] == "unknown_overlap"
+    assert matcher.classify(candidate, [similar])["status"] == "unknown_overlap"
+
+
+def test_unrelated_plain_automation_is_still_new(load):
+    matcher = load("automation.matching")
+    other = _record_p5("automation.hall", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.hall"}]},
+        refs=("light.hall",))
+    assert matcher.classify(_PORCH, [other])["status"] == "new"
+
+
+def test_blueprint_with_unrelated_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = _record_p5("automation.bp_hall",
+                        {"use_blueprint": {"path": "motion_light.yaml",
+                                           "input": {"light": "light.hall"}}},
+                        refs=("light.hall", "binary_sensor.hall_motion"))
+    out = matcher.classify(_PORCH, [blueprint])
+    assert out["status"] == "unknown_overlap"
+    assert out["matches"] == [{"entity_id": "automation.bp_hall",
+                               "name": "automation.bp_hall"}]
+
+
+def test_blueprint_with_only_device_or_area_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = types.SimpleNamespace(
+        entity_id="automation.bp_area", name="Area lights", referenced_entities=(),
+        referenced_devices=("device-porch-light",), referenced_areas=("porch",),
+        raw_config={"use_blueprint": {"path": "area_lights.yaml",
+                                      "input": {"area": "porch"}}})
+    assert matcher.classify(_PORCH, [blueprint])["status"] == "unknown_overlap"
+
+
+def test_metadata_only_record_with_unrelated_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    meta = _record_p5("automation.meta_hall", None, refs=("light.hall",))
+    assert matcher.classify(_PORCH, [meta])["status"] == "unknown_overlap"
+
+
+def test_templated_record_with_literal_targets_stays_uncertain(load):
+    matcher = load("automation.matching")
+    templated = _record_p5("automation.hall_if", {
+        "triggers": [{"trigger": "template", "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.hall"}]},
+        refs=("light.hall",))
+    assert matcher.classify(_PORCH, [templated])["status"] == "unknown_overlap"
+
+
+def test_identical_template_text_is_an_exact_duplicate(load):
+    matcher = load("automation.matching")
+    config = {"triggers": [{"trigger": "template",
+                            "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+              "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+    existing = _record_p5("automation.porch_dark", {
+        "id": "x", "alias": "Porch after dark", "mode": "single", **config})
+    out = matcher.classify(config, [existing])
+    assert out["status"] == "already_automated"
+    assert out["matches"][0]["entity_id"] == "automation.porch_dark"

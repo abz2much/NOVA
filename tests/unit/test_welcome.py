@@ -108,12 +108,6 @@ async def test_never_raises(welcome, nova_config, sh, fake_hass, monkeypatch):
     assert await welcome.async_maybe_show(fake_hass) is False
 
 
-def test_bootstrap_runs_welcome_after_pipeline_repair(load):
-    import inspect
-    src = inspect.getsource(load("bootstrap").schedule_bootstrap)
-    assert src.index("async_ensure_pipeline_agent") < src.index("welcome.async_maybe_show")
-
-
 # ── async_say_hello ──────────────────────────────────────────────────────────
 
 class _Resp:

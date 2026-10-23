@@ -6,7 +6,7 @@ panel data, activity log, config write, debug log, health, provider
 activity, semantic search, documents, sparklines and appliance reload
 commands. The decorators are stubbed to pass through, so each handler body
 runs with a recording connection, a fake entry and fake collaborators. The
-older pin files (test_pin_ws_panel.py, test_pin_ws_update_config.py,
+older pin files (test_websocket_panel.py, test_websocket_update_config.py,
 test_hazard_settings.py) cover the main paths; this file covers the readers,
 fallbacks and branches they leave out.
 """
@@ -22,7 +22,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _entry, _hass, _stub_ws_api, _update
+from ws_kit import _Conn, _entry, _hass, _stub_ws_api, _update
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 

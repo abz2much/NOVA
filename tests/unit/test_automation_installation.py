@@ -1,9 +1,11 @@
 """What create_automation builds, writes and records, and what
 install_approved_suggestion hands to it.
 
-The fail-closed and rollback paths are pinned in test_automation_creator_safety
-and test_automation_phase5_fixes. These tests pin the shape of the automation
-that is written, the audit rows, the replies, and the learn log line.
+These tests check the shape of the automation that is written, the audit
+rows, the replies and the learn log line. The last section covers ids,
+locking, rollback and retry against a file backed inventory that behaves like
+Home Assistant's loaded automation component. More fail closed paths are in
+test_automation_creator_safety.
 """
 from __future__ import annotations
 
@@ -15,6 +17,9 @@ import pytest
 import yaml
 
 from fakes import FakeAutomationInventory
+import asyncio
+import sqlite3
+from fakes import FakeAutomationInventory as FileInventory
 
 
 class _Services:
@@ -381,3 +386,326 @@ async def test_an_unexpected_failure_is_reported_in_safe_words_and_logged(
     assert result["ok"] is False and "secret detail" not in result["error"]
     assert [r.getMessage() for r in caplog.records] == [
         "install_approved_suggestion failed: secret detail"]
+
+
+# ── ids, locking, rollback and retry ──────────────────────────────────────────
+
+class Services:
+    def __init__(self, inventory=None, *, fail=(), hang_on=None):
+        self.calls = []
+        self.inventory = inventory
+        self.fail = set(fail)
+        self.hang_on = hang_on
+        self.started = asyncio.Event()
+
+    async def async_call(self, domain, service, data=None, blocking=False):
+        self.calls.append((domain, service))
+        n = len(self.calls)
+        if self.hang_on == n:
+            self.started.set()
+            await asyncio.sleep(0.05)
+        if n in self.fail:
+            raise RuntimeError(f"reload {n} failed")
+        if self.inventory is not None:
+            self.inventory.reload()
+
+
+class InstallHass:
+    def __init__(self, path, services):
+        self.config = types.SimpleNamespace(path=lambda name: str(path))
+        self.services = services
+        self.data = {}
+
+    async def async_add_executor_job(self, func, *args):
+        return await asyncio.get_running_loop().run_in_executor(None, func, *args)
+
+
+@pytest.fixture
+def audit_p5(monkeypatch):
+    rows = {"start": [], "execution": []}
+    mod = types.ModuleType("jc.action_log")
+    mod.new_request_id = lambda: "request-1"
+
+    def start(*args, **kwargs):
+        rows["start"].append((args, kwargs))
+        return len(rows["start"])
+
+    mod.start = start
+    mod.set_execution = lambda *a, **k: rows["execution"].append((a, k))
+    monkeypatch.setitem(sys.modules, "jc.action_log", mod)
+    return rows
+
+
+@pytest.fixture
+def installation(load):
+    return load("automation.installation")
+
+
+def _use_inventory(load, monkeypatch, inventory):
+    monkeypatch.setattr(load("automation.inventory"), "get_inventory",
+                        lambda hass: inventory)
+
+
+def _light(entity="light.porch", at="18:00:00"):
+    return dict(trigger={"trigger": "time", "at": at},
+                action={"action": "light.turn_on", "entity_id": entity})
+
+
+_SCHEMA = """
+CREATE TABLE state_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+    entity_id TEXT NOT NULL, domain TEXT NOT NULL, old_state TEXT,
+    new_state TEXT NOT NULL, area_id TEXT, hour INTEGER, day_of_week INTEGER,
+    triggered_by TEXT DEFAULT 'system', person TEXT DEFAULT 'unknown');
+CREATE TABLE commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, text TEXT NOT NULL,
+    handled_by TEXT DEFAULT 'agent', entity_ids TEXT DEFAULT '[]',
+    person TEXT DEFAULT 'unknown', hour INTEGER, day_of_week INTEGER);
+CREATE TABLE suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT NOT NULL,
+    description TEXT NOT NULL, automation_yaml TEXT, status TEXT DEFAULT 'pending',
+    confidence REAL DEFAULT 0.0, pattern_count INTEGER DEFAULT 0,
+    approved_at TEXT, dismissed_at TEXT, pattern_type TEXT DEFAULT '',
+    entity_ids TEXT DEFAULT '', details TEXT DEFAULT '{}');
+"""
+
+
+async def test_long_shared_alias_prefix_gets_distinct_ids(
+        installation, load, audit_p5, tmp_path, monkeypatch):
+    path = tmp_path / "automations.yaml"
+    path.write_text("- id: legacy\n  alias: Legacy\n")
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    hass = InstallHass(path, Services(inventory))
+    prefix = "Nova Learned: light.living_room_floor_lamp after "
+    first = await installation.create_automation(
+        hass, alias=prefix + "binary_sensor.hall_motion",
+        trigger={"trigger": "state", "entity_id": "binary_sensor.hall_motion", "to": "on"},
+        action={"action": "light.turn_on", "entity_id": "light.living_room_floor_lamp"})
+    second = await installation.create_automation(
+        hass, alias=prefix + "binary_sensor.stairs_motion",
+        trigger={"trigger": "state", "entity_id": "binary_sensor.stairs_motion", "to": "on"},
+        action={"action": "light.turn_on", "entity_id": "light.living_room_floor_lamp"})
+    assert first["success"] and second["success"], (first, second)
+    assert first["automation_id"] != second["automation_id"]
+    ids = [i["id"] for i in yaml.safe_load(path.read_text())]
+    assert ids == ["legacy", first["automation_id"], second["automation_id"]]
+
+
+def test_ids_are_deterministic_and_keep_the_prefix(installation):
+    config = {"triggers": [{"trigger": "time", "at": "18:00:00"}],
+              "actions": [{"action": "light.turn_on", "entity_id": "light.p"}]}
+    one = installation.automation_id_for("Porch on", config)
+    assert one == installation.automation_id_for("Porch on", dict(config))
+    assert one.startswith("nova_auto_porch_on_")
+    other = installation.automation_id_for(
+        "Porch on", {**config, "mode": "restart"})
+    assert other != one
+
+
+async def test_existing_entry_with_the_same_id_is_never_replaced(
+        installation, load, audit_p5, tmp_path, monkeypatch):
+    kw = _light()
+    config = {"alias": "Nova · Porch", "description": "Created by Nova: Porch",
+              "mode": "single", "triggers": [kw["trigger"]], "actions": [kw["action"]]}
+    auto_id = installation.automation_id_for("Porch", config)
+    path = tmp_path / "automations.yaml"
+    original = yaml.safe_dump([{"id": auto_id, "alias": "Someone else's",
+                                "triggers": [{"trigger": "sun", "event": "sunset"}],
+                                "actions": [{"action": "light.turn_off",
+                                             "entity_id": "light.x"}]}]).encode()
+    path.write_bytes(original)
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    hass = InstallHass(path, Services(inventory))
+    result = await installation.create_automation(hass, alias="Porch", **kw)
+    assert result["success"] is False
+    assert path.read_bytes() == original
+    assert hass.services.calls == []
+
+
+@pytest.fixture
+def store_db(tmp_path, monkeypatch):
+    db = tmp_path / "patterns.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(_SCHEMA)
+    conn.commit()
+    conn.close()
+    dr = types.ModuleType("jc.decision_record")
+    dr.record = lambda *a, **k: None
+    dr.set_outcome_by_ref = lambda *a, **k: None
+    monkeypatch.setitem(sys.modules, "jc.decision_record", dr)
+    return str(db)
+
+
+def _routine(models, days, hour=18, total=30):
+    return models.DetectedPattern(
+        pattern_type="time_routine",
+        description=f"light.porch turns on around {hour:02d}:00 on {days} of {total} days",
+        entity_ids=["light.porch"], confidence=days / total, occurrences=days,
+        details={"hour": hour, "state": "on", "observed_days": days})
+
+
+@pytest.fixture
+def home_p5(load, audit_p5, store_db, tmp_path, monkeypatch):
+    """A real suggestion store with one pending routine, an automations.yaml,
+    and Home Assistant's loaded automations following each reload."""
+    suggestions, models = load("automation.suggestions"), load("automation.models")
+    patterns = load("automation.patterns")
+    an = patterns.PatternAnalyzer()
+    an._db = store_db
+    an._store_suggestion(_routine(models, 12))
+    monkeypatch.setattr(patterns, "get_analyzer", lambda: an)
+    path = tmp_path / "automations.yaml"
+    path.write_bytes(b"# household automations\n- id: legacy\n  alias: Legacy\n")
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    return types.SimpleNamespace(analyzer=an, path=path, inventory=inventory,
+                                 store=suggestions.SuggestionStore(store_db),
+                                 original=path.read_bytes(), audit=audit_p5)
+
+
+def _status(home_p5, sid=1):
+    return home_p5.store.get(sid)["status"]
+
+
+async def test_concurrent_approvals_install_once(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory, hang_on=1))
+    first, second = await asyncio.gather(
+        installation.install_approved_suggestion(hass, 1),
+        installation.install_approved_suggestion(hass, 1))
+    assert sorted([first["installed"], second["installed"]]) == [False, True]
+    ids = [i["id"] for i in yaml.safe_load(home_p5.path.read_text())]
+    assert len(ids) == 2 and ids[0] == "legacy"
+    assert _status(home_p5) == "installed"
+    loser = first if not first["installed"] else second
+    assert "installed" in loser["reason"]
+
+
+async def test_dismissed_suggestion_is_never_installed(installation, home_p5):
+    home_p5.store.dismiss(1)
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and result["installed"] is False
+    assert "dismissed" in result["reason"]
+    assert home_p5.path.read_bytes() == home_p5.original and hass.services.calls == []
+
+
+async def test_cancellation_restores_bytes_reloads_and_reraises(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory, hang_on=1))
+    task = asyncio.ensure_future(installation.install_approved_suggestion(hass, 1))
+    await hass.services.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert home_p5.path.read_bytes() == home_p5.original
+    assert hass.services.calls == [("automation", "reload")] * 2
+    assert [r.unique_id for r in home_p5.inventory.records()] == ["legacy"]
+    assert _status(home_p5) == "pending"
+    assert home_p5.audit["execution"][-1][1]["reason_code"] == "installation_cancelled"
+
+
+async def test_a_second_cancel_cannot_skip_the_rollback(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory, hang_on=1))
+    task = asyncio.ensure_future(installation.install_approved_suggestion(hass, 1))
+    await hass.services.started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert home_p5.path.read_bytes() == home_p5.original
+    assert len(hass.services.calls) == 2
+
+
+async def test_unavailable_inventory_fails_closed(installation, home_p5, load, monkeypatch):
+    _use_inventory(load, monkeypatch, None)
+    hass = InstallHass(home_p5.path, Services())
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and "unavailable" in result["reason"]
+    assert home_p5.path.read_bytes() == home_p5.original and hass.services.calls == []
+    assert _status(home_p5) == "pending"
+    assert home_p5.audit["execution"][-1][1]["reason_code"] == "inventory_unavailable"
+
+
+async def test_unconfirmed_load_rolls_back_and_says_so(installation, home_p5):
+    home_p5.inventory.load_new = False
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False
+    assert "did not load" in result["reason"]
+    assert "restored and reloaded" in result["reason"]
+    assert home_p5.path.read_bytes() == home_p5.original
+    assert len(hass.services.calls) == 2
+    assert _status(home_p5) == "pending"
+
+
+async def test_unconfirmable_load_fails_closed(installation, home_p5, load, monkeypatch):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory))
+    real_refresh = home_p5.inventory.refresh
+    calls = {"n": 0}
+
+    def flaky_refresh():
+        calls["n"] += 1
+        if calls["n"] == 2:        # the post-write confirmation
+            raise RuntimeError("automation component gone")
+        return real_refresh()
+
+    home_p5.inventory.refresh = flaky_refresh
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and "could not confirm" in result["reason"]
+    assert home_p5.path.read_bytes() == home_p5.original
+
+
+async def test_failed_rollback_reload_is_reported(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory, fail={1, 2}))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False
+    assert "rollback failed" in result["reason"]
+    assert home_p5.path.read_bytes() == home_p5.original
+    assert home_p5.audit["execution"][-1][1]["reason_code"] == "rollback_failed"
+
+
+async def test_failed_install_stays_retryable(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory, fail={1}))
+    failed = await installation.install_approved_suggestion(hass, 1)
+    assert failed["ok"] is False and _status(home_p5) == "pending"
+    assert [s["id"] for s in home_p5.analyzer.get_pending_suggestions()] == [1]
+    retried = await installation.install_approved_suggestion(hass, 1)
+    assert retried["installed"] is True and _status(home_p5) == "installed"
+
+
+async def test_advisory_approval_is_unchanged(installation, home_p5, load):
+    conn = sqlite3.connect(home_p5.store._db)
+    conn.execute("UPDATE suggestions SET automation_yaml = ? WHERE id = 1",
+                 ('{"note": "x", "type": "manual_review"}',))
+    conn.commit()
+    conn.close()
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is True and result["installed"] is False
+    assert _status(home_p5) == "approved" and hass.services.calls == []
+
+
+async def test_device_reaches_the_audit_row(installation, home_p5):
+    hass = InstallHass(home_p5.path, Services(home_p5.inventory))
+    await installation.install_approved_suggestion(
+        hass, 1, requested_by_user_id="user-abi", request_device_id="device-kitchen")
+    _args, kwargs = home_p5.audit["start"][-1]
+    assert kwargs["requested_by_user_id"] == "user-abi"
+    assert kwargs["request_device_id"] == "device-kitchen"
+
+
+async def test_installation_never_blocks_on_template_similarity(
+        installation, load, audit_p5, tmp_path, monkeypatch):
+    path = tmp_path / "automations.yaml"
+    path.write_text(yaml.safe_dump([{
+        "id": "templated", "alias": "Templated",
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on",
+                     "target": {"entity_id": "{{ 'light.porch' }}"}}]}]))
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    hass = InstallHass(path, Services(inventory))
+    result = await installation.create_automation(hass, alias="Porch", **_light())
+    assert result["success"] is True

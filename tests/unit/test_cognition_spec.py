@@ -319,6 +319,17 @@ def test_presence_status_rows(cog):
     ]
 
 
+def test_presence_status_returns_the_rows_so_far_when_a_state_is_malformed(cog):
+    hass = FakeHass()
+    hass.config = types.SimpleNamespace(latitude=0.0, longitude=0.0)
+    hass.states.async_set("person.a", "home", {"friendly_name": "A"})
+    hass.states.async_set("person.b", "home")
+    hass.states.get("person.b").attributes = None
+    assert cog.presence_status(hass) == [
+        {"entity_id": "person.a", "name": "A", "zone": "Home", "gps": False, "distance_km": None},
+    ]
+
+
 def test_heading_home_wording(cog):
     hass = FakeHass()
     hass.config = types.SimpleNamespace(latitude=0.0, longitude=0.0)

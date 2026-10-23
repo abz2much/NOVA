@@ -35,6 +35,15 @@ def llm(monkeypatch):
     return state
 
 
+def _broken_panel_log(monkeypatch):
+    """A panel log that raises, so the caller's own work must carry on."""
+    def nova_log(*_a, **_k):
+        raise RuntimeError("panel log down")
+    fake = types.ModuleType("jc.websocket")
+    fake.nova_log = nova_log
+    monkeypatch.setitem(sys.modules, "jc.websocket", fake)
+
+
 async def _run(clf, eid, old, new, dc=None, hhmm="12:00", **kw):
     return await clf.classify(None, None, entity_id=eid, old_state=old, new_state=new,
                               device_class=dc, now_hhmm=hhmm, **kw)
@@ -281,6 +290,14 @@ async def test_ambiguous_event_calls_the_provider_once(clf, llm):
     user = msgs[1]["content"]
     for fact in ("10:15", "cover.awning", "Awning", "awning", "closed", "open"):
         assert fact in user
+
+
+async def test_a_failing_panel_log_does_not_stop_the_provider_call(clf, llm, monkeypatch):
+    _broken_panel_log(monkeypatch)
+    llm.reply = {"text": '{"worth_considering": true, "urgency": "low", "category": "climate"}'}
+    out = await _run(clf, "cover.awning", "closed", "open", dc="awning")
+    assert out == {"worth_considering": True, "urgency": "low", "category": "climate"}
+    assert len(llm.calls) == 1
 
 
 async def test_user_message_line_format(clf, llm):

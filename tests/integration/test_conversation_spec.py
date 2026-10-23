@@ -392,3 +392,59 @@ async def test_both_halves_of_a_turn_join_the_history(hass, monkeypatch, tmp_pat
     await asyncio.sleep(0)
     assert made[0]._histories[CHAT][-2:] == [
         {"role": "user", "content": text}, {"role": "assistant", "content": "Done."}]
+
+
+# ── Catching up on a conversation's own past ────────────────────────────────
+
+def _seed_agent(hass):
+    return SimpleNamespace(hass=hass, _last_seen={})
+
+
+async def test_a_reseed_replaces_the_window_with_one_note_from_this_conversation(conv, hass):
+    calls = []
+
+    async def load_recent(h, hours, limit, device_id=None, subject=None):
+        calls.append((hours, limit, device_id, subject))
+        return [{"role": "user", "content": "the old exchange"}]
+    history = [{"role": "user", "content": "a live turn"}]
+    with patch("custom_components.nova.memory_thread.config", return_value=(True, 48, 10)), \
+         patch("custom_components.nova.memory_thread.load_recent", load_recent):
+        await conv.NovaAgent._maybe_seed_history(_seed_agent(hass), "cid-1", history,
+                                                 subject="person.abi")
+    assert calls == [(48, 10, "cid-1", "person.abi")]          # this conversation, then the person
+    assert len(history) == 1 and history[0]["role"] == "system"  # one background note, not raw turns
+    assert "the old exchange" in history[0]["content"]
+    assert "a live turn" not in history[0]["content"]
+
+
+async def test_a_conversation_catches_up_again_after_every_gap(conv, hass):
+    calls = []
+
+    async def load_recent(h, hours, limit, device_id=None, subject=None):
+        calls.append(device_id)
+        return [{"role": "user", "content": f"turn {len(calls)}"}]
+    agent, history = _seed_agent(hass), []
+    with patch("custom_components.nova.memory_thread.config", return_value=(True, 48, 10)), \
+         patch("custom_components.nova.memory_thread.load_recent", load_recent):
+        await conv.NovaAgent._maybe_seed_history(agent, "cid-1", history)
+        await conv.NovaAgent._maybe_seed_history(agent, "cid-1", history)      # no gap: no reseed
+        assert calls == ["cid-1"]
+        agent._last_seen["cid-1"] -= 49 * 3600                                  # back after two days
+        await conv.NovaAgent._maybe_seed_history(agent, "cid-1", history)
+    assert calls == ["cid-1", "cid-1"]
+    assert len(history) == 1 and "turn 2" in history[0]["content"]           # replaced, never piled up
+
+
+async def test_semantic_memory_is_searched_for_this_conversation_only(hass, tmp_path, monkeypatch):
+    from .test_chat_turn import _engine
+    _isolate_conversations_db(monkeypatch, tmp_path)
+    entity_id = await _setup_nova(hass)
+    seen = []
+
+    def context(text, k, cid, subject=None):
+        seen.append((k, cid))
+        return ""
+    _, local, agent = _engine()
+    with local, agent, patch("custom_components.nova.memory.get_conversation_context", context):
+        await _converse(hass, entity_id, "Nova, what did we decide about the heating?", "thread-a")
+    assert seen == [(3, "thread-a")]

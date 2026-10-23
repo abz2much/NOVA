@@ -25,6 +25,7 @@ search vs. cross-session reseed) with the identical shape of gap.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -51,11 +52,10 @@ def _init_fts():
     global _fts_available
     try:
         db_path = _db_path()
-        conn = _store.connect(db_path, row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        _store.ensure(conn, "memory_fts")
-        conn.commit()
-        conn.close()
+        with contextlib.closing(_store.connect(db_path, row_factory=False, mkdir=False,
+                                               busy_timeout_ms=None)) as conn:
+            _store.ensure(conn, "memory_fts")
+            conn.commit()
         _fts_available = True
         _LOGGER.info("Nova memory: FTS5 initialized")
         return True
@@ -108,14 +108,13 @@ def store_memory(text: str, *, role: str = "user", device_id: str = "",
         return False
     try:
         import json
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        conn.execute(
-            "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
-            (text, json.dumps(meta), stamp),
-        )
-        conn.commit()
-        conn.close()
+        with contextlib.closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
+                                               busy_timeout_ms=None)) as conn:
+            conn.execute(
+                "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
+                (text, json.dumps(meta), stamp),
+            )
+            conn.commit()
     except Exception as exc:
         _LOGGER.debug("FTS5 store failed: %s", exc)
         return False
@@ -199,34 +198,33 @@ def search_memory(
 
     if _fts_available:
         try:
-            conn = _store.connect(_db_path(), mkdir=False,
-                                  busy_timeout_ms=None)
-            # FTS5 MATCH query
-            query_clean = " OR ".join(query.split()[:8])  # limit query terms
-            # FTS5 can't filter into the JSON metadata column directly, so
-            # when conversation_id-scoping is requested, over-fetch and
-            # filter in Python, then truncate to k — unchanged from before
-            # Phase 2 (out of scope to rewrite here).
-            #
-            # subject-scoping is different: proven empirically (see
-            # tests/unit/test_memory.py) that this same over-fetch approach
-            # can EXCLUDE the target subject's row when 25+ higher-ranked
-            # rows belong to another subject — the SQL LIMIT truncates
-            # before the Python filter ever runs. So subject additionally
-            # gets a safely-escaped metadata LIKE pre-filter combined with
-            # the MATCH query, narrowing candidates BEFORE the rank-based
-            # LIMIT. The LIKE result is never trusted on its own — the
-            # Python-side equality check below is still authoritative.
-            fetch_limit = max(k * 5, 25) if (conversation_id or subject) else k
-            sql = "SELECT content, metadata, rank FROM memory_fts WHERE memory_fts MATCH ?"
-            params: list = [query_clean]
-            if subject:
-                sql += " AND metadata LIKE ? ESCAPE '\\'"
-                params.append(_metadata_like_pattern("subject", subject))
-            sql += " ORDER BY rank LIMIT ?"
-            params.append(fetch_limit)
-            rows = conn.execute(sql, params).fetchall()
-            conn.close()
+            with contextlib.closing(_store.connect(_db_path(), mkdir=False,
+                                                   busy_timeout_ms=None)) as conn:
+                # FTS5 MATCH query
+                query_clean = " OR ".join(query.split()[:8])  # limit query terms
+                # FTS5 can't filter into the JSON metadata column directly, so
+                # when conversation_id-scoping is requested, over-fetch and
+                # filter in Python, then truncate to k — unchanged from before
+                # Phase 2 (out of scope to rewrite here).
+                #
+                # subject-scoping is different: proven empirically (see
+                # tests/unit/test_memory.py) that this same over-fetch approach
+                # can EXCLUDE the target subject's row when 25+ higher-ranked
+                # rows belong to another subject — the SQL LIMIT truncates
+                # before the Python filter ever runs. So subject additionally
+                # gets a safely-escaped metadata LIKE pre-filter combined with
+                # the MATCH query, narrowing candidates BEFORE the rank-based
+                # LIMIT. The LIKE result is never trusted on its own — the
+                # Python-side equality check below is still authoritative.
+                fetch_limit = max(k * 5, 25) if (conversation_id or subject) else k
+                sql = "SELECT content, metadata, rank FROM memory_fts WHERE memory_fts MATCH ?"
+                params: list = [query_clean]
+                if subject:
+                    sql += " AND metadata LIKE ? ESCAPE '\\'"
+                    params.append(_metadata_like_pattern("subject", subject))
+                sql += " ORDER BY rank LIMIT ?"
+                params.append(fetch_limit)
+                rows = conn.execute(sql, params).fetchall()
 
             memories = []
             for row in rows:
@@ -264,13 +262,12 @@ def _find_sibling(
     if _fts_available:
         try:
             import json
-            conn = _store.connect(_db_path(), mkdir=False,
-                                  busy_timeout_ms=None)
-            rows = conn.execute(
-                "SELECT content, metadata FROM memory_fts WHERE metadata LIKE ? ESCAPE '\\'",
-                (_metadata_like_pattern("turn_id", turn_id),),
-            ).fetchall()
-            conn.close()
+            with contextlib.closing(_store.connect(_db_path(), mkdir=False,
+                                                   busy_timeout_ms=None)) as conn:
+                rows = conn.execute(
+                    "SELECT content, metadata FROM memory_fts WHERE metadata LIKE ? ESCAPE '\\'",
+                    (_metadata_like_pattern("turn_id", turn_id),),
+                ).fetchall()
             for row in rows:
                 try:
                     meta = json.loads(row["metadata"])
@@ -402,10 +399,9 @@ def get_memory_stats() -> dict:
     if not _fts_available:
         return report
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        counted = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
-        conn.close()
+        with contextlib.closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
+                                               busy_timeout_ms=None)) as conn:
+            counted = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
     except Exception:
         return report
     report["backend"] = "fts5"

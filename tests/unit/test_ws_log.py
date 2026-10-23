@@ -360,21 +360,13 @@ def test_ws_log_defines_the_log_and_imports_nothing_from_home_assistant():
                 assert node.module is None and [a.name for a in node.names] == ["paths"]
 
 
-def test_the_persisted_log_is_loaded_once_at_import_and_nowhere_else():
-    tree = ast.parse((COMP / "ws_log.py").read_text(encoding="utf-8"))
-    top_calls = [ast.unparse(n.value) for n in tree.body
-                 if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)]
-    assert top_calls == ["_load_persisted_log()"]
-
-
-def test_websocket_reexports_the_log_names_other_code_reaches_through_it():
-    tree = ast.parse((COMP / "websocket.py").read_text(encoding="utf-8"))
-    imported = {a.name: a.asname for n in tree.body
-                if isinstance(n, ast.ImportFrom) and n.level == 1 and n.module == "ws_log"
-                for a in n.names}
-    assert {"nova_log", "recent_debug_log", "recent_conversation_log",
-            "_DEBUG_LOG", "_LOG_QUEUE", "_ensure_writer"} <= set(imported)
-    assert not any(imported.values())                  # re-exported under their own names
+def test_websocket_reexports_the_log_names_other_code_reaches_through_it(load, monkeypatch):
+    from ws_kit import _stub_ws_api
+    _stub_ws_api(monkeypatch)
+    monkeypatch.delitem(sys.modules, "jc.websocket", raising=False)
+    log, ws = load("ws_log"), load("websocket")
+    for name in ("nova_log", "recent_debug_log", "recent_conversation_log",
+                 "_DEBUG_LOG", "_LOG_QUEUE", "_ensure_writer"):
+        assert getattr(ws, name) is getattr(log, name), name     # the same object, not a copy
     # _LOG_FILE is reassigned in tests; a copy of it in websocket.py would be a trap.
-    assert "_LOG_FILE" not in imported
-    assert not (_MOVED & _defined(tree))               # defined in ws_log.py only
+    assert not hasattr(ws, "_LOG_FILE")

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
+import types
 from datetime import datetime, timedelta
 
 import pytest
@@ -422,6 +424,15 @@ def test_prompt_names_entities_and_fences_home_data(load):
     assert msgs[1]["content"] == f"<<{fenced[0]}>>"
 
 
+def _broken_panel_log(monkeypatch):
+    """A panel log that raises, so the caller's own work must carry on."""
+    def nova_log(*_a, **_k):
+        raise RuntimeError("panel log down")
+    fake = types.ModuleType("jc.websocket")
+    fake.nova_log = nova_log
+    monkeypatch.setitem(sys.modules, "jc.websocket", fake)
+
+
 async def test_no_reviewer_when_disabled(load, monkeypatch, fake_hass):
     sr = load("suggestion_review")
 
@@ -429,6 +440,19 @@ async def test_no_reviewer_when_disabled(load, monkeypatch, fake_hass):
         return {"suggestion_review_enabled": False}
     monkeypatch.setattr(sr, "_config", _cfg)
     assert await sr.reviewer_for(fake_hass) is None
+
+
+async def test_suggestions_wait_without_a_usable_model_even_if_the_panel_log_fails(
+        load, monkeypatch, fake_hass):
+    sr = load("suggestion_review")
+
+    async def _cfg(hass):
+        return {"suggestion_review_enabled": True}
+    monkeypatch.setattr(sr, "_config", _cfg)
+    monkeypatch.setattr(sr, "_spec", lambda *_a: None)
+    _broken_panel_log(monkeypatch)
+    reviewer = await sr.reviewer_for(fake_hass)
+    assert await reviewer(fake_hass, object()) is None
 
 
 # ── panel payloads ──────────────────────────────────────────────────────

@@ -317,19 +317,20 @@ async def test_what_changed_tool_clamps_hours_and_reports(
     assert huge["found"] is True
 
 
-def test_question_looks_are_not_recorded(cams):
-    import inspect
-    src = inspect.getsource(cams._analyze_camera)
-    assert '"record_scene": False' in src
+async def test_question_looks_are_not_recorded(cams, monkeypatch):
+    import sys
+    import types
+    seen = []
 
-
-def test_intrusion_person_check_is_not_recorded(load):
-    """The intrusion yes/no check is a question, not a scene: its "PERSON:
-    NO" reply would otherwise be stored as a person sighting."""
-    import inspect
-    cc = load("cognitive_core")
-    src = inspect.getsource(cc.SafetyManager._confirm_person_with_vision)
-    assert '"record_scene": False' in src
+    async def analyze(hass, call, *args, **kwargs):
+        seen.append(dict(call.data))
+        return {"ok": True}
+    camera = types.ModuleType("jc.camera")
+    camera._FakeCall = lambda data: types.SimpleNamespace(data=data)
+    camera.async_analyze_camera = analyze
+    monkeypatch.setitem(sys.modules, "jc.camera", camera)
+    await cams._analyze_camera(None, "camera.hall", "Are my keys there?", False, "sir")
+    assert seen[0]["record_scene"] is False and seen[0]["entity_id"] == "camera.hall"
 
 
 def test_doorbell_backlog_is_not_recorded():

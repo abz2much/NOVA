@@ -268,6 +268,9 @@ def test_porch_motion_sensors_are_discovered(pm, sensors, name, dc):
     ("garage_motion", "motion"),
     ("backyard_motion", "motion"),
     ("hallway_motion", "motion"),          # not a porch name
+    # Mailbox names with the wrong class, and names that only look alike.
+    ("mailbox", "motion"), ("mailbox_battery", "battery"),
+    ("mail_box", "door"), ("mailboxes", "door"),
 ])
 def test_other_sensors_are_ignored(pm, sensors, name, dc):
     sensors.add(name, dc)
@@ -281,15 +284,6 @@ def test_other_sensors_are_ignored(pm, sensors, name, dc):
 def test_mailbox_sensors_are_discovered(pm, sensors, name, dc):
     sensors.add(name, dc)
     assert pm.discover_trigger_sensors(sensors) == {f"binary_sensor.{name}": "mailbox"}
-
-
-@pytest.mark.parametrize("name,dc", [
-    ("mailbox", "motion"), ("mailbox_battery", "battery"),
-    ("mail_box", "door"), ("mailboxes", "door"),
-])
-def test_other_mailbox_names_and_classes_are_ignored(pm, sensors, name, dc):
-    sensors.add(name, dc)
-    assert pm.discover_trigger_sensors(sensors) == {}
 
 
 def test_eufy_covered_sensors_are_not_discovered(pm, fake_hass, monkeypatch):
