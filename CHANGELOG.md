@@ -1,3 +1,9 @@
+## [8.69.1] Open windows while armed home or night
+
+### Fixed
+- **Open windows no longer count as a break in while armed home or night.** A door or window only backs up an intrusion if it opened after the alarm armed and, with ground floor areas set, is on the ground floor. A window left open before arming stays ignored even if its sensor drops out and comes back. Armed away and vacation work exactly as before.
+- **No "open while the alarm is armed" message when armed home or night.** It now only comes when armed away or on vacation.
+
 ## [8.69.0] Faster, quieter start up
 
 ### Fixed

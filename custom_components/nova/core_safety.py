@@ -79,6 +79,14 @@ def _best_effort(work, default=None):
         return default
 
 
+def _changed_ts(state) -> Optional[float]:
+    """When a state last changed, as a timestamp, or None if unreadable."""
+    try:
+        return state.last_changed.timestamp()
+    except Exception:
+        return None
+
+
 def _setting(config: dict, key: str, default, kind):
     """A number from the config, or ``default`` when it is not one."""
     try:
@@ -130,6 +138,11 @@ class SafetyManager:
         # The household reading for the tick under way (household.py); None
         # between ticks, when the helpers below read the house live.
         self._house = None
+        # Doors and windows already open when the alarm armed home or night,
+        # and that arming's time. A sensor dropping out and coming back
+        # resets its change time, so these stay left out until seen shut.
+        self._open_when_armed: set[str] = set()
+        self._open_when_armed_at: Optional[float] = None
 
     # ── surviving a restart ─────────────────────────────────────────────────
 
@@ -216,6 +229,10 @@ class SafetyManager:
 
     async def _tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
         actions: list = []
+        try:
+            self._note_open_when_armed()
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: noting openings at arming failed: %s", exc)
         try:
             freeze = await self._check_freeze()
             if freeze:
@@ -375,7 +392,8 @@ class SafetyManager:
         state = self.hass.states.get(eid)
         return (state.attributes.get("friendly_name") if state else None) or eid
 
-    def _open_entry(self, areas: Optional[Iterable[str]] = None) -> Optional[str]:
+    def _open_entry(self, areas: Optional[Iterable[str]] = None,
+                    opened_after: Optional[float] = None) -> Optional[str]:
         """An open outside door or window, the way a real entry would come
         in, or None when everything is shut.
 
@@ -383,11 +401,20 @@ class SafetyManager:
         excluded from Nova, or a driveway gate or shed door is never a way in
         (household.is_way_in), so an open garden gate cannot turn a curtain
         flutter into a corroborated intrusion. The garage is part of the house.
-        ``areas`` limits it to those areas (the ground floor check)."""
+        ``areas`` limits it to those areas (the ground floor check).
+        ``opened_after`` (a timestamp) leaves out anything that was already
+        open by then, or was open at arming and not seen shut since; one whose
+        change time cannot be read still counts."""
         from . import household
         allowed = set(areas) if areas else None
 
         def counts(state) -> bool:
+            if opened_after is not None:
+                if state.entity_id in self._open_when_armed:
+                    return False
+                changed = _changed_ts(state)
+                if changed is not None and changed <= opened_after:
+                    return False
             return (household.is_way_in(self.hass, state)
                     and (allowed is None or self._breach_area(state.entity_id) in allowed))
 
@@ -401,14 +428,61 @@ class SafetyManager:
                 return state.entity_id
         return None
 
-    def _ground_floor_open_entry(self) -> tuple[Optional[str], bool]:
+    def _ground_floor_open_entry(self, opened_after: Optional[float] = None
+                                 ) -> tuple[Optional[str], bool]:
         """(an open outside door or window, whether ground floor areas are
         set). With ground_floor_areas set, only those count; without, every
         floor does, so leaving it unset never means less protection."""
         ground = self.config.get("ground_floor_areas") or []
         if not ground:
-            return self._open_entry(), False
-        return self._open_entry(areas=ground), True
+            return self._open_entry(opened_after=opened_after), False
+        return self._open_entry(areas=ground, opened_after=opened_after), True
+
+    def _armed_home_since(self) -> Optional[float]:
+        """When the alarm armed for people at home (home, night, custom
+        bypass), as a timestamp, or None when it is not armed that way or the
+        time cannot be read. A window left open before arming, or one opened
+        from inside while armed for being home, is then no sign of a way in."""
+        from . import alarm_source, household
+        if self._household().posture != household.HOME:
+            return None
+        try:
+            times = [_changed_ts(st) for st in alarm_source.states(self.hass, self.config)
+                     if household.ALARM_POSTURE.get(str(st.state).lower()) == household.HOME]
+        except Exception:
+            return None
+        times = [t for t in times if t is not None]
+        return min(times) if times else None
+
+    def _note_open_when_armed(self) -> None:
+        """Keep _open_when_armed up to date. On a new arming for people at
+        home it records every door and window open since before it; after
+        that one is dropped once it reads shut (an unreadable state is not
+        shut). Disarmed, or armed any other way, it is cleared."""
+        since = self._armed_home_since()
+        if since is None:
+            self._open_when_armed, self._open_when_armed_at = set(), None
+            return
+        if since != self._open_when_armed_at:
+            self._open_when_armed_at = since
+            self._open_when_armed = set()
+            for state in self._opening_states():
+                changed = _changed_ts(state)
+                if (state.state in ("on", "open", "opening")
+                        and changed is not None and changed <= since):
+                    self._open_when_armed.add(state.entity_id)
+            return
+        for eid in list(self._open_when_armed):
+            state = self.hass.states.get(eid)
+            if state is None or state.state in ("off", "closed", "closing"):
+                self._open_when_armed.discard(eid)
+
+    def _opening_states(self) -> list:
+        """Every door and window sensor and cover _open_entry looks at."""
+        return ([st for st in self.hass.states.async_all("binary_sensor")
+                 if st.attributes.get("device_class") in _OPENING_SENSORS]
+                + [st for st in self.hass.states.async_all("cover")
+                   if st.attributes.get("device_class") in _OPENING_COVERS])
 
     def _breach_area(self, entry_eid: Optional[str]) -> Optional[str]:
         """The area of the way in, where an intruder would enter."""
@@ -663,7 +737,13 @@ class SafetyManager:
             # takes an open way in, or an alarm armed away or on vacation.
             armed, entry = self._alarm_armed_away(), None
             if corroborate:
-                entry = self._open_entry()
+                # Armed home or night: only a way in opened since arming, on
+                # the ground floor, counts.
+                since = self._armed_home_since()
+                if since is None:
+                    entry = self._open_entry()
+                else:
+                    entry, _configured = self._ground_floor_open_entry(opened_after=since)
                 if not (armed or entry):
                     return None
             plan = ("confined", "home", entry, armed,
@@ -671,8 +751,10 @@ class SafetyManager:
         elif sleeping:
             # Asleep, it takes a real way in: an outside door or window on
             # the ground floor actually open. Someone up for water, or a pet,
-            # makes no alert at all.
-            entry, _configured = self._ground_floor_open_entry()
+            # makes no alert at all. Armed home or night, it must also have
+            # opened since arming.
+            entry, _configured = self._ground_floor_open_entry(
+                opened_after=self._armed_home_since())
             if not entry:
                 return None
             plan = ("sleeping", "asleep", entry, False,

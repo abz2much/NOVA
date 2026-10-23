@@ -7,6 +7,8 @@ it takes an open entry, or an alarm armed away or on vacation.
 
 All state here is fake. Nothing touches a real alarm or lock.
 """
+from datetime import timedelta
+
 import pytest
 
 ALARM = "alarm_control_panel.home"
@@ -27,6 +29,14 @@ def _motion(hass):
 
 def _door(hass):
     hass.states.set("binary_sensor.front_door", "on", device_class="door")
+
+
+def _door_after_arming(hass):
+    """The front door opened a second after the alarm armed: armed home or
+    night, only a way in opened since arming counts."""
+    armed_at = hass.states.get(ALARM).last_changed
+    hass.states.set("binary_sensor.front_door", "on", device_class="door",
+                    last_changed=armed_at + timedelta(seconds=1))
 
 
 def _home(hass):
@@ -132,9 +142,9 @@ async def test_armed_home_with_open_entry_alerts_with_secured_wording(
         make_safety, fake_hass):
     safety = make_safety(intrusion_requires_confinement=True)
     _home(fake_hass)
-    _door(fake_hass)
     _motion(fake_hass)
     fake_hass.states.set(ALARM, "armed_home")
+    _door_after_arming(fake_hass)
     intr = await _tick(safety, fake_hass)
     assert len(intr) == 1
     assert "while the house is secured" in intr[0]["message"]
@@ -188,9 +198,9 @@ async def test_corroboration_off_alerts_on_motion_when_confined(
 async def test_disarming_drops_the_active_investigation(make_safety, fake_hass):
     safety = make_safety(intrusion_requires_confinement=True)
     _home(fake_hass)
-    _door(fake_hass)
     _motion(fake_hass)
     fake_hass.states.set(ALARM, "armed_home")
+    _door_after_arming(fake_hass)
     assert len(await _tick(safety, fake_hass)) == 1
     assert safety._investigation is not None
     fake_hass.states.set(ALARM, "disarmed")
@@ -202,9 +212,9 @@ async def test_turning_the_setting_off_drops_a_confined_investigation(
         make_safety, fake_hass):
     safety = make_safety(intrusion_requires_confinement=True)
     _home(fake_hass)
-    _door(fake_hass)
     _motion(fake_hass)
     fake_hass.states.set(ALARM, "armed_home")
+    _door_after_arming(fake_hass)
     await _tick(safety, fake_hass)
     assert safety._investigation["trigger"] == "confined"
     safety.config["intrusion_requires_confinement"] = False
