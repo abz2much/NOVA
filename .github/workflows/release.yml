@@ -64,7 +64,7 @@ jobs:
           TITLE="$(python3 - "$VERSION" <<'PY'
           import re, sys
           v = sys.argv[1]
-          m = re.search(r"(?m)^## \[" + re.escape(v) + r"\]\s*[—-]\s*(.+)$",
+          m = re.search(r"(?m)^## \[" + re.escape(v) + r"\]\s*(?:[—-]\s*)?(.+)$",
                         open("CHANGELOG.md", encoding="utf-8").read())
           print(f"v{v} — {m.group(1).strip()}" if m else f"v{v}")
           PY

@@ -70,15 +70,15 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 |---|---|---|
 | Talk to your home | Voice and text conversation, with a calm, dry personality you can turn up or down | [Voice and speakers](docs/voice-and-speakers.md) |
 | Type to Nova from the panel | The Chat tab gives each person their own thread. Unlocking, opening and disarming from there need a tap on your phone | [Safety and security](docs/safety-and-security.md#chat) |
-| See the house at a glance | The Command Center has a hologram head and cards that come round by themselves: energy, security, clock, who is home, next event, reminders, weather and indoor temperature. Turn them off under Settings, General, "Cards on the Command Center" | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
-| Run things with your own words | "Nova, the house is cold" runs the script, automation, scene or shell command you link to it. Works offline, with the same safety checks as any other action. Say a phrase exactly and it runs straight away; a looser match gets a short question on the satellite you spoke to, and a spoken yes runs it | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
+| See the house at a glance | The Command Center shows a hologram head and rotating cards for energy, security, who is home, events, weather and more | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
+| Run things with your own words | "Nova, the house is cold" runs the script, automation or scene you link to it. Works offline, with the usual safety checks | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
 | Keep the home safe | Watches for intrusion, smoke, carbon monoxide, leaks, freezing pipes, and doors or windows left open. Can lock up at night | [Safety and security](docs/safety-and-security.md) |
 | Know who comes to the door | Analyses doorbell presses and learns regular visitors. Package Watch and face recognition (Frigate or Double Take) are off until you turn them on | [Cameras and faces](docs/cameras-and-faces.md) |
 | Stop being nagged at the wrong time | Knows who is home, who is asleep and when quiet hours are, and speaks to the right person in the right room | [Presence and alerts](docs/presence-and-alerts.md) |
 | Save effort | Suggests automations from your habits and gives morning and evening briefings once you pick a time. Departure alerts, which tell you when to leave for appointments, are off until you turn them on | [Routines and suggestions](docs/routines-and-suggestions.md) |
 | Understand your energy | Shows solar, battery and grid in one place, today's totals and a 36 hour outlook with advice | [Energy](docs/energy.md) |
 | Remember things | Keeps facts you tell it, answers from your manuals and receipts, and can read your email (read only) | [Memory and knowledge](docs/memory-and-knowledge.md) |
-| Use Nova's own speech to text, and know who is speaking | Nova Voice ID is Nova's own speech to text: it passes your speech to Whisper, gives back the same words, and falls back to your own speech to text if the app is down. Record or delete each person's voice from the panel; voice data stays in the app on your own machine, never in Nova. If you turn it on, a known voice helps Nova tell who is speaking (a hint, never a key) and keeps each voice up to date from everyday use. A speaker sensor you already have still works. Needs the [Nova Voice ID app](https://github.com/abz2much/nova-voice-id). | [Voice ID](docs/voice-and-speakers.md#voice-id) |
+| Use Nova's own speech to text, and know who is speaking | Nova Voice ID passes your speech to Whisper and can tell who is speaking (a hint, never a key). Voice data stays on your own machine. Needs the [Nova Voice ID app](https://github.com/abz2much/nova-voice-id). | [Voice ID](docs/voice-and-speakers.md#voice-id) |
 | Hear about bad weather | Weather warnings from Met Éireann, the US National Weather Service or a CAP feed | [Weather warnings](docs/weather-warnings.md) |
 | Find out why something broke | Checks your setup for problems and explains what it found, with fixes you apply yourself | [Getting started](docs/getting-started.md#when-something-is-not-working) |
 
@@ -125,8 +125,6 @@ Nova follows Home Assistant's language, and you can choose another under Setting
 
 ## Common questions
 
-**The panel looks old after an update.** Hard refresh with Ctrl+Shift+R.
-
 **Nova doesn't speak.** Check that each room has a speaker assigned under Settings, Room Speakers. Then check Notifications only mode and quiet hours.
 
 **A camera tile is blank.** Nest cameras need an extra step. See [Camera setup](docs/camera-setup.md).
@@ -155,7 +153,7 @@ Nova follows Home Assistant's language, and you can choose another under Setting
 - [Presence and alerts](docs/presence-and-alerts.md): who is home, rooms, sleep, quiet hours, mutes
 - [Routines and suggestions](docs/routines-and-suggestions.md): leave alerts, offers, suggested automations, briefings, modes
 - [Memory and knowledge](docs/memory-and-knowledge.md): facts, relations, documents, email, web research
-- [Voice recognition](docs/voice-recognition.md): knowing who is speaking
+- [Voice recognition with your own service](docs/voice-recognition.md): using a speaker recognition service you already run
 - [Energy](docs/energy.md): the Energy tab and the outlook
 - [Host health](docs/host-health.md): watching the machine Nova runs on
 - [Settings reference](docs/settings-reference.md): every setting

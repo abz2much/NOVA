@@ -251,7 +251,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 def test_the_old_examples_are_gone_outside_tests():
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
     shown = [f for f in files if not f.startswith(("tests/", "scripts/smoke_panel.js", "scripts/late_text_check.js"))
-             and f != "CHANGELOG.md" and f.endswith((".py", ".js", ".json", ".md", ".yaml", ".svg"))]
+             and f not in ("CHANGELOG.md", "docs/changelog-archive.md") and f.endswith((".py", ".js", ".json", ".md", ".yaml", ".svg"))]
     old = ("sam owns", "Sam owns", "car.jeep", "the Jeep", "Biscuit", "chase lamp", "'chase'",
            "camera.workshop", "Nova-AIO", "nova-aio", "AIO principle", "home_cove", "kitchen_dog",
            "thermo_lock", "core_switch", "server_root_storage", "basement_freeze_sensor",
