@@ -1,3 +1,11 @@
+## [8.68.0] Internal tidy
+
+### Fixed
+- **Camera analysis help text.** The Frames field of nova.analyze_camera said 2 to 4 frames; it takes up to 6, and now says so.
+
+### Changed
+- **Nothing else you will notice.** Service definitions, blueprints and project tooling were tidied. Your services, blueprints and automations work exactly as before. The audit now says when its names check is skipped, and the issue forms ask for what helps fix a problem.
+
 ## [8.67.0] Floor plan editor fixes
 
 ### Fixed
