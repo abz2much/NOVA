@@ -341,3 +341,11 @@ def test_register_log_lines(vr, load, monkeypatch, fake_hass, caplog):
     vr.register(fake_hass)
     assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
         ("WARNING", "Voice recognition provider not registered: identity not ready")]
+
+
+def test_each_registration_offers_a_new_provider(vr, load, monkeypatch, fake_hass):
+    got = []
+    monkeypatch.setattr(load("identity"), "register_voice_provider", got.append)
+    vr.register(fake_hass)
+    vr.register(fake_hass)
+    assert got[0] is not got[1]

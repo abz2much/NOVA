@@ -185,15 +185,15 @@ def maybe_fire_enrollment(hass: HomeAssistant, device_id: Optional[str] = None) 
     return person
 
 
-def _provide(hass: HomeAssistant, device_id: Optional[str]) -> dict[str, float]:
-    return identify(hass, device_id)
-
-
 def register(hass: HomeAssistant) -> None:
-    """Offer identify() to identity.py as its voice provider."""
+    """Offer identify() to identity.py as its voice provider. Each setup
+    registers a new function, so a stale one is never mistaken for it."""
+    def provide(h: HomeAssistant, device_id: Optional[str]) -> dict[str, float]:
+        return identify(h, device_id)
+
     try:
         from .identity import register_voice_provider
-        register_voice_provider(_provide)
+        register_voice_provider(provide)
     except Exception as exc:  # identity not importable or not ready
         _LOGGER.warning("Voice recognition provider not registered: %s", exc)
     else:
