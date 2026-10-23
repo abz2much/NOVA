@@ -1,3 +1,12 @@
+## [8.69.0] Faster, quieter start up
+
+### Fixed
+- **No more blocking warning at start up.** Nova reads its saved lockdown state without holding up Home Assistant. Lockdown works exactly as before.
+- **Memory database connections are always closed**, even after an error.
+
+### Changed
+- **Nothing you will notice.** The test suite and contributor guide were tidied.
+
 ## [8.68.0] Internal tidy
 
 ### Fixed
