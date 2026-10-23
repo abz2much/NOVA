@@ -1,164 +1,221 @@
-"""Tests for the action-authorization policy gate (policy.py).
+"""The policy gate in front of every state changing call (policy.py).
 
-The load-bearing test is ``test_confirm_gate_fails_closed_when_confirm_raises``:
-it guards the fix for the fail-open path where a confirmation-subsystem error
-used to let a protected action (unlock/garage/disarm) execute anyway.
+The guard that matters most: when the confirmation subsystem breaks, a
+protected action (unlock, open a garage, disarm) is refused, never let
+through. Only low risk convenience may carry on when the check itself
+fails, and then only with nothing to warn about.
 """
 from __future__ import annotations
 
 import sys
 import types
 
-
-# ── fake voice_confirm sibling ───────────────────────────────────────────────
-def _fake_vc(protected=True, confirm_result=True,
-             confirm_raises=False, protected_raises=False):
-    m = types.ModuleType("jc.voice_confirm")
-
-    def action_is_protected(hass, domain, service, entity_id=""):
-        if protected_raises:
-            raise RuntimeError("protection check boom")
-        return protected
-
-    async def confirm(hass, question, entity_id=""):
-        if confirm_raises:
-            raise RuntimeError("confirm exploded")
-        return confirm_result
-
-    async def confirm_typed(hass, question, entity_id=""):
-        if confirm_raises:
-            raise RuntimeError("confirm exploded")
-        return "approved" if confirm_result else "rejected"
-
-    m.action_is_protected = action_is_protected
-    m.confirm = confirm
-    m.confirm_typed = confirm_typed
-    return m
+import pytest
 
 
-def _install_vc(monkeypatch, fake):
-    # Both are required: `from . import voice_confirm` uses the jc-package
-    # attribute if one already exists (a prior test may have imported the real
-    # module), else it falls back to sys.modules. monkeypatch restores both.
-    monkeypatch.setitem(sys.modules, "jc.voice_confirm", fake)
-    monkeypatch.setattr(sys.modules["jc"], "voice_confirm", fake, raising=False)
+class _Confirmer:
+    """A stand-in voice_confirm module.
+
+    ``protected`` is what action_is_protected reports and ``answer`` what a
+    confirmation returns; either may be an exception to raise instead. Each
+    question asked is kept in ``asked`` as (question, entity_id)."""
+
+    def __init__(self, protected=True, answer="approved"):
+        self.protected, self.answer, self.asked = protected, answer, []
+
+    def _protected(self, hass, domain, service, entity_id=""):
+        if isinstance(self.protected, BaseException):
+            raise self.protected
+        return self.protected
+
+    async def _confirm_typed(self, hass, question, entity_id=""):
+        self.asked.append((question, entity_id))
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
+
+    async def _confirm(self, hass, question, entity_id=""):
+        return await self._confirm_typed(hass, question, entity_id) == "approved"
+
+    def module(self):
+        mod = types.ModuleType("jc.voice_confirm")
+        mod.action_is_protected = self._protected
+        mod.confirm_typed = self._confirm_typed
+        mod.confirm = self._confirm
+        return mod
 
 
-# ── classify (pure) ──────────────────────────────────────────────────────────
-def test_classify_risk_levels(load):
-    policy = load("policy")
-    assert policy.classify("lock", "unlock")[0] == "high"
-    assert policy.classify("alarm_control_panel", "alarm_disarm")[0] == "critical"
-    assert policy.classify("cover", "open_cover")[0] == "medium"
-    assert policy.classify("light", "turn_on")[0] == "low"
-    assert policy.classify("media_player", "media_play")[0] == "low"
-    assert policy.classify("climate", "set_temperature")[0] == "low"
+@pytest.fixture
+def policy(load):
+    return load("policy")
 
 
-def test_classify_security_switch(load):
-    policy = load("policy")
-    assert policy.classify("switch", "turn_off", "switch.front_door_lock")[0] == "high"
-    assert policy.classify("switch", "turn_off", "switch.alarm_siren")[0] == "high"
-    assert policy.classify("switch", "turn_off", "switch.desk_lamp")[0] == "low"
+@pytest.fixture
+def confirmer(monkeypatch):
+    """install(**kw) puts a _Confirmer in place of voice_confirm."""
+    def install(**kw):
+        fake = _Confirmer(**kw)
+        monkeypatch.setitem(sys.modules, "jc.voice_confirm", fake.module())
+        return fake
+    return install
 
 
-# ── confirm_gate ─────────────────────────────────────────────────────────────
-async def test_confirm_gate_fails_closed_when_confirm_raises(load, monkeypatch):
-    """THE regression guard: confirm() erroring on a protected action denies."""
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected=True, confirm_raises=True))
-    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
-    assert ok is False
-    assert "denied" in note.lower() or "unavailable" in note.lower()
-    assert approval_result == "error"
+BROKEN = RuntimeError("voice_confirm exploded")
+UNLOCK = ("lock", "unlock", "lock.front_door")
+LIGHT = ("light", "turn_on", "light.kitchen")
+
+# Every rating above low, and some convenience, for the fail closed tables.
+ABOVE_LOW = [
+    ("lock", "unlock", "lock.front_door"),
+    ("alarm_control_panel", "alarm_disarm", "alarm_control_panel.house"),
+    ("cover", "open_cover", "cover.garage"),
+    ("scene", "turn_on", "scene.evening"),
+    ("switch", "turn_off", "switch.alarm_siren"),
+]
+CONVENIENCE = [LIGHT, ("climate", "set_temperature", "climate.hall"),
+               ("media_player", "media_play", "media_player.lounge")]
 
 
-async def test_confirm_gate_allows_when_confirmed(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected=True, confirm_result=True))
-    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
-    assert ok is True
-    assert note == ""
-    assert approval_result == "approved"
+# ── confirm_gate: what each answer means ───────────────────────────────────
+
+@pytest.mark.parametrize("answer, allowed, note", [
+    ("approved", True, ""),
+    ("rejected", False,
+     "asked for spoken confirmation before unlock on front door; not yet confirmed"),
+    ("expired", False,
+     "asked for spoken confirmation before unlock on front door; not yet confirmed"),
+])
+async def test_a_protected_action_follows_the_typed_answer(policy, confirmer, answer,
+                                                          allowed, note):
+    fake = confirmer(protected=True, answer=answer)
+    assert await policy.confirm_gate(None, *UNLOCK) == (allowed, note, answer)
+    assert fake.asked == [("unlock front door — are you sure?", "lock.front_door")]
 
 
-async def test_confirm_gate_denies_when_declined(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected=True, confirm_result=False))
-    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
-    assert ok is False
-    assert "not yet confirmed" in note
-    assert approval_result == "rejected"
+async def test_a_confirmation_that_raises_denies_the_action(policy, confirmer):
+    confirmer(protected=True, answer=BROKEN)
+    ok, note, result = await policy.confirm_gate(None, *UNLOCK)
+    assert ok is False and result == "error"
+    assert "denied" in note.lower() and "unavailable" in note.lower()
+    assert note == "confirmation unavailable — action denied for safety"
 
 
-async def test_confirm_gate_no_friction_when_not_protected(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected=False))
-    ok, note, approval_result = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
-    assert ok is True
-    assert note == ""
-    assert approval_result == "not_required"
+async def test_the_label_and_target_name_word_the_question_only(policy, confirmer):
+    fake = confirmer(protected=True, answer="approved")
+    result = await policy.confirm_gate(None, *UNLOCK, action_label="Unlock",
+                                       target_name="Front Door")
+    assert result == (True, "", "approved")
+    # The decision and the entity passed on still use the entity id.
+    assert fake.asked == [("Unlock Front Door — are you sure?", "lock.front_door")]
 
 
-async def test_confirm_gate_fails_closed_when_protection_check_raises(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected_raises=True))
-    # high-risk action -> denied when the checker errors
-    ok, _, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
-    assert ok is False
-    assert approval_result == "error"
-    # low-risk convenience still flows even if the checker errors
-    ok2, _, approval_result2 = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
-    assert ok2 is True
-    assert approval_result2 == "not_required"
+async def test_an_unprotected_action_runs_without_asking(policy, confirmer):
+    fake = confirmer(protected=False)
+    assert await policy.confirm_gate(None, *LIGHT) == (True, "", "not_required")
+    assert fake.asked == []
 
 
-# ── requires_confirmation (sync, used by bulk_control) ────────────────────────
-def test_requires_confirmation_passthrough(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected=True))
-    assert policy.requires_confirmation(None, "lock", "unlock", "lock.front") is True
-    _install_vc(monkeypatch, _fake_vc(protected=False))
-    assert policy.requires_confirmation(None, "lock", "unlock", "lock.front") is False
+async def test_a_live_warning_is_always_asked_and_opens_the_question(policy, confirmer):
+    fake = confirmer(protected=False, answer="approved")
+    result = await policy.confirm_gate(None, "lock", "lock", "lock.back_door",
+                                       warning="The back door is open.")
+    assert result == (True, "", "approved")
+    assert fake.asked == [("The back door is open. lock back door anyway — are you sure?",
+                           "lock.back_door")]
 
 
-def test_requires_confirmation_fails_closed_on_error(load, monkeypatch):
-    policy = load("policy")
-    _install_vc(monkeypatch, _fake_vc(protected_raises=True))
-    # non-low risk -> require confirmation when the check errors
-    assert policy.requires_confirmation(None, "lock", "unlock", "lock.front") is True
-    # low risk -> allowed
-    assert policy.requires_confirmation(None, "light", "turn_on", "light.kitchen") is False
+@pytest.mark.parametrize("domain, service", [("nova", "dismiss_intrusion"),
+                                             ("nova", "ask_executive_assistant")])
+async def test_stand_down_and_specialists_ask_even_when_not_listed(policy, confirmer,
+                                                                  domain, service):
+    fake = confirmer(protected=False, answer="rejected")
+    ok, _, result = await policy.confirm_gate(None, domain, service)
+    assert (ok, result) == (False, "rejected")
+    assert len(fake.asked) == 1
 
 
-# ── indirection domains: scene/script/automation contents aren't visible ─────
-def test_classify_indirection_domains(load):
-    """A scene/script/automation can itself unlock/disarm/open something, and
-    classify() can't see inside one — so activating any of them is MEDIUM,
-    not LOW, regardless of the exact service name."""
-    policy = load("policy")
-    assert policy.classify("scene", "turn_on")[0] == "medium"
-    assert policy.classify("script", "turn_on")[0] == "medium"
-    assert policy.classify("automation", "trigger")[0] == "medium"
+# ── confirm_gate: a broken protection check ────────────────────────────────
+
+@pytest.mark.parametrize("call", ABOVE_LOW, ids=lambda c: f"{c[0]}.{c[1]}")
+async def test_a_broken_protection_check_denies_anything_above_low(policy, confirmer, call):
+    fake = confirmer(protected=BROKEN)
+    assert await policy.confirm_gate(None, *call) == (
+        False, "confirmation check failed — action denied for safety", "error")
+    assert fake.asked == []
 
 
-def test_classify_indirection_dynamic_script_service(load):
-    """Regression guard: HA auto-registers a dynamic per-script service
-    (script.<object_id>) as an alternative to script.turn_on. A tuple-based
-    check would miss this exactly the way the original cover.open_cover gap
-    was missed — the check has to be domain-level."""
-    policy = load("policy")
-    assert policy.classify("script", "my_unlock_front_door_script")[0] == "medium"
-    assert policy.classify("script", "some_random_custom_script_id")[0] == "medium"
+@pytest.mark.parametrize("call", CONVENIENCE, ids=lambda c: f"{c[0]}.{c[1]}")
+async def test_a_broken_protection_check_lets_convenience_through(policy, confirmer, call):
+    confirmer(protected=BROKEN)
+    assert await policy.confirm_gate(None, *call) == (True, "", "not_required")
 
 
-def test_classify_indirection_safe_ops_stay_low(load):
-    """Reloading config or stopping/disabling something already running can't
-    newly trigger whatever a scene/script/automation contains, so these stay
-    LOW — no friction for the non-actuating direction."""
-    policy = load("policy")
-    assert policy.classify("scene", "reload")[0] == "low"
-    assert policy.classify("script", "reload")[0] == "low"
-    assert policy.classify("script", "turn_off")[0] == "low"
-    assert policy.classify("automation", "turn_off")[0] == "low"
-    assert policy.classify("automation", "reload")[0] == "low"
+@pytest.mark.parametrize("answer, allowed", [("approved", True), ("rejected", False),
+                                             (BROKEN, False)])
+async def test_a_warning_is_asked_about_even_when_the_check_is_broken(policy, confirmer,
+                                                                     answer, allowed):
+    # A live warning makes the action protected before the check is read, so
+    # even low risk is never waved through on the broken-check path.
+    fake = confirmer(protected=BROKEN, answer=answer)
+    ok, _, result = await policy.confirm_gate(None, *LIGHT, warning="Zones are open.")
+    assert ok is allowed
+    assert result == (answer if isinstance(answer, str) else "error")
+    assert len(fake.asked) == 1
+
+
+# ── requires_confirmation (the sync check bulk control uses) ───────────────
+
+@pytest.mark.parametrize("protected", [True, False])
+def test_requires_confirmation_reports_what_voice_confirm_says(policy, confirmer, protected):
+    confirmer(protected=protected)
+    assert policy.requires_confirmation(None, *UNLOCK) is protected
+
+
+@pytest.mark.parametrize("call", ABOVE_LOW, ids=lambda c: f"{c[0]}.{c[1]}")
+def test_requires_confirmation_holds_anything_above_low_on_error(policy, confirmer, call):
+    confirmer(protected=BROKEN)
+    assert policy.requires_confirmation(None, *call) is True
+
+
+@pytest.mark.parametrize("call", CONVENIENCE, ids=lambda c: f"{c[0]}.{c[1]}")
+def test_requires_confirmation_lets_convenience_through_on_error(policy, confirmer, call):
+    confirmer(protected=BROKEN)
+    assert policy.requires_confirmation(None, *call) is False
+
+
+def test_an_unlock_by_voice_is_held_whatever_voice_confirm_says(policy, confirmer):
+    confirmer(protected=False)
+    assert policy.requires_confirmation(None, *UNLOCK, voice=True) is True
+    assert policy.requires_confirmation(None, *LIGHT, voice=True) is False
+
+
+# ── the ratings the gate relies on ─────────────────────────────────────────
+
+@pytest.mark.parametrize("domain, service, entity_id, risk", [
+    ("lock", "unlock", "", "high"),
+    ("alarm_control_panel", "alarm_disarm", "", "critical"),
+    ("cover", "open_cover", "", "medium"),
+    ("light", "turn_on", "", "low"),
+    ("media_player", "media_play", "", "low"),
+    ("climate", "set_temperature", "", "low"),
+    ("switch", "turn_off", "switch.front_door_lock", "high"),
+    ("switch", "turn_off", "switch.alarm_siren", "high"),
+    ("switch", "turn_off", "switch.desk_lamp", "low"),
+    # A scene, script or automation may unlock or open something inside
+    # itself, and the gate cannot see in, so starting one is medium.
+    ("scene", "turn_on", "", "medium"),
+    ("script", "turn_on", "", "medium"),
+    ("automation", "trigger", "", "medium"),
+    # Every script also gets its own script.<object_id> service; the rule is
+    # per domain so those are caught too.
+    ("script", "my_unlock_front_door_script", "", "medium"),
+    ("script", "some_random_custom_script_id", "", "medium"),
+    # Reloading or stopping cannot set off what one contains.
+    ("scene", "reload", "", "low"),
+    ("script", "reload", "", "low"),
+    ("script", "turn_off", "", "low"),
+    ("automation", "turn_off", "", "low"),
+    ("automation", "reload", "", "low"),
+])
+def test_ratings(policy, domain, service, entity_id, risk):
+    assert policy.classify(domain, service, entity_id)[0] == risk
