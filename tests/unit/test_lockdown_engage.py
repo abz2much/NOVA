@@ -12,6 +12,8 @@ import json
 import types
 
 import pytest
+import sys
+from cognitive_safety_kit import _isolated_core, cc, clock, service_calls  # noqa: F401
 
 FRONT = "lock.front"
 GARAGE = "cover.garage_door"
@@ -246,3 +248,96 @@ async def test_no_check_alerts_once_the_lockdown_is_lifted(manager, fake_hass,
     await manager.disengage("done")
     await fake_hass.drain()
     assert no_delay_and_alerts == []
+
+
+# ── the lockdown message's honorific follows who is home ──────────────────────
+
+def _set_nova_config(mod, monkeypatch, mapping):
+    """Same convention as test_honorific.py / test_announce_resilience.py:
+    monkeypatch the lazily-imported `nova_config` module in the same
+    synthetic package as `mod`, since every consumer does `from . import
+    nova_config` inside a function body, not at module level."""
+    pkg = mod.__name__.rsplit(".", 1)[0]
+    fake = types.SimpleNamespace(get=lambda k, d=None: mapping.get(k, d))
+    monkeypatch.setitem(sys.modules, f"{pkg}.nova_config", fake)
+
+
+@pytest.fixture
+def lockdown(cognitive_core, fake_hass, tmp_path, monkeypatch):
+    monkeypatch.setattr(cognitive_core, "LOCKDOWN_STATE_PATH", str(tmp_path / "lockdown.json"))
+    return cognitive_core.LockdownManager(fake_hass, {"honorific": "sir"})
+
+
+async def test_lockdown_engage_uses_solo_persons_own_honorific(
+    cognitive_core, lockdown, fake_hass, monkeypatch
+):
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    fake_hass.states.set("lock.front", "locked")
+    _set_nova_config(cognitive_core, monkeypatch, {
+        "person_honorifics": {"person.morgan": "boss"},
+        "honorific": "sir",
+    })
+    action = await lockdown.engage("test")
+    fake_hass.close_pending()
+    assert action["message"].startswith("Boss,")
+
+
+async def test_lockdown_engage_drops_honorific_when_multiple_home(
+    cognitive_core, lockdown, fake_hass, monkeypatch
+):
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    fake_hass.states.set("lock.front", "locked")
+    _set_nova_config(cognitive_core, monkeypatch, {"honorific": "sir"})
+    action = await lockdown.engage("test")
+    fake_hass.close_pending()
+    # Still a complete, correctly-capitalized sentence — just no address.
+    assert action["message"][0].isupper()
+    assert not action["message"].startswith(("Sir,", "Boss,"))
+
+
+# ── lockdown records each check against the lockdown ──────────────────────────
+
+@pytest.fixture
+def records(load, tmp_path, monkeypatch):
+    dr = load("decision_record")
+    monkeypatch.setattr(dr, "_DEFAULT_DB", str(tmp_path / "decisions.db"))
+    return lambda kind=None: dr.recent(limit=50, kind=kind)
+
+
+def obey(fake_hass, *jammed):
+    """Devices change state when commanded, except the jammed ones."""
+    real = fake_hass.services.async_call
+
+    async def call(domain, service, data=None, blocking=False, **kw):
+        await real(domain, service, data, blocking=blocking, **kw)
+        eid = (data or {}).get("entity_id")
+        new = {("lock", "lock"): "locked", ("cover", "close_cover"): "closed"}.get(
+            (domain, service))
+        if isinstance(eid, list):
+            eids = eid
+        else:
+            eids = [eid]
+        for e in eids:
+            st = fake_hass.states.get(e)
+            if st is not None and new and e not in jammed:
+                fake_hass.states.set(e, new, **dict(st.attributes))
+    fake_hass.services.async_call = call
+
+
+async def test_lockdown_records_its_checks_linked_to_the_lockdown(load, cc, fake_hass,
+                                                                  records, monkeypatch):
+    monkeypatch.setattr(sys.modules["jc.core_lockdown"], "LOCKDOWN_SECURE_VERIFY_DELAY", 0)
+    obey(fake_hass)
+    mgr = cc.LockdownManager(fake_hass, {})
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    fake_hass.states.set("lock.side", "unlocked", friendly_name="Side")
+    await mgr.engage("requested")
+    fake_hass.states.remove("lock.side")         # cannot be read at the check
+    await fake_hass.drain()
+    rows = records("lockdown")
+    by = {r["decision"]: r for r in rows}
+    assert {"lockdown engaged", "checked, secured", "could not check"} <= set(by)
+    refs = {r["ref"] for r in rows}
+    assert len(refs) == 1 and next(iter(refs)).startswith("lockdown:")
+    assert by["could not check"]["interpretation"] == {"assessment": "unverified"}

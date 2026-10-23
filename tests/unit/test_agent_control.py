@@ -16,6 +16,8 @@ import types
 import pytest
 
 from fakes import FakeHass
+import sys
+from cognitive_safety_kit import _isolated_core, cc, clock, service_calls  # noqa: F401
 
 SATELLITE = "device-kitchen-satellite"
 
@@ -337,3 +339,24 @@ async def test_a_script_is_gated_and_a_refusal_runs_nothing(ctl, hass, audit, co
     assert res["status"] == "awaiting_confirmation" and hass.service_calls == []
     res = json.loads(await ctl._exec_run_scene_script(hass, {"entity_id": "lock.front_door"}))
     assert "Not a scene/script/automation" in res["error"] and hass.service_calls == []
+
+
+# ── a scene or script cannot be checked ───────────────────────────────────────
+
+@pytest.fixture
+def al(load):
+    return load("action_log")
+
+
+def _rows(al):
+    return {t["entity_id"]: t for p in al.page_requests()["requests"] for t in p["targets"]}
+
+
+@pytest.mark.parametrize("eid", ["scene.movie", "script.bedtime"])
+async def test_a_scene_or_script_is_marked_not_checkable(load, fake_hass, al, eid):
+    ctl = load("agent_runtime.capabilities.control")
+    fake_hass.states.set(eid, "off", friendly_name="Thing")
+    res = await ctl._exec_run_scene_script(fake_hass, {"entity_id": eid})
+    assert '"success": true' in res.lower()
+    row = _rows(al)[eid]
+    assert row["execution_result"] == "unverified" and row["reason_code"] == "not_checkable"

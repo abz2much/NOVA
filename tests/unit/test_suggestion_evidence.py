@@ -14,6 +14,13 @@ import sqlite3
 
 import pytest
 from ws_sources import ws_text
+import asyncio
+import sys
+import threading
+import types
+from datetime import datetime, timedelta
+import yaml
+from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 NOVA_DIR = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 
@@ -185,3 +192,22 @@ def test_panel_data_carries_the_explanation():
 ])
 def test_panel_renders_evidence_and_keeps_actions(needle):
     assert needle in _source("frontend", "nova-panel.js")
+
+
+# ── the panel's suggestion card ───────────────────────────────────────────────
+
+def test_panel_keeps_a_failed_suggestion_actionable():
+    import contract_extract as ce
+    js = (ce.COMP / "frontend" / "nova-panel.js").read_text(encoding="utf-8")
+    wire = js[js.index("_wireSuggestions() {"):js.index("// ─── Settings")]
+    assert "if (res && res.ok)" in wire
+    assert "buttons.forEach(b => b.disabled = false)" in wire
+    assert "res.reason" in wire
+
+
+def test_panel_reads_the_matched_automation():
+    import contract_extract as ce
+    js = (ce.COMP / "frontend" / "nova-panel.js").read_text(encoding="utf-8")
+    block = js[js.index("const match = s.automation_match"):js.index("return `", js.index("const match = s.automation_match"))]
+    assert "(match.matches || [])[0]" in block
+    assert "match.name" not in block and "match.entity_id" not in block

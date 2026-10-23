@@ -7,6 +7,12 @@ import types
 import pytest
 
 from fakes import FakeHass
+import asyncio
+import sqlite3
+import threading
+from datetime import datetime, timedelta
+import yaml
+from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 SAFE = "RuntimeError (details are in the Home Assistant log)"
 
@@ -208,3 +214,48 @@ async def test_a_failing_install_is_a_safe_error(auto, installer):
 
 def test_the_agent_logger_keeps_the_name_it_always_had(auto):
     assert auto._LOGGER.name == "jc.agent"
+
+
+# ── approving through the agent records the real user and device ──────────────
+
+@pytest.fixture
+def installation(load):
+    return load("automation.installation")
+
+
+async def test_agent_approval_passes_the_real_user_and_device(load, monkeypatch):
+    agent = load("agent")
+    installation = load("automation.installation")
+    seen = {}
+
+    async def fake_install(hass, sid, **kw):
+        seen.update(kw, sid=sid)
+        return {"ok": True, "installed": False, "reason": "advisory"}
+
+    monkeypatch.setattr(installation, "install_approved_suggestion", fake_install)
+    user_input = types.SimpleNamespace(
+        device_id="device-kitchen", context=types.SimpleNamespace(user_id="user-abi"))
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, user_input)
+    assert seen == {"sid": 5, "requested_by_user_id": "user-abi",
+                    "request_device_id": "device-kitchen"}
+
+
+async def test_agent_approval_never_invents_a_user(load, monkeypatch):
+    agent = load("agent")
+    installation = load("automation.installation")
+    seen = {}
+
+    async def fake_install(hass, sid, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(installation, "install_approved_suggestion", fake_install)
+    user_input = types.SimpleNamespace(device_id=None,
+                                       context=types.SimpleNamespace(user_id=None))
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, user_input)
+    assert seen == {"requested_by_user_id": None, "request_device_id": None}
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, None)
+    assert seen == {"requested_by_user_id": None, "request_device_id": None}

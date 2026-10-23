@@ -11,6 +11,7 @@ Every test runs on its own clock so the hourly cooldown is exact.
 import types
 
 import pytest
+import sys
 
 START = 1_000_000.0
 HOUR = 3600.0
@@ -205,3 +206,65 @@ def test_a_phone_only_reminder_stays_off_the_speakers(load):
     decision = delivery.decide(request, delivery.Conditions())
     assert decision.push is True
     assert decision.speak is False
+
+
+# ── the freeze alert's honorific follows who is home ──────────────────────────
+
+def _set_nova_config(mod, monkeypatch, mapping):
+    """Same convention as test_honorific.py / test_announce_resilience.py:
+    monkeypatch the lazily-imported `nova_config` module in the same
+    synthetic package as `mod`, since every consumer does `from . import
+    nova_config` inside a function body, not at module level."""
+    pkg = mod.__name__.rsplit(".", 1)[0]
+    fake = types.SimpleNamespace(get=lambda k, d=None: mapping.get(k, d))
+    monkeypatch.setitem(sys.modules, f"{pkg}.nova_config", fake)
+
+
+@pytest.fixture
+def safety_sir(cognitive_core, fake_hass):
+    return cognitive_core.SafetyManager(fake_hass, {"honorific": "sir"})
+
+
+async def test_freeze_alert_uses_solo_persons_own_honorific(
+    cognitive_core, safety_sir, fake_hass, monkeypatch
+):
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    _set_nova_config(cognitive_core, monkeypatch, {
+        "person_honorifics": {"person.morgan": "boss"},
+        "honorific": "sir",
+    })
+    action = await safety_sir._check_freeze()
+    assert action is not None
+    assert action["message"].startswith("Boss,")
+
+
+async def test_freeze_alert_falls_back_to_global_default_for_solo_person_without_override(
+    cognitive_core, safety_sir, fake_hass, monkeypatch
+):
+    fake_hass.states.set("person.casey", "home", friendly_name="Casey")
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    _set_nova_config(cognitive_core, monkeypatch, {"honorific": "boss"})
+    action = await safety_sir._check_freeze()
+    assert action["message"].startswith("Boss,")
+
+
+async def test_freeze_alert_drops_honorific_when_multiple_home(
+    cognitive_core, safety_sir, fake_hass, monkeypatch
+):
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    _set_nova_config(cognitive_core, monkeypatch, {"honorific": "sir"})
+    action = await safety_sir._check_freeze()
+    assert not action["message"].startswith(("Sir", "Boss"))
+    assert action["message"].startswith("Outdoor temperature")
+
+
+async def test_freeze_alert_drops_honorific_when_nobody_home(
+    cognitive_core, safety_sir, fake_hass, monkeypatch
+):
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    _set_nova_config(cognitive_core, monkeypatch, {"honorific": "sir"})
+    action = await safety_sir._check_freeze()
+    assert action["message"].startswith("Outdoor temperature")

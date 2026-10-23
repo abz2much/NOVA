@@ -12,6 +12,13 @@ import time
 from datetime import date, datetime, time as clock, timedelta
 
 import pytest
+import asyncio
+import sys
+import threading
+import types
+from datetime import datetime, timedelta
+import yaml
+from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 # Columns of the history tables, as the logger writes them. Built into DDL
 # below so a test can also ask for an older store without the owner column.
@@ -485,3 +492,106 @@ def test_a_sensor_reading_is_never_a_persons_routine(mod, tmp_path):
 
     assert analyzer._store_person_pattern(reading) is False
     assert analyzer.get_person_patterns() == []
+
+
+# ── analysis runs off the event loop, one at a time ───────────────────────────
+
+class ThreadedHass(FakeHass):
+    """Runs executor jobs on a real thread pool, like Home Assistant."""
+
+    async def async_add_executor_job(self, func, *args):
+        return await asyncio.get_running_loop().run_in_executor(None, func, *args)
+
+
+_SCHEMA = """
+CREATE TABLE state_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+    entity_id TEXT NOT NULL, domain TEXT NOT NULL, old_state TEXT,
+    new_state TEXT NOT NULL, area_id TEXT, hour INTEGER, day_of_week INTEGER,
+    triggered_by TEXT DEFAULT 'system', person TEXT DEFAULT 'unknown');
+CREATE TABLE commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, text TEXT NOT NULL,
+    handled_by TEXT DEFAULT 'agent', entity_ids TEXT DEFAULT '[]',
+    person TEXT DEFAULT 'unknown', hour INTEGER, day_of_week INTEGER);
+CREATE TABLE suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT NOT NULL,
+    description TEXT NOT NULL, automation_yaml TEXT, status TEXT DEFAULT 'pending',
+    confidence REAL DEFAULT 0.0, pattern_count INTEGER DEFAULT 0,
+    approved_at TEXT, dismissed_at TEXT, pattern_type TEXT DEFAULT '',
+    entity_ids TEXT DEFAULT '', details TEXT DEFAULT '{}');
+"""
+
+
+def _history_db(tmp_path, days=12):
+    db = tmp_path / "patterns.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(_SCHEMA)
+    base = datetime.now() - timedelta(days=days + 2)
+    for d in range(days):
+        when = (base + timedelta(days=d)).replace(hour=18, minute=0, second=0)
+        conn.execute(
+            "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, "
+            "new_state, area_id, hour, day_of_week) VALUES (?,?,?,?,?,?,?,?)",
+            (when.isoformat(), "light.porch", "light", "off", "on", "", 18,
+             when.weekday()))
+    conn.commit()
+    conn.close()
+    return str(db)
+
+
+def _quiet_analyzer(patterns, db, monkeypatch, stored):
+    an = patterns.PatternAnalyzer()
+    an._db = db
+    monkeypatch.setattr(an, "_store_suggestion", lambda p: (stored.append(p), True)[1])
+    monkeypatch.setattr(an, "_store_person_pattern", lambda p: False)
+    monkeypatch.setattr(an, "_promote_to_knowledge", lambda pats: 0)
+    monkeypatch.setattr(patterns, "_learned_threshold_delta", lambda: 0.0)
+    return an
+
+
+async def test_analysis_finds_patterns_with_a_real_executor(load, tmp_path, monkeypatch):
+    patterns = load("automation.patterns")
+    stored = []
+    an = _quiet_analyzer(patterns, _history_db(tmp_path), monkeypatch, stored)
+    found = await an.analyze(ThreadedHass())
+    assert any(p.pattern_type == "time_routine" for p in found)
+    assert stored, "a real thread pool must still store the routine"
+    assert an._last_result["patterns_found"] == len(found)
+
+
+async def test_no_sqlite_connection_is_opened_on_the_event_loop(
+        load, tmp_path, monkeypatch):
+    patterns = load("automation.patterns")
+    stored = []
+    an = _quiet_analyzer(patterns, _history_db(tmp_path), monkeypatch, stored)
+    loop_thread = threading.get_ident()
+    opened_on = []
+    real_connect = sqlite3.connect
+
+    def spy(*a, **k):
+        opened_on.append(threading.get_ident())
+        return real_connect(*a, **k)
+
+    monkeypatch.setattr(patterns.sqlite3, "connect", spy)
+    await an.analyze(ThreadedHass())
+    assert opened_on and loop_thread not in opened_on
+
+
+async def test_manual_and_scheduled_analysis_never_overlap(load, monkeypatch):
+    patterns = load("automation.patterns")
+    an = patterns.PatternAnalyzer()
+    running = {"now": 0, "max": 0, "runs": 0}
+
+    async def slow_once(hass):
+        running["now"] += 1
+        running["runs"] += 1
+        running["max"] = max(running["max"], running["now"])
+        await asyncio.sleep(0.02)
+        running["now"] -= 1
+        return ["pattern"]
+
+    monkeypatch.setattr(an, "_analyze_once", slow_once)
+    first, second = await asyncio.gather(an.analyze(None), an.analyze(None))
+    assert running["max"] == 1 and running["runs"] == 1
+    assert first == second == ["pattern"]
+    assert not an.analysis_running
