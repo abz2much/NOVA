@@ -620,3 +620,45 @@ async def test_assess_log_failure_is_swallowed(lm, load, fake_hass, monkeypatch)
     out = await lm.assess(fake_hass, honorific="sir", entity_id="switch.kettle",
                           to_state="on", urgency="low")
     assert out["speak"] is False
+
+
+# ── characterisation (8.66): pinned before the rewrite of this module ──────
+
+@pytest.mark.parametrize("to,dc,eid,phrase", [
+    ("nan", "battery", "sensor.remote", "is now nan"),
+    ("nan", "", "sensor.lounge", "reads nan"),
+    ("1e2", "battery", "sensor.remote", "battery is at 100%"),
+    ("on", "gas", "binary_sensor.hall_motion", "is detecting gas"),
+    ("off", "moisture", "binary_sensor.front_door", "has cleared"),
+    ("on", "opening", "switch.x", "is open"),
+    ("off", "occupancy", "switch.x", "has gone quiet"),
+    ("on", "", "lock.front_door", "is open"),
+    ("closed", "", "lock.water_valve", "is closed"),
+])
+def test_state_phrase_edges(lm, to, dc, eid, phrase):
+    assert lm._state_phrase(to, dc, eid) == phrase
+
+
+def test_profile_cache_returns_the_same_dict(lm, db):
+    db([(DOOR, "on", 14)])
+    first = lm.history_profile(DOOR, "on", 14)
+    assert lm.history_profile(DOOR, "on", 14) is first
+    assert first == {"days": 10.0, "at_hour": 1, "total": 1, "grade": "occasional"}
+
+
+def test_profile_under_three_days_does_not_open_a_second_connection(lm, db, monkeypatch):
+    db([(DOOR, "on", 14)], span_days=2)
+    opened = []
+    real = lm._connect
+    monkeypatch.setattr(lm, "_connect", lambda: opened.append(1) or real())
+    assert lm.history_profile(DOOR, "on", 14)["grade"] == "unknown"
+    assert len(opened) == 1
+
+
+def test_compose_multiword_honorific_fallback(lm, load, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(load("persona"), "announce_opener", boom)
+    assert lm._compose("young  master", "Lamp", "light.lamp", "off", 1, novelty="",
+                       away=True, escalated=False) == \
+        "Young Master, Lamp is off — while no one is home."
