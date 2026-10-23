@@ -1,34 +1,34 @@
-"""Nova Provider Activity (Phase 5) — bounded daily aggregates of LLM calls.
+"""Provider activity (Phase 5): daily totals, kept to a bound, of the LLM calls
+Nova makes.
 
-Recorded by providers.activity.execute_chat() for every chat call Nova
-makes. Deliberately narrow: this answers "how much is each provider/model/role
-actually being used, from where, and how successfully" — never "what was
-asked or answered."
+providers.activity.execute_chat() records every chat call. The aim is narrow.
+It answers how much each provider, model and role is used, from where and how
+successfully, and never what was asked or answered.
 
-Hard privacy boundary, enforced by this module's own function signature, not
-by policy: record() accepts only scalar identifiers and counters (provider,
-model, role, location, data_category, success, two optional token ints, one
-latency int). There is no parameter through which a prompt, response, tool
-argument, image, entity state, credential, or the provider's raw response
-object could be passed — and providers.activity is the only caller (a
-static test enforces that).
+The privacy limit comes from this module's own signature and not from policy.
+record() takes only scalar identifiers and counters: provider, model, role,
+location, data_category, success, two optional token counts and one latency.
+No parameter could carry a prompt, a response, a tool argument, an image, an
+entity state, a credential or the provider's raw response object, and
+providers.activity is the only caller (a static test checks that).
 
-One row per (day, provider, model, role, location, data_category) — calls
-accumulate into the same row via an upsert, so growth is bounded by that
-cardinality, not by call volume. Dependency-light (SQLite + stdlib only);
-every entry point takes db_path resolved at call time for isolated testing,
-same shape as decision_record.py / automation_trials.py.
+There is one row for each (day, provider, model, role, location,
+data_category). Calls add to the same row with an upsert, so the table grows
+with that number of combinations and not with the number of calls. It needs
+only SQLite and the standard library. Every entry point takes a db_path that is
+resolved when it is called, so tests can use their own file, in the same way
+as decision_record.py and automation_trials.py.
 """
 from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from datetime import datetime, timedelta
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _DEFAULT_DB: Optional[str] = None  # override; None resolves via paths.py
 
@@ -69,6 +69,33 @@ def _connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _close(conn) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+_UPSERT = """
+INSERT INTO provider_activity_daily
+  (day, provider, model, role, location, data_category,
+   success_count, failure_count, input_tokens, output_tokens,
+   latency_ms_sum, call_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+ON CONFLICT (day, provider, model, role, location, data_category) DO UPDATE SET
+  success_count = success_count + excluded.success_count,
+  failure_count = failure_count + excluded.failure_count,
+  input_tokens = CASE
+    WHEN input_tokens IS NULL AND excluded.input_tokens IS NULL THEN NULL
+    ELSE COALESCE(input_tokens, 0) + COALESCE(excluded.input_tokens, 0) END,
+  output_tokens = CASE
+    WHEN output_tokens IS NULL AND excluded.output_tokens IS NULL THEN NULL
+    ELSE COALESCE(output_tokens, 0) + COALESCE(excluded.output_tokens, 0) END,
+  latency_ms_sum = latency_ms_sum + excluded.latency_ms_sum,
+  call_count = call_count + excluded.call_count
+"""
+
+
 def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
@@ -104,93 +131,67 @@ def record(
     atomic from SQLite's own perspective, so no write is ever lost or raises
     under concurrent access.
     """
-    db = _resolve(db_path)
-    d = day or _today()
+    bucket_day = day or _today()
     try:
-        conn = _connect(db)
+        conn = _connect(_resolve(db_path))
     except Exception:
         return False
     try:
-        success_inc = 1 if success else 0
-        failure_inc = 0 if success else 1
-        conn.execute(
-            "INSERT INTO provider_activity_daily "
-            "(day, provider, model, role, location, data_category, "
-            " success_count, failure_count, input_tokens, output_tokens, "
-            " latency_ms_sum, call_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
-            "ON CONFLICT (day, provider, model, role, location, data_category) DO UPDATE SET "
-            "  success_count = success_count + excluded.success_count, "
-            "  failure_count = failure_count + excluded.failure_count, "
-            "  input_tokens = CASE "
-            "    WHEN input_tokens IS NULL AND excluded.input_tokens IS NULL THEN NULL "
-            "    ELSE COALESCE(input_tokens, 0) + COALESCE(excluded.input_tokens, 0) END, "
-            "  output_tokens = CASE "
-            "    WHEN output_tokens IS NULL AND excluded.output_tokens IS NULL THEN NULL "
-            "    ELSE COALESCE(output_tokens, 0) + COALESCE(excluded.output_tokens, 0) END, "
-            "  latency_ms_sum = latency_ms_sum + excluded.latency_ms_sum, "
-            "  call_count = call_count + excluded.call_count",
-            (
-                d, str(provider), str(model), str(role), str(location), str(data_category),
-                success_inc, failure_inc, input_tokens, output_tokens, int(latency_ms),
-            ),
-        )
+        conn.execute(_UPSERT, (
+            bucket_day, str(provider), str(model), str(role), str(location),
+            str(data_category), 1 if success else 0, 0 if success else 1,
+            input_tokens, output_tokens, int(latency_ms),
+        ))
         conn.commit()
         return True
     except Exception:
         return False
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
 
 def list_days(days: int = 7, db_path: Optional[str] = None) -> list:
     """Aggregates for the last `days` calendar days, most recent first, with
     per-bucket averages computed at read time from the stored sums — nothing
     beyond the sums themselves is persisted. Pure DB read; never raises."""
-    db = _resolve(db_path)
-    if not Path(db).exists():
+    path = _resolve(db_path)
+    if not Path(path).exists():
         return []
     try:
-        conn = _connect(db)
+        conn = _connect(path)
     except Exception:
         return []
     try:
-        cutoff = (datetime.now() - timedelta(days=max(1, int(days)) - 1)).strftime("%Y-%m-%d")
+        first_day = datetime.now() - timedelta(days=max(1, int(days)) - 1)
         rows = conn.execute(
             "SELECT * FROM provider_activity_daily WHERE day >= ? ORDER BY day DESC",
-            (cutoff,),
+            (first_day.strftime("%Y-%m-%d"),),
         ).fetchall()
     except Exception:
         return []
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
-    by_day: dict = {}
-    for r in rows:
-        d = dict(r)
-        count = d["call_count"] or 0
-        entry = {
-            "provider": d["provider"],
-            "model": d["model"],
-            "role": d["role"],
-            "location": d["location"],
-            "data_category": d["data_category"],
-            "success_count": d["success_count"],
-            "failure_count": d["failure_count"],
-            "call_count": count,
-            "avg_input_tokens": (round(d["input_tokens"] / count, 1)
-                                 if d["input_tokens"] is not None and count else None),
-            "avg_output_tokens": (round(d["output_tokens"] / count, 1)
-                                  if d["output_tokens"] is not None and count else None),
-            "avg_latency_ms": round(d["latency_ms_sum"] / count, 1) if count else None,
-        }
-        by_day.setdefault(d["day"], []).append(entry)
+    grouped: dict = {}
+    for row in rows:
+        values = dict(row)
+        calls = values["call_count"] or 0
+        tokens_in, tokens_out = values["input_tokens"], values["output_tokens"]
+        grouped.setdefault(values["day"], []).append({
+            "provider": values["provider"],
+            "model": values["model"],
+            "role": values["role"],
+            "location": values["location"],
+            "data_category": values["data_category"],
+            "success_count": values["success_count"],
+            "failure_count": values["failure_count"],
+            "call_count": calls,
+            "avg_input_tokens": (round(tokens_in / calls, 1)
+                                 if tokens_in is not None and calls else None),
+            "avg_output_tokens": (round(tokens_out / calls, 1)
+                                  if tokens_out is not None and calls else None),
+            "avg_latency_ms": round(values["latency_ms_sum"] / calls, 1) if calls else None,
+        })
 
-    return [{"day": day, "entries": entries}
-            for day, entries in sorted(by_day.items(), reverse=True)]
+    return [{"day": name, "entries": entries}
+            for name, entries in sorted(grouped.items(), reverse=True)]
