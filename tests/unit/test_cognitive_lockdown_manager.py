@@ -878,6 +878,21 @@ async def test_ensure_lockdown_reads_the_saved_state_in_the_executor_before_the_
     assert "created on demand" not in caplog.text                                   # the normal setup path
 
 
+async def test_ensure_lockdown_logs_a_failed_create_and_leaves_no_manager(
+        cc, fake_hass, monkeypatch, caplog):
+    cc._CORE.config = {"security_alarm_entity": ALARM}
+    fake_hass.bus.async_listen = lambda event, handler: (lambda: None)
+
+    def broken(*_a, **_k):
+        raise OSError("disk gone")
+    monkeypatch.setattr(cc._m_lockdown, "LockdownManager", broken)
+    await cc.ensure_lockdown(fake_hass, cc._CORE.config)
+    fake_hass.close_pending()
+    assert cc._CORE.lockdown_mgr is None
+    assert cc.is_lockdown() is False
+    assert "Lockdown manager create failed: disk gone" in caplog.text
+
+
 async def test_request_lockdown_announces_and_a_manual_lift_while_armed_suppresses(
         cc, fake_hass, emitted):
     cc._CORE.config = {"security_alarm_entity": ALARM}

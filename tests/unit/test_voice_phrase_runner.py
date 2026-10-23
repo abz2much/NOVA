@@ -4,6 +4,9 @@ The real policy and the real action log, with a fake confirmation layer and
 a fake Home Assistant (the same fixtures as test_authority.py). Nothing here
 touches a real device.
 """
+import sys
+import types
+
 import pytest
 
 from conftest import readable_devices
@@ -254,6 +257,15 @@ async def test_run_entry_never_raises(run, fake_hass, al, monkeypatch):
 LOOSE = "the house is a bit cold"
 
 
+def _broken_panel_log(monkeypatch):
+    """A panel log that raises, so the caller's own work must carry on."""
+    def nova_log(*_a, **_k):
+        raise RuntimeError("panel log down")
+    fake = types.ModuleType("jc.websocket")
+    fake.nova_log = nova_log
+    monkeypatch.setitem(sys.modules, "jc.websocket", fake)
+
+
 async def _step(run, hass, text="Nova, the house is cold."):
     return await run.try_phrase(hass, text, honorific="sir", device_id=None, user_id="u1")
 
@@ -268,6 +280,14 @@ async def test_no_phrases_means_no_step(run, fake_hass, calls, cfg):
 
 async def test_a_match_runs_and_returns_a_local_result(run, fake_hass, calls, cfg):
     cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry()]}}
+    step = await _step(run, fake_hass)
+    assert step.defer_hint is None and step.result.handled and step.result.success
+    assert len(calls) == 1
+
+
+async def test_a_match_still_runs_when_the_panel_log_fails(run, fake_hass, calls, cfg, monkeypatch):
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry()]}}
+    _broken_panel_log(monkeypatch)
     step = await _step(run, fake_hass)
     assert step.defer_hint is None and step.result.handled and step.result.success
     assert len(calls) == 1
