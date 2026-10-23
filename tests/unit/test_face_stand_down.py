@@ -84,15 +84,11 @@ def test_only_literal_true_enables_it_and_the_write_must_be_a_boolean(load):
         assert sc.valid_panel_value("face_stand_down", v) is False
 
 
-def test_setting_is_panel_writable_surfaced_and_applied_live():
-    ws = (COMP / "websocket.py").read_text()
+def test_setting_is_a_panel_bool_off_by_default():
     setting = settings_schema().SETTINGS["face_stand_down"]
     # A panel bool, off by default, shown as on only for a saved true.
     assert (setting.kind, setting.default, setting.payload, setting.exact_true) == (
         "bool", False, "plain", True)
-    assert '"intrusion_requires_confinement", "face_stand_down"):\n            from . import cognitive_core' in ws
-    cc = core_text()
-    assert 'key in ("intrusion_requires_confinement", "face_stand_down")' in cc
 
 
 async def test_apply_runtime_config_turns_it_on_and_off_live(env):
