@@ -1,4 +1,4 @@
-"""Home Assistant LLM API tool translation into normalized JSON-schema tools."""
+"""Turns Home Assistant LLM API tools into plain JSON-schema tool entries."""
 from __future__ import annotations
 
 import json
@@ -6,90 +6,80 @@ import logging
 from typing import Sequence
 
 
-# One logger for the whole agent, named as it always was (…nova.agent), so
-# log filters and levels set for the agent keep applying.
+# The agent logs under …nova.agent whichever module the line comes from, so
+# any filter or level a user set for the agent still applies.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 
 def _ha_kwargs(cls, **kwargs):
-    """Keep only the kwargs that cls's constructor accepts. Home Assistant's LLM
-    API changed fields across versions — 2026.8 moved the context out of
-    ToolInput into LLMContext and dropped user_prompt — so we pass the
-    intersection and stay compatible with old and new HA (v7.21.1). Never raises."""
+    """Pass on only the keyword arguments `cls` can take.
+
+    Home Assistant keeps changing the fields of its LLM API classes (2026.8
+    moved the context from ToolInput into LLMContext and removed
+    user_prompt), so the safe call is the overlap between what we have and
+    what this version accepts (v7.21.1). If the signature cannot be read, all
+    the arguments go through untouched."""
     try:
         import inspect
-        allowed = inspect.signature(cls).parameters
-        return {k: v for k, v in kwargs.items() if k in allowed}
+        accepted = inspect.signature(cls).parameters
     except Exception:
         return kwargs
+    return {name: value for name, value in kwargs.items() if name in accepted}
 
-
-# ── Main agent loop ─────────────────────────────────────────────────────────
 
 def _json_safe(obj):
-    """Recursively strip anything that isn't plain JSON-serializable data.
+    """Copy `obj`, replacing every value that is not plain JSON with None.
 
-    Belt-and-braces alongside the try/except in _ha_tools_to_openai_format
-    below: voluptuous_openapi.convert() can return *successfully* — no
-    exception — while still leaving its own UNSUPPORTED sentinel (or some
-    other custom object) embedded as a value somewhere inside the schema
-    it hands back, e.g. a field's "default" or buried in "items"/"anyOf"
-    for one selector type it doesn't fully know how to represent. The
-    try/except only catches convert() *raising*; it does nothing for a
-    schema that "successfully" comes back already broken. That one bad
-    leaf then only surfaces much later, as an opaque "Object of type
-    _Unsupported is not JSON serializable" when the HTTP client tries to
-    encode the whole request — with no indication of which tool or field
-    caused it. So instead of trusting the library's output, walk it and
-    drop anything that isn't a plain JSON type before it goes anywhere
-    near a request.
-    """
-    if isinstance(obj, dict):
-        return {k: _json_safe(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_json_safe(v) for v in obj]
-    if isinstance(obj, (str, int, float, bool)) or obj is None:
+    voluptuous_openapi.convert() can return without raising and still leave
+    its UNSUPPORTED marker (or another custom object) inside the result, for
+    example as a field default or deep in an items or anyOf entry. A try
+    around the call does not see that. It only shows up later, when the HTTP
+    client fails with "Object of type _Unsupported is not JSON serializable"
+    and nothing says which tool caused it. Cleaning the converted schema
+    before it reaches a request avoids that."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
+    if isinstance(obj, dict):
+        return {key: _json_safe(item) for key, item in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(item) for item in obj]
     return None
 
 
 def _ha_tools_to_openai_format(ha_tools: Sequence, custom_serializer=None) -> list[dict]:
-    """Convert HA LLM API tool definitions to OpenAI function-calling format.
+    """Build OpenAI function-calling entries from HA LLM API tools.
 
-    HA tools carry their parameters as a voluptuous Schema, which is NOT JSON
-    serializable — passing it straight through makes the whole LLM request fail
-    with "Object of type Schema is not JSON serializable". Convert each schema to
-    a JSON Schema dict via voluptuous_openapi, using the API's custom serializer
-    so HA's selector types (entity ids, areas, etc.) render correctly. If a single
-    tool's schema can't be converted — or converts but still isn't actually
-    JSON-safe (see _json_safe) — fall back to an empty object schema for that
-    tool so one odd tool never breaks the entire call.
-    """
+    A tool's parameters are a voluptuous Schema. That cannot go into a JSON
+    request ("Object of type Schema is not JSON serializable"), so each one is
+    converted with voluptuous_openapi, using the API's own serializer so HA
+    selectors (entity ids, areas and so on) come out right. A tool whose
+    schema fails to convert, or converts to something that still is not JSON
+    (see _json_safe), gets an empty object schema. One odd tool must not take
+    the whole call down."""
     try:
         from voluptuous_openapi import convert
     except Exception:
         convert = None
-    tools = []
-    for t in ha_tools:
-        params = None
-        raw = getattr(t, "parameters", None)
-        if raw is not None and convert is not None:
+
+    entries = []
+    for tool in ha_tools:
+        schema = None
+        source = getattr(tool, "parameters", None)
+        if convert is not None and source is not None:
             try:
-                params = _json_safe(convert(raw, custom_serializer=custom_serializer))
-                json.dumps(params)  # verify — _json_safe should guarantee this
+                schema = _json_safe(convert(source, custom_serializer=custom_serializer))
+                json.dumps(schema)
             except Exception as exc:
+                schema = None
                 _LOGGER.debug(
                     "Nova: couldn't convert schema for HA tool %s: %s",
-                    getattr(t, "name", "?"), exc)
-                params = None
-        if not params:
-            params = {"type": "object", "properties": {}}
-        tools.append({
+                    getattr(tool, "name", "?"), exc)
+        entries.append({
             "type": "function",
             "function": {
-                "name":        t.name,
-                "description": t.description or "",
-                "parameters":  params,
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": schema or {"type": "object", "properties": {}},
             },
         })
-    return tools
+    return entries
