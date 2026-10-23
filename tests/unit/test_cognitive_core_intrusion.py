@@ -1,130 +1,219 @@
-"""Regression tests for SafetyManager intrusion detection.
+"""SafetyManager: when does motion become an intrusion alert?
 
-These pin the away-vs-home decision that drives "motion … while no one is home"
-alerts — the false-positive class fixed in v6.7.1. Intrusion must fire only when
-residents are CONFIDENTLY away (tracked away / armed-away), never on the mere
-absence of occupancy.
+The rule under test: an alert needs residents who are confidently away
+(a person tracked away, or the alarm armed away), never just "nobody shows as
+present", which is what an untracked person at home looks like. While away,
+motion also needs backing (an open way in or an armed alarm) unless the user
+has turned that requirement off.
 
-tick() is called with sleeping=False so the nighttime-lockdown branch (which
-would touch the filesystem) is skipped; we assert purely on the returned actions.
+Ticks run with sleeping=False so the night sweep, which writes files, stays
+out of the way. Results are read from the returned actions, and the intrusion
+module's stand down state and event log are reset for every test so nothing
+leaks in from elsewhere.
 """
+import time
+
 import pytest
+
+HALL = "binary_sensor.hall_motion"
+FRONT_DOOR = "binary_sensor.front_door"
+ALARM = "alarm_control_panel.home"
 
 
 @pytest.fixture
-def safety(cognitive_core, fake_hass):
-    return cognitive_core.SafetyManager(fake_hass, {"honorific": "sir"})
+def intrusion_state(load, tmp_path, monkeypatch):
+    mod = load("intrusion")
+    monkeypatch.setattr(mod, "LOG_PATH", tmp_path / "intrusion_log.json")
+    for name, value in (("_log", []), ("_log_loaded", True), ("_called_off_until", 0.0),
+                        ("_acknowledged_ts", 0.0), ("_false_alarms", [])):
+        monkeypatch.setattr(mod, name, value)
+    return mod
 
 
-def _motion(hass, eid="binary_sensor.hall_motion"):
-    hass.states.set(eid, "on", device_class="motion")
+@pytest.fixture
+def make_safety(cognitive_core, fake_hass, intrusion_state):
+    def build(**extra):
+        return cognitive_core.SafetyManager(fake_hass, {"honorific": "sir", **extra})
+    return build
 
 
-async def _tick(safety, hass, anyone_home):
-    actions = await safety.tick(sleeping=False, anyone_home=anyone_home)
-    hass.close_pending()  # discard any announce coroutine; we assert on actions
-    return actions
+@pytest.fixture
+def safety(make_safety):
+    return make_safety()
 
 
-def _intrusions(actions):
-    return [a for a in actions if str(a.get("type", "")).startswith("intrusion")]
+def away(hass):
+    hass.states.set("person.alex", "not_home")
+    hass.states.set("device_tracker.alex_phone", "not_home")
 
 
-async def test_untracked_resident_motion_is_not_intrusion(safety, fake_hass):
-    # The bug: someone home & moving, but NO person/device_tracker/alarm at all.
-    _motion(fake_hass)
-    actions = await _tick(safety, fake_hass, anyone_home=True)
-    assert _intrusions(actions) == []
+def moving(hass, entity_id=HALL, device_class="motion", state="on"):
+    hass.states.set(entity_id, state, device_class=device_class)
 
 
-async def test_tracked_away_motion_with_open_door_alerts_once(safety, fake_hass):
-    # v6.33.0: corroborated motion when away fires ONE "investigating" alert,
-    # then investigates silently (escalation only on confirmation).
-    fake_hass.states.set("person.username", "not_home")
-    fake_hass.states.set("device_tracker.username_phone", "not_home")
-    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
-    _motion(fake_hass)
-    actions = await _tick(safety, fake_hass, anyone_home=False)
-    intr = _intrusions(actions)
-    assert len(intr) == 1
-    assert intr[0]["type"] == "intrusion_investigating"
-    assert intr[0]["urgency"] == "high"
+def door_open(hass):
+    hass.states.set(FRONT_DOOR, "on", device_class="door")
 
 
-async def test_bare_motion_away_without_corroboration_is_suppressed(safety, fake_hass):
-    # v6.32.0: bare motion when away — no armed alarm, no open door — is treated
-    # as benign (pet / robot vacuum / blinds) and does NOT alert.
-    fake_hass.states.set("person.username", "not_home")
-    fake_hass.states.set("device_tracker.username_phone", "not_home")
-    _motion(fake_hass)
-    actions = await _tick(safety, fake_hass, anyone_home=False)
-    assert _intrusions(actions) == []
+async def run_tick(safety, hass, *, home):
+    found = await safety.tick(sleeping=False, anyone_home=home)
+    hass.close_pending()   # drop any speech coroutine; only actions matter
+    return [a for a in found if str(a.get("type", "")).startswith("intrusion")]
 
 
-async def test_corroboration_can_be_disabled(cognitive_core, fake_hass):
-    # Users who want the old behaviour can opt back in.
-    safety = cognitive_core.SafetyManager(
-        fake_hass, {"honorific": "sir", "intrusion_require_corroboration": False})
-    fake_hass.states.set("person.username", "not_home")
-    _motion(fake_hass)
-    actions = await safety.tick(sleeping=False, anyone_home=False)
-    fake_hass.close_pending()
-    assert len(_intrusions(actions)) == 1
+# ── no alert ────────────────────────────────────────────────────────────────
+
+async def test_motion_with_nobody_tracked_is_not_an_intrusion(safety, fake_hass):
+    # Someone home and walking about, with no person, tracker or alarm at all.
+    moving(fake_hass)
+    assert await run_tick(safety, fake_hass, home=True) == []
+    assert safety._investigation is None
 
 
-async def test_person_home_suppresses_intrusion(safety, fake_hass):
-    # Phone/person home wins outright even if motion is firing.
-    fake_hass.states.set("person.username", "home")
-    _motion(fake_hass)
-    actions = await _tick(safety, fake_hass, anyone_home=True)
-    assert _intrusions(actions) == []
+async def test_a_person_at_home_outranks_motion(safety, fake_hass):
+    fake_hass.states.set("person.alex", "home")
+    moving(fake_hass)
+    assert await run_tick(safety, fake_hass, home=True) == []
 
 
-async def test_armed_away_alarm_enables_intrusion_without_trackers(safety, fake_hass):
-    safety.config["security_alarm_entity"] = "alarm_control_panel.home"
-    fake_hass.states.set("alarm_control_panel.home", "armed_away")
-    _motion(fake_hass)
-    actions = await _tick(safety, fake_hass, anyone_home=False)
-    assert len(_intrusions(actions)) == 1
+async def test_a_person_at_home_outranks_an_open_door_too(safety, fake_hass):
+    fake_hass.states.set("person.alex", "home")
+    door_open(fake_hass)
+    moving(fake_hass)
+    assert await run_tick(safety, fake_hass, home=True) == []
+    assert safety._investigation is None
 
 
-async def test_no_motion_no_intrusion_even_when_away(safety, fake_hass):
-    fake_hass.states.set("person.username", "not_home")  # away, but nothing moving
-    actions = await _tick(safety, fake_hass, anyone_home=False)
-    assert _intrusions(actions) == []
+async def test_away_with_bare_motion_stays_quiet(safety, fake_hass):
+    # No armed alarm and nothing open: a pet, a robot vacuum or a blind.
+    away(fake_hass)
+    moving(fake_hass)
+    assert await run_tick(safety, fake_hass, home=False) == []
+    assert safety._investigation is None
 
 
-async def test_intrusion_debounced_within_window(safety, fake_hass):
-    fake_hass.states.set("person.username", "not_home")
-    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")  # corroboration
-    _motion(fake_hass)
-    first = await _tick(safety, fake_hass, anyone_home=False)
-    second = await _tick(safety, fake_hass, anyone_home=False)  # immediately again
-    assert len(_intrusions(first)) == 1
-    assert _intrusions(second) == []  # 5-min debounce suppresses the repeat
+async def test_away_and_still_is_no_intrusion(safety, fake_hass):
+    away(fake_hass)
+    door_open(fake_hass)
+    assert await run_tick(safety, fake_hass, home=False) == []
 
 
-# ── notification snapshot image data (v6.69.0) ──────────────────────────────
+@pytest.mark.parametrize("device_class,state", [
+    ("motion", "off"),          # sensor clear
+    ("door", "on"),             # not a motion sensor at all
+    ("moisture", "on"),
+])
+async def test_only_live_motion_starts_anything(safety, fake_hass, device_class, state):
+    away(fake_hass)
+    door_open(fake_hass)
+    moving(fake_hass, "binary_sensor.hall_other", device_class=device_class, state=state)
+    assert await run_tick(safety, fake_hass, home=False) == []
 
-def test_notification_image_data_absolute_url(cognitive_core, fake_hass):
-    # already-absolute URLs are passed through with both platform keys
-    data = cognitive_core._notification_image_data(fake_hass, "https://x/snap.jpg")
-    assert data["image"] == "https://x/snap.jpg"
-    assert data["attachment"]["url"] == "https://x/snap.jpg"
+
+async def test_a_recent_call_off_holds_new_alerts(safety, fake_hass, intrusion_state,
+                                                  monkeypatch):
+    monkeypatch.setattr(intrusion_state, "_called_off_until", time.time() + 600)
+    away(fake_hass)
+    door_open(fake_hass)
+    moving(fake_hass)
+    assert await run_tick(safety, fake_hass, home=False) == []
 
 
-def test_notification_image_data_makes_local_absolute(cognitive_core, fake_hass):
-    # a /local path gets the external base prepended so the app can fetch it
-    try:
-        fake_hass.config.external_url = "https://home.example.com"
-    except Exception:
-        pass
+# ── one alert ───────────────────────────────────────────────────────────────
+
+async def test_away_with_an_open_door_raises_one_investigating_alert(
+        safety, fake_hass, intrusion_state):
+    away(fake_hass)
+    door_open(fake_hass)
+    moving(fake_hass)
+    alerts = await run_tick(safety, fake_hass, home=False)
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["type"] == "intrusion_investigating"
+    assert alert["urgency"] == "high"
+    assert alert["entity_id"] == HALL
+    assert alert["auto_act"] is True
+    # The away alert is spoken as well as pushed.
+    assert "phone_only" not in alert
+    assert safety._investigation["trigger"] == "away"
+    logged = intrusion_state.get_log()
+    assert [ev["kind"] for ev in logged] == ["investigating"]
+
+
+async def test_with_backing_switched_off_bare_motion_alerts(make_safety, fake_hass):
+    # The opt out for people who want every movement while away reported.
+    safety = make_safety(intrusion_require_corroboration=False)
+    fake_hass.states.set("person.alex", "not_home")
+    moving(fake_hass)
+    alerts = await run_tick(safety, fake_hass, home=False)
+    assert [a["type"] for a in alerts] == ["intrusion_investigating"]
+
+
+async def test_armed_away_counts_as_away_with_no_trackers(safety, fake_hass):
+    safety.config["security_alarm_entity"] = ALARM
+    fake_hass.states.set(ALARM, "armed_away")
+    moving(fake_hass)
+    alerts = await run_tick(safety, fake_hass, home=False)
+    assert [a["type"] for a in alerts] == ["intrusion_investigating"]
+
+
+# ── repeats ─────────────────────────────────────────────────────────────────
+
+async def test_a_second_tick_straight_after_stays_quiet(safety, fake_hass):
+    away(fake_hass)
+    door_open(fake_hass)
+    moving(fake_hass)
+    first = await run_tick(safety, fake_hass, home=False)
+    second = await run_tick(safety, fake_hass, home=False)
+    assert len(first) == 1
+    assert second == []
+
+
+@pytest.mark.parametrize("seconds_ago,alerts", [(60, 0), (299, 0), (301, 1)])
+async def test_a_new_alert_waits_for_the_repeat_gap(safety, fake_hass, load,
+                                                    seconds_ago, alerts):
+    assert load("core_safety")._REPEAT_ALERT_GAP == 300.0
+    away(fake_hass)
+    door_open(fake_hass)
+    moving(fake_hass)
+    # The last investigation has closed; only the gap is left to hold.
+    safety._last_intrusion_alert = time.time() - seconds_ago
+    assert len(await run_tick(safety, fake_hass, home=False)) == alerts
+
+
+# ── the picture attached to a push ──────────────────────────────────────────
+
+def _base_urls(hass, external=None, internal=None):
+    hass.config.external_url, hass.config.internal_url = external, internal
+
+
+@pytest.mark.parametrize("url", ["https://x/snap.jpg", "http://cam.example/a.png"])
+def test_a_full_address_goes_out_unchanged_for_both_phones(cognitive_core, fake_hass, url):
+    _base_urls(fake_hass, external="https://home.example.com")
+    assert cognitive_core._notification_image_data(fake_hass, url) == {
+        "image": url, "attachment": {"url": url}}
+
+
+@pytest.mark.parametrize("external,internal,expected", [
+    ("https://home.example.com", None, "https://home.example.com/local/nova/x.jpg"),
+    ("https://home.example.com/", None, "https://home.example.com/local/nova/x.jpg"),
+    (None, "http://homeassistant.local:8123", "http://homeassistant.local:8123/local/nova/x.jpg"),
+    (None, None, "/local/nova/x.jpg"),
+])
+def test_a_local_path_gets_the_instance_address(cognitive_core, fake_hass,
+                                                external, internal, expected):
+    _base_urls(fake_hass, external=external, internal=internal)
+    data = cognitive_core._notification_image_data(fake_hass, "/local/nova/x.jpg")
+    assert data == {"image": expected, "attachment": {"url": expected}}
+
+
+def test_a_local_path_without_any_config_is_left_as_it_is(cognitive_core, fake_hass):
+    # The fake has no url fields at all; that must not raise.
     data = cognitive_core._notification_image_data(fake_hass, "/local/nova/intrusion/x.jpg")
-    # either prepended (if fake_hass exposes config.external_url) or left relative,
-    # but must always carry both keys and never raise
-    assert "image" in data and "attachment" in data
+    assert data == {"image": "/local/nova/intrusion/x.jpg",
+                    "attachment": {"url": "/local/nova/intrusion/x.jpg"}}
 
 
-def test_notification_image_data_none_is_empty(cognitive_core, fake_hass):
-    assert cognitive_core._notification_image_data(fake_hass, None) == {}
-    assert cognitive_core._notification_image_data(fake_hass, "") == {}
+@pytest.mark.parametrize("nothing", [None, ""])
+def test_no_snapshot_means_no_image_block(cognitive_core, fake_hass, nothing):
+    assert cognitive_core._notification_image_data(fake_hass, nothing) == {}

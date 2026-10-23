@@ -1,16 +1,27 @@
-"""state (presence) conditions on time routines — "only when the owner is home".
+"""A learned time routine is gated on its owner being home.
 
-A time trigger has no inherent presence, so gating a learned routine on the
-owner's person entity is a real guard (unlike motion sequences, where presence
-is implied). The owner is resolved to a person.* entity via a name→entity map
-built from hass; the routine's description already reflects the observation, and
-now an HA state condition enforces it.
+A clock trigger knows nothing about who is in, so when one person clearly owns
+a daily routine the analyser attaches a Home Assistant state condition on that
+person's person.* entity. The owner is matched to the entity through a map of
+every way the person may have been recorded (friendly name, normalised name,
+entity id). With no owner, or no entity for the owner, the routine is still
+learned but stays ungated.
 """
+from __future__ import annotations
+
 import json
 import sqlite3
 from datetime import datetime, timedelta
 
 import pytest
+
+PORCH = "light.porch"
+HOME_GATE = {"condition": "state", "entity_id": "person.alex", "state": "home"}
+
+
+@pytest.fixture
+def analyser(load):
+    return load("pattern_analyzer").PatternAnalyzer()
 
 
 @pytest.fixture
@@ -18,101 +29,131 @@ def pa(load):
     return load("pattern_analyzer")
 
 
-_SCHEMA = (
-    "CREATE TABLE state_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-    "timestamp TEXT, entity_id TEXT, domain TEXT, old_state TEXT, "
-    "new_state TEXT, area_id TEXT, hour INTEGER, day_of_week INTEGER, "
-    "person TEXT, person_confidence REAL)")
-
-
-def _conn(path):
-    conn = sqlite3.connect(str(path))
-    conn.executescript(_SCHEMA)
+@pytest.fixture
+def history(load, tmp_path):
+    """A patterns.db built from Nova's own schema, closed after the test."""
+    component = load("persistence.schema").COMPONENTS["pattern_log"]
+    conn = sqlite3.connect(str(tmp_path / "patterns.db"))
+    for statement in component.statements:
+        conn.execute(statement)
     conn.row_factory = sqlite3.Row
-    return conn
+    yield conn
+    conn.close()
 
 
-def _seed_owned_routine(conn, owner="username"):
-    # light.porch turns on ~19:00 on many days, attributed to `owner`
-    base = datetime.now() - timedelta(days=20)
-    for d in range(15):
-        t = base + timedelta(days=d, hours=19)
-        conn.execute("INSERT INTO state_changes (timestamp, entity_id, domain, "
-                     "old_state, new_state, hour, day_of_week, person, "
-                     "person_confidence) VALUES (?,?,?,?,?,?,?,?,?)",
-                     (t.isoformat(), "light.porch", "light", "off", "on",
-                      19, t.weekday(), owner, 0.9))
+def _evenings(conn, owners, *, entity=PORCH, sure=0.9):
+    """One 19:00 switch-on per day for the last len(owners) days (ending
+    three days ago), each credited to the matching owner."""
+    first = datetime.now().replace(hour=19, minute=0, second=0, microsecond=0)
+    first -= timedelta(days=len(owners) + 3)
+    rows = []
+    for offset, who in enumerate(owners):
+        at = first + timedelta(days=offset)
+        rows.append((at.isoformat(), entity, entity.split(".")[0], "off", "on",
+                     at.hour, at.weekday(), who, sure))
+    conn.executemany(
+        "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, "
+        "new_state, hour, day_of_week, person, person_confidence) "
+        "VALUES (?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
 
 
-def test_time_routine_gets_presence_condition(pa, tmp_path):
-    conn = _conn(tmp_path / "r.db")
-    _seed_owned_routine(conn, owner="username")
-    person_map = {"username": "person.username"}
-    pats = pa.PatternAnalyzer()._find_time_routines(conn, person_map)
-    m = [p for p in pats if p.entity_ids == ["light.porch"]]
-    assert m, "expected the porch routine"
-    cond = m[0].details.get("condition")
-    assert cond == {"condition": "state", "entity_id": "person.username", "state": "home"}
-    assert m[0].details.get("person") == "username"
+def _porch_routine(analyser, conn, person_map):
+    found = [p for p in analyser._find_time_routines(conn, person_map)
+             if p.entity_ids == [PORCH]]
+    assert len(found) == 1, found
+    return found[0]
 
 
-def test_time_routine_no_condition_when_owner_unresolved(pa, tmp_path):
-    conn = _conn(tmp_path / "r2.db")
-    _seed_owned_routine(conn, owner="username")
-    # empty map → owner can't be resolved to a person entity → no condition,
-    # but the routine is still detected.
-    pats = pa.PatternAnalyzer()._find_time_routines(conn, {})
-    m = [p for p in pats if p.entity_ids == ["light.porch"]]
-    assert m and m[0].details.get("condition") is None
+# ── detection ────────────────────────────────────────────────────────────────
+
+def test_owned_routine_is_gated_on_owner_home(analyser, history):
+    _evenings(history, ["alex"] * 15)
+    routine = _porch_routine(analyser, history, {"alex": "person.alex"})
+    assert routine.details["person"] == "alex"
+    assert routine.details["condition"] == HOME_GATE
+    assert routine.details["hour"] == 19 and routine.details["state"] == "on"
+    assert routine.description.endswith("when alex is home")
 
 
-def test_generate_time_routine_emits_presence_condition(pa):
-    p = pa.DetectedPattern(
-        pattern_type="time_routine", description="x",
-        entity_ids=["light.porch"], confidence=0.9, occurrences=15,
-        details={"hour": 19, "state": "on",
-                 "condition": {"condition": "state",
-                               "entity_id": "person.username", "state": "home"}})
-    auto = json.loads(pa.PatternAnalyzer()._generate_automation(p))
+def test_owner_without_person_entity_stays_ungated(analyser, history):
+    _evenings(history, ["alex"] * 15)
+    routine = _porch_routine(analyser, history, {})
+    # Still learned and still credited, but there is nothing to gate on.
+    assert routine.details["person"] == "alex"
+    assert "condition" not in routine.details
+
+
+def test_shared_routine_has_no_owner_and_no_gate(analyser, history):
+    # Eight evenings by one person, seven by another: nobody dominates.
+    _evenings(history, ["alex", "sam"] * 7 + ["alex"])
+    routine = _porch_routine(analyser, history,
+                             {"alex": "person.alex", "sam": "person.sam"})
+    assert "person" not in routine.details
+    assert "condition" not in routine.details
+    assert "is home" not in routine.description
+
+
+# ── the automation it becomes ────────────────────────────────────────────────
+
+def _routine_pattern(pa, condition):
+    details = {"hour": 19, "minute": 0, "state": "on"}
+    if condition is not None:
+        details["condition"] = condition
+    return pa.DetectedPattern(pattern_type="time_routine", description="porch at seven",
+                              entity_ids=[PORCH], confidence=0.9, occurrences=15,
+                              details=details)
+
+
+def test_gate_is_carried_into_the_automation(pa, analyser):
+    auto = json.loads(analyser._generate_automation(_routine_pattern(pa, HOME_GATE)))
+    assert auto["trigger"] == {"platform": "time", "at": "19:00:00"}
+    assert auto["action"] == {"service": "light.turn_on", "entity_id": PORCH}
+    assert auto["condition"] == [HOME_GATE]
+
+
+@pytest.mark.parametrize("condition", [None, {}, {"entity_id": "person.alex"}])
+def test_no_condition_block_without_a_real_gate(pa, analyser, condition):
+    auto = json.loads(analyser._generate_automation(_routine_pattern(pa, condition)))
     assert auto["trigger"]["platform"] == "time"
-    assert auto["condition"] == [{"condition": "state",
-                                  "entity_id": "person.username", "state": "home"}]
+    assert "condition" not in auto
 
 
-def test_condition_phrase_state(pa):
-    assert pa._condition_phrase(
-        {"condition": "state", "entity_id": "person.username", "state": "home"}
-    ) == ", only when username is home"
-    assert pa._condition_phrase(
-        {"condition": "state", "entity_id": "person.username", "state": "home"},
-        {"person.username": "Username"}) == ", only when Username is home"
+# ── how the gate reads in a description ──────────────────────────────────────
+
+@pytest.mark.parametrize("condition, names, phrase", [
+    (HOME_GATE, None, ", only when alex is home"),
+    (HOME_GATE, {"person.alex": "Alex"}, ", only when Alex is home"),
+    ({"condition": "state", "entity_id": "person.alex", "state": "not_home"},
+     {"person.alex": "Alex"}, ", only when Alex is not_home"),
+    ([HOME_GATE, {"condition": "sun", "after": "sunset"}], {"person.alex": "Alex"},
+     ", only when Alex is home, mostly after dark"),
+    ({"condition": "zone"}, None, ""),
+    (None, None, ""),
+])
+def test_condition_phrase(pa, condition, names, phrase):
+    assert pa._condition_phrase(condition, names) == phrase
 
 
-class _FakeState:
-    def __init__(self, entity_id, friendly):
-        self.entity_id = entity_id
-        self.attributes = {"friendly_name": friendly}
+# ── resolving a recorded owner to a person entity ────────────────────────────
+
+def test_person_map_covers_every_recorded_form(analyser, fake_hass):
+    fake_hass.states.set("person.alex_smith", "home", friendly_name="Alex Smith")
+    fake_hass.states.set("person.sam", "not_home")            # no friendly name
+    fake_hass.states.set("light.porch", "on", friendly_name="Porch")
+    assert analyser._person_entity_map(fake_hass) == {
+        "Alex Smith": "person.alex_smith",
+        "alex_smith": "person.alex_smith",
+        "person.alex_smith": "person.alex_smith",
+        "sam": "person.sam",
+        "person.sam": "person.sam",
+    }
 
 
-class _FakeStates:
-    def __init__(self, people):
-        self._people = people
-
-    def async_all(self, domain):
-        return self._people if domain == "person" else []
-
-
-class _FakeHass:
-    def __init__(self, people):
-        self.states = _FakeStates(people)
-
-
-def test_person_entity_map_resolves_normalized_and_friendly(pa):
-    hass = _FakeHass([_FakeState("person.username_smith", "Username Smith")])
-    m = pa.PatternAnalyzer()._person_entity_map(hass)
-    # a routine's owner may be recorded normalized ("username_smith"), as the friendly
-    # name ("Username Smith"), or as the entity id — all must resolve.
-    assert m["username_smith"] == "person.username_smith"
-    assert m["Username Smith"] == "person.username_smith"
-    assert m["person.username_smith"] == "person.username_smith"
+def test_person_map_is_empty_when_states_fail(analyser):
+    class Broken:
+        class states:
+            @staticmethod
+            def async_all(domain=None):
+                raise RuntimeError("not ready")
+    assert analyser._person_entity_map(Broken()) == {}

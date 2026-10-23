@@ -1,128 +1,177 @@
-"""Tests for the lockdown-engaged announcement (v6.31.0).
+"""The English "lockdown engaged" announcement (build_lockdown_message).
 
-Reports three outcomes distinctly — locks locked, closeable openings closed
-(garage doors), and openings that can't be secured remotely (windows). Open
-openings are named and framed as the gap to close, never the old "left as-is"
-shrug, and the message is never self-contradictory.
+Three things are reported apart: locks a command went to, closeable openings
+(garage doors) a command went to, and openings Nova cannot shut from afar
+(bare window contacts). An opening left open is named as something to close,
+never shrugged off. The engage message goes out before the background checks
+have run, so it may only say commands were sent, never that a door is locked
+or the home is secure.
 """
 import pytest
 
-
-@pytest.fixture
-def cc(load):
-    return load("cognitive_core")
+PROMISE = "I will alert you if anything does not secure."
+ALREADY = "Sir, lockdown engaged — the home was already fully secured."
 
 
 @pytest.fixture
-def i18n(load):
-    return load("notify_i18n")
+def build(load):
+    return load("cognitive_core").build_lockdown_message
 
 
-@pytest.mark.parametrize("names,expected", [
+@pytest.fixture
+def join(load):
+    return load("notify_i18n").join_names
+
+
+# ── the list join ───────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("given,joined", [
     ([], ""),
     (["a"], "a"),
     (["a", "b"], "a and b"),
     (["a", "b", "c"], "a, b, and c"),
+    (["a", "", "b"], "a and b"),     # blank names are dropped
+    (None, ""),
 ])
-def test_join_names(i18n, names, expected):
-    assert i18n.join_names(names) == expected
+def test_english_join(join, given, joined):
+    assert join(given) == joined
 
 
-def test_already_secured(cc):
-    assert cc.build_lockdown_message("sir", [], [], []) == \
-        "Sir, lockdown engaged — the home was already fully secured."
+# ── whole sentences, word for word ──────────────────────────────────────────
 
-
-def test_locked_only(cc):
-    msg = cc.build_lockdown_message("sir", ["Front Lock", "Back Lock"], [], [])
-    assert "I sent commands to lock Front Lock and Back Lock" in msg
-    assert "I will alert you if anything does not secure." in msg
-    # Phase 3: engage() hasn't observed the lock actually take yet -- must
-    # not claim completion or overall home security.
-    assert "is locked" not in msg
-    assert "The home is secure" not in msg
-
-
-def test_closed_a_garage(cc):
-    msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], [])
-    assert "I sent commands to close the Garage Door" in msg
-    assert "I will alert you if anything does not secure." in msg
-    assert "is closed" not in msg
-    assert "The home is secure" not in msg
-
-
-def test_locked_and_closed(cc):
-    msg = cc.build_lockdown_message("sir", ["Front Lock"], ["the Garage Door"], [])
-    assert "I sent commands to lock Front Lock and close the Garage Door" in msg
-    assert "The home is secure" not in msg
-
-
-def test_open_window_named_and_actionable(cc):
-    # Username's case: nothing closeable, locks already locked, one window open.
-    msg = cc.build_lockdown_message("sir", [], [], ["Username's Window 1"])
-    assert "Username's Window 1 is open" in msg
-    assert "close it" in msg
-    assert "already secured" in msg
-    assert "left as-is" not in msg and "1 opening already open" not in msg
-
-
-def test_closed_garage_but_window_open(cc):
-    msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], ["Username's Window 1"])
-    assert "I sent commands to close the Garage Door" in msg
-    assert "Username's Window 1 is open" in msg
-    assert "close it" in msg
-    assert "I will alert you if anything does not secure." in msg
-
-
-def test_multiple_open_named(cc):
-    msg = cc.build_lockdown_message("sir", [], [], ["the garage", "a window"])
-    assert "the garage and a window are open" in msg and "close them" in msg
-
-
-def test_many_open_summarised(cc):
-    msg = cc.build_lockdown_message("sir", [], [], ["d1", "d2", "d3", "d4", "d5"])
-    assert "5 openings are open" in msg and "close them" in msg
-
-
-def test_honorific_applied(cc):
-    assert cc.build_lockdown_message("madam", [], [], []).startswith("Madam, lockdown engaged")
-
-
-def test_empty_honorific_capitalizes_instead_of_defaulting(cc):
-    # Nobody specifically home to address (see honorific.py) -> no longer
-    # silently coerced to "sir"; the sentence is just capitalized on its own.
-    assert cc.build_lockdown_message("", [], [], []).startswith("Lockdown engaged")
-
-
-# ── Phase 3: honest wording for actions awaiting background verification ────
-
-def test_pending_actions_never_claim_locked_closed_or_secure(cc):
-    """engage() schedules _verify_secured() in the background and responds
-    before any of it resolves -- the immediate message must not claim a
-    lock/cover reached its target state, nor that the home is secure."""
-    msg = cc.build_lockdown_message(
-        "sir", ["Front Door"], ["Garage Door"], [])
-    assert "locked" not in msg.lower()
-    assert "closed" not in msg.lower()
-    assert "is secure" not in msg.lower()
-    assert "is secured" not in msg.lower()
-    assert msg == (
+WHOLE = {
+    "nothing to do": (
+        ("sir", [], [], []), ALREADY),
+    "locks and a garage": (
+        ("sir", ["Front Door"], ["Garage Door"], []),
         "Sir, lockdown engaged. I sent commands to lock Front Door and close "
-        "Garage Door. I will alert you if anything does not secure.")
-
-
-def test_pending_actions_with_uncloseable_gap(cc):
-    msg = cc.build_lockdown_message(
-        "sir", ["Front Door"], ["Garage Door"], ["the Window"])
-    assert msg == (
+        "Garage Door. " + PROMISE),
+    "locks, a garage and a window": (
+        ("sir", ["Front Door"], ["Garage Door"], ["the Window"]),
         "Sir, lockdown engaged. I sent commands to lock Front Door and close "
         "Garage Door, but the Window is open and I can't secure it remotely "
-        "— you'll want to close it. I will alert you if anything does not "
-        "secure.")
+        "— you'll want to close it. " + PROMISE),
+    "only a window": (
+        ("sir", [], [], ["Bedroom Window"]),
+        "Sir, lockdown engaged. Everything was already secured, but Bedroom "
+        "Window is open and I can't secure it remotely — you'll want to close it."),
+    "three windows by name": (
+        ("sir", [], [], ["A", "B", "C"]),
+        "Sir, lockdown engaged. Everything was already secured, but A, B, and C "
+        "are open and I can't secure them remotely — you'll want to close them."),
+    "four windows by count": (
+        ("sir", [], [], ["A", "B", "C", "D"]),
+        "Sir, lockdown engaged. Everything was already secured, but 4 openings "
+        "are open and I can't secure them remotely — you'll want to close them."),
+    "nobody to address": (
+        ("", ["Front Lock"], [], []),
+        "Lockdown engaged. I sent commands to lock Front Lock. " + PROMISE),
+}
 
 
-def test_already_secured_wording_is_unaffected_by_the_pending_fix(cc):
-    # Nothing acted on -> everything was already observed secure -> no
-    # pending-verification wording applies at all.
-    assert cc.build_lockdown_message("sir", [], [], []) == \
-        "Sir, lockdown engaged — the home was already fully secured."
+@pytest.mark.parametrize("args,expected", list(WHOLE.values()), ids=list(WHOLE))
+def test_the_whole_sentence(build, args, expected):
+    assert build(*args) == expected
+
+
+# ── what each part says ─────────────────────────────────────────────────────
+
+def test_locks_only_are_reported_as_sent(build):
+    text = build("sir", ["Front Lock", "Back Lock"], [], [])
+    assert "I sent commands to lock Front Lock and Back Lock" in text
+    assert PROMISE in text
+
+
+def test_a_garage_only_is_reported_as_sent(build):
+    text = build("sir", [], ["the Garage Door"], [])
+    assert "I sent commands to close the Garage Door" in text
+    assert PROMISE in text
+
+
+def test_locks_and_a_garage_share_one_sentence(build):
+    text = build("sir", ["Front Lock"], ["the Garage Door"], [])
+    assert "I sent commands to lock Front Lock and close the Garage Door" in text
+
+
+def test_a_garage_sent_and_a_window_left(build):
+    text = build("sir", [], ["the Garage Door"], ["Bedroom Window"])
+    assert "I sent commands to close the Garage Door" in text
+    assert "Bedroom Window is open" in text and "close it" in text
+    assert PROMISE in text
+
+
+def test_one_open_window_is_named_as_a_job_to_do(build):
+    text = build("sir", [], [], ["Bedroom Window"])
+    assert "Bedroom Window is open" in text and "close it" in text
+    assert "already secured" in text
+    # The old wording that hid the gap must never come back.
+    assert "left as-is" not in text and "1 opening already open" not in text
+
+
+def test_two_open_are_named_together(build):
+    text = build("sir", [], [], ["the garage", "a window"])
+    assert "the garage and a window are open" in text and "close them" in text
+
+
+def test_many_open_are_counted(build):
+    text = build("sir", [], [], ["d1", "d2", "d3", "d4", "d5"])
+    assert "5 openings are open" in text and "close them" in text
+
+
+@pytest.mark.parametrize("args", [
+    ("sir", ["Front Lock", "Back Lock"], [], []),
+    ("sir", [], ["the Garage Door"], []),
+    ("sir", ["Front Door"], ["Garage Door"], []),
+    ("sir", ["Front Door"], ["Garage Door"], ["the Window"]),
+])
+def test_sent_commands_never_claim_the_result(build, args):
+    lowered = build(*args).lower()
+    for claim in ("is locked", "is closed", "the home is secure", "is secure"):
+        assert claim not in lowered
+
+
+def test_with_nothing_open_no_lock_or_close_word_appears(build):
+    lowered = build("sir", ["Front Door"], ["Garage Door"], []).lower()
+    assert "locked" not in lowered and "closed" not in lowered
+
+
+# ── failures and unreadable openings ────────────────────────────────────────
+
+def test_a_failed_lock_alone_is_never_called_secure(build):
+    text = build("sir", [], [], [], failed=["Back Lock"])
+    assert text == ("Sir, lockdown engaged, but I couldn't secure Back Lock — "
+                    "please check by hand.")
+    assert "already" not in text
+
+
+def test_an_unreadable_window_is_never_taken_as_shut(build):
+    text = build("sir", [], [], [], unreadable=["Hall Window"])
+    assert text == ("Sir, lockdown engaged. Everything was already secured, but "
+                    "I can't tell if Hall Window is closed.")
+    assert text != ALREADY
+
+
+def test_every_problem_is_listed_after_what_was_sent(build):
+    text = build("sir", ["Front Lock"], [], [], failed=["Back Lock"],
+                 unreadable=["Hall Window"])
+    assert text == ("Sir, lockdown engaged. I sent commands to lock Front Lock, but "
+                    "I couldn't secure Back Lock — please check by hand; I can't tell "
+                    "if Hall Window is closed. " + PROMISE)
+
+
+def test_a_failed_lock_comes_before_an_open_window(build):
+    text = build("sir", [], [], ["Bedroom Window"], failed=["Back Lock"])
+    assert text.index("Back Lock") < text.index("Bedroom Window")
+    assert text.startswith("Sir, lockdown engaged, but I couldn't secure Back Lock")
+
+
+# ── who is addressed ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("honorific,opening", [
+    ("sir", "Sir, lockdown engaged"),
+    ("madam", "Madam, lockdown engaged"),
+    # Nobody in particular at home: the sentence is capitalised, not "sir".
+    ("", "Lockdown engaged"),
+])
+def test_the_opening_follows_the_honorific(build, honorific, opening):
+    assert build(honorific, [], [], []).startswith(opening)

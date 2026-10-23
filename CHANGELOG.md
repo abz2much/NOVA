@@ -1,3 +1,8 @@
+## [8.66.2] Internal tidy
+
+### Changed
+- **Nothing you will notice.** Sixty test files were tidied and now check more cases. Nova works exactly as before.
+
 ## [8.66.1] Internal tidy
 
 ### Changed

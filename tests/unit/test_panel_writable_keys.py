@@ -1,145 +1,130 @@
-"""Every config key the panel tries to save must be accepted by the backend.
+"""Settings the panel saves have to be accepted, and shown again, by the backend.
 
-This guards the bug class where the panel calls nova/update_config with a key
-that isn't in PANEL_WRITABLE_KEYS, so the write is rejected with `invalid_key`
-and the user sees a save failure (e.g. the Residence tab's HOME STYLE control).
+nova/update_config refuses any key outside PANEL_WRITABLE_KEYS with
+`invalid_key`, which the user sees as a failed save (the Residence tab's HOME
+STYLE control once did exactly that). A key that saves but is missing from
+get_panel_data's `config` block has the opposite problem: the control snaps
+back to its default on the next render.
 
-Both sides are parsed statically from source — websocket.py can't be imported
-(heavy HA module-level imports), and the panel is JS.
+Neither side is imported: websocket.py pulls in Home Assistant at module
+level and the panel is JavaScript, so both are read as source.
 """
+from __future__ import annotations
+
+import ast
+import pathlib
 import re
-from pathlib import Path
-from ws_sources import panel_config_keys, panel_writable_keys, ws_text
 
-_COMPONENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-_PANEL_JS = _COMPONENT / "frontend" / "nova-panel.js"
+import pytest
 
+from ws_sources import panel_config_keys, panel_writable_keys, ws_function, ws_text
 
-def _allowlist() -> set[str]:
-    """The PANEL_WRITABLE_KEYS set, built from settings_schema.SETTINGS."""
-    return panel_writable_keys()
+PANEL_SOURCE = (pathlib.Path(__file__).resolve().parents[2]
+                / "custom_components" / "nova" / "frontend" / "nova-panel.js")
 
-
-def _panel_saved_keys() -> set[str]:
-    """Every literal key the panel persists: _saveConfig('k', …) calls and the
-    data-cfg-key='k' attributes consumed by the generic save handlers."""
-    js = _PANEL_JS.read_text()
-    keys = set(re.findall(r"_saveConfig\(\s*['\"]([a-z0-9_]+)['\"]", js))
-    keys |= set(re.findall(r"data-cfg-key=['\"]([a-z0-9_]+)['\"]", js))
-    return keys
+# How the panel names a setting it is about to persist.
+_SAVE_PATTERNS = (
+    re.compile(r"_saveConfig\(\s*['\"]([a-z0-9_]+)['\"]"),   # direct calls
+    re.compile(r"data-cfg-key=['\"]([a-z0-9_]+)['\"]"),     # generic handlers
+)
+# How the panel reads a saved value back when it renders a control.
+_READ_BACK = re.compile(r"d\.config\?\.([a-z0-9_]+)")
 
 
-def test_panel_writable_keys_set_exists():
-    assert len(_allowlist()) > 0
+def _panel_js() -> str:
+    return PANEL_SOURCE.read_text(encoding="utf-8")
 
 
-def test_every_panel_saved_key_is_writable():
-    allow = _allowlist()
-    saved = _panel_saved_keys()
-    assert saved, "expected to find keys the panel saves"
-    missing = sorted(k for k in saved if k not in allow)
-    assert not missing, (
-        "panel saves config keys the backend rejects as not-writable "
-        f"(nova/update_config -> invalid_key): {missing}"
-    )
+def keys_the_panel_saves() -> set[str]:
+    js = _panel_js()
+    return {key for pattern in _SAVE_PATTERNS for key in pattern.findall(js)}
 
 
-def test_home_layout_keys_specifically_writable():
-    # The keys the Settings → Home layout card saves (the Residence tab's
-    # door and layout keys, which moved there in 8.30.0).
-    allow = _allowlist()
-    for key in ("home_stories", "has_basement", "garage_bays", "garage_mode",
-                "exit_doors", "basement_mode", "door_mapping"):
-        assert key in allow, f"{key} missing from PANEL_WRITABLE_KEYS"
+def keys_the_panel_reads_back() -> set[str]:
+    return set(_READ_BACK.findall(_panel_js()))
 
 
-def test_3d_house_keys_are_no_longer_writable_or_surfaced():
-    # Only the removed 3D house used these (8.30.0). Old saved values stay in
-    # config.json and are ignored.
-    allow = _allowlist()
-    surfaced = _panel_data_config_keys()
-    for key in ("residence_style", "floor_plan_sqft", "dormers_front", "dormers_rear",
-                "chimney_side", "home_bedrooms", "home_bathrooms"):
-        assert key not in allow and key not in surfaced, key
+# Groups of keys with the sides each must (or must not) appear on.
+# "writable": in PANEL_WRITABLE_KEYS. "surfaced": in get_panel_data's config.
+EXPECTED = [
+    pytest.param(("home_stories", "has_basement", "garage_bays", "garage_mode",
+                  "exit_doors", "basement_mode", "door_mapping"),
+                 {"writable"}, id="home-layout-card-8.30"),
+    pytest.param(("garage_mode", "has_garage", "exit_doors", "exit_door_status",
+                  "exit_door_candidates", "basement_mode", "home_features"),
+                 {"surfaced"}, id="garage-and-exit-doors-8.26"),
+    pytest.param(("banter_level", "search_backend", "searxng_url",
+                  "calendar_tight_gap_min", "recognition_source"),
+                 {"surfaced"}, id="character-and-research-read-back"),
+    pytest.param(("security_alarm_entity", "lockdown_auto_on_arm",
+                  "intrusion_requires_confinement", "lockdown_exempt_locks"),
+                 {"writable", "surfaced"}, id="security-alarm"),
+    pytest.param(("notify_services",), {"writable"}, id="several-notify-targets"),
+    pytest.param(("onboarding_dismissed",), {"writable"}, id="onboarding-dismiss"),
+]
+
+# The removed 3D house (8.30.0) used these. Values already in config.json stay
+# there and are ignored, but the backend must neither accept nor report them.
+RETIRED_3D_HOUSE = ("residence_style", "floor_plan_sqft", "dormers_front",
+                    "dormers_rear", "chimney_side", "home_bedrooms", "home_bathrooms")
 
 
-def test_garage_flag_and_exit_doors_are_surfaced():
-    # 8.26.0: the panel reads these back to show or hide garage items and to
-    # list the exit doors the user picked.
-    surfaced = _panel_data_config_keys()
-    for key in ("garage_mode", "has_garage", "exit_doors", "exit_door_status",
-                "exit_door_candidates", "basement_mode", "home_features"):
-        assert key in surfaced, key
+@pytest.mark.parametrize("keys, sides", EXPECTED)
+def test_known_keys_sit_where_the_panel_needs_them(keys, sides):
+    on_side = {"writable": panel_writable_keys(), "surfaced": panel_config_keys()}
+    for side in sides:
+        absent = [k for k in keys if k not in on_side[side]]
+        assert absent == [], f"not {side}: {absent}"
 
 
-def test_multiple_notify_services_are_writable():
-    assert "notify_services" in _allowlist()
+@pytest.mark.parametrize("key", RETIRED_3D_HOUSE)
+def test_3d_house_keys_are_gone_from_both_sides(key):
+    assert key not in panel_writable_keys()
+    assert key not in panel_config_keys()
 
 
-def _panel_data_config_keys() -> set[str]:
-    """Keys surfaced in ws_get_panel_data's `config` dict. This is what the
-    panel reads back as d.config.KEY."""
-    return panel_config_keys()
+def test_the_allowlist_and_the_panel_extraction_are_both_populated():
+    assert len(panel_writable_keys()) > 0
+    assert keys_the_panel_saves(), "found no keys the panel saves; has the JS changed shape?"
 
 
-def _panel_read_cfg_keys() -> set[str]:
-    """cfg-field keys the panel reads back via d.config?.KEY — a select/input
-    that saves AND is expected to reflect its saved value on re-render."""
-    js = _PANEL_JS.read_text()
-    return set(re.findall(r"d\.config\?\.([a-z0-9_]+)", js))
+def test_whatever_the_panel_saves_the_backend_accepts():
+    rejected = sorted(keys_the_panel_saves() - panel_writable_keys())
+    assert rejected == [], (
+        f"nova/update_config would answer invalid_key for: {rejected}")
 
 
-def test_character_and_research_keys_surfaced_in_panel_data():
-    """Regression: banter_level, search_backend, searxng_url,
-    calendar_tight_gap_min, and recognition_source were SAVED but not returned
-    by get_panel_data, so their selects snapped back to defaults on re-render.
-    Pin them so this can't regress."""
-    surfaced = _panel_data_config_keys()
-    for key in ("banter_level", "search_backend", "searxng_url",
-                "calendar_tight_gap_min", "recognition_source"):
-        assert key in surfaced, (
-            f"{key} is missing from ws_get_panel_data's config block — the panel "
-            f"select will reset to its default on every re-render")
+def test_saved_and_read_back_keys_come_back_in_panel_data():
+    # Covers the whole class, not just the keys named in EXPECTED: any field
+    # that is both saved and read back must be returned, or it resets.
+    round_trip = keys_the_panel_saves() & keys_the_panel_reads_back()
+    lost = sorted(round_trip - panel_config_keys())
+    assert lost == [], f"saved and read back but never returned, so they reset: {lost}"
 
 
-def test_read_back_cfg_fields_are_surfaced():
-    """Every cfg-field the panel reads via d.config?.KEY must be surfaced in the
-    panel-data config block, or its control silently resets after saving. Guards
-    the whole bug class, not just the known keys."""
-    read = _panel_read_cfg_keys()
-    surfaced = _panel_data_config_keys()
-    # only enforce for keys that are ALSO saved as cfg-fields (round-trip fields)
-    saved = _panel_saved_keys()
-    round_trip = read & saved
-    missing = sorted(k for k in round_trip if k not in surfaced)
-    assert not missing, (
-        "these config keys are saved + read-back by the panel but not surfaced "
-        f"in get_panel_data, so they reset on re-render: {missing}")
+# ── first-run onboarding card (v6.70.0) ──────────────────────────────────
+
+def test_panel_data_carries_the_onboarding_block():
+    source = ws_text()
+    assert '"onboarding": _get_onboarding_state(' in source
+    assert "def _get_onboarding_state(" in source
 
 
-def test_onboarding_state_wired_into_panel_data():
-    # the first-run onboarding block must be present in get_panel_data (v6.70.0)
-    js = ws_text()
-    assert '"onboarding": _get_onboarding_state(' in js
-    assert "def _get_onboarding_state(" in js
+def _onboarding_step_ids() -> set[str]:
+    """The `"id"` value of every step dict built inside _get_onboarding_state."""
+    ids = set()
+    for node in ast.walk(ws_function("_get_onboarding_state")):
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if (isinstance(k, ast.Constant) and k.value == "id"
+                        and isinstance(v, ast.Constant)):
+                    ids.add(v.value)
+    return ids
 
 
-def test_onboarding_dismissed_is_writable():
-    # the dismiss button persists onboarding_dismissed via update_config
-    assert "onboarding_dismissed" in _allowlist()
-
-
-def test_security_alarm_settings_round_trip_through_panel_data():
-    allow = _allowlist()
-    surfaced = _panel_data_config_keys()
-    for key in ("security_alarm_entity", "lockdown_auto_on_arm",
-                "intrusion_requires_confinement", "lockdown_exempt_locks"):
-        assert key in allow
-        assert key in surfaced
-
-
-def test_onboarding_steps_cover_key_setup():
-    # the checklist should name the high-value post-install steps
-    js = ws_text()
-    for step_id in ('"notify"', '"cameras"', '"voice"', '"banter"'):
-        assert step_id in js, f"onboarding missing step {step_id}"
+@pytest.mark.parametrize("step", ["notify", "cameras", "voice", "banter"])
+def test_onboarding_checklist_names_the_key_setup_steps(step):
+    assert f'"{step}"' in ws_text()
+    # Stronger: the id belongs to a step of the checklist itself, not just
+    # any string that happens to match somewhere in the websocket layer.
+    assert step in _onboarding_step_ids()

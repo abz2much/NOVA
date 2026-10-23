@@ -1,9 +1,10 @@
-"""The deterministic fast-path must honor the authorization gate — v7.44.0.
+"""The local fast path obeys the same authorisation gate as the agent (v7.44.0).
 
-local_engine.try_local intercepts simple commands before the LLM. Protected
-actions (unlock, open a garage/cover) must not be a second, unguarded way to
-actuate: when confirmation is enabled they defer to the agent (which runs the
-gate + prompt); when it's off they actuate fast, exactly as the agent would.
+local_engine.try_local answers simple commands before any model is asked. It
+must never become a second, unguarded way to unlock a door, open a garage or
+run a scene: with confirmation switched on those requests go to the agent
+(which asks), and with it off they run straight away, exactly as the agent
+would run them.
 """
 from __future__ import annotations
 
@@ -15,165 +16,195 @@ import pytest
 from conftest import readable_devices
 from fakes import FakeHass
 
-
-def _hass():
-    """Locks and covers that read a state, for the live check (8.46.0)."""
-    h = FakeHass()
-    readable_devices(h, "lock.front", "cover.garage")
-    return h
-
-
-def _install_vc(monkeypatch, protected: bool):
-    """Fake voice_confirm.action_is_protected mirroring the real one: protected
-    services (unlock / open a cover) require confirmation only when enabled;
-    everything else (lights, etc.) never does. `protected` here means 'is
-    confirmation enabled'."""
-    _SENSITIVE = {("lock", "unlock"), ("cover", "open_cover"),
-                  ("cover", "open"), ("alarm_control_panel", "alarm_disarm")}
-    fake = types.ModuleType("jc.voice_confirm")
-    fake.action_is_protected = lambda hass, d, s, e="": protected and (d, s) in _SENSITIVE
-    async def _confirm(hass, q, entity_id=""):
-        return False
-    fake.confirm = _confirm
-    monkeypatch.setitem(sys.modules, "jc.voice_confirm", fake)
+# What the stand-in confirmation module treats as needing a yes.
+GUARDED_PAIRS = frozenset({
+    ("lock", "unlock"), ("cover", "open_cover"), ("cover", "open"),
+    ("alarm_control_panel", "alarm_disarm"),
+})
+SATELLITE = "satellite-kitchen"
 
 
-# ── _service_for (pure mapping) ───────────────────────────────────────────────
-def test_service_for_maps_actions(load):
-    le = load("local_engine")
-    assert le._service_for("unlock", "lock.front") == ("lock", "unlock")
-    assert le._service_for("open", "cover.garage") == ("cover", "open_cover")
-    assert le._service_for("turn_off", "light.kitchen") == ("light", "turn_off")
-    assert le._service_for("turn_on", "switch.pump") == ("switch", "turn_on")
-    assert le._service_for("media_pause", "media_player.tv") == ("media_player", "media_pause")
-    assert le._service_for("greeting", "") is None
+@pytest.fixture
+def engine(load):
+    return load("local_engine")
 
 
-# ── _needs_confirmation ───────────────────────────────────────────────────────
-def test_needs_confirmation_true_for_protected_when_enabled(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=True)
-    assert le._needs_confirmation(_hass(), "unlock", "lock.front") is True
-    assert le._needs_confirmation(_hass(), "open", "cover.garage") is True
+@pytest.fixture
+def confirmation(monkeypatch):
+    """Install a stand-in voice_confirm. Call with on=True for "confirmation
+    enabled" (guarded pairs then need a yes; nothing else ever does), or
+    broken=True for a module whose protection lookup raises."""
+
+    def _install(on: bool = True, *, broken: bool = False):
+        stand_in = types.ModuleType("jc.voice_confirm")
+
+        def action_is_protected(hass, domain, service, entity_id=""):
+            if broken:
+                raise RuntimeError("confirmation settings unreadable")
+            return on and (domain, service) in GUARDED_PAIRS
+
+        async def confirm(hass, question, entity_id=""):
+            return False
+
+        stand_in.action_is_protected = action_is_protected
+        stand_in.confirm = confirm
+        stand_in.is_voice_satellite_device = (
+            lambda hass, device_id, strict=False: device_id == SATELLITE)
+        monkeypatch.setitem(sys.modules, "jc.voice_confirm", stand_in)
+
+    return _install
 
 
-def test_needs_confirmation_false_when_disabled(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=False)
-    assert le._needs_confirmation(_hass(), "unlock", "lock.front") is False
-
-
-def test_needs_confirmation_false_for_non_actuation(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=True)      # even if "protected" says yes,
-    assert le._needs_confirmation(_hass(), "greeting", "") is False   # no service to gate
-
-
-# ── try_local end-to-end defer behavior ───────────────────────────────────────
-def _hass_with_lock():
-    h = FakeHass()
-    h.states.set("lock.front_door", "locked", friendly_name="Front Door")
-    return h
-
-
-async def test_unlock_defers_to_agent_when_confirmation_enabled(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=True)
-    h = _hass_with_lock()
-    result = await le.try_local(h, "unlock the front door", "sir")
-    assert result is None                          # deferred to the agent
-    assert h.service_calls == []                   # nothing actuated in the fast-path
-
-
-async def test_unlock_actuates_fast_when_confirmation_disabled(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=False)
-    h = _hass_with_lock()
-    result = await le.try_local(h, "unlock the front door", "sir")
-    assert result is not None and result.handled
-    assert ("lock", "unlock", {"entity_id": "lock.front_door"}) in h.service_calls
-    h.close_pending()  # accepted -> background _verify_control scheduled
-
-
-async def test_bulk_unlock_defers_when_confirmation_enabled(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=True)
-    h = _hass_with_lock()
-    result = await le.try_local(h, "unlock all doors", "sir")
-    assert result is None
-    assert h.service_calls == []
-
-
-async def test_turn_off_light_is_never_gated(load, monkeypatch):
-    le = load("local_engine")
-    _install_vc(monkeypatch, protected=True)       # confirmation on, but lights aren't protected
-    # Phase 3's fast-domain synchronous check (light/switch/fan) uses its own
-    # sleep seam -- mock it, or this real turn_off (FakeHass never flips the
-    # state) takes a real ~1s bounded poll before falling back.
-    ev = load("entity_verify")
-    async def _no_sleep(_secs):
-        pass
-    monkeypatch.setattr(ev, "_SLEEP", _no_sleep)
-
-    h = FakeHass()
-    h.states.set("light.kitchen", "on", friendly_name="Kitchen")
-    result = await le.try_local(h, "turn off the kitchen light", "sir")
-    assert result is not None and result.handled
-    assert any(c[:2] == ("light", "turn_off") for c in h.service_calls)
-    h.close_pending()  # unverified -> background _verify_control scheduled
-
-
-# ── scene/script activation via the fast path (audit fix, local_engine.py) ──
-# The fast path's own scene-activation logic (the "activate X" pattern and the
-# goodnight shortcut) called hass.services.async_call directly with no gate at
-# all -- a scene/script can unlock a door or disarm the alarm just as easily
-# as any other actuation this file already gates. _needs_confirmation_domain
-# is the fix: same policy.requires_confirmation() check, for callers that
-# already have a (domain, service) pair rather than a fast-path action name.
-
-def _hass_with_scene(entity_id="scene.welcome", friendly="Welcome"):
-    h = FakeHass()
-    h.states.set(entity_id, "scening", friendly_name=friendly)
-    return h
-
-
-async def test_scene_activation_defers_when_protected(load, monkeypatch):
-    le = load("local_engine")
+@pytest.fixture
+def scene_gate(load, monkeypatch):
+    """Answer policy.requires_confirmation with a fixed verdict."""
     policy = load("policy")
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
-    h = _hass_with_scene()
-    result = await le.try_local(h, "activate welcome scene", "sir")
-    assert result is None                          # deferred to the agent
-    assert h.service_calls == []                   # nothing actuated in the fast-path
+
+    def _set(needs_yes: bool):
+        monkeypatch.setattr(policy, "requires_confirmation",
+                            lambda hass, d, s, e="", *a, **k: needs_yes)
+
+    return _set
 
 
-async def test_scene_activation_runs_when_not_protected(load, monkeypatch):
-    le = load("local_engine")
-    policy = load("policy")
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": False)
-    h = _hass_with_scene()
-    result = await le.try_local(h, "activate welcome scene", "sir")
+def _readable_home() -> FakeHass:
+    """A lock and a cover with readable states, for the live check (8.46.0)."""
+    home = FakeHass()
+    readable_devices(home, "lock.front", "cover.garage")
+    return home
+
+
+def _home_with(entity_id: str, state: str, name: str) -> FakeHass:
+    home = FakeHass()
+    home.states.set(entity_id, state, friendly_name=name)
+    return home
+
+
+# ── which service an action name means ──────────────────────────────────────
+
+@pytest.mark.parametrize("action, entity_id, expected", [
+    ("unlock", "lock.front", ("lock", "unlock")),
+    ("open", "cover.garage", ("cover", "open_cover")),
+    ("turn_off", "light.kitchen", ("light", "turn_off")),
+    ("turn_on", "switch.pump", ("switch", "turn_on")),
+    ("toggle", "fan.bedroom", ("fan", "toggle")),
+    ("media_pause", "media_player.tv", ("media_player", "media_pause")),
+    ("media_next", "media_player.tv", ("media_player", "media_next_track")),
+    ("set_temp", "climate.hall", ("climate", "set_temperature")),
+    ("volume_set", "media_player.tv", ("media_player", "volume_set")),
+    ("greeting", "", None),
+    ("time_query", "", None),
+])
+def test_action_to_service(engine, action, entity_id, expected):
+    assert engine._service_for(action, entity_id) == expected
+
+
+# ── whether an action has to go to the agent ────────────────────────────────
+
+@pytest.mark.parametrize("enabled, action, entity_id, expected", [
+    (True, "unlock", "lock.front", True),
+    (True, "open", "cover.garage", True),
+    (False, "unlock", "lock.front", False),
+    (False, "open", "cover.garage", False),
+    (True, "greeting", "", False),          # nothing to actuate, nothing to gate
+    (True, "turn_off", "light.kitchen", False),
+])
+def test_needs_confirmation(engine, confirmation, enabled, action, entity_id, expected):
+    confirmation(on=enabled)
+    home = _readable_home()
+    home.states.set("light.kitchen", "on")
+    assert engine._needs_confirmation(home, action, entity_id) is expected
+
+
+def test_satellite_unlock_needs_confirmation_even_when_disabled(engine, confirmation):
+    # A voice can be imitated: from a satellite an unlock always defers.
+    confirmation(on=False)
+    home = _readable_home()
+    assert engine._needs_confirmation(home, "unlock", "lock.front", SATELLITE) is True
+    assert engine._needs_confirmation(home, "unlock", "lock.front", "phone-app") is False
+
+
+def test_satellite_light_command_stays_ungated(engine, confirmation):
+    confirmation(on=False)
+    home = _home_with("light.kitchen", "on", "Kitchen")
+    assert engine._needs_confirmation(home, "turn_off", "light.kitchen", SATELLITE) is False
+
+
+def test_broken_confirmation_lookup_fails_closed_for_guarded(engine, confirmation):
+    confirmation(broken=True)
+    home = _readable_home()
+    home.states.set("light.kitchen", "on")
+    assert engine._needs_confirmation(home, "unlock", "lock.front") is True
+    assert engine._needs_confirmation(home, "open", "cover.garage") is True
+    assert engine._needs_confirmation(home, "turn_off", "light.kitchen") is False
+
+
+def test_unreadable_lock_is_never_actuated_locally(engine, confirmation):
+    # No state at all for the lock: the live check refuses, so it defers.
+    confirmation(on=False)
+    assert engine._needs_confirmation(FakeHass(), "unlock", "lock.nowhere") is True
+
+
+# ── try_local end to end ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("phrase", ["unlock the front door", "unlock all doors"])
+async def test_guarded_unlock_defers_when_enabled(engine, confirmation, phrase):
+    confirmation(on=True)
+    home = _home_with("lock.front_door", "locked", "Front Door")
+    assert await engine.try_local(home, phrase, "sir") is None
+    assert home.service_calls == []
+
+
+async def test_unlock_runs_locally_when_disabled(engine, confirmation):
+    confirmation(on=False)
+    home = _home_with("lock.front_door", "locked", "Front Door")
+    result = await engine.try_local(home, "unlock the front door", "sir")
     assert result is not None and result.handled
-    assert ("scene", "turn_on", {"entity_id": "scene.welcome"}) in h.service_calls
+    assert home.service_calls == [("lock", "unlock", {"entity_id": "lock.front_door"})]
+    home.close_pending()        # the background check it scheduled is not run
 
 
-async def test_goodnight_shortcut_defers_when_protected(load, monkeypatch):
-    le = load("local_engine")
-    policy = load("policy")
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
-    h = FakeHass()
-    h.states.set("scene.goodnight", "off", friendly_name="Goodnight")
-    result = await le.try_local(h, "goodnight", "sir")
-    assert result is None
-    assert h.service_calls == []
+async def test_light_is_never_gated(engine, confirmation, load, monkeypatch):
+    confirmation(on=True)
+    # The light/switch/fan check polls through its own sleep seam; FakeHass
+    # never changes the state, so without this the poll would really wait.
+    waits: list = []
 
+    async def no_wait(seconds):
+        waits.append(seconds)
 
-async def test_goodnight_shortcut_runs_when_not_protected(load, monkeypatch):
-    le = load("local_engine")
-    policy = load("policy")
-    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": False)
-    h = FakeHass()
-    h.states.set("scene.goodnight", "off", friendly_name="Goodnight")
-    result = await le.try_local(h, "goodnight", "sir")
+    monkeypatch.setattr(load("entity_verify"), "_SLEEP", no_wait)
+    home = _home_with("light.kitchen", "on", "Kitchen")
+    result = await engine.try_local(home, "turn off the kitchen light", "sir")
     assert result is not None and result.handled
-    assert ("scene", "turn_on", {"entity_id": "scene.goodnight"}) in h.service_calls
+    assert [call[:2] for call in home.service_calls] == [("light", "turn_off")]
+    home.close_pending()
+
+
+# ── scenes, scripts and the goodnight shortcut ──────────────────────────────
+# A scene can unlock a door or disarm an alarm inside itself, so activating
+# one locally goes through the same policy check as any other actuation.
+
+SCENE_CASES = [
+    pytest.param("scene.welcome", "scening", "Welcome", "activate welcome scene", id="activate"),
+    pytest.param("scene.goodnight", "off", "Goodnight", "goodnight", id="goodnight"),
+]
+
+
+@pytest.mark.parametrize("entity_id, state, name, phrase", SCENE_CASES)
+async def test_scene_defers_when_policy_wants_a_yes(engine, scene_gate,
+                                                    entity_id, state, name, phrase):
+    scene_gate(True)
+    home = _home_with(entity_id, state, name)
+    assert await engine.try_local(home, phrase, "sir") is None
+    assert home.service_calls == []
+
+
+@pytest.mark.parametrize("entity_id, state, name, phrase", SCENE_CASES)
+async def test_scene_runs_when_policy_allows(engine, scene_gate,
+                                             entity_id, state, name, phrase):
+    scene_gate(False)
+    home = _home_with(entity_id, state, name)
+    result = await engine.try_local(home, phrase, "sir")
+    assert result is not None and result.handled
+    assert ("scene", "turn_on", {"entity_id": entity_id}) in home.service_calls

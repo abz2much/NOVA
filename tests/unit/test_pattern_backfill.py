@@ -1,9 +1,11 @@
-"""History backfill for Analyze Now — safety-critical pieces.
+"""Importing recorder history for Analyze Now without bringing the flood back.
 
-The anti-flood core (_backfill_filter_states) must keep a motion-storm history
-bounded, and the store methods must round-trip. This is what lets backfill import
-past behavior without reintroducing the flood or double-counting.
+The thinning filter must keep a month of a pulsing motion sensor small, the
+store must take imported rows with their own historical times, and the import
+must ask the recorder for exactly what live logging would have stored.
 """
+from __future__ import annotations
+
 import sqlite3
 import sys
 import types
@@ -13,94 +15,140 @@ import pytest
 
 
 @pytest.fixture
-def cc(load):
+def core(load):
     return load("cognitive_core")
 
 
-def test_motion_storm_history_is_bounded(cc):
-    # 30 days of a motion sensor pulsing every 3s, imported through the filter
-    events = [(1000.0 + i * 3.0, "on" if i % 2 else "off") for i in range(20000)]
-    kept = cc._backfill_filter_states(events, interval=300.0, cap=1000)
-    assert len(kept) <= 1000, f"backfill not capped: {len(kept)}"
-    # spacing respects the rate limit
-    for a, b in zip(kept, kept[1:]):
-        assert b[0] - a[0] >= 300.0
+# ── the thinning filter ─────────────────────────────────────────────────────
+
+def _pulsing(count, step=3.0, start=1000.0):
+    """A sensor flipping on and off every `step` seconds."""
+    return [(start + n * step, "off" if n % 2 == 0 else "on") for n in range(count)]
 
 
-def test_filter_drops_unavailable_and_nochange(cc):
-    events = [
-        (100.0, "on"), (101.0, "on"),          # no-change
-        (500.0, "unavailable"),                 # dropped
-        (900.0, "off"), (1300.0, "on"),
-    ]
-    kept = cc._backfill_filter_states(events, interval=300.0, cap=1000)
-    states = [s for _, s in kept]
-    assert "unavailable" not in states
-    assert states == ["on", "off", "on"]       # first on, then off, then on
+def test_a_month_of_motion_pulses_is_thinned_to_one_per_interval(core):
+    kept = core._backfill_filter_states(_pulsing(20000), interval=300.0, cap=1000)
+    # One every 100 pulses survives: well inside the cap.
+    assert len(kept) == 200
+    assert len(kept) <= 1000
+    assert [t for t, _ in kept] == [1000.0 + 300.0 * k for k in range(200)]
+    gaps = [later[0] - earlier[0] for earlier, later in zip(kept, kept[1:])]
+    assert min(gaps) >= 300.0
 
 
-def test_sparse_events_all_kept(cc):
-    # occupancy-style: a few events hours apart — none dropped by the rate limit
-    events = [(i * 3600.0, "on" if i % 2 == 0 else "off") for i in range(10)]
-    kept = cc._backfill_filter_states(events, interval=300.0, cap=1000)
-    assert len(kept) == 10
+def test_the_cap_keeps_the_newest_of_what_the_interval_lets_through(core):
+    kept = core._backfill_filter_states(_pulsing(20000), interval=300.0, cap=50)
+    assert len(kept) == 50
+    assert kept[0][0] == 1000.0 + 300.0 * 150
+    assert kept[-1][0] == 1000.0 + 300.0 * 199
 
 
-def test_bulk_insert_and_distinct(cc, tmp_path, monkeypatch):
-    db = str(tmp_path / "p.db")
-    # db_path injected → StateLogger builds its real schema here, never /config
-    sl = cc.StateLogger(db_path=db)
-    t = datetime(2026, 6, 1, 18, 0, 0)
-    n = sl.bulk_insert_history([
-        (t.isoformat(), "binary_sensor.bay_occupancy", "binary_sensor", "unknown", "on"),
-        ((t + timedelta(minutes=1)).isoformat(), "cover.garage", "cover", "unknown", "closed"),
+def test_unreadable_states_and_repeats_are_dropped(core):
+    history = [(100.0, "on"), (101.0, "on"), (500.0, "unavailable"),
+               (700.0, "unknown"), (900.0, "off"), (1300.0, "on")]
+    kept = core._backfill_filter_states(history, interval=300.0, cap=1000)
+    assert kept == [(100.0, "on"), (900.0, "off"), (1300.0, "on")]
+
+
+def test_occasional_changes_hours_apart_all_survive(core):
+    history = [(hour * 3600.0, "on" if hour % 2 == 0 else "off") for hour in range(10)]
+    assert core._backfill_filter_states(history, interval=300.0, cap=1000) == history
+
+
+# ── the store side ──────────────────────────────────────────────────────────
+
+@pytest.fixture
+def logger(core, tmp_path):
+    """A real StateLogger on its own file (never the real /config)."""
+    path = str(tmp_path / "patterns.db")
+    return core.StateLogger(db_path=path), path
+
+
+def test_imported_rows_carry_their_own_time_and_a_history_source(logger):
+    store, path = logger
+    evening = datetime(2026, 6, 1, 18, 0, 0)
+    added = store.bulk_insert_history([
+        (evening.isoformat(), "binary_sensor.bay_occupancy", "binary_sensor", "unknown", "on"),
+        ((evening + timedelta(minutes=1)).isoformat(), "cover.garage", "cover", "unknown", "closed"),
+        ("not a time", "light.hall", "light", "unknown", "on"),
     ])
-    assert n == 2
-    got = sl.distinct_logged_entities()
-    assert got == {"binary_sensor.bay_occupancy", "cover.garage"}
-    # hour/day_of_week derive from the historical timestamp, not now
-    conn = sqlite3.connect(db)
-    row = conn.execute("SELECT hour, triggered_by FROM state_changes "
-                       "WHERE entity_id='binary_sensor.bay_occupancy'").fetchone()
-    conn.close()
-    assert row[0] == 18 and row[1] == "history"
+    assert added == 2                   # the unreadable row is skipped
+    assert store.distinct_logged_entities() == {"binary_sensor.bay_occupancy", "cover.garage"}
+
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT entity_id, new_state, hour, day_of_week, triggered_by, person "
+            "FROM state_changes ORDER BY timestamp").fetchall()
+    # Hour and weekday come from the row, not from when the import ran.
+    assert rows == [
+        ("binary_sensor.bay_occupancy", "on", 18, evening.weekday(), "history", "unknown"),
+        ("cover.garage", "closed", 18, evening.weekday(), "history", "unknown"),
+    ]
 
 
-async def test_backfill_follows_live_logging_domain_rules(load, fake_hass, monkeypatch):
-    """8.49.37: Analyze Now imports scenes (live logging keeps them for
-    "button then scene") and imports button presses only when button
-    learning is on."""
-    core = load("cognitive_core")
-    jc = load("nova_config")
-    store = {}
-    monkeypatch.setattr(jc, "get", lambda k, d=None: store.get(k, d))
-    for eid in ("scene.evening", "event.hall_button", "light.hall", "automation.night"):
-        fake_hass.states.set(eid, "on")
-    asked = []
+def test_an_empty_import_and_an_empty_store(logger):
+    store, _path = logger
+    assert store.bulk_insert_history([]) == 0
+    assert store.distinct_logged_entities() == set()
 
-    class _Recorder:
-        async def async_add_executor_job(self, func):
-            return func()
 
-    def _states(hass, start, end, ids, **kw):
-        asked.extend(ids)
+# ── which entities the import asks the recorder for ─────────────────────────
+
+@pytest.fixture
+def asked(core, load, monkeypatch, fake_hass):
+    """Run the import against a stand-in recorder and return the ids it
+    requested. The panel settings come from `asked.settings`."""
+    requested: list = []
+    settings: dict = {}
+    monkeypatch.setattr(load("nova_config"), "get",
+                        lambda key, default=None: settings.get(key, default))
+
+    class _Instance:
+        async def async_add_executor_job(self, job):
+            return job()
+
+    def significant_states(hass, start, end, entity_ids, **options):
+        requested.extend(entity_ids)
         return {}
 
     recorder = types.ModuleType("homeassistant.components.recorder")
-    recorder.get_instance = lambda hass: _Recorder()
-    recorder.history = types.SimpleNamespace(get_significant_states=_states)
+    recorder.get_instance = lambda hass: _Instance()
+    recorder.history = types.SimpleNamespace(get_significant_states=significant_states)
     monkeypatch.setitem(sys.modules, "homeassistant.components.recorder", recorder)
+    monkeypatch.setattr(core._CORE, "state_logger", types.SimpleNamespace(
+        distinct_logged_entities=lambda: set()))
 
-    class _Logger:
-        def distinct_logged_entities(self):
-            return set()
+    async def run():
+        requested.clear()
+        await core.backfill_from_history(fake_hass)
+        return list(requested)
+    run.settings = settings
+    return run
 
-    monkeypatch.setattr(core._CORE, "state_logger", _Logger())
-    await core.backfill_from_history(fake_hass)
-    assert "scene.evening" in asked and "light.hall" in asked
-    assert "event.hall_button" not in asked and "automation.night" not in asked
 
-    store["pattern_learn_buttons"] = True
-    asked.clear()
-    await core.backfill_from_history(fake_hass)
-    assert "event.hall_button" in asked
+_HOUSE = ("scene.evening", "event.hall_button", "light.hall", "automation.night",
+          "script.bedtime", "input_boolean.guest_mode", "sensor.hall_temperature")
+
+
+async def test_the_import_follows_the_live_domain_rules(asked, fake_hass):
+    """8.49.37: scenes are imported (live logging keeps them for "button then
+    scene"); helpers and automations never are; button presses only once
+    button learning is on."""
+    for entity_id in _HOUSE:
+        fake_hass.states.set(entity_id, "on")
+
+    first = await asked()
+    assert "scene.evening" in first and "light.hall" in first
+    for never in ("event.hall_button", "automation.night", "script.bedtime",
+                  "input_boolean.guest_mode", "sensor.hall_temperature"):
+        assert never not in first, never
+
+    asked.settings["pattern_learn_buttons"] = True
+    assert "event.hall_button" in await asked()
+
+
+async def test_a_named_noisy_entity_is_imported_once_listed(asked, fake_hass):
+    fake_hass.states.set("sensor.hall_temperature", "20")
+    assert await asked() == []
+    asked.settings["pattern_include_entities"] = ["sensor.hall_temperature"]
+    assert await asked() == ["sensor.hall_temperature"]

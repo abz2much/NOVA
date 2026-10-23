@@ -1,5 +1,23 @@
-"""Localized safety-notification templates."""
+"""Safety notifications in the household's language (notify_i18n).
+
+Freeze, intrusion and lockdown alerts are filled from fixed templates rather
+than by the model, so they have to work in every language Nova ships, fall
+back to English cleanly, and never raise while an alert is being sent.
+"""
+from __future__ import annotations
+
+import re
+
 import pytest
+
+LANGUAGES = {"en", "fr", "de", "es", "it", "nl", "pt"}
+PLACEHOLDER = re.compile(r"\{(\w+)\}")
+LEAD_IN = "{honorific}, "
+
+SEVERE_FREEZE_EN = (
+    "Outdoor temperature has dropped to 18.0°F. Pipe freeze risk is severe. "
+    "I recommend opening cabinet doors near exterior walls and confirming heat "
+    "is set to at least 55°F.")
 
 
 @pytest.fixture
@@ -7,83 +25,118 @@ def i18n(load):
     return load("notify_i18n")
 
 
-def test_english_freeze_matches_original_wording(i18n):
-    msg = i18n.message("freeze_critical", "en", honorific="Sir",
-                       reading="18.0°F", set_to="55°F")
-    assert msg.startswith("Sir, outdoor temperature has dropped to 18.0°F")
-    assert "55°F" in msg
+def _both_tables(module):
+    return (("MESSAGES", module.MESSAGES), ("TITLES", module.TITLES))
 
 
-def test_french_freeze_is_french_and_filled(i18n):
-    msg = i18n.message("freeze_critical", "fr", honorific="Monsieur",
-                       reading="-10,0°C", set_to="13°C")
-    assert "température extérieure" in msg and "-10,0°C" in msg and "13°C" in msg
+# ── filled messages ──────────────────────────────────────────────────────
+
+def test_english_severe_freeze_reads_as_it_always_has(i18n):
+    text = i18n.message("freeze_critical", "en", honorific="Sir",
+                        reading="18.0°F", set_to="55°F")
+    assert text.startswith("Sir, outdoor temperature has dropped to 18.0°F")
+    assert "55°F" in text
+    assert text == "Sir, o" + SEVERE_FREEZE_EN[1:]
 
 
-def test_region_suffix_normalized(i18n):
-    assert "Außentemperatur" in i18n.message("freeze_warning", "de-DE",
-                                             honorific="Sir", reading="2°C")
+def test_french_severe_freeze_is_translated_and_filled(i18n):
+    text = i18n.message("freeze_critical", "fr", honorific="Monsieur",
+                        reading="-10,0°C", set_to="13°C")
+    for fragment in ("température extérieure", "-10,0°C", "13°C"):
+        assert fragment in text
+    assert text.startswith("Monsieur, ")
 
 
-def test_unknown_language_falls_back_to_english(i18n):
-    assert i18n.message("freeze_warning", "xx", honorific="Sir",
-                        reading="2°C").startswith("Sir, outdoor temperature")
+@pytest.mark.parametrize("lang, needle", [
+    ("de-DE", "Außentemperatur"),      # region suffix dropped
+    ("FR-ca", "température extérieure"),  # and case ignored
+])
+def test_language_tags_are_reduced_to_their_base(i18n, lang, needle):
+    assert needle in i18n.message("freeze_warning", lang, honorific="Sir", reading="2°C")
 
 
-def test_unknown_key_is_safe(i18n):
+@pytest.mark.parametrize("lang", ["xx", None, ""])
+def test_unknown_or_missing_language_gives_english(i18n, lang):
+    text = i18n.message("freeze_warning", lang, honorific="Sir", reading="2°C")
+    assert text.startswith("Sir, outdoor temperature")
+    assert text == "Sir, outdoor temperature is 2°C. I'm monitoring for pipe freeze risk."
+
+
+def test_unknown_message_key_gives_an_empty_string(i18n):
     assert i18n.message("nope", "fr", honorific="X") == ""
 
 
-def test_titles_localized_with_fallback(i18n):
-    assert i18n.title("intrusion_confirmed", "fr") == "Nova — INTRUSION"
-    assert i18n.title("lockdown", "de") == "Nova — Haus gesichert"
-    assert i18n.title("lockdown", "xx") == "Nova — House Secured"   # fallback
-    assert i18n.title("unknown_type", "fr") == "Nova"               # default
+def test_missing_parameters_fall_back_to_the_raw_english_template(i18n):
+    # Neither the French nor the English template can be filled without
+    # `reading`; message() must still return something and not raise.
+    assert i18n.message("freeze_critical", "fr") == i18n.MESSAGES["freeze_critical"]["en"]
 
 
-def test_intrusion_ctx_fragments(i18n):
-    assert i18n.message("intrusion_ctx_open", "fr", name="Front Door") == " (Front Door ouvert)"
-    assert i18n.message("intrusion_ctx_armed", "es") == " (alarma armada)"
+@pytest.mark.parametrize("key, lang, params, expected", [
+    ("intrusion_ctx_open", "fr", {"name": "Front Door"}, " (Front Door ouvert)"),
+    ("intrusion_ctx_open", "fr", {"name": "Front Door", "honorific": ""},
+     " (Front Door ouvert)"),
+    ("intrusion_ctx_armed", "es", {}, " (alarma armada)"),
+    ("intrusion_ctx_armed", "en", {}, " (alarm armed)"),
+])
+def test_intrusion_fragments_ignore_the_honorific(i18n, key, lang, params, expected):
+    # Fragments have no lead-in, so an honorific (or none) changes nothing.
+    assert i18n.message(key, lang, **params) == expected
 
 
-def test_empty_honorific_capitalizes_instead_of_stray_comma(i18n):
-    # Nobody specifically home to address (see honorific.py) -> no leading
-    # "X, " at all, but the sentence must still open with a capital letter.
-    msg = i18n.message("freeze_critical", "en", honorific="",
+@pytest.mark.parametrize("honorific", ["", "   "])
+def test_no_one_to_address_gives_a_capitalised_sentence(i18n, honorific):
+    # honorific.py passes "" when nobody in particular is home: no stray
+    # leading ", ", but the sentence still opens with a capital.
+    text = i18n.message("freeze_critical", "en", honorific=honorific,
                         reading="18.0°F", set_to="55°F")
-    assert msg == "Outdoor temperature has dropped to 18.0°F. Pipe freeze risk is severe. I recommend opening cabinet doors near exterior walls and confirming heat is set to at least 55°F."
-    assert not msg.startswith(",")
+    assert text == SEVERE_FREEZE_EN
+    assert not text.startswith(",")
 
 
-def test_empty_honorific_leaves_fragment_keys_untouched(i18n):
-    # Fragment keys (no honorific lead-in to begin with) are unaffected by
-    # the honorific param either way.
-    assert i18n.message("intrusion_ctx_open", "fr", honorific="",
-                        name="Front Door") == " (Front Door ouvert)"
+def test_honorific_defaults_to_sir(i18n):
+    text = i18n.message("freeze_warning", "en", reading="2°C")
+    assert text.startswith("Sir, outdoor temperature")
 
 
-def test_default_honorific_is_sir_when_omitted(i18n):
-    assert i18n.message("freeze_warning", "en", reading="2°C") \
-        .startswith("Sir, outdoor temperature")
+# ── titles ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("key, lang, expected", [
+    ("intrusion_confirmed", "fr", "Nova — INTRUSION"),
+    ("lockdown", "de", "Nova — Haus gesichert"),
+    ("lockdown", "DE-at", "Nova — Haus gesichert"),
+    ("lockdown", "xx", "Nova — House Secured"),     # English fallback
+    ("lockdown", None, "Nova — House Secured"),
+    ("unknown_type", "fr", "Nova"),                 # last-resort default
+])
+def test_titles(i18n, key, lang, expected):
+    assert i18n.title(key, lang) == expected
 
 
-def test_all_message_keys_cover_all_title_languages(i18n):
-    # every message/title present in English must at least exist; spot-check the
-    # 7-language coverage is symmetric so nothing silently misses a language
-    langs = {"en", "fr", "de", "es", "it", "nl", "pt"}
-    for key, table in i18n.MESSAGES.items():
-        assert set(table.keys()) == langs, f"{key} missing languages"
-    for key, table in i18n.TITLES.items():
-        assert set(table.keys()) == langs, f"title {key} missing languages"
+# ── the tables themselves ────────────────────────────────────────────────
 
-
-def test_placeholders_match_the_english_in_every_language(i18n):
-    # A translation that drops or renames a {placeholder} would print the
-    # placeholder itself in a safety alert, or lose the device name (8.15.0).
-    import re
-    ph = re.compile(r"\{(\w+)\}")
-    for table_name, table in (("MESSAGES", i18n.MESSAGES), ("TITLES", i18n.TITLES)):
+def test_every_entry_exists_in_all_seven_languages(i18n):
+    for table_name, table in _both_tables(i18n):
         for key, by_lang in table.items():
-            want = sorted(ph.findall(by_lang["en"]))
+            assert set(by_lang) == LANGUAGES, f"{table_name}[{key!r}] missing languages"
+
+
+def test_translations_keep_the_english_placeholders(i18n):
+    # A dropped or renamed {placeholder} would print literally in a safety
+    # alert, or lose the device name (8.15.0).
+    for table_name, table in _both_tables(i18n):
+        for key, by_lang in table.items():
+            wanted = sorted(PLACEHOLDER.findall(by_lang["en"]))
             for lang, text in by_lang.items():
-                assert sorted(ph.findall(text)) == want, f"{table_name}[{key!r}][{lang!r}]"
+                assert sorted(PLACEHOLDER.findall(text)) == wanted, f"{table_name}[{key!r}][{lang!r}]"
+
+
+def test_the_lead_in_is_used_the_same_way_in_every_language(i18n):
+    # message() strips "{honorific}, " only at the very start. A translation
+    # that put it elsewhere, or left it out where English has it, would show
+    # a raw placeholder or address nobody.
+    for key, by_lang in i18n.MESSAGES.items():
+        english_addresses = by_lang["en"].startswith(LEAD_IN)
+        for lang, text in by_lang.items():
+            assert text.startswith(LEAD_IN) is english_addresses, (key, lang)
+            assert "{honorific}" not in text[len(LEAD_IN):], (key, lang)

@@ -1,77 +1,111 @@
-"""Guard: every Home Assistant component the integration imports must be
-declared in the manifest's dependencies or after_dependencies (v6.73.0).
+"""manifest.json against what the code really imports (v6.73.0).
 
-This is exactly the check hassfest enforces in CI — a new import of an HA
-component (like logbook) that isn't declared fails the HACS/hassfest validation.
-Catching it here means it fails locally on `pytest` instead of after a push.
+hassfest, run by the HACS validation in CI, fails when the integration imports
+a Home Assistant component it has not listed under `dependencies` or
+`after_dependencies`. Running the same comparison here makes the mistake show
+up on a local pytest run instead of after a push.
 
-HA components that are always available and don't need declaring (the standard
-library of the platform) are allow-listed below."""
+Every .py file under the component is scanned, sub-packages included
+(agent_runtime/, automation/, cognitive/ and the rest), and imports are read
+from the syntax tree so a parenthesised multi-line import is not missed.
+"""
+from __future__ import annotations
+
+import ast
+import functools
 import json
 import pathlib
 import re
 
-COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+import pytest
 
-# Components that are core/always-present and are conventionally not required in
-# a manifest's dependency list (persistent_notification is auto-loaded, http is
-# already a hard dependency, etc.). Keep this conservative.
-_ALLOWED_UNDECLARED = {
-    "persistent_notification",  # always available, auto-set-up
-    "websocket_api",            # core API surface, always present (hassfest
-                                # does not require it in dependencies)
-}
+COMPONENT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+HA_COMPONENTS = "homeassistant.components"
 
+# Parts of Home Assistant that are always loaded and that hassfest does not
+# ask an integration to declare. Kept deliberately short.
+ALWAYS_AVAILABLE = frozenset({
+    "persistent_notification",   # set up automatically
+    "websocket_api",             # core API, never needs declaring
+})
 
-def _manifest_declared() -> set:
-    m = json.loads((COMP / "manifest.json").read_text())
-    return set(m.get("dependencies", [])) | set(m.get("after_dependencies", []))
-
-
-def _imported_components() -> set:
-    """Find every homeassistant.components.<X> referenced across the code, in
-    both import styles:
-        from homeassistant.components.<X> import ...
-        from homeassistant.components import <X>
-        import homeassistant.components.<X>
-    """
-    found: set = set()
-    pat_dotted = re.compile(r"homeassistant\.components\.([a-z_][a-z0-9_]*)")
-    # `from homeassistant.components import a, b as c, d` — capture just the
-    # imported component names (the token right after 'import', and after each
-    # comma), handling `as` aliases and stopping at end of line.
-    pat_from = re.compile(
-        r"from\s+homeassistant\.components\s+import\s+(.+)")
-    for py in COMP.glob("*.py"):
-        text = py.read_text()
-        for m in pat_dotted.finditer(text):
-            found.add(m.group(1))
-        for m in pat_from.finditer(text):
-            clause = m.group(1)
-            # strip a trailing comment, then split the import list on commas
-            clause = clause.split("#", 1)[0]
-            for piece in clause.split(","):
-                # first identifier in the piece is the component ("logbook" in
-                # "logbook as lb"); ignore the alias
-                token = piece.strip().split()[0] if piece.strip().split() else ""
-                if re.fullmatch(r"[a-z_][a-z0-9_]*", token):
-                    found.add(token)
-    return found
+# A dotted mention anywhere in the text, which also catches
+# importlib.import_module("homeassistant.components.x") style lookups.
+DOTTED_MENTION = re.compile(r"homeassistant\.components\.([a-z_][a-z0-9_]*)")
 
 
-def test_all_imported_ha_components_are_declared():
-    declared = _manifest_declared()
-    imported = _imported_components()
-    missing = sorted(c for c in imported
-                     if c not in declared and c not in _ALLOWED_UNDECLARED)
-    assert not missing, (
-        "these HA components are imported but not declared in manifest "
-        f"dependencies/after_dependencies (hassfest will fail): {missing}. "
-        "Add them to after_dependencies in manifest.json.")
+def _manifest() -> dict:
+    return json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
 
 
-def test_logbook_and_recorder_declared():
-    # the two history components activity_history depends on
-    declared = _manifest_declared()
-    assert "logbook" in declared
-    assert "recorder" in declared
+def declared() -> set[str]:
+    data = _manifest()
+    return set(data.get("dependencies", [])) | set(data.get("after_dependencies", []))
+
+
+def _sources():
+    return sorted(COMPONENT.rglob("*.py"))
+
+
+def _from_tree(source: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == HA_COMPONENTS:
+                names |= {alias.name for alias in node.names}
+            elif node.module.startswith(HA_COMPONENTS + "."):
+                names.add(node.module.split(".")[2])
+        elif isinstance(node, ast.Import):
+            names |= {alias.name.split(".")[2] for alias in node.names
+                      if alias.name.startswith(HA_COMPONENTS + ".")}
+    return names
+
+
+@functools.lru_cache(maxsize=1)
+def imported() -> dict[str, frozenset[str]]:
+    """Component name -> the files (relative to the component) that use it.
+    Parsing the whole component is slow, so the answer is kept for the run."""
+    users: dict[str, set[str]] = {}
+    for path in _sources():
+        source = path.read_text(encoding="utf-8")
+        for name in _from_tree(source) | set(DOTTED_MENTION.findall(source)):
+            users.setdefault(name, set()).add(str(path.relative_to(COMPONENT)))
+    return {name: frozenset(files) for name, files in users.items()}
+
+
+def test_every_imported_component_is_declared():
+    known = declared() | ALWAYS_AVAILABLE
+    missing = {name: sorted(files) for name, files in imported().items() if name not in known}
+    assert missing == {}, (
+        "imported but not declared in manifest dependencies/after_dependencies "
+        f"(hassfest will fail); add them to after_dependencies: {missing}")
+
+
+def test_the_scan_reaches_sub_packages():
+    # The scan must look below the top folder; recorder is imported from
+    # automation/ as well as from top level modules.
+    files = {f for users in imported().values() for f in users}
+    assert any("/" in f for f in files)
+    assert "automation/patterns.py" in imported()["recorder"]
+
+
+@pytest.mark.parametrize("component", ["logbook", "recorder"])
+def test_history_components_are_declared(component):
+    # activity_history reads both.
+    assert component in declared()
+
+
+def test_hard_dependencies_are_not_repeated_as_soft_ones():
+    data = _manifest()
+    hard = data.get("dependencies", [])
+    soft = data.get("after_dependencies", [])
+    assert len(hard) == len(set(hard)) and len(soft) == len(set(soft))
+    assert set(hard).isdisjoint(soft)
+
+
+def test_manifest_keys_follow_the_order_hassfest_wants():
+    # domain, then name, then everything else alphabetically.
+    keys = list(_manifest())
+    assert keys[:2] == ["domain", "name"]
+    assert keys[2:] == sorted(keys[2:])
+    assert _manifest()["domain"] == "nova"

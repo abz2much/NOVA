@@ -1,15 +1,21 @@
-"""Tests for verify-after-act (v6.38.0) — control actions confirm their outcome,
-retry once, and report honestly. Stubs homeassistant.helpers.llm at import."""
-import sys
-import types
+"""Verify-after-act (v6.38.0) and the honest status words around it.
+
+After a control action Nova looks again. Lights, switches and fans get a short
+synchronous poll (entity_verify); locks, covers and other domains get the
+background checker (_verify_control), which retries once and records an
+activity entry when the device still has not got there. Toggles and
+brightness are never retried automatically. Bulk control and execute_plan
+report "accepted", never "verified" or "completed", because Home Assistant
+only accepted the calls.
+"""
+from __future__ import annotations
+
+import json
 
 import pytest
 
-if "homeassistant.helpers.llm" not in sys.modules:
-    _llm = types.ModuleType("homeassistant.helpers.llm")
-    _llm.async_get_api = lambda *a, **k: None
-    sys.modules["homeassistant.helpers.llm"] = _llm
 
+# ── fixtures ────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def agent(load):
@@ -17,73 +23,119 @@ def agent(load):
 
 
 @pytest.fixture
-def fast_sleep(agent, monkeypatch):
-    calls = {"n": 0, "hook": None}
-    async def _sleep(_secs):
-        calls["n"] += 1
-        if calls["hook"]:
-            calls["hook"](calls["n"])
-    monkeypatch.setattr(agent, "_VERIFY_SLEEP", _sleep)
-    return calls
+def checker_waits(agent, monkeypatch):
+    """Replace the background checker's sleep. ``on_wait`` (if set) is called
+    with the running count, so a test can move a device mid-check."""
+    waits = {"count": 0, "on_wait": None}
+
+    async def instant(_seconds):
+        waits["count"] += 1
+        if waits["on_wait"] is not None:
+            waits["on_wait"](waits["count"])
+
+    monkeypatch.setattr(agent, "_VERIFY_SLEEP", instant)
+    return waits
+
+
+@pytest.fixture
+def poll_waits(load, monkeypatch):
+    """Replace the fast light/switch/fan poll's own sleep and count its ticks.
+    It is separate from the background checker's sleep and must be stubbed
+    on its own, or every unconfirmed poll really waits about a second."""
+    ticks = {"count": 0}
+
+    async def instant(_seconds):
+        ticks["count"] += 1
+
+    monkeypatch.setattr(load("entity_verify"), "_SLEEP", instant)
+    return ticks
 
 
 @pytest.fixture
 def activity(load, monkeypatch):
-    db = load("database")
-    sink = []
-    monkeypatch.setattr(db, "save_activity", lambda **kw: sink.append(kw))
-    return sink
+    entries: list[dict] = []
+    monkeypatch.setattr(load("database"), "save_activity",
+                        lambda **entry: entries.append(entry))
+    return entries
 
 
 @pytest.fixture
-def fast_entity_verify_sleep(load, monkeypatch):
-    """Phase 3's synchronous fast-domain check uses its OWN sleep seam
-    (entity_verify._SLEEP), separate from agent._VERIFY_SLEEP (which only
-    the existing retrying background _verify_control uses) -- must be
-    mocked separately or set_brightness/toggle tests take a real ~1s."""
-    ev = load("entity_verify")
-    calls = {"n": 0}
-    async def _sleep(_secs):
-        calls["n"] += 1
-    monkeypatch.setattr(ev, "_SLEEP", _sleep)
-    return calls
+def no_aliases(agent, monkeypatch):
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
 
 
-def _retries(fake_hass, domain, service):
-    return [c for c in fake_hass.service_calls if c[0] == domain and c[1] == service]
+# ── helpers ─────────────────────────────────────────────────────────────────
+
+def _device_reaches(hass, entity_id, state, **attributes):
+    """A services.async_call that records the call and then moves the device."""
+    async def call(domain, service, data=None, blocking=False, **kwargs):
+        hass.service_calls.append((domain, service, dict(data or {})))
+        hass.states.set(entity_id, state, **attributes)
+    return call
 
 
-async def test_persistent_failure_retries_once_and_logs(agent, fake_hass, fast_sleep, activity):
-    fake_hass.states.set("cover.garage_door", "open")   # never reaches 'closed'
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "cover.garage_door", "action": "close"})
-    assert '"success": true' in out.lower()
-    await fake_hass.drain()                            # run the verify task
-    assert len(_retries(fake_hass, "cover", "close_cover")) == 2   # act + 1 retry
+def _failing_for(hass, *offline):
+    """A services.async_call that raises for the listed entities only."""
+    async def call(domain, service, data=None, blocking=False, **kwargs):
+        if (data or {}).get("entity_id") in offline:
+            raise RuntimeError(f"{data['entity_id']} offline")
+        hass.service_calls.append((domain, service, dict(data or {})))
+    return call
+
+
+def _sent(hass, domain, service) -> int:
+    return sum(1 for call in hass.service_calls if call[:2] == (domain, service))
+
+
+async def _control(agent, hass, entity_id, action, value=None) -> dict:
+    request = {"entity_id": entity_id, "action": action}
+    if value is not None:
+        request["value"] = value
+    return json.loads(await agent._exec_control_device(hass, request))
+
+
+async def _bulk(agent, hass, domain, action) -> dict:
+    return json.loads(await agent._exec_bulk_control(hass, {"domain": domain, "action": action}))
+
+
+async def _plan(agent, hass, *entity_ids) -> dict:
+    steps = [{"domain": "light", "service": "turn_on", "entity_id": eid} for eid in entity_ids]
+    out = await agent._exec_execute_plan(hass, {"goal": "evening routine", "steps": steps})
+    return json.loads(out)
+
+
+# ── the background checker ──────────────────────────────────────────────────
+
+async def test_stuck_cover_is_retried_once_then_reported(agent, fake_hass, checker_waits,
+                                                         activity):
+    fake_hass.states.set("cover.garage_door", "open")       # never reaches closed
+    result = await _control(agent, fake_hass, "cover.garage_door", "close")
+    assert result["success"] is True
+    await fake_hass.drain()
+    assert _sent(fake_hass, "cover", "close_cover") == 2    # the act plus one retry
     assert len(activity) == 1
-    assert activity[0]["urgency"] == "medium"
-    assert "did not respond" in activity[0]["message"]
-    assert activity[0]["source"] == "agent"
+    entry = activity[0]
+    assert entry["urgency"] == "medium"
+    assert "did not respond" in entry["message"]
+    assert "state: open" in entry["message"]
+    assert entry["source"] == "agent"
 
 
-# ── verification provenance: source defaults to "agent", callers can override ──
-
-async def test_verify_control_defaults_source_to_agent(agent, fake_hass, fast_sleep, activity):
-    fake_hass.states.set("lock.front", "unlocked")   # never reaches 'locked'
+async def test_checker_attributes_to_agent_by_default(agent, fake_hass, checker_waits,
+                                                      activity):
+    fake_hass.states.set("lock.front", "unlocked")          # never reaches locked
     await agent._verify_control(
         fake_hass, "lock.front", "lock", "lock", "lock", {"entity_id": "lock.front"})
     await fake_hass.drain()
-    assert len(activity) == 1
-    assert activity[0]["source"] == "agent"
+    assert [entry["source"] for entry in activity] == ["agent"]
 
 
-async def test_verify_control_honours_explicit_source_on_success_and_failure(
-    agent, fake_hass, fast_sleep, activity,
-):
-    # retry succeeds -> the "needed a second attempt... succeeded" branch
+async def test_checker_keeps_caller_source_when_retry_works(agent, fake_hass, checker_waits,
+                                                            activity):
     fake_hass.states.set("lock.front", "unlocked")
-    fast_sleep["hook"] = (lambda n: fake_hass.states.set("lock.front", "locked")
-                          if n >= 2 else None)
+    # The lock settles during the wait after the retry (the second wait).
+    checker_waits["on_wait"] = lambda n: (
+        fake_hass.states.set("lock.front", "locked") if n >= 2 else None)
     await agent._verify_control(
         fake_hass, "lock.front", "lock", "lock", "lock",
         {"entity_id": "lock.front"}, source="local_engine")
@@ -93,324 +145,259 @@ async def test_verify_control_honours_explicit_source_on_success_and_failure(
     assert "succeeded on retry" in activity[0]["message"]
 
 
-async def test_success_first_try_is_silent(agent, fake_hass, fast_sleep, activity):
-    fake_hass.states.set("light.den", "off")
-    async def call_and_flip(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        fake_hass.states.set("light.den", "on")
-    fake_hass.services.async_call = call_and_flip
-    await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "turn_on"})
-    await fake_hass.drain()
-    assert len(_retries(fake_hass, "light", "turn_on")) == 1       # no retry
-    assert activity == []                                          # silent
-
-
-async def test_recovery_on_retry_logs_low(agent, fake_hass, fast_sleep, activity):
+async def test_lock_recovering_on_retry_is_logged_low(agent, fake_hass, checker_waits,
+                                                      activity):
     fake_hass.states.set("lock.front", "unlocked")
-    # flip to locked during the post-retry sleep (2nd sleep on this path)
-    fast_sleep["hook"] = (lambda n: fake_hass.states.set("lock.front", "locked")
-                          if n >= 2 else None)
-    await agent._exec_control_device(
-        fake_hass, {"entity_id": "lock.front", "action": "lock"})
+    checker_waits["on_wait"] = lambda n: (
+        fake_hass.states.set("lock.front", "locked") if n >= 2 else None)
+    await _control(agent, fake_hass, "lock.front", "lock")
     await fake_hass.drain()
-    assert len(_retries(fake_hass, "lock", "lock")) == 2
+    assert _sent(fake_hass, "lock", "lock") == 2
     assert len(activity) == 1 and activity[0]["urgency"] == "low"
     assert "retry" in activity[0]["message"]
 
 
-async def test_transitional_state_gets_grace_then_passes(agent, fake_hass, fast_sleep, activity):
+async def test_moving_cover_gets_a_second_look_not_a_retry(agent, fake_hass, checker_waits,
+                                                           activity):
     fake_hass.states.set("cover.garage_door", "open")
-    async def call_then_move(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        fake_hass.states.set("cover.garage_door", "closing")
-    fake_hass.services.async_call = call_then_move
-    fast_sleep["hook"] = (lambda n: fake_hass.states.set("cover.garage_door", "closed")
-                          if n >= 2 else None)
-    await agent._exec_control_device(
-        fake_hass, {"entity_id": "cover.garage_door", "action": "close"})
+    fake_hass.services.async_call = _device_reaches(fake_hass, "cover.garage_door", "closing")
+    checker_waits["on_wait"] = lambda n: (
+        fake_hass.states.set("cover.garage_door", "closed") if n >= 2 else None)
+    await _control(agent, fake_hass, "cover.garage_door", "close")
     await fake_hass.drain()
-    assert len(_retries(fake_hass, "cover", "close_cover")) == 1   # no retry needed
+    assert _sent(fake_hass, "cover", "close_cover") == 1
     assert activity == []
 
 
-async def test_set_temperature_and_volume_skip_the_retrying_background_verifier(
-    agent, fake_hass, fast_sleep,
-):
-    """set_temperature/volume_set are out of scope this phase -- they must
-    never reach the retrying background _verify_control (agent._VERIFY_SLEEP
-    stays uncalled), unlike set_brightness/toggle which now use the
-    separate, non-retrying entity_verify fast check instead (see below)."""
-    fake_hass.states.set("climate.den", "on")
-    await agent._exec_control_device(
-        fake_hass, {"entity_id": "climate.den", "action": "set_temperature", "value": 70})
-    await fake_hass.drain()
-    assert fast_sleep["n"] == 0
-
-    fake_hass.states.set("media_player.den", "on")
-    await agent._exec_control_device(
-        fake_hass, {"entity_id": "media_player.den", "action": "volume_set", "value": 40})
-    await fake_hass.drain()
-    assert fast_sleep["n"] == 0
+async def test_cover_still_moving_after_both_looks_is_retried(agent, fake_hass,
+                                                              checker_waits, activity):
+    fake_hass.states.set("cover.garage_door", "closing")    # stuck mid-travel
+    await agent._verify_control(
+        fake_hass, "cover.garage_door", "close", "cover", "close_cover",
+        {"entity_id": "cover.garage_door"})
+    assert checker_waits["count"] == 3                      # two looks, one after retry
+    assert _sent(fake_hass, "cover", "close_cover") == 1
+    assert len(activity) == 1 and activity[0]["urgency"] == "medium"
 
 
-def test_new_tools_registered(agent):
-    names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert {"schedule_followup", "manage_followups"} <= names
-    assert "schedule_followup" in agent._TOOL_MAP
-    assert "manage_followups" in agent._TOOL_MAP
+@pytest.mark.parametrize("action", ["set_temperature", "volume_set", "media_pause"])
+async def test_checker_ignores_actions_without_an_end_state(agent, fake_hass,
+                                                            checker_waits, activity, action):
+    fake_hass.states.set("climate.den", "heat")
+    await agent._verify_control(fake_hass, "climate.den", action, "climate", action,
+                                {"entity_id": "climate.den"})
+    assert checker_waits["count"] == 0
+    assert fake_hass.service_calls == [] and activity == []
 
 
-async def test_schedule_and_manage_exec_roundtrip(agent, load, fake_hass, tmp_path, monkeypatch):
-    fu = load("followups")
-    monkeypatch.setattr(fu, "DB_PATH", str(tmp_path / "p.db"))
-    out = await agent._exec_schedule_followup(
-        fake_hass, {"instruction": "check the oven", "delay_minutes": 10})
-    assert "Follow-up #1 scheduled" in out
-    listing = await agent._exec_manage_followups(fake_hass, {"action": "list"})
-    assert "check the oven" in listing
-    cancelled = await agent._exec_manage_followups(
-        fake_hass, {"action": "cancel", "followup_id": 1})
-    assert "#1 cancelled" in cancelled
+# ── control_device: what each action reports ────────────────────────────────
 
-
-# ── Phase 3: fast-domain synchronous verification ────────────────────────────
-
-def _calls(fake_hass, domain, service):
-    return [c for c in fake_hass.service_calls if c[0] == domain and c[1] == service]
-
-
-async def test_fast_domain_turn_on_verified_immediately_no_sleep(
-    agent, fake_hass, fast_entity_verify_sleep,
-):
-    """State already correct the instant after the blocking call -> verified
-    with zero sleeps (the immediate-check-before-any-sleep contract)."""
+async def test_light_that_turns_on_is_silent_and_not_retried(agent, fake_hass, checker_waits,
+                                                             activity):
     fake_hass.states.set("light.den", "off")
-    async def call_and_flip(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        fake_hass.states.set("light.den", "on")
-    fake_hass.services.async_call = call_and_flip
-
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "turn_on"})
-    assert '"status": "verified"' in out
-    assert fast_entity_verify_sleep["n"] == 0
-
-
-async def test_fast_domain_turn_on_unverified_after_bound_schedules_background(
-    agent, fake_hass, fast_entity_verify_sleep, fast_sleep, activity,
-):
-    """State never flips within the 1.0s bound -> unverified, and the
-    EXISTING retrying background _verify_control is scheduled (turn_on is
-    idempotent, safe to retry)."""
-    fake_hass.states.set("switch.pump", "off")  # never flips to "on"
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "switch.pump", "action": "turn_on"})
-    assert '"status": "unverified"' in out
-    assert fast_entity_verify_sleep["n"] == 4  # 0.25s x 4 = 1.0s bound, no more
-
+    fake_hass.services.async_call = _device_reaches(fake_hass, "light.den", "on")
+    await _control(agent, fake_hass, "light.den", "turn_on")
     await fake_hass.drain()
-    assert len(_calls(fake_hass, "switch", "turn_on")) == 2  # original + _verify_control's 1 retry
+    assert _sent(fake_hass, "light", "turn_on") == 1
+    assert activity == []
+
+
+@pytest.mark.parametrize("entity_id, action, value, sent", [
+    ("climate.den", "set_temperature", 70, ("climate", "set_temperature")),
+    ("media_player.den", "volume_set", 40, ("media_player", "volume_set")),
+], ids=["temperature", "volume"])
+async def test_temperature_and_volume_skip_the_background_checker(
+        agent, fake_hass, checker_waits, entity_id, action, value, sent):
+    # Neither has a state to check against; neither may reach the retrying checker.
+    fake_hass.states.set(entity_id, "on")
+    result = await _control(agent, fake_hass, entity_id, action, value)
+    assert result["status"] == "accepted"
+    await fake_hass.drain()
+    assert checker_waits["count"] == 0
+    assert _sent(fake_hass, *sent) == 1
+
+
+async def test_missing_temperature_is_refused_without_a_call(agent, fake_hass):
+    fake_hass.states.set("climate.den", "heat")
+    result = await _control(agent, fake_hass, "climate.den", "set_temperature")
+    assert result["status"] == "error" and result["success"] is False
+    assert fake_hass.service_calls == []
+
+
+async def test_brightness_zero_is_sent_as_zero(agent, fake_hass, poll_waits):
+    fake_hass.states.set("light.den", "on", brightness=200)
+    fake_hass.services.async_call = _device_reaches(fake_hass, "light.den", "off")
+    await _control(agent, fake_hass, "light.den", "set_brightness", 0)
+    assert fake_hass.service_calls[0] == (
+        "light", "turn_on", {"entity_id": "light.den", "brightness_pct": 0})
+    fake_hass.close_pending()
+
+
+@pytest.mark.parametrize("entity_id, action, start, end", [
+    ("light.den", "turn_on", "off", "on"),
+    ("fan.loft", "turn_off", "on", "off"),
+    ("light.den", "toggle", "off", "on"),
+])
+async def test_fast_domain_confirmed_before_any_wait(agent, fake_hass, poll_waits,
+                                                     entity_id, action, start, end):
+    fake_hass.states.set(entity_id, start)
+    fake_hass.services.async_call = _device_reaches(fake_hass, entity_id, end)
+    result = await _control(agent, fake_hass, entity_id, action)
+    assert result["status"] == "verified"
+    assert result["new_state"] == end
+    assert poll_waits["count"] == 0
+
+
+async def test_unconfirmed_switch_hands_over_to_the_checker(agent, fake_hass, poll_waits,
+                                                            checker_waits, activity):
+    fake_hass.states.set("switch.pump", "off")              # never flips
+    result = await _control(agent, fake_hass, "switch.pump", "turn_on")
+    assert result["status"] == "unverified"
+    assert poll_waits["count"] == 4                         # 4 x 0.25s = the 1s bound
+    await fake_hass.drain()
+    assert _sent(fake_hass, "switch", "turn_on") == 2       # original plus one retry
     assert len(activity) == 1
     assert activity[0]["urgency"] == "medium"
 
 
-async def test_fast_domain_gating_excludes_other_domains(
-    agent, fake_hass, fast_entity_verify_sleep, fast_sleep,
-):
-    """turn_on on a domain OTHER than light/switch/fan must never reach the
-    new synchronous check -- falls through to the existing background-only
-    path unchanged."""
+async def test_other_domains_skip_the_fast_poll(agent, fake_hass, poll_waits, checker_waits):
     fake_hass.states.set("media_player.den", "off")
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "media_player.den", "action": "turn_on"})
-    assert '"status": "accepted"' in out
-    assert fast_entity_verify_sleep["n"] == 0
-    await fake_hass.drain()  # let the background _verify_control (agent._VERIFY_SLEEP) run
-    assert fast_sleep["n"] >= 1  # the OLD background path did run for this domain
-
-
-async def test_toggle_verified_from_derived_pre_state(
-    agent, fake_hass, fast_entity_verify_sleep,
-):
-    fake_hass.states.set("light.den", "off")
-    async def call_and_flip(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        fake_hass.states.set("light.den", "on")
-    fake_hass.services.async_call = call_and_flip
-
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "toggle"})
-    assert '"status": "verified"' in out
-    assert fast_entity_verify_sleep["n"] == 0
-
-
-async def test_toggle_unverified_records_honestly_and_never_auto_retries(
-    agent, fake_hass, fast_entity_verify_sleep, fast_sleep, activity,
-):
-    fake_hass.states.set("light.den", "off")  # never flips to "on"
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "toggle"})
-    assert '"status": "unverified"' in out
-    assert fast_entity_verify_sleep["n"] == 4
-
+    result = await _control(agent, fake_hass, "media_player.den", "turn_on")
+    assert result["status"] == "accepted"
+    assert poll_waits["count"] == 0
     await fake_hass.drain()
-    assert len(_calls(fake_hass, "light", "toggle")) == 1  # exactly the original call, NO retry
-    assert fast_sleep["n"] == 0  # _verify_control (which retries) was never scheduled
+    assert checker_waits["count"] >= 1                      # the background path ran
+
+
+async def test_unconfirmed_toggle_is_recorded_and_never_repeated(
+        agent, fake_hass, poll_waits, checker_waits, activity):
+    fake_hass.states.set("light.den", "off")                # never flips
+    result = await _control(agent, fake_hass, "light.den", "toggle")
+    assert result["status"] == "unverified"
+    assert poll_waits["count"] == 4
+    await fake_hass.drain()
+    assert _sent(fake_hass, "light", "toggle") == 1
+    assert checker_waits["count"] == 0
     assert len(activity) == 1
-    assert "toggle" in activity[0]["message"]
-    assert "reverse a delayed successful action" in activity[0]["message"]
+    note = activity[0]["message"]
+    assert "toggle" in note
+    assert "reverse a delayed successful action" in note
 
 
-async def test_toggle_with_unknown_pre_state_is_accepted_no_check(
-    agent, fake_hass, fast_entity_verify_sleep,
-):
-    # entity_id with no prior state at all -> pre_state is None, can't derive
-    # an expectation. _exec_control_device requires the entity to exist
-    # (returns an error otherwise), so simulate an existing-but-unknown state.
+async def test_toggle_from_unknown_state_is_only_accepted(agent, fake_hass, poll_waits):
+    # The entity exists but its state gives no direction to expect.
     fake_hass.states.set("light.den", "unknown")
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "toggle"})
-    assert '"status": "accepted"' in out
-    assert fast_entity_verify_sleep["n"] == 0
+    result = await _control(agent, fake_hass, "light.den", "toggle")
+    assert result["status"] == "accepted"
+    assert poll_waits["count"] == 0
 
 
-async def test_set_brightness_verified_within_tolerance(
-    agent, fake_hass, fast_entity_verify_sleep,
-):
+async def test_brightness_within_tolerance_is_verified(agent, fake_hass, poll_waits):
     fake_hass.states.set("light.den", "off")
-    async def call_and_set(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        fake_hass.states.set("light.den", "on", brightness=128)  # ~50.2%
-    fake_hass.services.async_call = call_and_set
-
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "set_brightness", "value": 50})
-    assert '"status": "verified"' in out
-    assert fast_entity_verify_sleep["n"] == 0
+    fake_hass.services.async_call = _device_reaches(
+        fake_hass, "light.den", "on", brightness=128)       # about 50.2%
+    result = await _control(agent, fake_hass, "light.den", "set_brightness", 50)
+    assert result["status"] == "verified"
+    assert poll_waits["count"] == 0
 
 
-async def test_set_brightness_unverified_records_honestly_never_auto_retries(
-    agent, fake_hass, fast_entity_verify_sleep, fast_sleep, activity,
-):
-    fake_hass.states.set("light.den", "on", brightness=25)  # far from requested 80%
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "set_brightness", "value": 80})
-    assert '"status": "unverified"' in out
-    assert fast_entity_verify_sleep["n"] == 4
-
+async def test_brightness_off_target_is_recorded_and_never_repeated(
+        agent, fake_hass, poll_waits, checker_waits, activity):
+    fake_hass.states.set("light.den", "on", brightness=25)  # nowhere near 80%
+    result = await _control(agent, fake_hass, "light.den", "set_brightness", 80)
+    assert result["status"] == "unverified"
+    assert poll_waits["count"] == 4
     await fake_hass.drain()
-    assert len(_calls(fake_hass, "light", "turn_on")) == 1  # exactly the original call, no retry
-    assert fast_sleep["n"] == 0  # never sent to the retrying _verify_control
+    assert _sent(fake_hass, "light", "turn_on") == 1
+    assert checker_waits["count"] == 0
     assert len(activity) == 1
-    assert "brightness" in activity[0]["message"]
-    assert "cannot validate the requested brightness level" in activity[0]["message"]
+    note = activity[0]["message"]
+    assert "brightness" in note
+    assert "cannot validate the requested brightness level" in note
 
 
-async def test_locks_and_covers_report_accepted_not_verified(agent, fake_hass, fast_entity_verify_sleep):
+async def test_lock_reports_accepted_and_skips_the_fast_poll(agent, fake_hass, poll_waits):
     fake_hass.states.set("lock.front", "unlocked")
-    out = await agent._exec_control_device(
+    raw = await agent._exec_control_device(
         fake_hass, {"entity_id": "lock.front", "action": "lock"})
-    assert '"status": "accepted"' in out
-    assert '"status": "verified"' not in out
-    assert fast_entity_verify_sleep["n"] == 0  # locks never touch the new synchronous check
+    assert '"status": "accepted"' in raw
+    assert '"status": "verified"' not in raw
+    assert poll_waits["count"] == 0
     fake_hass.close_pending()
 
 
-async def test_error_status_on_service_exception(agent, fake_hass):
-    async def boom(*a, **k):
+async def test_service_exception_is_an_error(agent, fake_hass):
+    async def offline(*args, **kwargs):
         raise RuntimeError("device offline")
-    fake_hass.services.async_call = boom
+
+    fake_hass.services.async_call = offline
     fake_hass.states.set("light.den", "off")
-    out = await agent._exec_control_device(
-        fake_hass, {"entity_id": "light.den", "action": "turn_on"})
-    assert '"status": "error"' in out
-    assert '"success": false' in out.lower()
+    result = await _control(agent, fake_hass, "light.den", "turn_on")
+    assert result["status"] == "error"
+    assert result["success"] is False
 
 
-# ── Phase 3: bulk control ────────────────────────────────────────────────────
+@pytest.mark.parametrize("entity_id, action", [
+    ("light.missing", "turn_on"),          # no such entity
+    ("light.den", "levitate"),             # no such action
+])
+async def test_bad_request_is_an_error_with_nothing_sent(agent, fake_hass, entity_id, action):
+    fake_hass.states.set("light.den", "off")
+    result = await _control(agent, fake_hass, entity_id, action)
+    assert result["status"] == "error"
+    assert fake_hass.service_calls == []
 
-async def test_bulk_control_records_immediate_exceptions_not_swallowed(agent, fake_hass, monkeypatch):
-    fake_hass.states.set("light.a", "off")
-    fake_hass.states.set("light.b", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
 
-    calls = {"n": 0}
-    async def flaky(domain, service, data=None, blocking=False, **kw):
-        calls["n"] += 1
-        if data.get("entity_id") == "light.b":
-            raise RuntimeError("light.b offline")
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-    fake_hass.services.async_call = flaky
+# ── bulk control ────────────────────────────────────────────────────────────
 
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    import json
-    result = json.loads(out)
+async def test_bulk_lists_each_failure(agent, fake_hass, no_aliases):
+    for eid in ("light.a", "light.b"):
+        fake_hass.states.set(eid, "off")
+    fake_hass.services.async_call = _failing_for(fake_hass, "light.b")
+    result = await _bulk(agent, fake_hass, "light", "turn_on")
     assert result["count"] == 1
-    assert result["failed"] == [{"entity_id": "light.b", "error": "RuntimeError (details are in the Home Assistant log)"}]
+    assert result["failed"] == [{
+        "entity_id": "light.b",
+        "error": "RuntimeError (details are in the Home Assistant log)",
+    }]
     fake_hass.close_pending()
 
 
-async def test_bulk_control_schedules_background_verify_for_successes(
-    agent, fake_hass, monkeypatch, fast_sleep, activity,
-):
+async def test_bulk_successes_are_checked_in_the_background(agent, fake_hass, no_aliases,
+                                                           checker_waits, activity):
     fake_hass.states.set("light.a", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-
-    async def flip(domain, service, data=None, blocking=False, **kw):
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-        # never actually flips -- forces the background verifier to retry
-    fake_hass.services.async_call = flip
-
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    assert '"status": "accepted"' in out
+    fake_hass.services.async_call = _failing_for(fake_hass)  # records, never flips
+    raw = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
+    assert '"status": "accepted"' in raw
     await fake_hass.drain()
-    assert len(_calls(fake_hass, "light", "turn_on")) == 2  # original + 1 background retry
+    assert _sent(fake_hass, "light", "turn_on") == 2
     assert len(activity) == 1
 
 
-async def test_bulk_control_does_not_delay_the_response(agent, fake_hass, monkeypatch, fast_sleep):
-    """Background verify scheduling must be fire-and-forget -- the response
-    returns before any sleep happens (no drain needed for the response)."""
+async def test_bulk_replies_before_any_wait(agent, fake_hass, no_aliases, checker_waits):
     fake_hass.states.set("light.a", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-    await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    assert fast_sleep["n"] == 0  # nothing slept BEFORE the response was built
+    await _bulk(agent, fake_hass, "light", "turn_on")
+    assert checker_waits["count"] == 0                      # scheduled, not awaited
     fake_hass.close_pending()
 
 
-# ── Corrective fixes: bulk_control's success/status must never overclaim ────
-
-async def test_bulk_control_all_calls_failed_reports_error(agent, fake_hass, monkeypatch):
-    fake_hass.states.set("light.a", "off")
-    fake_hass.states.set("light.b", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-
-    async def always_fail(domain, service, data=None, blocking=False, **kw):
-        raise RuntimeError("offline")
-    fake_hass.services.async_call = always_fail
-
-    import json
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    result = json.loads(out)
+async def test_bulk_with_every_call_failing_is_an_error(agent, fake_hass, no_aliases):
+    for eid in ("light.a", "light.b"):
+        fake_hass.states.set(eid, "off")
+    fake_hass.services.async_call = _failing_for(fake_hass, "light.a", "light.b")
+    result = await _bulk(agent, fake_hass, "light", "turn_on")
     assert result["success"] is False
     assert result["status"] == "error"
     assert result["count"] == 0
     assert len(result["failed"]) == 2
 
 
-async def test_bulk_control_all_blocked_reports_awaiting_confirmation(
-    agent, fake_hass, load, monkeypatch,
-):
-    fake_hass.states.set("lock.front", "unlocked")
-    fake_hass.states.set("lock.back", "unlocked")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-    policy = load("policy")
-    monkeypatch.setattr(policy, "requires_confirmation", lambda *a, **k: True)
-
-    import json
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "lock", "action": "unlock"})
-    result = json.loads(out)
+async def test_bulk_unlock_waits_for_confirmation(agent, fake_hass, load, no_aliases,
+                                                  monkeypatch):
+    for eid in ("lock.front", "lock.back"):
+        fake_hass.states.set(eid, "unlocked")
+    monkeypatch.setattr(load("policy"), "requires_confirmation", lambda *a, **k: True)
+    result = await _bulk(agent, fake_hass, "lock", "unlock")
     assert result["success"] is False
     assert result["status"] == "awaiting_confirmation"
     assert result["blocked"] == 2
@@ -418,104 +405,80 @@ async def test_bulk_control_all_blocked_reports_awaiting_confirmation(
     assert fake_hass.service_calls == []
 
 
-async def test_bulk_control_partial_failure_mentions_counts_stays_accepted(
-    agent, fake_hass, monkeypatch,
-):
-    fake_hass.states.set("light.a", "off")
-    fake_hass.states.set("light.b", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-
-    async def flaky(domain, service, data=None, blocking=False, **kw):
-        if data.get("entity_id") == "light.b":
-            raise RuntimeError("light.b offline")
-        fake_hass.service_calls.append((domain, service, dict(data or {})))
-    fake_hass.services.async_call = flaky
-
-    import json
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    result = json.loads(out)
-    assert result["success"] is True
-    assert result["status"] == "accepted"
-    assert result["count"] == 1
+async def test_bulk_partial_failure_is_accepted_with_counts(agent, fake_hass, no_aliases):
+    for eid in ("light.a", "light.b"):
+        fake_hass.states.set(eid, "off")
+    fake_hass.services.async_call = _failing_for(fake_hass, "light.b")
+    result = await _bulk(agent, fake_hass, "light", "turn_on")
+    assert (result["success"], result["status"], result["count"]) == (True, "accepted", 1)
     assert "1 failed" in result["message"]
     fake_hass.close_pending()
 
 
-async def test_bulk_control_full_success_message_has_no_failed_or_blocked_mention(
-    agent, fake_hass, monkeypatch,
-):
-    fake_hass.states.set("light.a", "off")
-    fake_hass.states.set("light.b", "off")
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-
-    import json
-    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
-    result = json.loads(out)
-    assert result["success"] is True
-    assert result["status"] == "accepted"
-    assert result["count"] == 2
-    assert "failed" not in result["message"]
-    assert "blocked" not in result["message"]
+async def test_bulk_full_success_mentions_no_failures(agent, fake_hass, no_aliases):
+    for eid in ("light.a", "light.b"):
+        fake_hass.states.set(eid, "off")
+    result = await _bulk(agent, fake_hass, "light", "turn_on")
+    assert (result["success"], result["status"], result["count"]) == (True, "accepted", 2)
+    for word in ("failed", "blocked"):
+        assert word not in result["message"]
     fake_hass.close_pending()
 
 
-# ── Phase 3: scene/script/automation/execute_plan wording ───────────────────
+# ── scenes and plans ────────────────────────────────────────────────────────
 
-async def test_scene_script_reports_accepted_not_verified(agent, load, fake_hass, monkeypatch):
-    policy = load("policy")
-    async def _ok_gate(*a, **k):
+async def test_scene_reports_accepted(agent, load, fake_hass, monkeypatch):
+    async def allow(*args, **kwargs):
         return True, None, "not_required"
-    monkeypatch.setattr(policy, "confirm_gate", _ok_gate)
+
+    monkeypatch.setattr(load("policy"), "confirm_gate", allow)
     fake_hass.states.set("scene.movie_night", "off")
-    out = await agent._exec_run_scene_script(fake_hass, {"entity_id": "scene.movie_night"})
-    assert '"status": "accepted"' in out
-    assert '"status": "verified"' not in out
+    raw = await agent._exec_run_scene_script(fake_hass, {"entity_id": "scene.movie_night"})
+    assert '"status": "accepted"' in raw
+    assert '"status": "verified"' not in raw
 
 
-async def test_execute_plan_steps_report_accepted_not_verified(agent, fake_hass, monkeypatch):
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+async def test_plan_step_reports_accepted(agent, fake_hass, no_aliases):
     fake_hass.states.set("light.den", "off")
-    import json
-    out = await agent._exec_execute_plan(fake_hass, {
-        "goal": "evening routine",
-        "steps": [{"domain": "light", "service": "turn_on", "entity_id": "light.den"}],
-    })
-    result = json.loads(out)
+    result = await _plan(agent, fake_hass, "light.den")
     assert result["results"][0]["status"] == "accepted"
     assert result["status"] == "accepted"
 
 
-async def test_execute_plan_exception_step_reports_error(agent, fake_hass, monkeypatch):
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+async def test_plan_step_exception_is_an_error(agent, fake_hass, no_aliases):
     fake_hass.states.set("light.den", "off")
-    async def boom(*a, **k):
-        raise RuntimeError("offline")
-    fake_hass.services.async_call = boom
-    import json
-    out = await agent._exec_execute_plan(fake_hass, {
-        "goal": "evening routine",
-        "steps": [{"domain": "light", "service": "turn_on", "entity_id": "light.den"}],
-    })
-    result = json.loads(out)
+    fake_hass.services.async_call = _failing_for(fake_hass, "light.den")
+    result = await _plan(agent, fake_hass, "light.den")
     assert result["results"][0]["status"] == "error"
     assert result["status"] == "error"
 
 
-async def test_execute_plan_summary_never_claims_completion(agent, fake_hass, monkeypatch):
-    """Regression: accepted steps must never be summarised as "completed" --
-    HA accepted the service calls, it didn't confirm they finished."""
-    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
-    fake_hass.states.set("light.den", "off")
-    fake_hass.states.set("light.hall", "off")
-    import json
-    out = await agent._exec_execute_plan(fake_hass, {
-        "goal": "evening routine",
-        "steps": [
-            {"domain": "light", "service": "turn_on", "entity_id": "light.den"},
-            {"domain": "light", "service": "turn_on", "entity_id": "light.hall"},
-        ],
-    })
-    result = json.loads(out)
+async def test_plan_summary_says_sent_not_completed(agent, fake_hass, no_aliases):
+    # Home Assistant accepted the calls; nothing confirmed they finished.
+    for eid in ("light.den", "light.hall"):
+        fake_hass.states.set(eid, "off")
+    result = await _plan(agent, fake_hass, "light.den", "light.hall")
     assert result["status"] == "accepted"
     assert "completed" not in result["message"].lower()
-    assert "I've sent 2 of 2 step(s) for evening routine." == result["message"]
+    assert result["message"] == "I've sent 2 of 2 step(s) for evening routine."
+
+
+# ── follow-up tools that share this file ────────────────────────────────────
+
+def test_followup_tools_are_registered(agent):
+    names = {tool["function"]["name"] for tool in agent.NOVA_TOOLS}
+    assert {"schedule_followup", "manage_followups"} <= names
+    for name in ("schedule_followup", "manage_followups"):
+        assert name in agent._TOOL_MAP
+
+
+async def test_followup_schedule_list_cancel(agent, load, fake_hass, tmp_path, monkeypatch):
+    monkeypatch.setattr(load("followups"), "DB_PATH", str(tmp_path / "followups.db"))
+    scheduled = await agent._exec_schedule_followup(
+        fake_hass, {"instruction": "check the oven", "delay_minutes": 10})
+    assert "Follow-up #1 scheduled" in scheduled
+    listed = await agent._exec_manage_followups(fake_hass, {"action": "list"})
+    assert "check the oven" in listed
+    cancelled = await agent._exec_manage_followups(
+        fake_hass, {"action": "cancel", "followup_id": 1})
+    assert "#1 cancelled" in cancelled

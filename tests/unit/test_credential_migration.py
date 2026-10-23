@@ -1,288 +1,247 @@
-"""Tests for the shared-credential provider split (Phase 2, v7.107.0).
+"""Splitting the old shared ``api_key`` into its provider's own slot.
 
-ha_secrets.split_shared_credential migrates the legacy shared `api_key` into
-the provider-specific slot it actually belongs to. Ownership is decided by
-the saved `llm_provider`, falling back to the key's own prefix only when
-that's absent — never a guess when both are inconclusive. Write→read-back→
-verify before ever deleting the legacy value; a write or verify failure
-leaves it exactly as it was.
+ha_secrets.split_shared_credential decides the owner from the saved
+``llm_provider`` and, only when that is not one of the fixed cloud
+providers, from a prefix the key itself proves. When neither settles it,
+nothing moves and a Repair issue is raised. The new secret is written and
+read back before the shared value is removed; any failure leaves the
+shared value working exactly as before.
 """
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
-try:
-    import yaml
-except Exception:  # pragma: no cover
-    yaml = None
+SHARED = "test-shared-key"
+NO_CHANGE = {"migrated": None, "ambiguous": False, "reason": None}
 
 
 @pytest.fixture
 def hs(load):
-    return load("ha_secrets")
+    mod = load("ha_secrets")
+    mod._reset_secrets_cache()
+    yield mod
+    mod._reset_secrets_cache()
+
+
+class _Install:
+    """One install's state: the plain config (``config``), the secrets file
+    (``path``), the config keys deleted, and the Repair notes raised and
+    cleared."""
+
+    def __init__(self, hs, tmp_path):
+        self.hs, self.path = hs, tmp_path / "secrets.yaml"
+        self.config: dict = {}
+        self.deleted: list = []
+        self.repairs: list = []
+
+    def secret(self, field):
+        return self.hs.get_secret_sync(self.hs.secret_key_for(field), path=self.path)
+
+    def seed(self, text):
+        self.path.write_text(text, encoding="utf-8")
 
 
 @pytest.fixture
-def jc(load):
-    return load("nova_config")
+def install(hs, load, tmp_path, monkeypatch):
+    """A fresh install with nova_config and repair_notices replaced by
+    stand-ins, so no state is shared between tests."""
+    box = _Install(hs, tmp_path)
+    monkeypatch.setattr(hs, "SECRETS_PATH", box.path)
+    nova_config = load("nova_config")
+
+    def delete(key):
+        box.deleted.append(key)
+        box.config.pop(key, None)
+
+    monkeypatch.setattr(nova_config, "get_all", lambda: dict(box.config))
+    monkeypatch.setattr(nova_config, "delete", delete)
+    monkeypatch.setitem(sys.modules, "jc.repair_notices", types.SimpleNamespace(
+        note_credential_migration_ambiguous=lambda hass: box.repairs.append(("note", hass)),
+        clear_credential_migration_ambiguous=lambda hass: box.repairs.append(("clear", hass)),
+    ))
+    return box
 
 
-# ── strict key-prefix detection ───────────────────────────────────────────────
+# ── which provider a key's prefix proves ───────────────────────────────────
 
-@pytest.mark.parametrize("key,expected", [
+@pytest.mark.parametrize("key, expected", [
     ("sk-ant-abc123", "anthropic"),
     ("gsk_abc123", "groq"),
     ("AIzaSyAbc123", "gemini"),
     ("sk-abc123", "openai"),
+    ("  sk-ant-padded  ", "anthropic"),
     ("", None),
+    (None, None),
     ("totally-unrecognized-shape", None),
     ("Bearer sometoken", None),
 ])
-def test_detect_provider_from_key_strict(hs, key, expected):
+def test_prefix_detection_never_guesses(hs, key, expected):
     assert hs._detect_provider_from_key_strict(key) == expected
 
 
-# ── saved-provider-driven migration ───────────────────────────────────────────
+# ── moving the key ─────────────────────────────────────────────────────────
 
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
 @pytest.mark.parametrize("provider", ["groq", "openai", "anthropic", "gemini"])
-async def test_migrates_using_saved_provider(hs, jc, fake_hass, tmp_path, monkeypatch, provider):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "SHARED-KEY", "llm_provider": provider})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["migrated"] == provider
-    assert deleted == ["api_key"]
-    assert hs.get_secret_sync(hs.secret_key_for(f"{provider}_api_key"), path=p) == "SHARED-KEY"
+async def test_the_saved_provider_receives_the_key(install, fake_hass, provider):
+    install.config.update(api_key=SHARED, llm_provider=provider)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result == {"migrated": provider, "ambiguous": False, "reason": None}
+    assert install.deleted == ["api_key"]
+    assert install.secret(f"{provider}_api_key") == SHARED
+    assert install.repairs == [("clear", fake_hass)]
 
 
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_migrates_using_key_prefix_when_no_saved_provider(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "sk-ant-realanthropickey"})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
+async def test_the_saved_provider_is_matched_ignoring_case_and_spaces(install, fake_hass):
+    install.config.update(api_key=SHARED, llm_provider="  Groq ")
+    assert (await install.hs.split_shared_credential(fake_hass))["migrated"] == "groq"
+    assert install.secret("groq_api_key") == SHARED
 
-    result = await hs.split_shared_credential(fake_hass)
 
+async def test_without_a_saved_provider_the_prefix_decides(install, fake_hass):
+    install.config["api_key"] = "sk-ant-test-key"
+    result = await install.hs.split_shared_credential(fake_hass)
     assert result["migrated"] == "anthropic"
-    assert deleted == ["api_key"]
-    assert hs.get_secret_sync(hs.secret_key_for("anthropic_api_key"), path=p) == "sk-ant-realanthropickey"
+    assert install.deleted == ["api_key"]
+    assert install.secret("anthropic_api_key") == "sk-ant-test-key"
 
 
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_saved_provider_wins_over_key_prefix(hs, jc, fake_hass, tmp_path, monkeypatch):
-    """An OpenAI-shaped key but llm_provider says anthropic -> the saved
-    provider is trusted (the installation already told Nova what this key
-    is for); the key's own shape is only a fallback for when that's absent."""
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "sk-looks-like-openai", "llm_provider": "anthropic"})
-    monkeypatch.setattr(jc, "delete", lambda k: None)
-
-    result = await hs.split_shared_credential(fake_hass)
-
+async def test_the_saved_provider_beats_the_key_shape(install, fake_hass):
+    # The install already said what the key is for; the prefix is a fallback.
+    install.config.update(api_key="sk-looks-like-openai", llm_provider="anthropic")
+    result = await install.hs.split_shared_credential(fake_hass)
     assert result["migrated"] == "anthropic"
-    assert hs.get_secret_sync(hs.secret_key_for("anthropic_api_key"), path=p) == "sk-looks-like-openai"
-    assert hs.get_secret_sync(hs.secret_key_for("openai_api_key"), path=p) in (None, "")
+    assert install.secret("anthropic_api_key") == "sk-looks-like-openai"
+    assert install.secret("openai_api_key") in (None, "")
 
 
-# ── ambiguity — never guess, never delete ─────────────────────────────────────
-
-async def test_ambiguous_key_is_left_untouched(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "unrecognized-shape-key"})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["ambiguous"] is True
-    assert result["migrated"] is None
-    assert deleted == []
-    assert not p.exists() or hs.get_secret_sync(hs.secret_key_for("groq_api_key"), path=p) in (None, "")
-
-
-async def test_ambiguous_key_raises_repair_issue(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "unrecognized-shape"})
-    monkeypatch.setattr(jc, "delete", lambda k: None)
-
-    calls = []
-    from types import ModuleType
-    import sys as _sys
-    fake_rn = ModuleType("jc.repair_notices")
-    fake_rn.note_credential_migration_ambiguous = lambda hass: calls.append(hass)
-    fake_rn.clear_credential_migration_ambiguous = lambda hass: None
-    monkeypatch.setitem(_sys.modules, "jc.repair_notices", fake_rn)
-
-    await hs.split_shared_credential(fake_hass)
-    assert calls == [fake_hass]
-
-
-# ── never overwrite an existing provider-specific credential ─────────────────
-
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_never_overwrites_existing_provider_secret(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    p.write_text('nova_groq_api_key: "ALREADY-THERE"\n')
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "SHARED-KEY", "llm_provider": "groq"})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["migrated"] == "already_present"
-    assert deleted == []
-    assert hs.get_secret_sync(hs.secret_key_for("groq_api_key"), path=p) == "ALREADY-THERE"
-
-
-async def test_never_overwrites_existing_plaintext_provider_key(hs, jc, fake_hass, tmp_path, monkeypatch):
-    monkeypatch.setattr(hs, "SECRETS_PATH", tmp_path / "secrets.yaml")
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {
-        "api_key": "SHARED-KEY", "llm_provider": "openai", "openai_api_key": "EXISTING-PLAINTEXT",
-    })
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["migrated"] == "already_present"
-    assert deleted == []
-
-
-# ── nothing to migrate ────────────────────────────────────────────────────────
-
-async def test_no_shared_key_is_a_noop(hs, jc, fake_hass, tmp_path, monkeypatch):
-    monkeypatch.setattr(hs, "SECRETS_PATH", tmp_path / "secrets.yaml")
-    monkeypatch.setattr(jc, "get_all", lambda: {"llm_provider": "groq"})
-    result = await hs.split_shared_credential(fake_hass)
-    assert result == {"migrated": None, "ambiguous": False, "reason": None}
-
-
-# ── write / verify failure leaves the legacy value working ───────────────────
-
-async def test_write_failure_leaves_legacy_value_in_place(hs, jc, fake_hass, tmp_path, monkeypatch):
-    monkeypatch.setattr(hs, "SECRETS_PATH", tmp_path / "secrets.yaml")
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "SHARED-KEY", "llm_provider": "groq"})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-    monkeypatch.setattr(hs, "set_secret_sync", lambda k, v, path=None: False)
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["reason"] == "write_failed"
-    assert deleted == []
-
-
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_verify_failure_leaves_legacy_value_in_place(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "SHARED-KEY", "llm_provider": "groq"})
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    real_get = hs.get_secret_sync
-    calls = {"n": 0}
-
-    def _flaky_read(key, default=None, path=None):
-        # 1st call: the "does a credential already exist" pre-write check
-        # (must see nothing, so migration proceeds to write). 2nd call: the
-        # post-write verify — simulate a corrupt write by returning the
-        # wrong value here only.
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return real_get(key, default, path)
-        return "WRONG-VALUE"
-
-    monkeypatch.setattr(hs, "get_secret_sync", _flaky_read)
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["reason"] == "verify_failed"
-    assert deleted == []
-
-
-# ── idempotency ────────────────────────────────────────────────────────────────
-
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_idempotent_second_run_is_a_noop(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    state = {"api_key": "SHARED-KEY", "llm_provider": "groq"}
-    monkeypatch.setattr(jc, "get_all", lambda: dict(state))
-
-    def _delete(k):
-        state.pop(k, None)
-    monkeypatch.setattr(jc, "delete", _delete)
-
-    first = await hs.split_shared_credential(fake_hass)
-    assert first["migrated"] == "groq"
-
-    second = await hs.split_shared_credential(fake_hass)
-    assert second == {"migrated": None, "ambiguous": False, "reason": None}
-
-
-# ── legacy groq_api_key alias handled safely ──────────────────────────────────
-
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_existing_groq_api_key_alias_is_not_duplicated_or_lost(hs, jc, fake_hass, tmp_path, monkeypatch):
-    """An install that already has a `groq_api_key` (the pre-Phase-2 alias,
-    already sitting under the exact name Phase 2 also uses as groq's own
-    slot) must never be overwritten or duplicated by the shared-key split."""
-    p = tmp_path / "secrets.yaml"
-    p.write_text('nova_groq_api_key: "ALIAS-KEY"\n')
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    deleted = []
-    monkeypatch.setattr(jc, "get_all", lambda: {
-        "api_key": "SOME-OTHER-SHARED-KEY", "llm_provider": "groq", "groq_api_key": "",
-    })
-    monkeypatch.setattr(jc, "delete", lambda k: deleted.append(k))
-
-    result = await hs.split_shared_credential(fake_hass)
-
-    assert result["migrated"] == "already_present"
-    assert hs.get_secret_sync(hs.secret_key_for("groq_api_key"), path=p) == "ALIAS-KEY"
-    assert deleted == []
-
-
-# ── Gemini credential preserved untouched ─────────────────────────────────────
-
-@pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")
-async def test_gemini_credential_is_never_touched_by_the_split(hs, jc, fake_hass, tmp_path, monkeypatch):
-    p = tmp_path / "secrets.yaml"
-    p.write_text('nova_gemini_api_key: "GEMINI-SECRET"\n')
-    monkeypatch.setattr(hs, "SECRETS_PATH", p)
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "GROQ-SHARED-KEY", "llm_provider": "groq"})
-    monkeypatch.setattr(jc, "delete", lambda k: None)
-
-    result = await hs.split_shared_credential(fake_hass)
-
+async def test_a_shared_key_already_in_secrets_moves_and_its_old_line_goes(install, fake_hass):
+    install.seed('nova_api_key: "gsk_test-key"\n# keep me\nother: "x"\n')
+    result = await install.hs.split_shared_credential(fake_hass)
     assert result["migrated"] == "groq"
-    assert hs.get_secret_sync(hs.secret_key_for("gemini_api_key"), path=p) == "GEMINI-SECRET"
+    assert install.secret("groq_api_key") == "gsk_test-key"
+    assert install.secret("api_key") is None
+    text = install.path.read_text(encoding="utf-8")
+    assert "nova_api_key:" not in text
+    assert "# keep me" in text and 'other: "x"' in text
 
 
-# ── custom / ollama are never targets of the shared-key split ────────────────
+async def test_other_providers_keys_are_left_alone(install, fake_hass):
+    install.seed('nova_gemini_api_key: "test-gemini-key"\n')
+    install.config.update(api_key="test-groq-shared", llm_provider="groq")
+    assert (await install.hs.split_shared_credential(fake_hass))["migrated"] == "groq"
+    assert install.secret("gemini_api_key") == "test-gemini-key"
 
-async def test_custom_and_ollama_are_never_legacy_fallback_targets(hs, jc, fake_hass, tmp_path, monkeypatch):
-    """llm_provider = custom/ollama isn't a fixed cloud endpoint Nova can
-    prove the shared key belongs to — falls through to key-prefix detection,
-    which (for an unrecognized custom-endpoint token) stays ambiguous rather
-    than guessing."""
-    monkeypatch.setattr(hs, "SECRETS_PATH", tmp_path / "secrets.yaml")
-    monkeypatch.setattr(jc, "get_all", lambda: {"api_key": "custom-token-xyz", "llm_provider": "custom"})
-    monkeypatch.setattr(jc, "delete", lambda k: None)
 
-    result = await hs.split_shared_credential(fake_hass)
+# ── when the owner cannot be proved: nothing moves ─────────────────────────
 
-    assert result["ambiguous"] is True
-    assert result["migrated"] is None
+@pytest.mark.parametrize("config", [
+    {"api_key": "unrecognized-shape-key"},
+    # custom and ollama are self hosted, so never a fallback target; their
+    # tokens rarely have a provable prefix either.
+    {"api_key": "custom-token-xyz", "llm_provider": "custom"},
+    {"api_key": "ollama-proxy-token", "llm_provider": "ollama"},
+], ids=["no_provider", "custom", "ollama"])
+async def test_an_unprovable_owner_moves_nothing_and_raises_a_repair(install, fake_hass, config):
+    install.config.update(config)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result == {"migrated": None, "ambiguous": True,
+                      "reason": "unrecognized key shape and no saved llm_provider"}
+    assert install.deleted == []
+    assert install.repairs == [("note", fake_hass)]
+    assert not install.path.exists()        # nothing written anywhere
+
+
+# ── a provider key that already exists is never overwritten ────────────────
+
+@pytest.mark.parametrize("seed, config_extra", [
+    ('nova_groq_api_key: "test-existing"\n', {}),
+    # An older install may already hold groq_api_key, under the very name
+    # groq's own slot uses, with a blank plain copy beside it.
+    ('nova_groq_api_key: "test-existing"\n', {"groq_api_key": ""}),
+], ids=["in_secrets", "alias_with_blank_plain_copy"])
+async def test_an_existing_secret_is_kept(install, fake_hass, seed, config_extra):
+    install.seed(seed)
+    install.config.update(api_key="test-other-shared", llm_provider="groq", **config_extra)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result == {"migrated": "already_present", "ambiguous": False, "reason": None}
+    assert install.deleted == []
+    assert install.secret("groq_api_key") == "test-existing"
+
+
+async def test_an_existing_plain_provider_key_is_kept(install, fake_hass):
+    install.config.update(api_key=SHARED, llm_provider="openai",
+                          openai_api_key="test-existing-plain")
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result["migrated"] == "already_present"
+    assert install.deleted == []
+    assert install.secret("openai_api_key") is None      # nothing written
+
+
+# ── nothing to do ──────────────────────────────────────────────────────────
+
+async def test_no_shared_key_changes_nothing(install, fake_hass):
+    install.config["llm_provider"] = "groq"
+    assert await install.hs.split_shared_credential(fake_hass) == NO_CHANGE
+    assert install.repairs == [] and install.deleted == []
+
+
+async def test_an_unreadable_config_changes_nothing(install, fake_hass, load, monkeypatch):
+    def broken():
+        raise OSError("config.json unreadable")
+    monkeypatch.setattr(load("nova_config"), "get_all", broken)
+    assert await install.hs.split_shared_credential(fake_hass) == NO_CHANGE
+
+
+async def test_a_second_run_is_a_no_op(install, fake_hass):
+    install.config.update(api_key=SHARED, llm_provider="groq")
+    assert (await install.hs.split_shared_credential(fake_hass))["migrated"] == "groq"
+    assert await install.hs.split_shared_credential(fake_hass) == NO_CHANGE
+    assert install.deleted == ["api_key"]
+    assert install.secret("groq_api_key") == SHARED
+
+
+# ── failures leave the shared key working ──────────────────────────────────
+
+async def test_a_failed_write_keeps_the_shared_key(install, fake_hass, monkeypatch):
+    install.config.update(api_key=SHARED, llm_provider="groq")
+    monkeypatch.setattr(install.hs, "set_secret_sync", lambda key, value, path=None: False)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result == {"migrated": None, "ambiguous": False, "reason": "write_failed"}
+    assert install.deleted == []
+    assert install.config["api_key"] == SHARED
+
+
+async def test_a_read_back_that_differs_keeps_the_shared_key(install, fake_hass, monkeypatch):
+    install.config.update(api_key=SHARED, llm_provider="groq")
+    real_get = install.hs.get_secret_sync
+    lookups = []
+
+    def corrupt_after_write(key, default=None, path=None):
+        # The first lookup is "is there a groq key already?" and must see
+        # none; the second is the read back after the write.
+        lookups.append(key)
+        return real_get(key, default, path) if len(lookups) == 1 else "test-wrong-value"
+
+    monkeypatch.setattr(install.hs, "get_secret_sync", corrupt_after_write)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result["reason"] == "verify_failed" and result["migrated"] is None
+    assert install.deleted == []
+    assert lookups == ["nova_groq_api_key", "nova_groq_api_key"]
+
+
+async def test_an_error_while_removing_the_old_copy_is_reported(install, fake_hass, load,
+                                                               monkeypatch):
+    install.config.update(api_key=SHARED, llm_provider="groq")
+
+    def broken_delete(key):
+        raise OSError("config.json read only")
+    monkeypatch.setattr(load("nova_config"), "delete", broken_delete)
+    result = await install.hs.split_shared_credential(fake_hass)
+    assert result == {"migrated": None, "ambiguous": False, "reason": "error"}
+    # The new secret is in place, and the shared one still works too.
+    assert install.secret("groq_api_key") == SHARED
+    assert install.config["api_key"] == SHARED
+    assert install.repairs == []
