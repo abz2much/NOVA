@@ -284,3 +284,60 @@ def test_register_failures_are_contained(vr, load, monkeypatch, fake_hass):
     monkeypatch.setattr(load("identity"), "register_voice_provider", boom)
     vr.register(fake_hass)
     vr.unregister()
+
+
+# characterisation (8.66): pinned before the rewrite of this module
+
+def test_not_a_number_score_clamps_high(vr, fake_hass):
+    vr.settings["voice_recognition_source"] = "sensor.speaker"
+    sensor(fake_hass, "sensor.speaker", "Robin", confidence="nan")
+    assert vr.identify(fake_hass) == {"Robin": 1.0}
+
+
+def test_device_id_does_not_change_the_answer(vr, fake_hass):
+    vr.settings["voice_recognition_source"] = "sensor.speaker"
+    sensor(fake_hass, "sensor.speaker", "Robin", score=0.6)
+    assert vr.identify(fake_hass, "sat1") == vr.identify(fake_hass) == {"Robin": 0.6}
+
+
+def test_glob_ignores_other_domains(vr, fake_hass):
+    vr.settings["voice_recognition_source"] = "*_voice"
+    sensor(fake_hass, "sensor.robin_voice", "on")
+    sensor(fake_hass, "binary_sensor.casey_voice", "on")
+    assert vr.identify(fake_hass) == {"casey": 0.85}
+
+
+def test_enrol_event_log_lines(vr, fake_hass, who, monkeypatch, caplog):
+    import logging
+    _enabled(vr)
+    caplog.set_level(logging.DEBUG, logger=vr.__name__)
+    vr.maybe_fire_enrollment(fake_hass)
+    assert ("INFO", "Voice enrolment candidate: Robin") in [
+        (r.levelname, r.getMessage()) for r in caplog.records]
+
+    def boom(*a, **k):
+        raise RuntimeError("bus closed")
+    monkeypatch.setattr(fake_hass.bus, "async_fire", boom)
+    vr._last_enroll_fire.clear()
+    caplog.clear()
+    vr.maybe_fire_enrollment(fake_hass)
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("DEBUG", "Voice enrolment event failed: bus closed")]
+
+
+def test_register_log_lines(vr, load, monkeypatch, fake_hass, caplog):
+    import logging
+    ident = load("identity")
+    caplog.set_level(logging.DEBUG, logger=vr.__name__)
+    monkeypatch.setattr(ident, "register_voice_provider", lambda fn: None)
+    vr.register(fake_hass)
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("DEBUG", "Voice recognition provider registered")]
+
+    def boom(fn):
+        raise RuntimeError("identity not ready")
+    monkeypatch.setattr(ident, "register_voice_provider", boom)
+    caplog.clear()
+    vr.register(fake_hass)
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("WARNING", "Voice recognition provider not registered: identity not ready")]
