@@ -1,3 +1,11 @@
+## [8.66.0] No false error from the appliance monitor when Nova stops
+
+### Fixed
+- **No false error in the Home Assistant log.** If you saved your appliances in the Energy tab and the monitor then had nothing to watch, the next time Nova was reloaded with the Observer on, Home Assistant logged "Unable to remove unknown job listener" with a traceback. Appliance monitoring itself was not affected. The monitor now forgets a listener once it has removed it, so the error no longer appears.
+
+### Changed
+- **Nothing you will notice.** Five more files were rewritten so Nova no longer carries code copied from the project it was forked from. Voice recognition, cameras, alerts, appliance monitoring and offline decisions work exactly as before.
+
 ## [8.65.2] Copied code removed from eighteen more files
 
 ### Changed
