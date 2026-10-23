@@ -1,90 +1,100 @@
-"""Hand-rolled fakes for unit-testing Nova modules without a Home Assistant
-runtime. These implement only the narrow surface the modules under test actually
-call — keeping them fast, deterministic, and easy to keep faithful.
+"""Small stand-ins for the parts of Home Assistant that Nova's modules touch.
 
-Pure Python; no Home Assistant import required.
+Each fake covers only what the code under test calls, so unit tests stay
+quick and give the same result every run. Nothing here imports Home
+Assistant.
 """
 from __future__ import annotations
 
 import types
 from datetime import datetime, timezone
 
+_DEFAULT_REPLY = '{"speak": false, "reason": "routine"}'
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _no_op() -> None:
+    return None
+
 
 class FakeState:
-    """Mirrors the handful of attributes the cores read off a hass state.
+    """One entity's state as Nova reads it.
 
-    last_changed/last_updated default to "now" (like real HA setting a
-    state for the first time) so existing tests that never pass them keep
-    working unchanged; a test that cares about staleness passes an explicit
-    value (see host_health tests)."""
+    With no times given, last_changed and last_updated are the moment the
+    state was made, as when Home Assistant first sets a state. Tests about
+    staleness pass their own times."""
+
     __slots__ = ("entity_id", "state", "attributes", "last_changed", "last_updated")
 
     def __init__(self, entity_id: str, state, attributes: dict | None = None,
                  last_changed=None, last_updated=None):
-        self.entity_id = entity_id
-        self.state = state
+        made_at = _utc_now()
+        self.entity_id, self.state = entity_id, state
         self.attributes = attributes or {}
-        now = datetime.now(timezone.utc)
-        self.last_changed = last_changed or now
-        self.last_updated = last_updated or last_changed or now
+        self.last_changed = last_changed or made_at
+        self.last_updated = last_updated or last_changed or made_at
 
-    def __repr__(self):  # pragma: no cover - debugging aid
+    def __repr__(self):  # pragma: no cover - only for reading test failures
         return f"<FakeState {self.entity_id}={self.state!r} {self.attributes}>"
 
 
 class FakeStates:
-    """Implements the slice of hass.states the cores use: set/get/remove and
-    async_all(domain) with the same domain-prefix semantics as Home Assistant."""
+    """hass.states: set, get, remove, and async_all filtered by domain the
+    way Home Assistant does it (by the "domain." prefix)."""
 
     def __init__(self):
         self._d: dict[str, FakeState] = {}
 
+    def _store(self, state: FakeState) -> FakeState:
+        self._d[state.entity_id] = state
+        return state
+
     def set(self, entity_id: str, state, last_changed=None, last_updated=None,
             **attributes) -> FakeState:
-        st = FakeState(entity_id, state, attributes,
-                       last_changed=last_changed, last_updated=last_updated)
-        self._d[entity_id] = st
-        return st
+        """Test helper: attributes as keyword arguments."""
+        return self._store(FakeState(entity_id, state, attributes,
+                                     last_changed=last_changed, last_updated=last_updated))
 
     def async_set(self, entity_id: str, state, attributes: dict | None = None,
                   last_changed=None, last_updated=None) -> FakeState:
-        """Same shape as real HA's hass.states.async_set(entity_id, state,
-        attributes_dict) — a dict, not **kwargs, so callers that build the
-        attributes dict themselves (camera_semantic.py) work unchanged."""
-        st = FakeState(entity_id, state, dict(attributes or {}),
-                       last_changed=last_changed, last_updated=last_updated)
-        self._d[entity_id] = st
-        return st
+        """Home Assistant's own signature: attributes as one dict, copied so
+        the caller's dict can change afterwards."""
+        return self._store(FakeState(entity_id, state, dict(attributes or {}),
+                                     last_changed=last_changed, last_updated=last_updated))
 
-    def remove(self, entity_id: str) -> None:
-        self._d.pop(entity_id, None)
+    def remove(self, entity_id) -> None:
+        if entity_id in self._d:
+            del self._d[entity_id]
 
-    def get(self, entity_id: str):
-        return self._d.get(entity_id)
+    def get(self, entity_id):
+        """The state, or None for an unknown entity."""
+        return self._d.get(entity_id, None)
 
-    def async_all(self, domain: str | None = None):
-        values = list(self._d.values())
-        if domain is None:
-            return values
-        prefix = domain + "."
-        return [s for s in values if s.entity_id.startswith(prefix)]
+    def async_all(self, domain=None):
+        prefix = "" if domain is None else f"{domain}."
+        return [st for eid, st in self._d.items() if eid.startswith(prefix)]
 
 
 class _Services:
-    def __init__(self, sink: list):
-        self._sink = sink
-        self._registered: dict = {}   # domain -> {service_name: None}
+    """hass.services. Calls are written to a shared list, never run, so a
+    test can check that Nova asked for something without any device."""
 
-    async def async_call(self, domain, service, data=None, blocking=False, **kwargs):
-        # Record the intent instead of executing it, so tests can assert
-        # "Nova tried to lock the door" without touching real devices.
-        self._sink.append((domain, service, dict(data or {})))
+    def __init__(self, sink: list) -> None:
+        self._sink, self._registered = sink, {}   # domain -> {service name: None}
 
-    def register(self, domain: str, service: str) -> None:
-        """Test helper: register a service so async_services() lists it."""
-        self._registered.setdefault(domain, {})[service] = None
+    async def async_call(self, domain, service, data=None, blocking=False,
+                         **kwargs) -> None:
+        self._sink.append((domain, service, {**(data or {})}))
+
+    def register(self, domain, service) -> None:
+        """Test helper: make async_services() and has_service() list it."""
+        self._registered.setdefault(domain, {}).update({service: None})
 
     def async_services(self) -> dict:
+        """Every registered service, by domain."""
         return self._registered
 
     def has_service(self, domain: str, service: str) -> bool:
@@ -92,33 +102,25 @@ class _Services:
 
 
 class FakeRegistryEntry:
-    """Mirrors the handful of homeassistant.helpers.entity_registry.RegistryEntry
-    fields host_health.py (and anything else doing integration-ownership-based
-    discovery) actually reads."""
+    """The entity registry entry fields Nova reads when it finds entities
+    by the integration that owns them (host_health.py and others)."""
+
     __slots__ = ("entity_id", "platform", "unique_id", "translation_key",
-                "disabled_by", "device_id", "area_id",
-                "original_unit_of_measurement", "original_state_class")
+                 "disabled_by", "device_id", "area_id",
+                 "original_unit_of_measurement", "original_state_class")
 
     def __init__(self, entity_id: str, platform: str, unique_id: str = "",
-                translation_key: str | None = None, disabled_by=None,
-                device_id: str | None = None, area_id: str | None = None,
-                original_unit_of_measurement: str | None = None,
-                original_state_class: str | None = None):
-        self.entity_id = entity_id
-        self.platform = platform
-        self.unique_id = unique_id
-        self.translation_key = translation_key
-        self.disabled_by = disabled_by
-        self.device_id = device_id
-        self.area_id = area_id
-        self.original_unit_of_measurement = original_unit_of_measurement
-        self.original_state_class = original_state_class
+                 translation_key: str | None = None, disabled_by=None,
+                 device_id: str | None = None, area_id: str | None = None,
+                 original_unit_of_measurement: str | None = None,
+                 original_state_class: str | None = None):
+        given = dict(locals())
+        for field in self.__slots__:
+            setattr(self, field, given[field])
 
 
 class FakeEntityRegistry:
-    """Mirrors the slice of homeassistant.helpers.entity_registry.EntityRegistry
-    used for platform-ownership discovery: entities (dict-like, .values()
-    iterable) and async_get(entity_id)."""
+    """The entity registry: an `entities` mapping and async_get()."""
 
     def __init__(self):
         self.entities: dict[str, FakeRegistryEntry] = {}
@@ -132,120 +134,122 @@ class FakeEntityRegistry:
 
 
 class _Bus:
-    def __init__(self):
-        self.fired: list = []   # (event_type, data) recorded for assertions
+    """hass.bus. Fired events are kept in `fired` as (type, data)."""
+
+    def __init__(self) -> None:
+        self.fired: list = []
 
     def async_listen(self, *args, **kwargs):
-        return lambda: None  # returns an unsubscribe callable, like HA
+        return _no_op   # what Home Assistant gives back to unsubscribe
 
-    def async_fire(self, event_type, event_data=None, **kwargs):
-        self.fired.append((event_type, dict(event_data or {})))
+    def async_fire(self, event_type, event_data=None, **kwargs) -> None:
+        self.fired.append((event_type, {**(event_data or {})}))
 
 
 class FakeHass:
-    """A fake Home Assistant core exposing only the surfaces enumerated from
-    cognitive_core.py and reasoning_loop.py:
+    """The core object. What it offers:
 
-        states.async_all / states.get / states.set(test helper)
-        services.async_call           (recorded into .service_calls)
-        async_add_executor_job        (runs the callable synchronously)
-        async_create_task / async_create_background_task  (collected; drain())
-        bus.async_listen
-        data                          (plain dict)
+    - states (FakeStates) and services (calls land in `service_calls`)
+    - async_add_executor_job: runs the function at once, on this thread
+    - async_create_task and async_create_background_task: the coroutines
+      are kept in `_tasks`; drain() runs them, close_pending() drops them
+    - bus (events land in bus.fired), data (a plain dict), config
     """
 
-    def __init__(self):
-        self.states = FakeStates()
-        self.data: dict = {}
-        self.service_calls: list = []
-        self._tasks: list = []
-        self.bus = _Bus()
+    def __init__(self) -> None:
+        self.states, self.bus, self.data = FakeStates(), _Bus(), {}
         self.config = types.SimpleNamespace(time_zone="America/New_York")
+        self.service_calls: list = []
         self._services = _Services(self.service_calls)
+        self._tasks: list = []
 
     @property
     def services(self):
+        """hass.services, swappable by subclasses through `_services`."""
         return self._services
 
     async def async_add_executor_job(self, func, *args):
-        # The caller awaits this; running synchronously is deterministic and
-        # avoids a real thread pool.
-        return func(*args)
+        # No thread pool: the same order every run.
+        result = func(*args)
+        return result
+
+    def _keep(self, coro):
+        self._tasks.append(coro)
+        return coro
 
     def async_create_task(self, coro, name=None):
-        self._tasks.append(coro)
-        return coro
+        """Kept, not started."""
+        return self._keep(coro)
 
     def async_create_background_task(self, coro, name=None):
-        self._tasks.append(coro)
-        return coro
+        """Kept, not started."""
+        return self._keep(coro)
 
-    async def drain(self):
-        """Run any coroutines that were spawned via create_task, so tests can
-        exercise (or simply close) the announcement side-effects."""
-        pending, self._tasks = self._tasks, []
-        for coro in pending:
-            await coro
+    async def drain(self) -> None:
+        """Await every kept coroutine, oldest first."""
+        queued, self._tasks = self._tasks, []
+        for job in queued:
+            await job
 
-    def close_pending(self):
-        """Close collected coroutines without running them (avoids
-        'coroutine was never awaited' warnings when the effect is irrelevant)."""
-        for coro in self._tasks:
-            coro.close()
-        self._tasks = []
+    def close_pending(self) -> None:
+        """Drop kept coroutines without running them, so Python does not
+        warn that they were never awaited."""
+        queued, self._tasks = self._tasks, []
+        for job in queued:
+            job.close()
 
 
 class FakeProvider:
-    """The single network seam for reasoning_loop.decide().
+    """A model client for reasoning_loop.decide().
 
-    provider.chat is synchronous and returns {"text": <str>} on success. Pass
-    `exc` to simulate a failure; use a non-transient message so decide() fails
-    fast without retry/backoff sleeps.
-    """
+    chat() answers with the next queued reply (or a quiet "routine" verdict
+    once they run out), or raises `exc` when one is given. Use an error
+    that is not retried, so decide() gives up without waiting."""
 
-    def __init__(self, replies: list[str] | None = None, exc: BaseException | None = None):
-        self.replies = list(replies or [])
-        self.exc = exc
-        self.calls = 0
-        self.last_messages = None
+    def __init__(self, replies: list[str] | None = None,
+                 exc: BaseException | None = None) -> None:
+        self.replies, self.exc = list(replies or []), exc
+        self.calls, self.last_messages = 0, None
 
-    def chat(self, messages, temperature=0.4, max_tokens=200, **kwargs):
-        self.calls += 1
-        self.last_messages = messages
+    def chat(self, messages, temperature=0.4, max_tokens=200,
+             **kwargs) -> dict:
+        self.calls, self.last_messages = self.calls + 1, messages
         if self.exc is not None:
             raise self.exc
-        text = self.replies.pop(0) if self.replies else '{"speak": false, "reason": "routine"}'
-        return {"text": text, "tool_calls": [], "raw": None}
+        reply = self.replies.pop(0) if self.replies else _DEFAULT_REPLY
+        return {"text": reply, "tool_calls": [], "raw": None}
 
 
 class FakeAutomationInventory:
-    """Home Assistant's loaded automations, as read from an automations.yaml
-    at the last reload. ``load_new=False`` models a reload that silently
-    skips Nova's new automation."""
+    """Home Assistant's loaded automations, read from an automations.yaml
+    at the last reload. ``load_new=False`` stands for a reload that quietly
+    leaves out the automations Nova just wrote."""
 
     def __init__(self, path, *, load_new: bool = True):
         self.path = path
         self.load_new = load_new
-        self._records: list = []
         self.refreshes = 0
+        self._records: list = []
         self.reload()
 
-    def reload(self) -> None:
+    @staticmethod
+    def _read_items(path) -> list:
         import yaml
         try:
-            with open(self.path, encoding="utf-8") as handle:
-                items = yaml.safe_load(handle) or []
+            with open(path, encoding="utf-8") as handle:
+                parsed = yaml.safe_load(handle)
         except (FileNotFoundError, yaml.YAMLError):
-            items = []
-        if not isinstance(items, list):
-            items = []
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    def reload(self) -> None:
+        kept = [item for item in self._read_items(self.path)
+                if self.load_new or not str(item.get("id", "")).startswith("nova_auto_")]
         self._records = [
             types.SimpleNamespace(
                 entity_id=f"automation.{item.get('id')}", unique_id=str(item.get("id")),
-                name=str(item.get("alias", "")), raw_config=item,
-                referenced_entities=())
-            for item in items
-            if self.load_new or not str(item.get("id", "")).startswith("nova_auto_")
+                name=str(item.get("alias", "")), raw_config=item, referenced_entities=())
+            for item in kept
         ]
 
     def refresh(self) -> list:
@@ -257,22 +261,20 @@ class FakeAutomationInventory:
 
 
 class FakeUserInput:
-    """A live conversation turn's ConversationInput: the parts the agent reads
-    (text, language, device_id and the requesting user's context). The agent
-    treats a run with no user_input as headless scheduled work."""
+    """A live conversation turn: text, language, device_id and the user's
+    context. A run without one is treated as scheduled work."""
 
     def __init__(self, text: str = "", *, device_id=None, user_id="user-1",
                  language: str = "en", conversation_id=None):
-        import types as _types
         self.text = text
         self.language = language
         self.device_id = device_id
         self.conversation_id = conversation_id
-        self.context = _types.SimpleNamespace(user_id=user_id)
+        self.context = types.SimpleNamespace(user_id=user_id)
 
 
 class FakeConfigEntry:
-    """A loaded config entry carrying a runtime (entry.runtime_data)."""
+    """A loaded config entry; its runtime sits in entry.runtime_data."""
 
     def __init__(self, runtime, domain: str = "nova", entry_id: str = "nova-test"):
         self.domain = domain
@@ -286,21 +288,20 @@ class FakeConfigEntries:
         self._entries = list(entries)
 
     def async_entries(self, domain=None):
-        return [e for e in self._entries if domain is None or e.domain == domain]
+        return [entry for entry in self._entries if domain in (None, entry.domain)]
 
 
 def make_runtime(load, **overrides):
-    """A NovaRuntime with inert placeholders for the setup-built owners."""
-    kwargs = dict(client=None, llm_provider_name="test", sentinel=None,
-                  reminder_watcher=None, scheduler=None, resources=None,
-                  automation_contexts=None)
-    kwargs.update(overrides)
-    return load("runtime").NovaRuntime(**kwargs)
+    """A NovaRuntime whose setup-built parts are empty placeholders."""
+    parts = {"client": None, "llm_provider_name": "test", "sentinel": None,
+             "reminder_watcher": None, "scheduler": None, "resources": None,
+             "automation_contexts": None, **overrides}
+    return load("runtime").NovaRuntime(**parts)
 
 
 def attach_runtime(hass, runtime):
-    """Make `runtime` this hass's loaded Nova entry, found through the
-    runtime boundary (domain_runtime) exactly as in production."""
+    """Load `runtime` as this hass's Nova entry, so the runtime lookup finds
+    it the same way it does in production."""
     entry = FakeConfigEntry(runtime)
     hass.config_entries = FakeConfigEntries([entry])
     return entry
