@@ -27,7 +27,7 @@ import logging
 import sqlite3
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from . import paths
 from .persistence import sqlite as _store
@@ -100,18 +100,6 @@ def _connect() -> sqlite3.Connection | None:
         return None
 
 
-def _query_one(sql: str, params: tuple = ()) -> Optional[tuple]:
-    """One row from patterns.db, or None when there is no database. Query
-    errors are raised for the caller to handle."""
-    conn = _connect()
-    if conn is None:
-        return None
-    try:
-        return conn.execute(sql, params).fetchone()
-    finally:
-        conn.close()
-
-
 def _data_days() -> float:
     """How many days of history patterns.db holds (cached for an hour)."""
     global _days_cache
@@ -119,37 +107,17 @@ def _data_days() -> float:
     expires, span = _days_cache
     if clock < expires:
         return span
-    try:
-        row = _query_one(_SPAN_SQL)
-        span = float(row[0] or 0.0) if row else 0.0
-    except Exception:  # unreadable table counts as no history
-        span = 0.0
+    span = 0.0
+    conn = _connect()
+    if conn is not None:
+        with contextlib.closing(conn):
+            try:
+                row = conn.execute(_SPAN_SQL).fetchone()
+                span = float(row[0] or 0.0) if row else 0.0
+            except Exception:  # unreadable table counts as no history
+                span = 0.0
     _days_cache = (clock + _DAYS_TTL, span)
     return span
-
-
-def _grade(total: int, at_hour: int, days: float) -> str:
-    """Familiarity from all-time and near-this-hour counts over `days` of data."""
-    if not total:
-        return "novel"
-    if not at_hour:
-        return "unusual_hour"
-    per_day = at_hour / days
-    if per_day >= 0.5:
-        return "routine"
-    return "common" if per_day >= 0.15 else "occasional"
-
-
-def _fill_profile(profile: dict, entity_id: str, state: str, hour: int, days: float) -> None:
-    neighbours = ((hour - 1) % 24, hour % 24, (hour + 1) % 24)
-    try:
-        row = _query_one(_NEAR_HOUR_SQL, (*neighbours, entity_id, state))
-    except Exception as exc:
-        _LOGGER.debug("Local Mind history query failed for %s: %s", entity_id, exc)
-        return
-    if row is not None:
-        total, at_hour = int(row[0] or 0), int(row[1] or 0)
-        profile.update(total=total, at_hour=at_hour, grade=_grade(total, at_hour, days))
 
 
 def history_profile(entity_id: str, new_state: str, hour: int) -> dict:
@@ -162,8 +130,26 @@ def history_profile(entity_id: str, new_state: str, hour: int) -> dict:
 
     days = _data_days()
     profile = {"days": round(days, 1), "at_hour": 0, "total": 0, "grade": "unknown"}
-    if days >= 3:  # too little history says nothing
-        _fill_profile(profile, *key, days)
+    conn = _connect() if days >= 3 else None  # too little history says nothing
+    if conn is not None:
+        h = key[2]
+        neighbours = ((h - 1) % 24, h % 24, (h + 1) % 24)
+        with contextlib.closing(conn):
+            try:
+                total, at_hour = (int(n or 0) for n in conn.execute(
+                    _NEAR_HOUR_SQL, (*neighbours, entity_id, key[1])).fetchone())
+                per_day = at_hour / days
+                if not total:
+                    grade = "novel"
+                elif not at_hour:
+                    grade = "unusual_hour"
+                elif per_day >= 0.5:
+                    grade = "routine"
+                else:
+                    grade = "common" if per_day >= 0.15 else "occasional"
+                profile.update(total=total, at_hour=at_hour, grade=grade)
+            except Exception as exc:
+                _LOGGER.debug("Local Mind history query failed for %s: %s", entity_id, exc)
 
     _hist_cache[key] = (clock + _HIST_TTL, profile)
     if len(_hist_cache) > _HIST_CACHE_LIMIT:
@@ -204,45 +190,41 @@ def _case_prior(domain, device_class, category, anyone_home) -> tuple[int, int]:
 
 # ── Voice ──────────────────────────────────────────────────────────────────
 
-def _binary_phrase(state: str, dc: str, eid: str) -> str:
-    """The phrase for on/off on a typed sensor, or "" to read it plainly."""
+def _state_phrase(to_state, device_class="", entity_id="") -> str:
+    """How a new state reads after the device's name."""
+    state = str(to_state or "").strip().lower()
+    dc, eid = (device_class or "").lower(), (entity_id or "").lower()
+
+    # On and off on a typed sensor, strongest reading first.
     safety = dc in _SAFETY_PHRASES
     leak = dc == "moisture" or any(w in eid for w in _LEAK_WORDS)
     opening = dc in _OPENING_CLASSES or any(w in eid for w in _OPENING_WORDS)
     motion = dc in _MOTION_CLASSES or "motion" in eid or "occupancy" in eid
+    ranked: tuple = ()
     if state == "on":
         ranked = ((safety, _SAFETY_PHRASES.get(dc, "")), (leak, "is detecting water"),
                   (opening, "is open"), (motion, "has detected motion"))
     elif state == "off":
         ranked = ((safety or leak, "has cleared"), (opening, "is closed"),
                   (motion, "has gone quiet"))
-    else:
-        ranked = ()
-    return next((phrase for hit, phrase in ranked if hit), "")
+    phrase = next((p for hit, p in ranked if hit), "")
+    if phrase:
+        return phrase
 
-
-def _numeric_phrase(state: str, shown: Any, dc: str, eid: str) -> str:
-    """A battery level or a sensor reading, or "" when `state` is not a number."""
+    # A battery level or a sensor reading.
     try:
         value = float(state)
         if dc == "battery" or "battery" in eid:
             whole = int(value)
             level = whole if value == whole else value
             return f"battery is at {level}%"
+        if eid.startswith("sensor."):
+            return f"reads {to_state}"
     except (TypeError, ValueError):
-        return ""
-    return f"reads {shown}" if eid.startswith("sensor.") else ""
+        pass  # not a number
 
-
-def _state_phrase(to_state, device_class="", entity_id="") -> str:
-    """How a new state reads after the device's name."""
-    state = str(to_state or "").strip().lower()
-    dc, eid = (device_class or "").lower(), (entity_id or "").lower()
-    phrase = (_binary_phrase(state, dc, eid)
-              or _numeric_phrase(state, to_state, dc, eid)
-              or _STATE_PHRASES.get(state, ""))
-    if phrase:
-        return phrase
+    if state in _STATE_PHRASES:
+        return _STATE_PHRASES[state]
     return f"is now {to_state}" if to_state else "needs attention"
 
 
@@ -252,43 +234,32 @@ def _pick(variants: list[str], entity_id: str, hour: int) -> str:
     return variants[seed % len(variants)]
 
 
-def _device_name(friendly_name: str, entity_id: str) -> str:
+def _compose(honorific, friendly_name, entity_id, to_state, hour, *, novelty, away,
+             escalated, device_class="", urgency="") -> str:
+    """One spoken sentence: opener, device and state, then any context."""
     if friendly_name:
-        return friendly_name
-    if entity_id:
-        return entity_id.split(".", 1)[-1].replace("_", " ").title()
-    return "A device"
+        name = friendly_name
+    else:
+        name = (entity_id.split(".", 1)[-1].replace("_", " ").title()
+                if entity_id else "A device")
+    body = f"{name} {_state_phrase(to_state, device_class, entity_id)}"
 
-
-def _context_tail(entity_id: str, hour: int, novelty: str, away: bool) -> str:
-    """Away and novelty notes after the core sentence, or ""."""
     notes = ["while no one is home"] if away else []
     if novelty == "novel":
         notes.append(_pick(_NOVEL_CLAUSES, entity_id, hour))
     elif novelty == "unusual_hour":
         notes.append("which is unusual at this hour of the night" if 0 <= hour <= 5
                      else "which is out of pattern for this time of day")
-    return " — " + ", ".join(notes) if notes else ""
+    tail = " — " + ", ".join(notes) if notes else ""
 
-
-def _opener(honorific: str, escalated: bool, urgency: str) -> str:
     try:
         from . import persona
         tone = persona.register_for(urgency) if urgency else (
             "urgent" if escalated else "neutral")
-        return persona.announce_opener(honorific, tone)
+        opener = persona.announce_opener(honorific, tone)
     except Exception:  # persona unavailable: the honorific alone
         titled = " ".join(part.capitalize() for part in (honorific or "").split())
-        return f"{titled}," if titled else ""
-
-
-def _compose(honorific, friendly_name, entity_id, to_state, hour, *, novelty, away,
-             escalated, device_class="", urgency="") -> str:
-    """One spoken sentence: opener, device and state, then any context."""
-    body = (f"{_device_name(friendly_name, entity_id)} "
-            f"{_state_phrase(to_state, device_class, entity_id)}")
-    tail = _context_tail(entity_id, hour, novelty, away)
-    opener = _opener(honorific, escalated, urgency)
+        opener = f"{titled}," if titled else ""
     return f"{opener} {body}{tail}." if opener else f"{body}{tail}."
 
 
@@ -324,14 +295,6 @@ def assess_core(*, honorific, entity_id, domain, device_class, category, from_st
     return voiced(verdict, honorific).as_dict()
 
 
-def _log_decision(label: str, verdict: dict) -> None:
-    """One line in the panel's log; best effort."""
-    with contextlib.suppress(Exception):
-        from .websocket import nova_log
-        why = str(verdict.get("reason", "")).removeprefix("local mind: ")
-        nova_log("LOCAL", f"{label}: {'SPEAK' if verdict.get('speak') else 'silent'} — {why}")
-
-
 async def assess(hass, *, honorific, entity_id="", domain="", device_class="",
                  category="", from_state="", to_state="", friendly_name="",
                  urgency="medium", anyone_home=False, recent_announcements=None) -> dict:
@@ -349,7 +312,11 @@ async def assess(hass, *, honorific, entity_id="", domain="", device_class="",
         to_state=to_state, friendly_name=friendly_name, urgency=urgency,
         anyone_home=anyone_home, recent_announcements=recent_announcements or [],
         hour=hour, history=history, prior=prior)
-    _log_decision(entity_id or friendly_name, verdict)
+    with contextlib.suppress(Exception):  # the panel log is best effort
+        from .websocket import nova_log
+        why = str(verdict.get("reason", "")).removeprefix("local mind: ")
+        said = "SPEAK" if verdict.get("speak") else "silent"
+        nova_log("LOCAL", f"{entity_id or friendly_name}: {said} — {why}")
     return verdict
 
 
