@@ -1,4 +1,4 @@
-"""Anthropic adapter (Messages API through the anthropic SDK)."""
+"""Anthropic adapter: the Messages API, reached through the anthropic SDK."""
 from __future__ import annotations
 
 import json
@@ -9,6 +9,96 @@ from .capabilities import SDK_CLIENT_POLICY, ProviderCapabilities, anthropic_vis
 from .errors import ProviderConfigurationError, ProviderErrorKind, error_text
 from .models import ChatRequest, ChatResponse, ToolCall, Usage
 from .reasoning import visible_text
+
+_DEFAULT_IMAGE_TYPE = "image/jpeg"
+
+
+def _system_text(content) -> str:
+    """A system message's text. A list of parts keeps only its text parts,
+    joined with spaces."""
+    if not isinstance(content, list):
+        return content
+    return " ".join(
+        part.get("text", "") for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+def _tool_result_turn(message: dict, turns: list[dict]) -> None:
+    """Add a tool result to ``turns``.
+
+    Anthropic wants every result for one assistant turn's tool calls, which
+    may have run in parallel, inside a single user message. A result
+    therefore joins the last turn when that turn already holds only tool
+    results."""
+    block = {
+        "type": "tool_result",
+        "tool_use_id": message.get("tool_call_id", ""),
+        "content": message.get("content") or "",
+    }
+    last = turns[-1] if turns else None
+    holds_only_results = bool(
+        last and last["role"] == "user"
+        and isinstance(last["content"], list) and last["content"]
+        and all(item.get("type") == "tool_result" for item in last["content"])
+    )
+    if holds_only_results:
+        last["content"].append(block)
+    else:
+        turns.append({"role": "user", "content": [block]})
+
+
+def _tool_use_input(raw) -> Any:
+    """The arguments of one call as a dict. Text is parsed as JSON, and
+    anything that is not valid JSON counts as no arguments."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            raw = {}
+    return raw or {}
+
+
+def _assistant_tool_turn(message: dict) -> dict:
+    """An assistant message that made tool calls: its text, if any, then one
+    tool_use block for each call."""
+    blocks = []
+    text = message.get("content") or ""
+    if text:
+        blocks.append({"type": "text", "text": text})
+    for call in message["tool_calls"]:
+        function = call.get("function", {}) or {}
+        blocks.append({
+            "type": "tool_use",
+            "id": call.get("id", ""),
+            "name": function.get("name", ""),
+            "input": _tool_use_input(function.get("arguments", {})),
+        })
+    return {"role": "assistant", "content": blocks}
+
+
+def _split_data_url(url: str) -> tuple[str, str]:
+    """(media type, base64 data) of a ``data:`` URL. A URL that will not split
+    gives the default image type and no data."""
+    try:
+        header, data = url.split(",", 1)
+        media_type = header.split(":", 1)[1].split(";", 1)[0]
+    except Exception:
+        return _DEFAULT_IMAGE_TYPE, ""
+    return media_type or _DEFAULT_IMAGE_TYPE, data
+
+
+def _image_block(part: dict) -> Optional[dict]:
+    """Anthropic's form of an OpenAI ``image_url`` part, or None when the part
+    has no address."""
+    url = (part.get("image_url") or {}).get("url", "") or ""
+    if url.startswith("data:"):
+        media_type, data = _split_data_url(url)
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data}}
+    if url:
+        return {"type": "image", "source": {"type": "url", "url": url}}
+    return None
 
 
 class AnthropicProvider(LLMProvider):
@@ -24,175 +114,125 @@ class AnthropicProvider(LLMProvider):
             raise ProviderConfigurationError(
                 ProviderErrorKind.PROVIDER_UNAVAILABLE, self.name,
                 detail="the anthropic package is not installed") from exc
-        kwargs = {"api_key": api_key}
+        options = {"api_key": api_key}
         if base_url:
-            kwargs["base_url"] = base_url
-        self._client = Anthropic(**kwargs)
+            options["base_url"] = base_url
+        self._client = Anthropic(**options)
 
-    # ── Request translation ─────────────────────────────────────────────────
+    # ── Building the request ────────────────────────────────────────────────
 
     @classmethod
     def _to_anthropic_messages(cls, messages: list[dict]) -> tuple[str, list[dict]]:
-        """Split system text from the conversation and translate the
-        OpenAI-shaped history Nova builds.
+        """Separate the system text from the conversation and translate the
+        OpenAI-shaped history Nova keeps.
 
-        Anthropic has no "tool" role or top-level tool_calls field: tool use
-        and results are content blocks on ordinary user/assistant turns, and
-        it uses a different image block format than OpenAI's image_url."""
+        Anthropic has no "tool" role and no top-level tool_calls. Tool calls
+        and their results are content blocks inside ordinary assistant and user
+        turns, and images use a different block than OpenAI's image_url."""
         system = ""
-        chat_msgs: list[dict] = []
-        for m in messages:
-            role = m["role"]
+        turns: list[dict] = []
+        for message in messages:
+            role = message["role"]
             if role == "system":
-                sys_c = m["content"]
-                if isinstance(sys_c, list):
-                    sys_c = " ".join(
-                        p.get("text", "") for p in sys_c
-                        if isinstance(p, dict) and p.get("type") == "text"
-                    )
-                system = sys_c if not system else system + "\n\n" + sys_c
+                text = _system_text(message["content"])
+                system = text if not system else system + "\n\n" + text
             elif role == "tool":
-                # A tool_result block, sent back as a *user* turn. Anthropic
-                # requires every tool_result from one assistant turn's
-                # (possibly parallel) tool_use calls to land in a single user
-                # message, so merge onto the previous one when it's already an
-                # all-tool_result user turn.
-                block = {
-                    "type": "tool_result",
-                    "tool_use_id": m.get("tool_call_id", ""),
-                    "content": m.get("content") or "",
-                }
-                prev = chat_msgs[-1] if chat_msgs else None
-                if (prev and prev["role"] == "user"
-                        and isinstance(prev["content"], list) and prev["content"]
-                        and all(b.get("type") == "tool_result" for b in prev["content"])):
-                    prev["content"].append(block)
-                else:
-                    chat_msgs.append({"role": "user", "content": [block]})
-            elif role == "assistant" and m.get("tool_calls"):
-                # Assistant turn with tool calls -> a text block (if any)
-                # plus one tool_use block per call.
-                content = []
-                text = m.get("content") or ""
-                if text:
-                    content.append({"type": "text", "text": text})
-                for tc in m["tool_calls"]:
-                    fn = tc.get("function", {}) or {}
-                    args = fn.get("arguments", {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args) if args else {}
-                        except (TypeError, ValueError):
-                            args = {}
-                    content.append({
-                        "type": "tool_use",
-                        "id": tc.get("id", ""),
-                        "name": fn.get("name", ""),
-                        "input": args or {},
-                    })
-                chat_msgs.append({"role": "assistant", "content": content})
+                _tool_result_turn(message, turns)
+            elif role == "assistant" and message.get("tool_calls"):
+                turns.append(_assistant_tool_turn(message))
             else:
-                chat_msgs.append({
+                turns.append({
                     "role": role,
-                    "content": cls._to_anthropic_content(m["content"]),
+                    "content": cls._to_anthropic_content(message["content"]),
                 })
-        return system, chat_msgs
+        return system, turns
 
     @staticmethod
     def _to_anthropic_content(content):
-        """Convert OpenAI-style message content to Anthropic's format. The
-        camera pipeline sends images as {"type":"image_url",...}; Anthropic
-        wants {"type":"image","source":{"type":"base64",...}}. Plain strings
-        and text blocks pass through unchanged."""
-        if isinstance(content, str):
-            return content
+        """Translate OpenAI-style message content. The camera pipeline sends
+        {"type": "image_url", ...} parts, which Anthropic wants as
+        {"type": "image", "source": {...}}. Strings and text parts are kept as
+        they are; a part of any other type is passed through unchanged."""
         if not isinstance(content, list):
             return content
-        out = []
+        converted = []
         for part in content:
             if not isinstance(part, dict):
                 continue
-            ptype = part.get("type")
-            if ptype == "image_url":
-                url = (part.get("image_url") or {}).get("url", "") or ""
-                if url.startswith("data:"):
-                    try:
-                        header, b64 = url.split(",", 1)
-                        media_type = header.split(":", 1)[1].split(";", 1)[0] or "image/jpeg"
-                    except Exception:
-                        media_type, b64 = "image/jpeg", ""
-                    out.append({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": media_type, "data": b64},
-                    })
-                elif url:
-                    out.append({"type": "image", "source": {"type": "url", "url": url}})
-            elif ptype == "text":
-                out.append({"type": "text", "text": part.get("text", "")})
+            kind = part.get("type")
+            if kind == "image_url":
+                block = _image_block(part)
+                if block is not None:
+                    converted.append(block)
+            elif kind == "text":
+                converted.append({"type": "text", "text": part.get("text", "")})
             else:
-                out.append(part)
-        return out
+                converted.append(part)
+        return converted
 
     def _request_kwargs(self, request: ChatRequest) -> dict[str, Any]:
-        system, chat_msgs = self._to_anthropic_messages(
-            [m.to_openai() for m in request.messages])
-        kwargs: dict[str, Any] = {
+        system, turns = self._to_anthropic_messages(
+            [message.to_openai() for message in request.messages])
+        body: dict[str, Any] = {
             "model": request.model or self.model,
             "system": system,
-            "messages": chat_msgs,
+            "messages": turns,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
         }
         if request.tools:
-            kwargs["tools"] = [
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.parameters,
-                }
-                for t in request.tools
+            body["tools"] = [
+                {"name": tool.name, "description": tool.description,
+                 "input_schema": tool.parameters}
+                for tool in request.tools
             ]
-        return kwargs
+        return body
 
-    # ── Execution ───────────────────────────────────────────────────────────
+    # ── Running it ──────────────────────────────────────────────────────────
+
+    def _create(self, body: dict[str, Any]):
+        """Send the request. If the model refuses `temperature` as deprecated,
+        send it once more without it.
+
+        Newer Claude generations answer 400 to a temperature setting where
+        older ones ignored it, and they changed one model at a time, so the
+        retry reacts to the error text instead of listing model ids."""
+        try:
+            return self._client.messages.create(**body)
+        except Exception as exc:
+            text = error_text(exc).lower()
+            refused = "temperature" in text and "deprecated" in text
+            if "temperature" not in body or not refused:
+                raise
+            body.pop("temperature")
+            return self._client.messages.create(**body)
 
     def complete(self, request: ChatRequest) -> ChatResponse:
-        kwargs = self._request_kwargs(request)
-        try:
-            resp = self._client.messages.create(**kwargs)
-        except Exception as exc:
-            # Newer Claude generations reject `temperature` outright with a
-            # 400 instead of ignoring it, rolled out model by model, so retry
-            # once without it rather than hardcoding model ids.
-            msg = error_text(exc).lower()
-            if "temperature" in kwargs and "temperature" in msg and "deprecated" in msg:
-                kwargs.pop("temperature")
-                resp = self._client.messages.create(**kwargs)
-            else:
-                raise
-        text_parts = []
-        calls = []
-        # Only text and tool_use blocks are read: thinking and
-        # redacted_thinking blocks are hidden reasoning and never surface.
-        for block in resp.content:
-            btype = getattr(block, "type", None)
-            if btype == "text":
-                text_parts.append(block.text)
-            elif btype == "tool_use":
+        body = self._request_kwargs(request)
+        reply = self._create(body)
+        pieces: list[str] = []
+        calls: list[ToolCall] = []
+        # Thinking and redacted_thinking blocks are hidden reasoning. Only
+        # text and tool_use blocks are ever read.
+        for block in reply.content:
+            kind = getattr(block, "type", None)
+            if kind == "text":
+                pieces.append(block.text)
+            elif kind == "tool_use":
                 args = block.input if isinstance(block.input, dict) else {}
                 calls.append(ToolCall(id=str(block.id), name=str(block.name), args=args))
-        u = getattr(resp, "usage", None)
-        text = visible_text("".join(text_parts))
+        used = getattr(reply, "usage", None)
+        text = visible_text("".join(pieces))
         tool_calls = tuple(calls)
         return ChatResponse(
             text=text,
             tool_calls=tool_calls,
             usage=Usage(
-                input_tokens=getattr(u, "input_tokens", None) if u is not None else None,
-                output_tokens=getattr(u, "output_tokens", None) if u is not None else None,
+                input_tokens=getattr(used, "input_tokens", None) if used is not None else None,
+                output_tokens=getattr(used, "output_tokens", None) if used is not None else None,
             ),
             provider=self.name,
-            model=str(kwargs["model"]),
+            model=str(body["model"]),
             raw=anthropic_raw(text, tool_calls),
         )
 
@@ -201,8 +241,9 @@ class AnthropicProvider(LLMProvider):
 
 
 def anthropic_raw(text: str, tool_calls: tuple[ToolCall, ...]) -> dict:
-    """The sanitized ``raw`` compatibility value: an Anthropic-shaped message
-    rebuilt from normalized data only (no thinking blocks, ids or usage)."""
+    """The cleaned ``raw`` value kept for compatibility: an Anthropic-style
+    message rebuilt only from the normalised reply, so it holds no thinking
+    blocks, ids or usage."""
     content: list[dict] = []
     if text:
         content.append({"type": "text", "text": text})
