@@ -1,3 +1,8 @@
+# Nova's services. Names and descriptions shown in Home Assistant live in
+# translations/en.json (services section); this file holds only the fields.
+
+# ── Cameras and the doorbell ────────────────────────────────────────────────
+
 analyze_camera:
   fields:
     entity_id:
@@ -45,45 +50,28 @@ analyze_on_event:
       selector:
         text:
 
-conversation_summary:
+check_packages:
   fields:
-    hours:
+    entity_id:
       required: false
-      default: 24
+      selector:
+        entity:
+          domain: camera
+
+diagnose_doorbell:
+
+train_doorbell_backlog:
+  fields:
+    limit:
+      required: false
+      default: 40
       selector:
         number:
           min: 1
-          max: 168
-          unit_of_measurement: hours
-    device_id:
-      required: false
-      selector:
-        text:
-    announce:
-      required: false
-      selector:
-        boolean:
-    store:
-      required: false
-      selector:
-        boolean:
+          max: 500
+          mode: box
 
-sentinel_start:
-
-sentinel_stop:
-
-database_purge:
-  fields:
-    days:
-      required: false
-      default: 30
-      selector:
-        number:
-          min: 1
-          max: 365
-          unit_of_measurement: days
-
-database_stats:
+# ── Briefings, reminders and summaries ──────────────────────────────────────
 
 briefing:
   fields:
@@ -154,117 +142,31 @@ add_reminder:
       default: true
       selector:
         boolean:
-# ── v5.2 Observer Mode services ──────────────────────────────────────────────
 
-nap:
+conversation_summary:
   fields:
-    duration_minutes:
+    hours:
       required: false
-      default: 30
+      default: 24
       selector:
         number:
           min: 1
-          max: 480
-          unit_of_measurement: min
-          mode: slider
-
-shush:
-  fields:
-    entity_id:
+          max: 168
+          unit_of_measurement: hours
+    device_id:
       required: false
       selector:
         text:
-    category:
+    announce:
       required: false
       selector:
-        select:
-          options:
-            - appliances
-            - doors_windows
-            - presence
-            - energy
-            - security
-            - climate
-            - lights
-            - schedule
-    all:
+        boolean:
+    store:
       required: false
       selector:
         boolean:
 
-unshush:
-  fields:
-    entity_id:
-      required: false
-      selector:
-        text:
-    category:
-      required: false
-      selector:
-        text:
-
-observer_start:
-
-observer_stop:
-
-observer_status:
-
-create_automation:
-  fields:
-    alias:
-      required: true
-      selector:
-        text:
-    trigger:
-      required: true
-      selector:
-        object:
-    action:
-      required: true
-      selector:
-        object:
-
-diagnose_doorbell:
-
-test_notify:
-
-test_tts:
-
-test_routing:
-
-lockdown:
-  fields:
-    state:
-      required: true
-      example: "on"
-      selector:
-        select:
-          options:
-            - "on"
-            - "off"
-    reason:
-      required: false
-      selector:
-        text:
-
-train_doorbell_backlog:
-  fields:
-    limit:
-      required: false
-      default: 40
-      selector:
-        number:
-          min: 1
-          max: 500
-          mode: box
-
-check_packages:
-  fields:
-    entity_id:
-      required: false
-      selector:
-        entity:
-          domain: camera
+# ── What Nova remembers ─────────────────────────────────────────────────────
 
 remember:
   fields:
@@ -320,6 +222,122 @@ forget:
       required: false
       selector:
         text:
+
+# ── When Nova speaks up: the observer, Sentinel and silencing ───────────────
+
+observer_start:
+
+observer_stop:
+
+observer_status:
+
+sentinel_start:
+
+sentinel_stop:
+
+nap:
+  fields:
+    duration_minutes:
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 480
+          unit_of_measurement: min
+          mode: slider
+
+shush:
+  fields:
+    entity_id:
+      required: false
+      selector:
+        text:
+    category:
+      required: false
+      selector:
+        select:
+          options:
+            - appliances
+            - doors_windows
+            - presence
+            - energy
+            - security
+            - climate
+            - lights
+            - schedule
+    all:
+      required: false
+      selector:
+        boolean:
+
+unshush:
+  fields:
+    entity_id:
+      required: false
+      selector:
+        text:
+    category:
+      required: false
+      selector:
+        text:
+
+# ── Security ────────────────────────────────────────────────────────────────
+
+lockdown:
+  fields:
+    state:
+      required: true
+      example: "on"
+      selector:
+        select:
+          options:
+            - "on"
+            - "off"
+    reason:
+      required: false
+      selector:
+        text:
+
+# ── Automations ─────────────────────────────────────────────────────────────
+
+create_automation:
+  fields:
+    alias:
+      required: true
+      selector:
+        text:
+    trigger:
+      required: true
+      selector:
+        object:
+    action:
+      required: true
+      selector:
+        object:
+
+# ── Tests for notifications, voice and speakers ─────────────────────────────
+
+test_notify:
+
+test_tts:
+
+test_routing:
+
+# ── The conversation store, backup and restore ──────────────────────────────
+
+database_purge:
+  fields:
+    days:
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 365
+          unit_of_measurement: days
+
+database_stats:
 
 backup:
 

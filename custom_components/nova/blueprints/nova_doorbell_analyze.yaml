@@ -1,54 +1,52 @@
 blueprint:
   name: Nova — Look at a camera when the doorbell or a sensor fires
-  description: >
-    When a doorbell is pressed, or a motion or person sensor turns on, Nova
-    looks at the camera you pick and says what it sees. Works with doorbells
-    that report presses as events (such as Nest) and with any binary sensor,
-    for example Frigate person detection.
   domain: automation
+  description: >
+    Nova looks at a camera of your choice and says what it sees whenever a
+    doorbell is pressed or a motion or person sensor turns on. It works with
+    doorbells that report each press as an event, such as Nest, and with any
+    binary sensor, such as Frigate's person detection.
   homeassistant:
     min_version: 2024.10.0
   input:
     trigger_entity:
       name: Doorbell or sensor
-      description: A doorbell event, or a motion or person binary sensor.
+      description: The doorbell's event entity, or a motion or person binary sensor.
       selector:
         entity:
-          domain:
-            - binary_sensor
-            - event
+          domain: [binary_sensor, event]
     camera_entity:
       name: Camera
-      description: The camera Nova looks at when the doorbell or sensor fires.
+      description: The camera Nova looks at each time it fires.
       selector:
         entity:
           domain: camera
     reason:
       name: What to tell Nova
-      description: A short note on what happened, given to Nova with the image.
-      default: "Someone has triggered the camera"
+      description: A short note on what happened, sent to Nova with the picture.
       selector:
         text:
+      default: "Someone has triggered the camera"
     cooldown_seconds:
       name: Cooldown
-      description: The least time between two looks, so a busy sensor does not repeat itself.
-      default: 30
+      description: The shortest gap between two looks, so a busy sensor does not keep repeating itself.
       selector:
         number:
           min: 0
           max: 600
           unit_of_measurement: seconds
+      default: 30
 
 triggers:
-  # A binary sensor turning on.
+  # The binary sensor turns on.
   - trigger: state
     entity_id: !input trigger_entity
     to: "on"
     id: turned_on
-  # An event entity takes a new timestamp on every press, so each press
-  # counts, even the same kind twice in a row. It reads unknown until its
-  # first press, which therefore counts too; coming back from unavailable
-  # after a restart does not.
+  # An event entity gets a fresh timestamp on each press, so every press
+  # counts, even two of the same kind in a row. Before its first press it
+  # reads unknown, so that first press counts too; returning from
+  # unavailable after a restart does not.
   - trigger: state
     entity_id: !input trigger_entity
     not_from:

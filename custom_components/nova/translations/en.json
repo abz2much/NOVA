@@ -260,7 +260,7 @@
         },
         "frames": {
           "name": "Frames",
-          "description": "How many images to take. 1, the default, is a single snapshot; 2 to 4 let Nova describe what happened over a few seconds, such as someone arriving and leaving a parcel."
+          "description": "How many images to take. 1, the default, is a single snapshot; 2 to 6 let Nova describe what happened over a few seconds, such as someone arriving and leaving a parcel."
         },
         "interval": {
           "name": "Seconds between frames",
