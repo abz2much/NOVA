@@ -649,3 +649,47 @@ async def test_start_gives_up_when_providers_fail(ob, load, fake_hass, monkeypat
     monkeypatch.setattr(load("providers.manager"), "runtime_manager", lambda hass: Mgr())
     await ob.start(fake_hass, {})
     assert ob.is_running() is False and ob._STATE.providers is None
+
+
+# ── characterisation (8.66): pinned before the rewrite of the state and stop ─
+
+def test_state_reset_keeps_hass_config_and_buffers(ob):
+    s = ob._ObserverState()
+    assert (s.hass, s.config, s.running, s.unsub, s.entry, s.providers) == (
+        None, {}, False, None, None, None)
+    assert s.classifier_timestamps.maxlen == 5000 and s.recent_events.maxlen == 50
+    buffers = (s.last_seen, s.recent_events, s.classifier_timestamps)
+    s.hass, s.config = "hass", {"k": 1}
+    s.recent_events.append(1)
+    s.reset()
+    assert (s.hass, s.config) == ("hass", {"k": 1})
+    assert (s.last_seen, s.recent_events, s.classifier_timestamps) == buffers
+    assert all(a is b for a, b in zip(
+        (s.last_seen, s.recent_events, s.classifier_timestamps), buffers))
+
+
+async def test_stop_survives_every_failure_and_logs(ob, load, monkeypatch, caplog):
+    import logging
+    calls = []
+
+    def bad_unsub():
+        calls.append("unsub")
+        raise RuntimeError("gone")
+    for mod in ("appliance_monitor", "proactive_briefing"):
+        async def stopped(*a, _m=mod, **k):
+            calls.append(_m)
+            raise RuntimeError(_m)
+        monkeypatch.setattr(load(mod), "stop", stopped)
+
+    def gap():
+        calls.append("gap")
+        raise RuntimeError("cognition")
+    monkeypatch.setattr(load("cognition"), "mark_unobserved", gap)
+    monkeypatch.setattr(ob._STATE, "unsub", bad_unsub)
+    monkeypatch.setattr(ob._STATE, "running", True)
+    caplog.set_level(logging.INFO, logger=ob.__name__)
+    await ob.stop()
+    assert calls == ["unsub", "appliance_monitor", "proactive_briefing", "gap"]
+    assert ob.is_running() is False and ob._STATE.unsub is None
+    assert ("INFO", "Nova Observer stopped") in [
+        (r.levelname, r.getMessage()) for r in caplog.records]

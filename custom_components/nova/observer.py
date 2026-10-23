@@ -22,6 +22,7 @@ no limit), cognition_enabled, cognition_threshold, observer_group_debounce.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import time
@@ -111,34 +112,33 @@ class _ObserverState:
     it runs without an entry); `entry` is the config entry whose live
     settings the pipeline reads."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.hass = None
         self.config: dict = {}
-        self.entry = None
-        self.running = False
-        self.unsub = None
-        self.providers = None
-        self.owns_providers = False
-        self.classifier_provider = None
-        self.reasoning_provider = None
+        # entity -> when it was last let through (the per entity debounce)
         self.last_seen: dict[str, float] = {}
-        self.recent_events: deque = deque(maxlen=50)
-        self.classifier_timestamps: deque = deque(maxlen=5000)
-        self.rate_limit_warn_logged: bool = False
+        # the context buffer behind get_recent_context()
+        self.recent_events: deque[dict] = deque(maxlen=50)
+        # one stamp per classifier call, for the hourly limit
+        self.classifier_timestamps: deque[float] = deque(maxlen=5000)
+        self._set_stopped()
 
-    def reset(self):
-        """Back to stopped. hass and config are left for late readers."""
+    def _set_stopped(self) -> None:
+        """The fields that describe a running observer, put back to idle."""
         self.running = False
         self.unsub = None
         self.entry = None
         self.providers = None
         self.owns_providers = False
-        self.classifier_provider = None
-        self.reasoning_provider = None
-        self.last_seen.clear()
-        self.recent_events.clear()
-        self.classifier_timestamps.clear()
+        self.classifier_provider = self.reasoning_provider = None
         self.rate_limit_warn_logged = False
+
+    def reset(self) -> None:
+        """Back to stopped. hass and config are left for late readers, and
+        the buffers are emptied where they are."""
+        self._set_stopped()
+        for buffer in (self.last_seen, self.recent_events, self.classifier_timestamps):
+            buffer.clear()
 
 
 _STATE = _ObserverState()
@@ -423,14 +423,12 @@ def record_camera_event(
 ) -> None:
     """Add a camera review (from camera.py) to the recent events, so
     briefings and questions about what happened outside include it."""
-    try:
+    with contextlib.suppress(Exception):
         _STATE.recent_events.append({
             "ts": time.time(), "kind": "camera", "camera": camera_name,
             "summary": summary, "category": category, "notable": bool(notable),
             "area": None,
         })
-    except Exception:
-        pass
 
 
 # ─── The state change handler ───────────────────────────────────────────────
@@ -446,11 +444,9 @@ def _cognition_escalates(event: Event) -> tuple[bool, str]:
 
 
 def _log_escalation(entity_id: str, why: str) -> None:
-    try:
+    with contextlib.suppress(Exception):  # the panel log is best effort
         from .websocket import nova_log
         nova_log("CLASSIFY", f"cognition escalated {entity_id}: {why}")
-    except Exception:
-        pass
 
 
 def _ignored_by_core(entity_id: str) -> bool:
@@ -489,11 +485,10 @@ def _on_state_changed(event: Event) -> None:
     if _cognition_enabled():
         lifted, why = _cognition_escalates(event)
     else:
-        try:
+        # Cognition is off, so this event is a gap in what it has seen.
+        with contextlib.suppress(Exception):
             from . import cognition
             cognition.mark_unobserved()
-        except Exception:
-            pass
 
     if _should_pre_filter(event):
         if not lifted:
@@ -584,12 +579,10 @@ async def _audit(event: Event, *, result: str, category: str, classifier_urgency
 
 
 def _save_activity(entity_id: str, category: str, urgency: str, message: str) -> None:
-    try:
+    with contextlib.suppress(Exception):  # the activity log never blocks an alert
         from .database import save_activity
         save_activity(entity_id=entity_id, category=category, urgency=urgency,
                       message=message, was_spoken=False, source="observer")
-    except Exception:
-        pass
 
 
 async def _process_event(event: Event) -> None:
@@ -678,11 +671,9 @@ async def _process_event(event: Event) -> None:
                          "(reasoning said critical but classifier said %s)",
                          entity_id, hint)
         if quiet.value is True and urgency != "critical":
-            try:
+            with contextlib.suppress(Exception):
                 from .websocket import nova_log
                 nova_log("GATE", f"quiet hours — holding {urgency} announcement (not critical)")
-            except Exception:
-                pass
 
         from . import delivery
         out = await delivery.async_deliver(_STATE.hass, delivery.DeliveryRequest(
@@ -859,26 +850,23 @@ async def stop() -> None:
         from . import proactive_briefing
         await proactive_briefing.stop()
 
+    # Each step is independent: one failing must not keep the rest from
+    # running, or leave the observer marked as running.
     unsubscribe = _STATE.unsub
-    try:
-        if unsubscribe is not None:
+    if unsubscribe is not None:
+        with contextlib.suppress(Exception):
             unsubscribe()
-    except Exception:
-        pass
     for halt in (appliances, briefings):
-        try:
+        with contextlib.suppress(Exception):
             await halt()
-        except Exception:
-            pass
     await _release_tier_providers()
-    try:
+    with contextlib.suppress(Exception):
         from . import cognition
         cognition.mark_unobserved()
-    except Exception:
-        pass
     _STATE.reset()
     _LOGGER.info("Nova Observer stopped")
 
 
 def is_running() -> bool:
+    """Whether the observer is listening to state changes."""
     return _STATE.running
