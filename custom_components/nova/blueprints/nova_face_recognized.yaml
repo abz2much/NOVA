@@ -1,50 +1,50 @@
 blueprint:
   name: Nova — Announce recognised faces
-  description: >
-    When a face is recognised on a camera (DoubleTake or Frigate face
-    names), Nova says who it is, or warns about an unknown person and
-    describes them. Runs on the `nova_face_recognized` event.
   domain: automation
+  description: >
+    Each time a camera recognises a face (face names from DoubleTake or
+    Frigate), Nova names a known person, or warns about someone it does not
+    know and describes them. It listens for the `nova_face_recognized` event.
   homeassistant:
     min_version: 2024.10.0
   input:
     target_camera:
       name: Camera (optional)
-      description: Only announce faces seen on this camera. Leave empty for every camera.
-      default: ""
+      description: Announce faces from this camera only. Leave it empty to use every camera.
       selector:
         entity:
           domain: camera
+      default: ""
     greet_known:
       name: Announce known people
-      description: Say who has been recognised and where.
-      default: true
+      description: Say which person was recognised, and on which camera.
       selector:
         boolean:
+      default: true
     alert_unknown:
       name: Warn about unknown people
-      description: Announce an unknown person and have Nova describe them.
-      default: true
+      description: Speak up about a face Nova does not know and ask it to describe the person.
       selector:
         boolean:
+      default: true
     cooldown_seconds:
       name: Cooldown
       description: >-
-        After an announcement, further recognitions on any camera are ignored
-        for this long, so the same visit is not announced twice.
-      default: 300
+        How long to ignore further faces, on every camera, after an
+        announcement, so one visit is announced once.
       selector:
         number:
           min: 30
           max: 3600
           unit_of_measurement: seconds
+      default: 300
 
 triggers:
   - trigger: event
     event_type: nova_face_recognized
 
-# Repeats inside the cooldown are dropped, not queued, so nothing is
-# announced late.
+# A face seen again during the cooldown is dropped, never queued, so
+# nothing is announced late.
 mode: single
 max_exceeded: silent
 
@@ -62,7 +62,7 @@ conditions:
 
 actions:
   - choose:
-      # A known face must be a confident match before it is named.
+      # Name a known face only when the match is confident.
       - conditions:
           - condition: template
             value_template: >-
@@ -72,7 +72,7 @@ actions:
             data:
               entity_id: "{{ seen.camera_entity }}"
               reason: "{{ seen.name }} has been recognised at the {{ place }}"
-      # An unknown face has no match to be confident about.
+      # An unknown face has no match, so no confidence to check.
       - conditions:
           - condition: template
             value_template: >-
@@ -83,7 +83,7 @@ actions:
               entity_id: "{{ seen.camera_entity }}"
               reason: "An unknown person has been seen at the {{ place }}; describe them"
     default:
-      # Nothing announced, so no cooldown either.
+      # Nothing was said, so there is no cooldown to wait out.
       - stop: Nothing to announce
   - delay:
       seconds: !input cooldown_seconds
