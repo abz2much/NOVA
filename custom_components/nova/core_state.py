@@ -46,12 +46,12 @@ class _CoreState:
         self.alarm_unsub: Optional[object] = None
 
         # One manager for each area of work.
-        self.ignore_mgr: Optional[IgnoreManager] = None
-        self.safety_mgr: Optional[SafetyManager] = None
-        self.lockdown_mgr: Optional["LockdownManager"] = None
-        self.proactive_mgr: Optional[ProactiveManager] = None
-        self.autonomy_mgr: Optional[AutonomyManager] = None
         self.state_logger: Optional[StateLogger] = None
+        self.autonomy_mgr: Optional[AutonomyManager] = None
+        self.proactive_mgr: Optional[ProactiveManager] = None
+        self.lockdown_mgr: Optional["LockdownManager"] = None
+        self.safety_mgr: Optional[SafetyManager] = None
+        self.ignore_mgr: Optional[IgnoreManager] = None
 
         # Running totals and timestamps.
         self.tick_count: int = 0
