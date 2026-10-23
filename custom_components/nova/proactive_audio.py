@@ -27,11 +27,11 @@ from datetime import timedelta
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import area_registry as ar
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.helpers import area_registry as ar
+from homeassistant.exceptions import HomeAssistantError
 
 from . import audio_routing, delivery
 from .audio import NoiseGate, ProsodyController

@@ -217,25 +217,26 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
 
     from .. import connectivity, reasoning_cache
 
-    # Backfill structured fields from the summary if not provided.
-    if not (domain := (entity_id.split(".", 1)[0] if "." in entity_id else "")):
-        f2, e2, d2, fs2, ts2 = parse_summary(event_summary)
-        friendly_name = friendly_name or f2
-        entity_id = entity_id or e2
-        domain = d2
-        from_state = from_state or fs2
-        to_state = to_state or ts2
-
-    snapshot = EventSnapshot.build(
-        entity_id=entity_id, domain=domain, device_class=device_class,
-        from_state=from_state, to_state=to_state, friendly_name=friendly_name,
-        event_summary=event_summary, category=classifier_category,
-        urgency=classifier_urgency, anyone_home=anyone_home,
-        recent_announcements=recent_announcements)
+    # An event with no usable entity id has its missing fields read from the
+    # summary text. A field that was given is never replaced.
+    domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
+    if not domain:
+        name_hint, entity_hint, domain, before_hint, after_hint = parse_summary(event_summary)
+        entity_id = entity_id or entity_hint
+        friendly_name = friendly_name or name_hint
+        from_state = from_state or before_hint
+        to_state = to_state or after_hint
 
     sig = reasoning_cache.signature(
         domain, device_class, classifier_category, from_state, to_state,
         anyone_home, classifier_urgency)
+
+    snapshot = EventSnapshot.build(
+        entity_id=entity_id, domain=domain, device_class=device_class,
+        friendly_name=friendly_name, from_state=from_state, to_state=to_state,
+        event_summary=event_summary, category=classifier_category,
+        urgency=classifier_urgency, anyone_home=anyone_home,
+        recent_announcements=recent_announcements)
 
     cached = reasoning_cache.get(sig)
     if cached is not None and not rich:
