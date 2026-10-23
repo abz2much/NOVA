@@ -154,14 +154,18 @@ async def test_concurrent_saves_keep_the_newest_state(fr):
 
 
 def test_importing_the_roster_reads_nothing_until_setup_loads_it(fr, load, monkeypatch, tmp_path):
-    import importlib
+    import importlib.util
+    import sys
     saved = tmp_path / "roster.json"
     saved.write_text(json.dumps({"residents": ["Sam"]}))
-    monkeypatch.setattr(load("paths"), "nova_path", lambda name: str(saved))
-    importlib.reload(fr)
-    assert fr.names() == []                        # nothing is read at import
-    fr.load()
-    assert fr.names() == ["Sam"]
+    monkeypatch.setattr(load("paths"), "nova_path", lambda *parts: str(saved))
+    spec = importlib.util.spec_from_file_location("jc._face_roster_fresh", fr.__file__)
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh.names() == []                     # nothing is read at import
+    fresh.load()
+    assert fresh.names() == ["Sam"]
 
 
 # ── recent_faces ────────────────────────────────────────────────────────────

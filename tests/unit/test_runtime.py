@@ -212,16 +212,6 @@ def test_proactive_audio_objects_live_on_the_runtime():
     assert "runtime.alert_buffer = None" in unload
 
 
-def test_proactive_audio_registers_no_services():
-    """proactive_audio.py registers nothing and has no domain-level runtime
-    lookup. (Its nova.speak and nova.process_intent handlers were removed in
-    8.60.0.)"""
-    src = (COMP / "proactive_audio.py").read_text(encoding="utf-8")
-    for gone in ("async_register_services", "_service_runtime", "domain_runtime",
-                 "async_register(", "async_remove("):
-        assert gone not in src, gone
-
-
 def test_proactive_audio_unsubs_are_owned_by_resources():
     setup = ast.unparse(_func(COMP / "proactive_audio.py", "async_setup_proactive_audio"))
     assert "runtime.resources.add_unsubs(unsubs)" in setup

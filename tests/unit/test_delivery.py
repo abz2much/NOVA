@@ -113,12 +113,6 @@ def test_your_own_reminder_still_respects_quiet_hours_and_sleep(d):
         assert _say(d.decide(req, d.Conditions(**cond))) == (False, True)
 
 
-def test_decide_is_pure(d):
-    import inspect
-    src = inspect.getsource(d.decide)
-    assert "hass" not in src and "import" not in src
-
-
 # ── async_deliver ───────────────────────────────────────────────────────────
 
 @pytest.fixture

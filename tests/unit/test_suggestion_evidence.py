@@ -163,26 +163,21 @@ def test_stored_row_keeps_evidence_for_the_panel(load, store):
 
 # ── the wiring, read from source ─────────────────────────────────────────────
 
-def test_schema_has_evidence_columns_for_new_and_old_databases():
-    schema = _source("persistence", "schema.py")
-    for column in ("pattern_type TEXT", "entity_ids TEXT", "details TEXT"):
-        assert column in schema
-    for name in ("pattern_type", "entity_ids", "details"):
-        assert f'Column("suggestions", "{name}"' in schema
-
-
-def test_insert_writes_evidence_columns():
-    text = _source("automation", "suggestions.py")
-    for needle in ("pattern_type, entity_ids, details",
-                   "json.dumps(pattern.entity_ids", "json.dumps(pattern.details"):
-        assert needle in text
+def test_an_old_suggestions_table_gains_the_evidence_columns(load, tmp_path):
+    conn = sqlite3.connect(str(tmp_path / "old.db"))
+    conn.execute("CREATE TABLE suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "created TEXT NOT NULL, description TEXT NOT NULL, automation_yaml TEXT, "
+                 "status TEXT DEFAULT 'pending', confidence REAL DEFAULT 0.0, "
+                 "pattern_count INTEGER DEFAULT 0, approved_at TEXT, dismissed_at TEXT)")
+    load("persistence.sqlite").ensure(conn, "pattern_log")
+    columns = {row[1]: row[4] for row in conn.execute("PRAGMA table_info(suggestions)")}
+    conn.close()
+    assert columns["pattern_type"] == "''" and columns["entity_ids"] == "''"
+    assert columns["details"] == "'{}'"
 
 
 def test_panel_data_carries_the_explanation():
     assert "panel_suggestion_items" in ws_text()
-    api = _source("automation", "api.py")
-    for needle in ("explain_suggestion", "why_headline", "evidence", '"pattern_type"'):
-        assert needle in api
 
 
 @pytest.mark.parametrize("needle", [

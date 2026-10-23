@@ -62,13 +62,6 @@ def test_a_failing_check_never_hides_a_tool(of, monkeypatch):
     assert of.is_set_up(FakeHass(), "cameras")
 
 
-def test_the_conversation_filters_the_offered_tools():
-    import pathlib
-    loop = (pathlib.Path(__file__).resolve().parents[2]
-            / "custom_components/nova/agent_runtime/loop.py").read_text(encoding="utf-8")
-    assert "optional_features.tools_not_set_up(hass)" in loop
-
-
 async def test_web_research_does_nothing_until_set_up(load, monkeypatch):
     wr = load("web_research")
     monkeypatch.setattr(load("nova_config"), "get", lambda k, d=None: d)

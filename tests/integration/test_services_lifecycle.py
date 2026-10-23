@@ -829,3 +829,26 @@ async def test_doorbell_diagnostic_without_the_blueprint(hass):
     await hass.async_block_till_done()
     assert events[0]["checks"][0]["ok"] is False
     assert events[0]["verdict"].startswith("Automation missing")
+
+
+# ── Saved mutes ─────────────────────────────────────────────────────────────
+
+async def test_saved_mutes_are_loaded_at_setup_and_every_shush_is_saved(hass):
+    import json as _json
+    from custom_components.nova import output_gate
+    state = output_gate._STATE
+    saved = pathlib.Path(hass.config.path("nova", output_gate.MUTES_FILE))
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text(_json.dumps({"entities": ["light.hall"], "categories": [], "all": False}))
+    state.muted_entities, state.muted_categories, state.mute_all = set(), set(), False
+    try:
+        await _setup(hass)
+        assert state.muted_entities == {"light.hall"}          # loaded at setup
+        await hass.services.async_call(DOMAIN, "shush", {"entity_id": "binary_sensor.porch"},
+                                       blocking=True)
+        assert _json.loads(saved.read_text())["entities"] == ["binary_sensor.porch", "light.hall"]
+        await hass.services.async_call(DOMAIN, "unshush", {"entity_id": "light.hall"},
+                                       blocking=True)
+        assert _json.loads(saved.read_text())["entities"] == ["binary_sensor.porch"]
+    finally:
+        state.muted_entities, state.muted_categories, state.mute_all = set(), set(), False

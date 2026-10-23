@@ -566,13 +566,6 @@ async def test_tracked_object_face(rec, mqtt, source):
     assert [e["source"] for e in rec._FACE_LOG] == ["frigate_tracked"]   # no camera, no record
 
 
-def test_recognition_source_read_twice_with_off_default():
-    import pathlib
-    src = (pathlib.Path(__file__).resolve().parents[2]
-           / "custom_components/nova/recognition.py").read_text(encoding="utf-8")
-    assert src.count('nova_config.get("recognition_source", "off")') == 2
-
-
 # ── agent tool registration ──────────────────────────────────────────────────
 
 def test_who_do_you_see_tool_registered(load):

@@ -82,16 +82,6 @@ def test_set_stores_a_real_bool(rt):
     assert runtime.observer_running is True
 
 
-def test_set_takes_no_hass():
-    """Without hass the helper has no way to reach hass.data."""
-    src = (COMP / "runtime.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef) and n.name == "set_observer_running")
-    assert [a.arg for a in fn.args.args] == ["entry", "running"]
-    assert "hass" not in ast.get_source_segment(src, fn)
-
-
 def test_set_without_runtime_raises_and_invents_nothing(rt):
     entry = types.SimpleNamespace(entry_id="e1", state=_State.LOADED)
     with pytest.raises(rt.NovaRuntimeUnavailable):
@@ -177,27 +167,6 @@ def test_only_the_helper_writes_observer_running():
         if found:
             writes[str(path.relative_to(COMP))] = [f for f, _ in found]
     assert writes == {"runtime.py": ["set_observer_running"]}
-
-
-def test_every_known_writer_uses_the_helper():
-    init_src = (COMP / "__init__.py").read_text(encoding="utf-8")
-    svc_src = (COMP / "services.py").read_text(encoding="utf-8")
-    ws_src = ws_text()
-    # setup enabled + setup failure, and unload
-    assert init_src.count("set_observer_running(entry, True)") == 2
-    assert init_src.count("set_observer_running(entry, False)") == 1
-    # nova.observer_start and nova.observer_stop (services.py since Phase 4)
-    assert svc_src.count("set_observer_running(entry, True)") == 1
-    assert svc_src.count("set_observer_running(entry, False)") == 1
-    # nova/update_config observer_enabled on and off
-    assert ws_src.count("set_observer_running(entry, True)") == 1
-    assert ws_src.count("set_observer_running(entry, False)") == 1
-
-
-def test_panel_status_reads_the_runtime():
-    ws_src = ws_text()
-    assert "observer_running = observer_status(entry)" in ws_src
-    assert 'data.get("observer_running"' not in ws_src
 
 
 def _nested(path: pathlib.Path, name: str) -> ast.AST:

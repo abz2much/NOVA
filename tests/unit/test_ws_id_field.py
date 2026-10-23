@@ -72,12 +72,20 @@ def test_forget_button_sends_fact_id_and_not_id():
         assert "id" not in keys
 
 
-def test_forget_handler_reads_fact_id():
-    assert 'msg.get("fact_id")' in ws_text()
-    body = ast.unparse(ws_function("ws_forget_knowledge"))
-    assert "msg.get('fact_id')" in body
-    # The reply still goes back on the message number, as it must.
-    assert "msg['id']" in body
+async def test_forget_handler_reads_fact_id(load, monkeypatch):
+    import sys
+    from fakes import FakeHass
+    from ws_kit import _Conn, _stub_ws_api
+    _stub_ws_api(monkeypatch)
+    monkeypatch.delitem(sys.modules, "jc.ws_knowledge", raising=False)
+    wk, knowledge = load("ws_knowledge"), load("knowledge")
+    forgot = []
+    monkeypatch.setattr(knowledge, "forget", lambda **kw: forgot.append(kw) or 1)
+    monkeypatch.setattr(knowledge, "all_facts", lambda **kw: [])
+    conn = _Conn()
+    await wk.ws_forget_knowledge(FakeHass(), conn, {"id": 41, "fact_id": 7})
+    assert forgot == [{"fact_id": 7, "subject": None, "key": None}]
+    assert conn.results == [(41, {"removed": 1, "facts": []})]   # the reply goes on the message number
 
 
 # ── every other panel call ──────────────────────────────────────────────
