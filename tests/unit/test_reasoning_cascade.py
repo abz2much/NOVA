@@ -1,125 +1,216 @@
-"""Regression tests for reasoning_loop.decide()'s resilience cascade.
+"""How reasoning_loop.decide() falls back as capabilities drop away.
 
-decide() is engineered so the household keeps a coherent voice as capabilities
-drop away: local templates -> learned cache -> cloud LLM, with a connectivity
-breaker, falling back to stale cache then the Local Mind. These tests isolate the
-cascade ROUTING by stubbing the collaborator layers (templates, cache, Local
-Mind), so we assert on the control flow — not on those modules' internals.
+Order of preference: local rules, then a fresh learned verdict, then the
+cloud model guarded by the connectivity breaker, then a stale learned verdict,
+and finally the Local Mind. The collaborators (rules, cache, Local Mind) are
+replaced with small stand-ins so only the routing between them is under test.
 
-The single network seam is the injected provider; the only shared mutable state
-is connectivity._BREAKER, reset before each test via the public reset().
+The breaker is process-wide state: every test starts and ends with it closed,
+and its clock is a fake one the test moves by hand.
 """
+from __future__ import annotations
+
 import pytest
+
+FLOOR_MESSAGE = "Local Mind handled it."
+REFUSED = RuntimeError("connection refused")   # not transient, so never retried
+
+
+class Cascade:
+    """Handles on the stand-ins a test may steer or inspect."""
+
+    def __init__(self, rl, clock):
+        self.rl = rl
+        self.clock = clock
+        self.fresh = None        # what reasoning_cache.get returns for a fresh read
+        self.stale = None        # ... and for get(..., ignore_age=True)
+        self.learned: list[tuple] = []
+        self.floor_calls = 0
+        self.local_answer = None
+
+    async def decide(self, hass, provider, trace=None, **changes):
+        event = {
+            "honorific": "sir",
+            "event_summary": "binary_sensor.shed_window changed to on",
+            "home_state_summary": "away",
+            "classifier_urgency": "medium",
+            "classifier_category": "general",
+            "recent_announcements": [],
+            "anyone_home": False,
+            "entity_id": "binary_sensor.shed_window",
+            "device_class": "window",
+            "from_state": "off",
+            "to_state": "on",
+            "friendly_name": "Shed Window",
+        }
+        event.update(changes)
+        if trace is not None:
+            event["trace"] = trace
+        return await self.rl.decide(hass, provider, **event)
 
 
 @pytest.fixture(autouse=True)
-def reset_breaker(connectivity):
+def closed_breaker(connectivity):
     connectivity.reset()
     yield
     connectivity.reset()
 
 
 @pytest.fixture
-def isolate_cascade(reasoning_loop, connectivity, load, monkeypatch):
-    """Force decide() down to the cloud/breaker branch deterministically and
-    capture the Local-Mind floor without loading patterns.db or the cache file."""
-    rl = reasoning_loop
+def cascade(reasoning_loop, connectivity, load, monkeypatch):
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(connectivity, "_now", lambda: clock["now"])
+    state = Cascade(reasoning_loop, clock)
+
     cache = load("reasoning_cache")
-    local_mind = load("local_mind")
-
-    monkeypatch.setattr(rl, "_try_local_reasoning", lambda *a, **k: None)
-    monkeypatch.setattr(rl, "_rich_mode", lambda hass: False)
-    monkeypatch.setattr(cache, "get", lambda *a, **k: None)
-    monkeypatch.setattr(cache, "remember", lambda *a, **k: None)
+    monkeypatch.setattr(
+        cache, "get", lambda sig, ignore_age=False: state.stale if ignore_age else state.fresh)
+    monkeypatch.setattr(cache, "remember", lambda *args: state.learned.append(args))
     monkeypatch.setattr(cache, "note_hit", lambda *a, **k: None)
+    monkeypatch.setattr(cache, "note_cloud_call", lambda *a, **k: None)
 
-    async def fake_assess(*a, **k):
-        return {"speak": True, "message": "Local Mind handled it.", "urgency": "medium"}
+    monkeypatch.setattr(reasoning_loop, "_try_local_reasoning",
+                        lambda *a, **k: state.local_answer)
+    monkeypatch.setattr(reasoning_loop, "_rich_mode", lambda hass: False)
 
-    monkeypatch.setattr(local_mind, "assess", fake_assess)
-    return rl
+    async def floor(*args, **kwargs):
+        state.floor_calls += 1
+        return {"speak": True, "message": FLOOR_MESSAGE, "urgency": "medium"}
 
-
-def _decide(rl, hass, provider, **over):
-    kwargs = dict(
-        honorific="sir",
-        event_summary="binary_sensor.cellar_window changed to on",
-        home_state_summary="away",
-        classifier_urgency="medium",
-        classifier_category="general",
-        recent_announcements=[],
-        anyone_home=False,
-        entity_id="binary_sensor.cellar_window",
-        device_class="window",
-        from_state="off",
-        to_state="on",
-        friendly_name="Cellar Window",
-    )
-    kwargs.update(over)
-    return rl.decide(hass, provider, **kwargs)
+    monkeypatch.setattr(load("local_mind"), "assess", floor)
+    return state
 
 
-async def test_decide_never_raises_on_provider_failure(
-        isolate_cascade, fake_hass, provider_factory):
-    rl = isolate_cascade
-    provider = provider_factory(exc=RuntimeError("connection refused"))  # non-transient
-    out = await _decide(rl, fake_hass, provider)
-    assert isinstance(out, dict) and "speak" in out      # resilient: returns a decision
-    assert provider.calls == 1                            # tried the cloud once
-    assert out["message"] == "Local Mind handled it."     # fell through to the floor
+def _reply(speak: bool, **fields) -> str:
+    import json
+    return json.dumps({"speak": speak, **fields})
 
 
-async def test_two_failures_open_breaker_then_skip_network(
-        isolate_cascade, fake_hass, provider_factory, connectivity):
-    rl = isolate_cascade
-    provider = provider_factory(exc=RuntimeError("connection refused"))
-    for _ in range(2):                                   # _FAILURE_THRESHOLD = 2
-        await _decide(rl, fake_hass, provider)
-    assert connectivity.status()["state"] == "open"             # breaker OPEN
-
-    calls_before = provider.calls
-    out = await _decide(rl, fake_hass, provider)
-    assert provider.calls == calls_before                # cloud skipped while OPEN
-    assert out["message"] == "Local Mind handled it."    # served by the floor
+async def _trip(cascade, hass, provider_factory, times=2):
+    failing = provider_factory(exc=REFUSED)
+    for _ in range(times):
+        await cascade.decide(hass, failing)
+    return failing
 
 
-async def test_successful_cloud_decision_is_returned(
-        isolate_cascade, fake_hass, provider_factory):
-    rl = isolate_cascade
+# ── provider failures ───────────────────────────────────────────────────────
+
+async def test_unreachable_provider_falls_to_local_mind(cascade, fake_hass,
+                                                        provider_factory, connectivity):
+    provider = provider_factory(exc=REFUSED)
+    trace: dict = {}
+    out = await cascade.decide(fake_hass, provider, trace=trace)
+    assert isinstance(out, dict) and "speak" in out
+    assert provider.calls == 1
+    assert out["message"] == FLOOR_MESSAGE
+    assert trace["origin"] == "local_mind"
+    assert connectivity.status()["consecutive_failures"] == 1
+    assert cascade.learned == []                  # a failure is never learned
+
+
+async def test_unreadable_reply_counts_as_failure(cascade, fake_hass,
+                                                  provider_factory, connectivity):
+    provider = provider_factory(replies=["I think you should probably say something"])
+    out = await cascade.decide(fake_hass, provider)
+    assert out["message"] == FLOOR_MESSAGE
+    assert "provider_failure" in out
+    assert connectivity.status()["consecutive_failures"] == 1
+    assert cascade.learned == []
+
+
+async def test_failure_prefers_stale_learned_verdict(cascade, fake_hass, provider_factory):
+    cascade.stale = {"speak": False, "urgency": "medium"}
+    trace: dict = {}
+    out = await cascade.decide(fake_hass, provider_factory(exc=REFUSED), trace=trace)
+    assert out["speak"] is False
+    assert trace["origin"] == "cache"
+    assert cascade.floor_calls == 0
+
+
+# ── the breaker ─────────────────────────────────────────────────────────────
+
+async def test_two_failures_open_the_breaker_and_skip_the_network(
+        cascade, fake_hass, provider_factory, connectivity):
+    failing = provider_factory(exc=REFUSED)
+    await cascade.decide(fake_hass, failing)
+    assert connectivity.status()["state"] == "closed"     # one is not enough
+    await cascade.decide(fake_hass, failing)
+    assert connectivity.status()["state"] == "open"
+
+    spare = provider_factory(replies=[_reply(True, message="Never sent.", urgency="high")])
+    out = await cascade.decide(fake_hass, spare)
+    assert failing.calls == 2 and spare.calls == 0
+    assert out["message"] == FLOOR_MESSAGE
+
+
+async def test_breaker_holds_until_cooldown_then_probe_recovers(
+        cascade, fake_hass, provider_factory, connectivity):
+    await _trip(cascade, fake_hass, provider_factory)
+
+    good = provider_factory(replies=[_reply(True, message="Recovered, sir.", urgency="low")])
+    cascade.clock["now"] += 59                        # still inside the 60s cooldown
+    await cascade.decide(fake_hass, good)
+    assert good.calls == 0
+
+    cascade.clock["now"] += 61                        # well past the cooldown
+    out = await cascade.decide(fake_hass, good)
+    assert good.calls == 1                            # the probe went through
+    assert out["speak"] is True
+    assert connectivity.status()["state"] == "closed"
+    assert connectivity.status()["consecutive_failures"] == 0
+
+
+async def test_failed_probe_reopens_at_once(cascade, fake_hass, provider_factory, connectivity):
+    failing = await _trip(cascade, fake_hass, provider_factory)
+    cascade.clock["now"] += 120
+    await cascade.decide(fake_hass, failing)
+    assert failing.calls == 3
+    assert connectivity.status()["state"] == "open"
+    assert connectivity.status()["cooldown_remaining_s"] == 60
+
+
+# ── provider answers ────────────────────────────────────────────────────────
+
+async def test_spoken_verdict_is_returned_and_learned(cascade, fake_hass,
+                                                      provider_factory, connectivity):
     provider = provider_factory(
-        replies=['{"speak": true, "message": "Sir, the cellar window opened.", "urgency": "high"}'])
-    out = await _decide(rl, fake_hass, provider)
+        replies=[_reply(True, message="Sir, the shed window opened.", urgency="high")])
+    trace: dict = {}
+    out = await cascade.decide(fake_hass, provider, trace=trace)
     assert provider.calls == 1
     assert out["speak"] is True
     assert out["urgency"] == "high"
-    assert "cellar window" in out["message"].lower()
+    assert "shed window" in out["message"].lower()
+    assert trace["origin"] == "provider"
+    assert [entry[1:] for entry in cascade.learned] == [(True, "high")]
+    assert connectivity.status()["total_successes"] >= 1
 
 
-async def test_cloud_silence_decision_is_returned(
-        isolate_cascade, fake_hass, provider_factory):
-    rl = isolate_cascade
-    provider = provider_factory(replies=['{"speak": false, "reason": "routine"}'])
-    out = await _decide(rl, fake_hass, provider)
+async def test_silent_verdict_is_returned_and_learned_at_classifier_urgency(
+        cascade, fake_hass, provider_factory):
+    provider = provider_factory(replies=[_reply(False, reason="routine")])
+    out = await cascade.decide(fake_hass, provider)
     assert out["speak"] is False
+    assert [entry[1:] for entry in cascade.learned] == [(False, "medium")]
+    assert cascade.floor_calls == 0
 
 
-async def test_recovery_after_cooldown(
-        isolate_cascade, fake_hass, provider_factory, connectivity, monkeypatch):
-    rl = isolate_cascade
-    # Trip the breaker.
-    bad = provider_factory(exc=RuntimeError("connection refused"))
-    for _ in range(2):
-        await _decide(rl, fake_hass, bad)
-    assert connectivity.status()["state"] == "open"
+# ── earlier layers short-circuit the model ──────────────────────────────────
 
-    # Advance time past the 60s cooldown so the breaker allows a probe again.
-    # The breaker reads the monotonic clock (8.49.10).
-    import time as _t
-    base = _t.monotonic()
-    monkeypatch.setattr(_t, "monotonic", lambda: base + 120)
+async def test_local_rule_answer_never_reaches_the_model(cascade, fake_hass, provider_factory):
+    cascade.local_answer = {"speak": False, "reason": "rule said no"}
+    provider = provider_factory(replies=[_reply(True, message="x", urgency="high")])
+    out = await cascade.decide(fake_hass, provider)
+    assert out == {"speak": False, "reason": "rule said no"}
+    assert provider.calls == 0
 
-    good = provider_factory(
-        replies=['{"speak": true, "message": "Recovered, sir.", "urgency": "low"}'])
-    out = await _decide(rl, fake_hass, good)
-    assert good.calls == 1                 # probe was allowed through
-    assert out["speak"] is True
+
+async def test_fresh_learned_verdict_never_reaches_the_model(cascade, fake_hass,
+                                                             provider_factory):
+    cascade.fresh = {"speak": False, "urgency": "medium"}
+    provider = provider_factory(replies=[_reply(True, message="x", urgency="high")])
+    trace: dict = {}
+    out = await cascade.decide(fake_hass, provider, trace=trace)
+    assert out["speak"] is False
+    assert trace["origin"] == "cache"
+    assert provider.calls == 0
