@@ -1,12 +1,8 @@
   // ─── Memory ───────────────────────────────────────────────────────────
-  // Ported from Classic's own Memory tab (nova-panel.js): curated facts
-  // ("What Nova Knows" + TEACH form), a Pending Confirmation queue for
-  // facts staged via "remember that…" but not yet approved, and Person
-  // Routines (habits confidently attributed to one person). Each section
-  // patches its own container after a fetch/action rather than doing a
-  // full _render() — the TEACH inputs are free text the user may be
-  // mid-typing, and a full re-render would wipe them the same way it
-  // would for AI Models/Cameras/Appliances.
+  // Four sections: what Nova knows (with the TEACH form), facts waiting for
+  // a yes, relations between things, and habits tied to one person. Each
+  // section redraws only its own box after a fetch or an action, so text
+  // half typed into TEACH is never wiped by a full render.
   _htmlMemory() {
     return `
         <div class="panel">
@@ -59,14 +55,36 @@
     `;
   }
 
+  // One call to Nova: { reply } on success, { failed } with the error text.
+  async _memAsk(msg) {
+    try {
+      return { reply: await this._hass.callWS(msg) };
+    } catch (err) {
+      return { failed: String(err), err };
+    }
+  }
+
+  // Stores a new fact list, keeping the waiting list and stats unless given.
+  // The tab may act before its first load, when there is nothing to keep.
+  _keepKnowledge(facts, pending) {
+    const was = this._knowledge || {};
+    this._knowledge = { facts, pending: pending ?? was.pending ?? [], stats: was.stats ?? {} };
+  }
+
+  // Calls fn(id, button) when a button carrying a numeric data-id is clicked.
+  _memBind(box, selector, fn) {
+    box.querySelectorAll(selector).forEach(btn => btn.addEventListener("click", () => {
+      const id = parseInt(btn.getAttribute("data-id"), 10);
+      if (!isNaN(id)) fn(id, btn);
+    }));
+  }
+
   async _fetchKnowledge() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/get_knowledge" });
-      this._knowledge = { facts: res?.facts || [], pending: res?.pending || [], stats: res?.stats || {} };
-    } catch (err) {
-      this._knowledge = { facts: [], pending: [], stats: {}, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/get_knowledge" });
+    this._knowledge = failed
+      ? { facts: [], pending: [], stats: {}, error: failed }
+      : { facts: reply?.facts || [], pending: reply?.pending || [], stats: reply?.stats || {} };
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
     this._renderPendingFacts();
@@ -74,158 +92,141 @@
 
   async _fetchPersonRoutines() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/get_person_routines" });
-      this._personRoutines = { groups: res?.routines || {} };
-    } catch (err) {
-      this._personRoutines = { groups: {}, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/get_person_routines" });
+    this._personRoutines = failed ? { groups: {}, error: failed } : { groups: reply?.routines || {} };
     this._personRoutinesLoaded = true;
     this._renderPersonRoutines();
   }
 
   _renderPersonRoutines() {
-    const list = this.shadowRoot?.getElementById("newProutineList");
-    if (!list) return;
-    const groups = this._personRoutines?.groups || {};
-    const people = Object.keys(groups).sort();
-    if (this._personRoutines?.error) {
-      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`);
+    const box = this.shadowRoot?.getElementById("newProutineList");
+    if (!box) return;
+    const state = this._personRoutines || {};
+    if (state.error) {
+      this._setHtml(box, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(state.error) })}</div>`);
       return;
     }
+    const groups = state.groups || {}, people = Object.keys(groups).sort();
     if (!people.length) {
-      this._setHtml(list, this._personRoutinesLoaded
+      this._setHtml(box, this._personRoutinesLoaded
         ? `<div class="stub-body">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
         : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    this._setHtml(list, people.map(person => {
-      const items = groups[person]
-        .slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-        .map(r => {
-          const pct = Math.round((r.confidence || 0) * 100);
-          return `
+    // "person_alex" reads "Person Alex". Capitalise first, then escape, so a
+    // name holding & or quotes is not turned into a broken entity.
+    const title = key => this._esc(key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
+    const surest = (a, b) => (b.confidence || 0) - (a.confidence || 0);
+    const habit = r => `
             <div class="cfg-row">
               <label>${this._esc(r.description)}</label>
-              <span class="toggle-desc">${pct}% · ×${r.occurrences || "?"}</span>
+              <span class="toggle-desc">${Math.round((r.confidence || 0) * 100)}% · ×${r.occurrences || "?"}</span>
             </div>`;
-        }).join("");
-      const label = this._esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
-      return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join(""));
+    this._setHtml(box, people
+      .map(person => `<div class="mode-bind-head">${title(person)}</div>${groups[person].slice().sort(surest).map(habit).join("")}`)
+      .join(""));
   }
 
   _renderKnowledgeList() {
-    const list = this.shadowRoot?.getElementById("newMemList");
-    if (!list) return;
-    const facts = this._knowledge?.facts || [];
-    const count = this.shadowRoot?.getElementById("newMemCount");
+    const root = this.shadowRoot;
+    const box = root?.getElementById("newMemList");
+    if (!box) return;
+    const known = this._knowledge || {}, facts = known.facts || [];
+    const count = root.getElementById("newMemCount");
     if (count) this._setText(count, this._t(facts.length === 1 ? "{count} fact" : "{count} facts", { count: facts.length }));
-    if (this._knowledge?.error) {
-      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`);
+    if (known.error) {
+      this._setHtml(box, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(known.error) })}</div>`);
       return;
     }
     if (!facts.length) {
-      this._setHtml(list, this._knowledgeLoaded
+      this._setHtml(box, this._knowledgeLoaded
         ? `<div class="stub-body">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
         : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    const groups = {};
-    facts.forEach(f => { (groups[f.subject] = groups[f.subject] || []).push(f); });
-    const labels = { household: "Household", primary: "About me" };
-    const order = Object.keys(groups).sort(
-      (a, b) => (a === "household" ? -1 : b === "household" ? 1 : a.localeCompare(b)));
-    this._setHtml(list, order.map(subj => {
-      const items = groups[subj].map(f => {
-        const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
-        const hedge = soft
-          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
-          : "";
-        const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
-        return `
+    // Household first, then the other subjects by name.
+    const bySubject = {};
+    for (const f of facts) (bySubject[f.subject] = bySubject[f.subject] || []).push(f);
+    const subjectNames = { household: "Household", primary: "About me" };
+    const rank = s => (s === "household" ? 0 : 1);
+    const subjects = Object.keys(bySubject).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    // A fact not stated outright, or held at under 90%, carries a "~" saying how sure Nova is.
+    const factRow = f => {
+      const sure = f.confidence ?? 1;
+      const hedge = f.source !== "stated" || sure < 0.9
+        ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round(sure * 100) })}">~</span>`
+        : "";
+      const expiry = f.expires_at ? `<span title="expires">⌛</span>` : "";
+      return `
           <div class="cfg-row" data-id="${f.id}">
             <label>${this._esc(f.key)}</label>
             <div style="display:flex;align-items:center;gap:6px">
-              <span class="toggle-desc">${this._esc(f.value)}${hedge}${exp}</span>
+              <span class="toggle-desc">${this._esc(f.value)}${hedge}${expiry}</span>
               <button class="new-mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
             </div>
           </div>`;
-      }).join("");
-      const label = labels[subj] || this._esc(subj.replace(/_/g, " "));
-      return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join(""));
-    list.querySelectorAll(".new-mem-forget").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._forgetKnowledge(id);
-      });
-    });
+    };
+    this._setHtml(box, subjects
+      .map(subj => `<div class="mode-bind-head">${subjectNames[subj] || this._esc(subj.replace(/_/g, " "))}</div>${bySubject[subj].map(factRow).join("")}`)
+      .join(""));
+    this._memBind(box, ".new-mem-forget", id => this._forgetKnowledge(id));
   }
 
   async _teachKnowledge() {
     const root = this.shadowRoot;
     if (!root || !this._hass) return;
-    const keyEl = root.getElementById("newMemKey");
-    const valEl = root.getElementById("newMemVal");
-    const subjEl = root.getElementById("newMemSubject");
-    const key = (keyEl?.value || "").trim();
-    const value = (valEl?.value || "").trim();
+    const [keyEl, valEl, subjEl] = ["newMemKey", "newMemVal", "newMemSubject"].map(id => root.getElementById(id));
+    const key = (keyEl?.value || "").trim(), value = (valEl?.value || "").trim();
     const subject = subjEl?.value || "household";
     if (!key || !value) return;
-    try {
-      const res = await this._hass.callWS({
-        type: "nova/add_knowledge", key, value, subject,
-        kind: subject === "primary" ? "preference" : "fact",
-      });
-      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
-      if (keyEl) keyEl.value = "";
-      if (valEl) valEl.value = "";
+    const kind = subject === "primary" ? "preference" : "fact";
+    const { reply, failed, err } = await this._memAsk({ type: "nova/add_knowledge", key, value, subject, kind });
+    if (failed) {
+      console.error("Nova: teach failed", err);
+    } else {
+      this._keepKnowledge(reply?.facts || []);
+      [keyEl, valEl].forEach(el => { if (el) el.value = ""; });
       if (keyEl) keyEl.focus();
-    } catch (err) { console.error("Nova: teach failed", err); }
+    }
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
   }
 
   async _forgetKnowledge(id) {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/forget_knowledge", fact_id: id });
-      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
-    } catch (err) { console.error("Nova: forget failed", err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/forget_knowledge", fact_id: id });
+    if (failed) console.error("Nova: forget failed", err);
+    else this._keepKnowledge(reply?.facts || []);
     this._renderKnowledgeList();
   }
 
   async _pendingFactAction(id, action) {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/pending_fact_action", fact_id: id, action });
-      this._knowledge = { facts: res?.facts || this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-    } catch (err) { console.error(`Nova: ${action} failed`, err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/pending_fact_action", fact_id: id, action });
+    if (failed) console.error(`Nova: ${action} failed`, err);
+    else this._keepKnowledge(reply?.facts || this._knowledge?.facts || [], reply?.pending || []);
     this._renderKnowledgeList();
     this._renderPendingFacts();
   }
 
   async _editPendingFact(id, value) {
     if (!this._hass || !value) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/edit_pending_fact", fact_id: id, value });
-      this._knowledge = { facts: this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-    } catch (err) { console.error("Nova: edit pending fact failed", err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/edit_pending_fact", fact_id: id, value });
+    if (failed) console.error("Nova: edit pending fact failed", err);
+    else this._keepKnowledge(this._knowledge?.facts || [], reply?.pending || []);
     this._renderPendingFacts();
   }
 
   _renderPendingFacts() {
     const root = this.shadowRoot;
-    const panel = root?.getElementById("newPendingPanel");
-    const list = root?.getElementById("newPendingList");
-    const countEl = root?.getElementById("newPendingCount");
-    if (!panel || !list) return;
-    const pending = this._knowledge?.pending || [];
-    panel.hidden = pending.length === 0;
-    if (!pending.length) { this._setHtml(list, ""); return; }
-    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: pending.length }));
-    this._setHtml(list, pending.map(f => `
+    const panel = root?.getElementById("newPendingPanel"), box = root?.getElementById("newPendingList");
+    if (!panel || !box) return;
+    const waiting = this._knowledge?.pending || [];
+    panel.hidden = !waiting.length;
+    if (!waiting.length) { this._setHtml(box, ""); return; }
+    const countEl = root.getElementById("newPendingCount");
+    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: waiting.length }));
+    this._setHtml(box, waiting.map(f => `
       <div class="cfg-row" data-id="${f.id}">
         <label>${this._esc(f.key)}</label>
         <input class="cfg-field new-pending-edit-val" style="flex:1" data-id="${f.id}" value="${this._esc(f.value)}">
@@ -235,36 +236,20 @@
         <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
       </div>`).join(""));
-    list.querySelectorAll(".new-pending-confirm").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._pendingFactAction(id, "confirm");
-      });
-    });
-    list.querySelectorAll(".new-pending-reject").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._pendingFactAction(id, "reject");
-      });
-    });
-    list.querySelectorAll(".new-pending-save-edit").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        const input = list.querySelector(`.new-pending-edit-val[data-id="${id}"]`);
-        const value = (input?.value || "").trim();
-        if (!isNaN(id) && value) this._editPendingFact(id, value);
-      });
+    this._memBind(box, ".new-pending-confirm", id => this._pendingFactAction(id, "confirm"));
+    this._memBind(box, ".new-pending-reject", id => this._pendingFactAction(id, "reject"));
+    this._memBind(box, ".new-pending-save-edit", id => {
+      const typed = (box.querySelector(`.new-pending-edit-val[data-id="${id}"]`)?.value || "").trim();
+      if (typed) this._editPendingFact(id, typed);
     });
   }
 
   async _fetchRelations() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/list_relations" });
-      this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-    } catch (err) {
-      this._relations = { pending: [], confirmed: [], cap: 500, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/list_relations" });
+    this._relations = failed
+      ? { pending: [], confirmed: [], cap: 500, error: failed }
+      : { pending: reply?.pending || [], confirmed: reply?.confirmed || [], cap: reply?.cap || 500 };
     this._relationsLoaded = true;
     this._renderRelations();
   }
