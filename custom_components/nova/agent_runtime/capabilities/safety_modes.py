@@ -9,8 +9,8 @@ from homeassistant.core import HomeAssistant
 
 from ...safe_errors import tool_error_text
 
-# One logger for the whole agent, named as it always was (…nova.agent), so
-# log filters and levels set for the agent keep applying.
+# The agent logs under …nova.agent from every module, so filters and levels
+# set for it keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 
@@ -39,35 +39,41 @@ async def _audit_start(hass, action: str, service: str, device_id: Optional[str]
     )
 
 
+def _note_in_log(category: str, text: str) -> None:
+    """Add a line to the Nova log. A logging problem is never a tool problem."""
+    try:
+        from ...websocket import nova_log
+        nova_log(category, text)
+    except Exception:
+        pass
+
+
 async def _exec_set_mode(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
                          user_id: Optional[str] = None) -> str:
-    """Switch the operational mode (Directive Layer, v6.61.0)."""
+    """Change the operational mode (Directive Layer, v6.61.0)."""
     try:
         from ... import modes
-        res = await hass.async_add_executor_job(
-            modes.set_mode, args.get("mode", ""), args.get("reason", ""))
-        if res.get("ok"):
-            try:
-                from ... import mode_scene
-                await mode_scene.apply_mode_entry(
-                    hass, res["mode"], source=_source(hass, device_id),
-                    requested_by_user_id=user_id or None)
-            except Exception:
-                pass
-            info = modes.mode_info()
-            try:
-                from ...websocket import nova_log
-                nova_log("MODE", f"mode → {res['mode']}"
-                                   + (f" ({args.get('reason')})" if args.get("reason") else ""))
-            except Exception:
-                pass
-            return json.dumps({
-                "ok": True, "mode": res["mode"],
-                "description": info.get("description", ""),
-                "note": "safety (pipe-freeze, intrusion, lockdown) remains fully "
-                        "active in every mode",
-            })
-        return json.dumps(res)
+        reason = args.get("reason", "")
+        switched = await hass.async_add_executor_job(
+            modes.set_mode, args.get("mode", ""), reason)
+        if not switched.get("ok"):
+            return json.dumps(switched)
+        mode = switched["mode"]
+        try:
+            from ... import mode_scene
+            await mode_scene.apply_mode_entry(
+                hass, mode, source=_source(hass, device_id),
+                requested_by_user_id=user_id or None)
+        except Exception:
+            pass
+        description = modes.mode_info().get("description", "")
+        _note_in_log("MODE", f"mode → {mode}" + (f" ({reason})" if reason else ""))
+        return json.dumps({
+            "ok": True, "mode": mode,
+            "description": description,
+            "note": "safety (pipe-freeze, intrusion, lockdown) remains fully "
+                    "active in every mode",
+        })
     except Exception as exc:
         return json.dumps({"error": tool_error_text(exc, "set_mode")})
 
@@ -97,6 +103,16 @@ async def _exec_acknowledge_alert(hass: HomeAssistant, args: dict,
             lambda: action_log.set_execution(action_id, "failed",
                                              reason_code="acknowledge_failed"))
         return json.dumps({"error": tool_error_text(exc, "acknowledge_alert")})
+
+
+def _clear_live_investigation(cognitive_core) -> None:
+    """End any live investigation held by the SafetyManager straight away."""
+    try:
+        core = getattr(cognitive_core, "_CORE", None)
+        if core and getattr(core, "safety_mgr", None):
+            core.safety_mgr._investigation = None
+    except Exception:
+        pass
 
 
 async def _exec_dismiss_intrusion(hass: HomeAssistant, args: dict,
@@ -140,20 +156,11 @@ async def _exec_dismiss_intrusion(hass: HomeAssistant, args: dict,
         })
     try:
         from ... import intrusion, cognitive_core
-        res = intrusion.dismiss_intrusion(args.get("reason", ""))
-        # Also clear any live investigation in the SafetyManager immediately.
-        try:
-            core = getattr(cognitive_core, "_CORE", None)
-            if core and getattr(core, "safety_mgr", None):
-                core.safety_mgr._investigation = None
-        except Exception:
-            pass
-        try:
-            from ...websocket import nova_log
-            nova_log("SAFETY", "Intrusion called off by user (false alarm)"
-                       + (f": {args.get('reason')}" if args.get("reason") else ""))
-        except Exception:
-            pass
+        reason = args.get("reason", "")
+        res = intrusion.dismiss_intrusion(reason)
+        _clear_live_investigation(cognitive_core)
+        _note_in_log("SAFETY", "Intrusion called off by user (false alarm)"
+                     + (f": {reason}" if reason else ""))
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "accepted"))
         return json.dumps({"ok": True, **res,

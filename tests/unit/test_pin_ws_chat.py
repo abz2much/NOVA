@@ -53,7 +53,11 @@ async def _call(handler, user_id="u1", hass=None, **msg):
 
 
 def _agent(load, monkeypatch, agent_id):
-    """ws_chat does `from . import bootstrap`, so patch the module it gets."""
+    """ws_chat does `from . import bootstrap`, so patch the module it gets.
+    bootstrap needs aiohttp at import time, so a bare stand-in is supplied
+    when the real package is absent, which lets this file run on its own."""
+    if "aiohttp" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
     monkeypatch.setattr(load("bootstrap"), "_find_nova_agent", lambda hass: agent_id)
 
 

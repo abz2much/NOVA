@@ -137,21 +137,21 @@ def test_homer_directive_forbids_control_and_delegation(agent):
 
 @pytest.fixture
 def spy_run_agent(agent, monkeypatch):
-    calls = []
+    """The nested run_agent calls, with a fixed finding as the answer."""
+    nested = []
 
-    async def _fake(hass, **kw):
-        calls.append(kw)
+    async def stand_in(hass, **kw):
+        nested.append(kw)
         return "diagnostic finding"
 
-    monkeypatch.setattr(agent, "run_agent", _fake)
-    return calls
+    monkeypatch.setattr(agent, "run_agent", stand_in)
+    return nested
 
 
-async def _delegate(agent, args, depth=0):
-    return await agent._run_delegated(
-        None, args, persona="p", provider_name="ollama", api_key="",
-        model="gemma4:26b", base_url=None, config={}, depth=depth,
-    )
+def _delegate(agent, args, depth=0):
+    settings = dict(persona="p", provider_name="ollama", api_key="",
+                    model="gemma4:26b", base_url=None, config={}, depth=depth)
+    return agent._run_delegated(None, args, **settings)
 
 
 async def test_homer_happy_path(agent, spy_run_agent):

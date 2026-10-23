@@ -1,78 +1,77 @@
-"""Tests for v6.47.1: Ollama-tag routing correction and model-not-found
-fallback classification — born from a live 'models/gemma4:26b is not found'
-404 from Google's API after the GPU server's local model name was configured
-against a cloud provider."""
+"""v6.47.1: sending a local model name to a cloud provider is corrected, and a
+"model not found" error is told apart from a connection problem. This came
+from a real 404, "models/gemma4:26b is not found", from Google's API after the
+model name from a GPU server was set against a cloud provider."""
 import pytest
 
+GOOGLE_404 = (
+    "Error code: 404 - [{'error': {'code': 404, 'message': "
+    "'models/gemma4:26b is not found for API version v1main, or is not "
+    "supported for generateContent.', 'status': 'NOT_FOUND'}}]")
+
 
 @pytest.fixture
-def llm(load):
-    return load("llm_provider")
+def route(load):
+    return load("llm_provider").normalize_routing
 
 
 @pytest.fixture
-def agent_mod(load):
+def agent(load):
     return load("agent")
 
 
 # ── normalize_routing ────────────────────────────────────────────────────────
 
-def test_ollama_tag_on_cloud_provider_reroutes(llm):
-    p, url, note = llm.normalize_routing("gemini", "gemma4:26b", None)
-    assert p == "ollama"
+def test_an_ollama_tag_on_a_cloud_provider_goes_to_ollama(route):
+    provider, _url, note = route("gemini", "gemma4:26b", None)
+    assert provider == "ollama"
     assert note and "gemma4:26b" in note and "ollama" in note
 
 
-def test_ollama_tag_keeps_configured_base_url(llm):
-    p, url, note = llm.normalize_routing(
-        "groq", "llama3.3:70b", "http://gpu.local:11434/v1")
-    assert p == "ollama"
-    assert url == "http://gpu.local:11434/v1"
+def test_the_configured_endpoint_travels_with_the_rerouted_model(route):
+    provider, url, _note = route("groq", "llama3.3:70b", "http://gpu.local:11434/v1")
+    assert (provider, url) == ("ollama", "http://gpu.local:11434/v1")
 
 
-def test_cloud_model_on_cloud_provider_untouched(llm):
-    for provider, model in (
-        ("gemini", "gemini-2.0-flash"),
-        ("groq", "llama-3.3-70b-versatile"),
-        ("anthropic", "claude-sonnet-4-6"),
-    ):
-        p, _url, note = llm.normalize_routing(provider, model, None)
-        assert p == provider and note is None, (provider, model)
+@pytest.mark.parametrize("provider, model", [
+    ("gemini", "gemini-2.0-flash"),
+    ("groq", "llama-3.3-70b-versatile"),
+    ("anthropic", "claude-sonnet-4-6"),
+])
+def test_a_cloud_model_on_its_cloud_provider_is_left_alone(route, provider, model):
+    routed, _url, note = route(provider, model, None)
+    assert routed == provider and note is None
 
 
-def test_ollama_provider_untouched(llm):
-    p, _url, note = llm.normalize_routing("ollama", "gemma4:26b", None)
-    assert p == "ollama" and note is None
+def test_the_ollama_provider_keeps_its_own_tagged_models(route):
+    routed, _url, note = route("ollama", "gemma4:26b", None)
+    assert routed == "ollama" and note is None
 
 
-def test_custom_provider_untouched(llm):
-    # Explicit custom endpoints may legitimately use colon-tagged names.
-    p, _url, note = llm.normalize_routing("custom", "mymodel:latest", None)
-    assert p == "custom" and note is None
+def test_a_custom_provider_keeps_tagged_names(route):
+    # A custom endpoint may well use colon tagged model names.
+    routed, _url, note = route("custom", "mymodel:latest", None)
+    assert routed == "custom" and note is None
 
 
-def test_non_tag_colon_forms_not_rerouted(llm):
-    # Paths/URLs with colons must not be mistaken for Ollama tags.
-    p, _url, note = llm.normalize_routing("gemini", "models/gemini:pro extra", None)
-    assert p == "gemini" and note is None
+def test_other_uses_of_a_colon_are_not_mistaken_for_an_ollama_tag(route):
+    # A path or URL with a colon is not tag syntax.
+    routed, _url, note = route("gemini", "models/gemini:pro extra", None)
+    assert routed == "gemini" and note is None
 
 
-# ── _is_model_not_found ──────────────────────────────────────────────────────
+# ── telling "model not found" from "cannot connect" ─────────────────────────
 
-def test_model_not_found_detects_google_404(agent_mod):
-    exc = Exception(
-        "Error code: 404 - [{'error': {'code': 404, 'message': "
-        "'models/gemma4:26b is not found for API version v1main, or is not "
-        "supported for generateContent.', 'status': 'NOT_FOUND'}}]")
-    assert agent_mod._is_model_not_found(exc) is True
+def test_googles_404_is_a_model_not_found(agent):
+    assert agent._is_model_not_found(Exception(GOOGLE_404)) is True
 
 
-def test_model_not_found_ignores_connectivity(agent_mod):
-    assert agent_mod._is_model_not_found(Exception("Connection timed out")) is False
-    assert agent_mod._is_model_not_found(Exception("503 service unavailable")) is False
+@pytest.mark.parametrize("text", ["Connection timed out", "503 service unavailable"])
+def test_a_connection_problem_is_not_a_model_not_found(agent, text):
+    assert agent._is_model_not_found(Exception(text)) is False
 
 
-def test_model_not_found_vs_connectivity_disjoint(agent_mod):
+def test_the_two_kinds_of_failure_never_overlap(agent):
     exc = Exception("404 model does not exist")
-    assert agent_mod._is_model_not_found(exc) is True
-    assert agent_mod._is_connectivity_error(exc) is False
+    assert agent._is_model_not_found(exc) is True
+    assert agent._is_connectivity_error(exc) is False

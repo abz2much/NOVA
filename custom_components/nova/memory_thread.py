@@ -1,170 +1,168 @@
-"""
-Nova — conversation memory threading (v6.86.0; ongoing catch-up, 11 Sept 2026).
+"""Conversation memory threading (v6.86.0, catch-up reworked 11 Sept 2026).
 
-Reads a bounded slice of recent cross-session conversation history back so a
-conversation picks up where you left off — continuity across session
-boundaries and restarts, not just the 20-message in-session window.
+A conversation can pick up where it left off. This reads a bounded slice of
+recent history from across sessions, so continuity survives session
+boundaries and restarts and does not stop at the 20 message window kept in
+a single session.
 
-This used to seed a conversation_id once, ever, then never touch it again.
-That's fine for surfaces where HA itself rotates the conversation_id after a
-few minutes idle (voice, the chat panel) — each new id naturally re-seeds. It
-silently stopped working for any surface with a permanent conversation_id
-(e.g. Telegram, keyed on chat id): after the first message, that thread never
-caught up on anything said elsewhere again, no matter how long the gap.
+Seeding used to happen once for a conversation_id and never again. That
+works where Home Assistant itself changes the conversation_id after a few
+idle minutes (voice, the chat panel), because every new id is seeded afresh.
+It quietly failed for a surface with a permanent conversation_id, such as
+Telegram, which is keyed on the chat id: after the first message the thread
+never caught up on anything said elsewhere, however long the gap.
 
-should_reseed() replaces the old "seeded or not" flag with a gap check: a
-thread reseeds on its first-ever turn, and again any time it resumes after
-being idle for at least the configured window (default 48h) — the same
-session-idle-timeout pattern used by Rasa, Dialogflow, and HA's own Assist
-pipeline (5 min) to decide when a conversation has effectively ended.
+should_reseed() replaces the old "seeded or not" flag with a check on the
+gap. A thread reseeds on its very first turn and again whenever it resumes
+after sitting idle for the configured window (48 hours by default). Rasa,
+Dialogflow and Home Assistant's own Assist pipeline (5 minutes) use the same
+idle timeout to decide that a conversation has ended.
 
-Kept deliberately dependency-light (no Home Assistant entity imports) so it's
-easy to test and so conversation.py just seeds its in-session window from
-load_recent(). Turns are persisted by database.save_message; this reads them via
-get_recent_messages, filters to user/assistant turns, truncates long ones, and
-caps to the last N. Never raises — a failure yields no seed, never a broken turn.
+The module has no Home Assistant entity imports, which keeps it easy to test
+and lets conversation.py fill its in-session window from load_recent(). Turns
+are saved by database.save_message. This module reads them back with
+get_recent_messages, keeps the user and assistant turns, cuts long ones and
+keeps the last few. It never raises: a failure means no seed, not a broken
+turn.
 
-Scoped + fenced (v7.87.0, backlog #1): load_recent() takes the caller's own
-conversation/device id and scopes the DB read to it — previously every reseed
-pulled history globally across every device/conversation in the house, so one
-household member's exchange could leak into another's session. And
-format_seed_message() wraps the seeded content between a random per-call
-delimiter with hardened anti-injection instructions, rather than relying on
-natural-language framing alone — a defence against content that was never
-meant to carry authority (e.g. an email or web result Nova once read aloud
-and which got logged) inheriting system-role trust on a later reseed.
+Scoped and fenced (v7.87.0, backlog #1): load_recent() takes the caller's own
+conversation or device id and reads only that. Before, every reseed pulled
+history from every device and conversation in the house, and one member's
+exchange could leak into another's session. format_seed_message() puts the
+seeded text between a random delimiter chosen for each call, with hardened
+anti-injection instructions, and does not rely on natural wording alone. That
+guards against text never meant to carry authority, such as an email or web
+result Nova once read aloud that was then logged, gaining system role trust
+when a later reseed replays it.
 """
 from __future__ import annotations
 
 import logging
 
-_LOGGER = logging.getLogger(__name__)
-
+DEFAULT_MAX = 12        # turns kept
+DEFAULT_HOURS = 48      # how far back to look, and the idle gap that triggers a reseed
 DEFAULT_ENABLED = True
-DEFAULT_HOURS = 48
-DEFAULT_MAX = 12
-_CHAR_CAP = 600
+_CHAR_CAP = 600         # longest a single seeded turn may be
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def config() -> tuple:
-    """(enabled, hours, limit) from nova_config, with defaults."""
+    """(enabled, hours, limit) from nova_config, falling back to the defaults."""
     try:
         from . import nova_config
-        enabled = bool(nova_config.get("memory_threading_enabled", DEFAULT_ENABLED))
-        hours = int(nova_config.get("memory_threading_hours", DEFAULT_HOURS) or DEFAULT_HOURS)
-        limit = int(nova_config.get("memory_threading_max", DEFAULT_MAX) or DEFAULT_MAX)
-        return enabled, max(1, hours), max(1, limit)
+        on = bool(nova_config.get("memory_threading_enabled", DEFAULT_ENABLED))
+        span = int(nova_config.get("memory_threading_hours", DEFAULT_HOURS) or DEFAULT_HOURS)
+        most = int(nova_config.get("memory_threading_max", DEFAULT_MAX) or DEFAULT_MAX)
     except Exception:
         return DEFAULT_ENABLED, DEFAULT_HOURS, DEFAULT_MAX
+    return on, max(1, span), max(1, most)
 
 
 def should_reseed(last_seen: float | None, now: float, hours: int = DEFAULT_HOURS) -> bool:
-    """True if this conversation thread should (re)seed from cross-session
-    history: it's never been seen before (`last_seen` is None), or it's
-    resuming after being idle for at least `hours`. Pure — takes plain epoch
-    seconds so it's trivial to test without touching a real clock.
+    """Whether a conversation thread should be (re)seeded from history across
+    sessions: it has never been seen (`last_seen` is None) or it is resuming
+    after at least `hours` of silence. Both times are plain epoch seconds, so
+    no real clock is needed to test it.
 
-    A conversation that's still active (gap under the threshold) returns
-    False — its in-session window is trusted as-is, so a reseed can't
-    duplicate turns it already holds.
+    A thread still in use, with a gap under the threshold, gets False. Its
+    window is trusted as it is, so a reseed cannot repeat turns it holds.
     """
     if last_seen is None:
         return True
-    return (now - last_seen) >= hours * 3600
+    return now - last_seen >= hours * 3600
 
 
 def shape_history(rows, limit: int = DEFAULT_MAX, char_cap: int = _CHAR_CAP) -> list:
-    """Filter DB rows to {role, content} user/assistant turns, truncate long
-    turns, cap to the last `limit`. Pure — junk rows are skipped."""
-    out = []
-    for r in rows or []:
-        if not isinstance(r, dict):
+    """Turn database rows into {role, content} user and assistant turns, cut
+    the long ones to `char_cap` and keep the last `limit` (all of them when
+    `limit` is 0). Rows that are not usable are skipped."""
+    turns = []
+    for row in rows or []:
+        if not isinstance(row, dict):
             continue
-        role = r.get("role")
-        content = (r.get("content") or "").strip()
-        if role in ("user", "assistant") and content:
-            if len(content) > char_cap:
-                content = content[:char_cap].rstrip() + "…"
-            out.append({"role": role, "content": content})
-    return out[-limit:] if limit else out
+        role = row.get("role")
+        text = (row.get("content") or "").strip()
+        if role not in ("user", "assistant") or not text:
+            continue
+        if len(text) > char_cap:
+            text = text[:char_cap].rstrip() + "…"
+        turns.append({"role": role, "content": text})
+    return turns[-limit:] if limit else turns
 
 
 async def load_recent(hass, hours: int = DEFAULT_HOURS, limit: int = DEFAULT_MAX,
                       device_id: str | None = None,
                       subject: str | None = None) -> list:
-    """Recent cross-session turns to seed a conversation with. Reads the
-    DB in the executor. Never raises.
+    """Recent turns across sessions to seed a conversation with. The database
+    is read in the executor. This never raises.
 
-    `device_id` (v7.87.0) scopes the read to the caller's own conversation
-    thread — pass the same id `database.save_message` stored turns under
-    (conversation.py's `cid`). This is the first-choice scope, tried first.
+    `device_id` (v7.87.0) limits the read to the caller's own thread. Pass the
+    id `database.save_message` saved the turns under (the `cid` in
+    conversation.py). It is the first scope tried.
 
-    `subject` (Phase 2) — person-scoped fallback, tried ONLY when the
-    device_id-scoped read returns no usable (shaped) rows, and only when
-    `subject` is given: a confidently resolved person. An unresolved
-    identity or the shared "primary" bucket must never reach this
-    parameter — callers pass None for both, which disables the fallback
-    entirely (falls through to returning the empty device_id-scoped
-    result). The two scopes are never merged into one read."""
+    `subject` (Phase 2) is the fallback for one person. It is tried only when
+    the device_id read leaves no usable turns, and only when a subject is
+    given, meaning a person who was resolved with confidence. An unresolved
+    identity and the shared "primary" bucket must never reach it. Callers pass
+    None for both, which turns the fallback off and returns the empty
+    device_id result. The two scopes are never merged into one read."""
     try:
         from .database import get_recent_messages
-        rows = await hass.async_add_executor_job(get_recent_messages, hours, device_id, limit)
-        shaped = shape_history(rows, limit)
-        if not shaped and subject:
-            rows = await hass.async_add_executor_job(get_recent_messages, hours, None, limit, subject)
-            shaped = shape_history(rows, limit)
-        return shaped
+        fetch = hass.async_add_executor_job
+        turns = shape_history(
+            await fetch(get_recent_messages, hours, device_id, limit), limit)
+        if turns or not subject:
+            return turns
+        return shape_history(
+            await fetch(get_recent_messages, hours, None, limit, subject), limit)
     except Exception as exc:
         _LOGGER.debug("memory_thread load_recent failed: %s", exc)
         return []
 
 
 def format_seed_message(seeded: list, *, _token: str | None = None) -> dict:
-    """Render seeded turns as ONE 'system'-role message instead of raw
-    user/assistant turns (fixed 11 Sept 2026).
+    """Render the seeded turns as ONE message with the 'system' role, not as
+    raw user and assistant turns (fixed 11 Sept 2026).
 
-    Bug this fixes: conversation.py used to splice seeded turns straight into
-    the live history as ordinary user/assistant messages. To the model, a
-    seeded turn and a turn from 30 seconds ago look identical — so a
-    completed, days-old exchange ("turn off the living room light" / "done")
-    got treated as live, unfinished business, and Nova kept circling back to
-    it in an unrelated conversation.
+    The bug: conversation.py used to put seeded turns straight into the live
+    history as ordinary user and assistant messages. To a model, a seeded turn
+    looks the same as one from 30 seconds ago. A finished exchange from days
+    back ("turn off the living room light" / "done") was treated as open
+    business, and Nova kept returning to it in an unrelated conversation.
 
-    A 'system' message fixes that by construction, not by hoping the model
-    reads the framing text correctly: llm_provider.AnthropicClient.chat pulls
-    every role='system' message out of the transcript entirely and folds it
-    into the top-level system prompt (same as _maybe_summarize's compressed-
-    history note in agent.py already does) — so it never appears as a turn
-    the model might feel compelled to continue. OpenAI-compatible providers
-    (Groq, OpenAI) pass 'system' through natively, where it's still read as
-    background/instruction rather than something the user just said.
+    A 'system' message removes the problem by construction, with no need for
+    the model to read the framing correctly. llm_provider.AnthropicClient.chat
+    lifts every role='system' message out of the transcript into the top-level
+    system prompt, as _maybe_summarize's note on compressed history in agent.py
+    already does, so it is never a turn the model feels bound to continue.
+    OpenAI-compatible providers (Groq, OpenAI) pass 'system' through as it is,
+    and read it as background or instruction, not as something the user just
+    said.
 
-    Fenced against prompt injection (v7.87.0, consolidated into prompt_fence.py
-    at v7.89.0 — the same pattern was independently built three times this
-    session): 'system'-role carries elevated authority with every provider —
-    exactly why it was chosen above — but that means anything that ever got
-    logged into history (including content Nova merely read aloud once, like
-    an email or a web result) inherits that authority on a future reseed,
-    with only the framing wording standing between it and being read as an
-    instruction. The verbatim turns are now wrapped between a random per-call
-    delimiter (never reused, so nothing stored earlier could have pre-guessed
-    and forged a matching closing marker) with an explicit instruction that
-    content between the markers is inert data, not a command, regardless of
-    phrasing. Not an absolute guarantee — no prompt-based defence is — but a
-    real structural boundary in place of none. `_token` is test-only, to make
-    the delimiter deterministic; production callers never pass it.
+    Fenced against prompt injection (v7.87.0, moved into prompt_fence.py at
+    v7.89.0 after the same pattern had been built three times in one
+    session). The 'system' role carries extra authority with every provider,
+    which is why it was chosen. It also means anything ever logged into
+    history, including text Nova only read aloud such as an email or web
+    result, would inherit that authority on a later reseed, with nothing but
+    the framing words between it and being taken as an instruction. The turns
+    are now wrapped between a random delimiter that is never reused, so nothing
+    stored earlier could have guessed and forged the closing marker. An
+    explicit instruction says that text between the markers is inert data and
+    never a command, however it is phrased. No prompt can promise more, but
+    this is a real boundary where there was none. `_token` exists for tests,
+    to fix the delimiter. Production callers never pass it.
     """
     from .prompt_fence import fence
-    lines = [f"{t.get('role', '?')}: {t.get('content', '')}" for t in seeded]
-    fenced = fence(
-        "\n".join(lines),
+    transcript = "\n".join(
+        f"{turn.get('role', '?')}: {turn.get('content', '')}" for turn in seeded)
+    wrapped = fence(
+        transcript,
         label="HISTORY",
         noun="is a completed exchange from an earlier, separate conversation",
         callback_noun="historical text",
         extra_instruction="and do not bring it up again unless the user does first",
         _token=_token,
     )
-    return {
-        "role": "system",
-        "content": f"[Resuming after a gap. {fenced}]",
-    }
+    return {"role": "system", "content": f"[Resuming after a gap. {wrapped}]"}

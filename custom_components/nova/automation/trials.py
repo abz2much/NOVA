@@ -1,30 +1,28 @@
-"""Nova Automation Trials (Phase 3) — probation tracking for suggestions that
-became live automations.
+"""Automation trials (Phase 3): a probation record for each suggestion that
+became a live automation.
 
-Installing a suggestion means the user ACCEPTED it — the suggestion store's own
-Decision Record outcome already reflects that (`decision_record.set_outcome_
-by_ref("suggestion:N", "good", "installed")`). This table answers a
-materially different question: does the automation actually RUN, and —
-only ever via explicit manual feedback — does the person living with it
-think it works? The two are kept structurally separate; nothing here is
-ever inferred from installation alone.
+Installing a suggestion means the user ACCEPTED it, and the Decision Record
+for the suggestion already says so (`decision_record.set_outcome_by_ref(
+"suggestion:N", "good", "installed")`). This table answers a different
+question: does the automation actually RUN and, through explicit manual
+feedback only, does the person living with it think it works? The two stay
+separate. Nothing here is inferred from the installation.
 
-Run counts come from Home Assistant's own ``automation_triggered`` event —
-the one documented, supported mechanism for observing that an automation
-fired (homeassistant/components/automation/__init__.py). No causality is
-drawn beyond "this automation ran": correlating a subsequent device state's
-context.parent_id to infer whether the automation did what it was *meant*
-to do is explicitly out of scope for this phase.
+Run counts come from Home Assistant's own ``automation_triggered`` event, the
+one documented and supported way to see that an automation fired
+(homeassistant/components/automation/__init__.py). The only claim is that the
+automation ran. Following the context.parent_id of a later device state to
+judge whether it did what it was *meant* to do is outside this phase.
 
-``automation_entity_id`` starts NULL at install time and is resolved lazily,
-on the event loop (never from a background thread — see
-``async_handle_triggered``), the first time that automation genuinely fires.
-There is no periodic resolution sweep; resolution is purely event-driven.
+``automation_entity_id`` is NULL when the trial is created. It is filled in
+lazily, on the event loop and never from a background thread (see
+``async_handle_triggered``), the first time the automation really fires. No
+periodic sweep resolves it. Resolution follows events and nothing else.
 
-Dependency-light (SQLite + stdlib only); every entry point takes ``db_path``
-resolved at call time, so tests run fully isolated — same shape as
-decision_record.py, targeting the same shared ``patterns.db`` file other
-Nova modules already read and write.
+The module needs only SQLite and the standard library. Every entry point takes
+a ``db_path`` that is resolved when it is called, so tests can run on their own
+files. It has the same shape as decision_record.py and uses the same shared
+``patterns.db`` that other Nova modules read and write.
 """
 from __future__ import annotations
 
@@ -53,41 +51,41 @@ def _connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _close(conn) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
 def create(
     suggestion_id: int,
     automation_id: str,
     installed_at: Optional[float] = None,
     db_path: Optional[str] = None,
 ) -> Optional[int]:
-    """Insert one trial row for a newly-installed automation. Best-effort by
-    design — a logging failure must never break the installation it's
-    recording. Returns the new row id, or None on failure."""
-    db = _resolve(db_path)
+    """Add the trial row for a newly installed automation. It is best effort
+    by design: a failure to record must never break the installation it
+    records. Returns the new row id, or None on failure."""
     try:
-        conn = _connect(db)
+        conn = _connect(_resolve(db_path))
     except Exception:
         return None
     try:
+        started = float(installed_at) if installed_at is not None else time.time()
         cur = conn.execute(
             "INSERT INTO automation_trials "
             "(suggestion_id, automation_id, automation_entity_id, installed_at, run_count) "
             "VALUES (?, ?, NULL, ?, 0)",
-            (
-                int(suggestion_id),
-                str(automation_id),
-                float(installed_at) if installed_at is not None else time.time(),
-            ),
+            (int(suggestion_id), str(automation_id), started),
         )
         conn.commit()
-        rowid = cur.lastrowid
-        return int(rowid) if rowid is not None else None
+        new_id = cur.lastrowid
+        return None if new_id is None else int(new_id)
     except Exception:
         return None
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
 
 def record_run(
@@ -105,56 +103,45 @@ def record_run(
     non-Nova automation, which is the overwhelmingly common case — every
     automation in the house fires this event, not just Nova's).
     """
-    db = _resolve(db_path)
     try:
-        conn = _connect(db)
+        conn = _connect(_resolve(db_path))
     except Exception:
         return False
     try:
+        ran_at = float(ts) if ts is not None else time.time()
         cur = conn.execute(
             "UPDATE automation_trials SET run_count = run_count + 1, last_run = ?, "
             "automation_entity_id = ? "
             "WHERE automation_entity_id = ? "
             "   OR (automation_entity_id IS NULL AND automation_id = ?)",
-            (
-                float(ts) if ts is not None else time.time(),
-                automation_entity_id,
-                automation_entity_id,
-                automation_id,
-            ),
+            (ran_at, automation_entity_id, automation_entity_id, automation_id),
         )
         conn.commit()
         return cur.rowcount > 0
     except Exception:
         return False
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
 
 def list_trials(db_path: Optional[str] = None) -> list:
-    """Most-recently-installed first. Pure DB read; never raises."""
-    db = _resolve(db_path)
-    if not Path(db).exists():
+    """Every trial, the most recently installed first. A plain read that never
+    raises."""
+    path = _resolve(db_path)
+    if not Path(path).exists():
         return []
     try:
-        conn = _connect(db)
+        conn = _connect(path)
     except Exception:
         return []
     try:
-        rows = conn.execute(
-            "SELECT * FROM automation_trials ORDER BY installed_at DESC"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        cursor = conn.execute(
+            "SELECT * FROM automation_trials ORDER BY installed_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
     except Exception:
         return []
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
 
 def set_manual_outcome(
@@ -171,25 +158,22 @@ def set_manual_outcome(
     manual feedback, never an inferred verdict. Returns whether a row with
     that id exists.
     """
-    db = _resolve(db_path)
     try:
-        conn = _connect(db)
+        conn = _connect(_resolve(db_path))
     except Exception:
         return False
     try:
+        given_at = float(ts) if ts is not None else time.time()
         cur = conn.execute(
             "UPDATE automation_trials SET manual_outcome = ?, manual_outcome_ts = ? WHERE id = ?",
-            (str(verdict), float(ts) if ts is not None else time.time(), int(trial_id)),
+            (str(verdict), given_at, int(trial_id)),
         )
         conn.commit()
         return cur.rowcount > 0
     except Exception:
         return False
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close(conn)
 
 
 async def async_handle_triggered(hass, event) -> None:

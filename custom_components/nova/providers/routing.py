@@ -251,32 +251,31 @@ def resolve_spec(
 
 
 def tier_spec(config: dict, tier: str) -> ProviderSpec:
-    """The ProviderSpec for an observer tier or the conversation role."""
+    """The ProviderSpec for an observer tier or for the conversation role."""
     from ..const import (
         CONF_MODEL,
-        DEFAULT_CLASSIFIER_MODEL,
-        DEFAULT_CLASSIFIER_PROVIDER,
-        DEFAULT_REASONING_MODEL,
-        DEFAULT_REASONING_PROVIDER,
-        DEFAULT_REVIEW_MODEL,
-        DEFAULT_REVIEW_PROVIDER,
+        DEFAULT_CLASSIFIER_MODEL, DEFAULT_CLASSIFIER_PROVIDER,
+        DEFAULT_REASONING_MODEL, DEFAULT_REASONING_PROVIDER,
+        DEFAULT_REVIEW_MODEL, DEFAULT_REVIEW_PROVIDER,
     )
 
-    tier_defaults = {
+    defaults = {
         "classifier": (DEFAULT_CLASSIFIER_PROVIDER, DEFAULT_CLASSIFIER_MODEL),
         "reasoning": (DEFAULT_REASONING_PROVIDER, DEFAULT_REASONING_MODEL),
         "review": (DEFAULT_REVIEW_PROVIDER, DEFAULT_REVIEW_MODEL),
-        "conversation": (
-            config.get("llm_provider", "groq"),
-            config.get(CONF_MODEL, "openai/gpt-oss-120b"),
-        ),
+        # The conversation role follows whatever was saved for the install.
+        "conversation": (config.get("llm_provider", "groq"),
+                         config.get(CONF_MODEL, "openai/gpt-oss-120b")),
     }
-    if tier not in tier_defaults:
+    if tier not in defaults:
         raise ValueError(f"Unknown tier: {tier}")
-    default_provider, default_model = tier_defaults[tier]
-    provider_name = config.get(f"{tier}_provider", default_provider)
-    model = config.get(f"{tier}_model", default_model)
-    return resolve_spec(config, provider_name, model, tier=tier)
+    fallback_provider, fallback_model = defaults[tier]
+    return resolve_spec(
+        config,
+        config.get(f"{tier}_provider", fallback_provider),
+        config.get(f"{tier}_model", fallback_model),
+        tier=tier,
+    )
 
 
 def build_provider(spec: ProviderSpec) -> LLMProvider:
@@ -291,26 +290,24 @@ def build_provider(spec: ProviderSpec) -> LLMProvider:
     return desc.adapter(api_key=spec.api_key, model=spec.model, base_url=base_url)
 
 
-def create_provider(
-    provider_name: str,
-    api_key: str,
-    model: str,
-    base_url: Optional[str] = None,
-) -> LLMProvider:
-    """Factory for provider instances (legacy signature).
+def create_provider(provider_name: str, api_key: str, model: str,
+                    base_url: Optional[str] = None) -> LLMProvider:
+    """Factory for provider instances (the legacy signature).
 
-    provider_name: 'groq' | 'openai' | 'gemini' | 'ollama' | 'anthropic' | 'custom'
-    'ollama' and 'custom' require their own endpoint in base_url; 'gemini'
-    defaults to Google's OpenAI-compatible endpoint. When a model is
-    re-routed to Ollama the given credential is not sent there: it belongs
-    to the provider it was resolved for. The endpoint, if any, is kept."""
-    requested = str(provider_name or "").lower().strip()
-    routed, base_url, note = normalize_routing(requested, model, base_url)
+    provider_name is 'groq', 'openai', 'gemini', 'ollama', 'anthropic' or
+    'custom'. 'ollama' and 'custom' need their own endpoint in base_url.
+    'gemini' defaults to Google's OpenAI-compatible endpoint. When a model is
+    re-routed to Ollama, the credential given is not sent there, because it
+    belongs to the provider it was resolved for. The endpoint, if there is one,
+    stays."""
+    asked_for = str(provider_name or "").lower().strip()
+    routed, base_url, note = normalize_routing(asked_for, model, base_url)
     if note:
         _LOGGER.warning("LLM routing corrected: %s", note)
         api_key = ""
-    return build_provider(ProviderSpec(
-        provider=routed, model=model, api_key=api_key or "", base_url=base_url))
+    spec = ProviderSpec(provider=routed, model=model, api_key=api_key or "",
+                        base_url=base_url)
+    return build_provider(spec)
 
 
 def create_tier_provider(config: dict, tier: str) -> LLMProvider:
