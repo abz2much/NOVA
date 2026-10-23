@@ -1,163 +1,246 @@
-"""device / button triggers — "press → scene/action", learned from history.
+"""Buttons and remotes as learned triggers: "press, then a scene".
 
-Modern HA surfaces button & remote presses as event.* entities whose event_type
-attribute holds the press. Those are logged (opt-in) with the event_type as the
-value, so the sequence detector mines "button press → action" with no new
-detector. On emission an event trigger becomes a state trigger on the entity
-plus a template condition matching the specific press (the reliable general HA
-form). Scenes are logged as actions so "button → scene" resolves to scene.turn_on.
+Home Assistant shows a button or remote press as an event.* entity whose
+event_type attribute names the press. When the user opts in, the logger keeps
+those with the press type as the state, so the ordinary sequence detector
+finds "press, then action" without a detector of its own. On the way out a
+press becomes a bare state trigger on the entity plus a template condition
+for the press type. Scenes are logged too, so "button, then scene" resolves
+to scene.turn_on.
 """
+from __future__ import annotations
+
 import json
 import sqlite3
-from datetime import datetime, timedelta
+import sys
+import types
+from datetime import date, datetime, time as clock, timedelta
 
 import pytest
 
 
 @pytest.fixture
-def pa(load):
+def mod(load):
     return load("pattern_analyzer")
 
 
 @pytest.fixture
-def cc(load):
+def core(load):
     return load("cognitive_core")
 
 
 @pytest.fixture
-def logger(cc, tmp_path):
-    lg = cc.StateLogger.__new__(cc.StateLogger)
-    lg._last_states = {}
-    lg._db_path = str(tmp_path / "patterns.db")
-    lg._init_db()
-    return lg
+def state_log(core, tmp_path):
+    """A real StateLogger writing to its own file."""
+    return core.StateLogger(db_path=str(tmp_path / "learning.db"))
 
 
-# ── capture: event + scene gating in the logger ──────────────────────────────
-
-def test_event_entity_needs_optin(logger):
-    # without force_include, event.* is filtered like other noisy domains
-    logger.log_state_change("event.remote", "", "single", force_include=False)
-    with sqlite3.connect(logger._db_path) as c:
-        assert c.execute("SELECT COUNT(*) FROM state_changes "
-                         "WHERE domain='event'").fetchone()[0] == 0
-    # opted in (force_include) → logged with the event_type as the value
-    logger.log_state_change("event.remote", "", "single", force_include=True)
-    with sqlite3.connect(logger._db_path) as c:
-        row = c.execute("SELECT new_state FROM state_changes "
-                        "WHERE domain='event'").fetchone()
-    assert row and row[0] == "single"
+def _logged(state_log, domain):
+    with sqlite3.connect(state_log._db_path) as conn:
+        return [row[0] for row in conn.execute(
+            "SELECT new_state FROM state_changes WHERE domain = ? ORDER BY id", (domain,))]
 
 
-def test_scene_activation_is_logged(logger):
-    # scenes are no longer meta-skipped — they're valid action targets
-    logger.log_state_change("scene.movie_night", "", "activated")
-    with sqlite3.connect(logger._db_path) as c:
-        row = c.execute("SELECT new_state FROM state_changes "
-                        "WHERE domain='scene'").fetchone()
-    assert row and row[0] == "activated"
+@pytest.fixture
+def settings(core, monkeypatch):
+    """Stand-in nova_config for the opt-in checks; tests fill ``values``.
+
+    Patched in sys.modules only: the shared set-up makes the package read
+    its members from there."""
+    values: dict = {}
+    fake = types.SimpleNamespace(get=lambda key, default=None: values.get(key, default))
+    package = core.__name__.rsplit(".", 1)[0]
+    monkeypatch.setitem(sys.modules, f"{package}.nova_config", fake)
+    return values
 
 
-def test_button_optin_flag(cc, monkeypatch):
-    import sys, types
-    pkg = cc.__name__.rsplit(".", 1)[0]              # the package load() used
-    fake = types.SimpleNamespace(get=lambda k, d=None:
-                                 True if k == "pattern_learn_buttons" else d)
-    monkeypatch.setitem(sys.modules, f"{pkg}.nova_config", fake)
-    assert cc._pattern_opted_in("event.remote", "") is True
-    fake.get = lambda k, d=None: False
-    assert cc._pattern_opted_in("event.remote", "") is False
+# ── what the logger keeps ───────────────────────────────────────────────────
+
+def test_a_button_press_is_kept_only_when_opted_in(state_log):
+    state_log.log_state_change("event.remote", "", "single", force_include=False)
+    assert _logged(state_log, "event") == []
+
+    state_log.log_state_change("event.remote", "", "single", force_include=True)
+    assert _logged(state_log, "event") == ["single"]   # the press type is the value
 
 
-# ── emission: event trigger → state trigger + template condition ─────────────
+@pytest.mark.parametrize("entity", ["automation.porch", "script.bedtime",
+                                    "input_boolean.guest_mode"])
+def test_nova_plumbing_is_never_kept_even_when_forced(state_log, entity):
+    state_log.log_state_change(entity, "off", "on", force_include=True)
 
-def test_generate_event_press_automation(pa):
-    p = pa.DetectedPattern(
-        pattern_type="sequence", description="x",
-        entity_ids=["event.living_remote", "scene.movie_night"],
-        confidence=0.8, occurrences=9,
-        details={"trigger": {"entity": "event.living_remote", "state": "single"},
-                 "action": {"entity": "scene.movie_night", "state": "activated"},
+    assert _logged(state_log, entity.split(".")[0]) == []
+
+
+def test_a_scene_being_activated_is_kept_as_an_action(state_log):
+    state_log.log_state_change("scene.movie_night", "", "activated")
+
+    assert _logged(state_log, "scene") == ["activated"]
+
+
+@pytest.mark.parametrize("values, entity, expected", [
+    ({"pattern_learn_buttons": True}, "event.remote", True),
+    ({"pattern_learn_buttons": False}, "event.remote", False),
+    ({}, "event.remote", False),                                  # off by default
+    ({"pattern_include_entities": ["event.remote"]}, "event.remote", True),
+    ({"pattern_learn_buttons": True}, "sensor.lux", False),       # buttons only
+])
+def test_the_buttons_opt_in(core, settings, values, entity, expected):
+    settings.update(values)
+
+    assert core._pattern_opted_in(entity, "") is expected
+
+
+# ── helpers that shape a press trigger ──────────────────────────────────────
+
+@pytest.mark.parametrize("entity, state, trigger", [
+    ("event.remote", "double", {"platform": "state", "entity_id": "event.remote"}),
+    ("scene.movie", "activated", {"platform": "state", "entity_id": "scene.movie"}),
+    ("light.hall", "on", {"platform": "state", "entity_id": "light.hall", "to": "on"}),
+])
+def test_trigger_shape(mod, entity, state, trigger):
+    assert mod._trigger_for(entity, state) == trigger
+
+
+def test_only_a_press_needs_an_extra_condition(mod):
+    (press,) = mod._trigger_extra_conditions("event.remote", "double")
+
+    assert press == {"condition": "template", "value_template":
+                     "{{ trigger.to_state.attributes.event_type == 'double' }}"}
+    assert mod._trigger_extra_conditions("light.hall", "on") == []
+    assert mod._trigger_extra_conditions("scene.movie", "activated") == []
+
+
+@pytest.mark.parametrize("entity, state, words", [
+    ("event.remote", "double", "When remote is pressed (double)"),
+    ("scene.movie", "activated", "When movie is activated"),
+    ("light.hall", "on", "When hall turns on"),
+])
+def test_trigger_wording(mod, entity, state, words):
+    assert mod._trigger_phrase(entity, state) == words
+
+
+@pytest.mark.parametrize("entity, state, call", [
+    ("scene.movie_night", "activated",
+     {"service": "scene.turn_on", "entity_id": "scene.movie_night"}),
+    ("lock.front", "locked", {"service": "lock.lock", "entity_id": "lock.front"}),
+    ("camera_event.front_door", "person", None),     # never something to do
+    ("event.remote", "single", None),                # a press is not an action
+])
+def test_service_for_actions(mod, entity, state, call):
+    assert mod.service_for(entity, state) == call
+
+
+# ── the automation a press becomes ──────────────────────────────────────────
+
+def _press_then_scene(mod, press="single", scene="scene.movie_night"):
+    return mod.DetectedPattern(
+        pattern_type="sequence", description="press chain",
+        entity_ids=["event.living_remote", scene], confidence=0.8, occurrences=9,
+        details={"trigger": {"entity": "event.living_remote", "state": press},
+                 "action": {"entity": scene, "state": "activated"},
                  "delay_seconds": 0, "condition": None})
-    auto = json.loads(pa.PatternAnalyzer()._generate_automation(p))
-    # trigger fires on any event from the entity
+
+
+def test_a_press_becomes_a_state_trigger_with_a_press_template(mod):
+    auto = json.loads(mod.PatternAnalyzer()._generate_automation(_press_then_scene(mod)))
+
+    # Any change of the entity fires it; the template picks out the press.
     assert auto["trigger"] == {"platform": "state", "entity_id": "event.living_remote"}
-    # the specific press is matched by a template condition
-    tmpl = [c for c in auto["condition"] if c["condition"] == "template"]
-    assert tmpl and "event_type == 'single'" in tmpl[0]["value_template"]
-    # the action is the scene activation
-    assert auto["action"][-1] == {"service": "scene.turn_on",
-                                  "entity_id": "scene.movie_night"}
+    templates = [c["value_template"] for c in auto["condition"]
+                 if c["condition"] == "template"]
+    assert len(templates) == 1 and "event_type == 'single'" in templates[0]
+    assert auto["action"] == [{"service": "scene.turn_on",
+                               "entity_id": "scene.movie_night"}]
     assert "press" in auto["alias"]
 
 
-def test_event_trigger_survives_normalize(pa):
-    auto = pa.normalize_suggestion_automation(json.dumps({
-        "alias": "x",
+def test_a_press_automation_passes_normalisation(mod):
+    stored = mod.PatternAnalyzer()._generate_automation(_press_then_scene(mod))
+
+    result = mod.normalize_suggestion_automation(stored)
+
+    assert result["installable"] is True
+    assert result["trigger"] == [{"trigger": "state", "entity_id": "event.living_remote"}]
+    assert result["condition"][0]["condition"] == "template"
+    assert result["action"][-1]["action"] == "scene.turn_on"
+
+
+def test_a_hand_written_press_payload_also_normalises(mod):
+    result = mod.normalize_suggestion_automation(json.dumps({
+        "alias": "remote to film scene",
         "trigger": {"platform": "state", "entity_id": "event.living_remote"},
-        "condition": [{"condition": "template",
-                       "value_template":
-                           "{{ trigger.to_state.attributes.event_type == 'single' }}"}],
+        "condition": [{"condition": "template", "value_template":
+                       "{{ trigger.to_state.attributes.event_type == 'single' }}"}],
         "action": [{"service": "scene.turn_on",
                     "target": {"entity_id": "scene.movie_night"}}],
     }))
-    assert auto["installable"] is True
-    assert auto["trigger"][0]["trigger"] == "state"
-    assert auto["condition"][0]["condition"] == "template"
+
+    assert result["installable"] is True
+    assert result["trigger"][0]["trigger"] == "state"
+    assert result["condition"][0]["condition"] == "template"
 
 
-def test_service_for_scene(pa):
-    assert pa.service_for("scene.movie_night", "activated") == {
-        "service": "scene.turn_on", "entity_id": "scene.movie_night"}
+# ── learned end to end from history ─────────────────────────────────────────
 
-
-def test_trigger_helpers_event_and_scene(pa):
-    assert pa._trigger_for("event.remote", "double") == {
-        "platform": "state", "entity_id": "event.remote"}
-    assert pa._trigger_extra_conditions("event.remote", "double")[0]["condition"] == "template"
-    assert pa._trigger_extra_conditions("light.hall", "on") == []
-    assert pa._trigger_phrase("event.remote", "double") == "When remote is pressed (double)"
-    assert pa._trigger_phrase("scene.movie", "activated") == "When movie is activated"
-
-
-# ── end-to-end: a button→scene sequence is detected and emitted ──────────────
-
-_SCHEMA = (
-    "CREATE TABLE state_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-    "timestamp TEXT, entity_id TEXT, domain TEXT, old_state TEXT, "
-    "new_state TEXT, area_id TEXT, hour INTEGER, day_of_week INTEGER, person TEXT)")
-
-
-def _conn(path):
-    conn = sqlite3.connect(str(path))
-    conn.executescript(_SCHEMA)
+def _history_db():
+    conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE state_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT,"
+        " entity_id TEXT, domain TEXT, old_state TEXT, new_state TEXT, area_id TEXT,"
+        " hour INTEGER, day_of_week INTEGER, person TEXT)")
     return conn
 
 
-def _ins(conn, eid, st, when):
-    dom = eid.split(".")[0]
-    conn.execute("INSERT INTO state_changes (timestamp, entity_id, domain, "
-                 "old_state, new_state, hour, day_of_week, person) "
-                 "VALUES (?,?,?,?,?,?,?,?)",
-                 (when.isoformat(), eid, dom, "", st, when.hour,
-                  when.weekday(), "unknown"))
+def _record(conn, entity, state, when):
+    conn.execute(
+        "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, new_state,"
+        " hour, day_of_week, person) VALUES (?, ?, ?, '', ?, ?, ?, 'unknown')",
+        (when.isoformat(), entity, entity.partition(".")[0], state,
+         when.hour, when.weekday()))
 
 
-def test_button_to_scene_detected_and_emitted(pa, tmp_path):
-    conn = _conn(tmp_path / "b.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):
-        t = base + timedelta(days=d, hours=20, seconds=137)
-        _ins(conn, "event.living_remote", "single", t)
-        _ins(conn, "scene.movie_night", "activated", t + timedelta(seconds=5))
-    conn.commit()
-    pats = pa.PatternAnalyzer()._find_sequence_patterns(conn, None, None)
-    m = [p for p in pats if p.details["trigger"]["entity"] == "event.living_remote"
-         and p.details["action"]["entity"] == "scene.movie_night"]
-    assert m, "expected button-press → scene sequence"
-    assert "is pressed (single)" in m[0].description
-    auto = json.loads(pa.PatternAnalyzer()._generate_automation(m[0]))
+def _evenings(days=8):
+    first = datetime.combine(date.today(), clock()) - timedelta(days=12)
+    return [first + timedelta(days=n, hours=20, seconds=137) for n in range(days)]
+
+
+def _found(mod, conn, first, then):
+    return [p for p in mod.PatternAnalyzer()._find_sequence_patterns(conn, None, None)
+            if p.details["trigger"]["entity"] == first
+            and p.details["action"]["entity"] == then]
+
+
+def test_a_press_then_a_scene_is_learned_and_emitted(mod):
+    conn = _history_db()
+    for at in _evenings():
+        _record(conn, "event.living_remote", "single", at)
+        _record(conn, "scene.movie_night", "activated", at + timedelta(seconds=5))
+
+    (seq,) = _found(mod, conn, "event.living_remote", "scene.movie_night")
+    assert seq.details["trigger"]["state"] == "single"
+    assert "is pressed (single)" in seq.description
+
+    auto = json.loads(mod.PatternAnalyzer()._generate_automation(seq))
     assert auto["trigger"] == {"platform": "state", "entity_id": "event.living_remote"}
     assert auto["action"][-1]["service"] == "scene.turn_on"
     assert any(c["condition"] == "template" for c in auto["condition"])
+
+
+def test_different_presses_on_one_remote_learn_different_scenes(mod):
+    conn = _history_db()
+    for at in _evenings():
+        _record(conn, "event.living_remote", "single", at)
+        _record(conn, "scene.movie_night", "activated", at + timedelta(seconds=5))
+        later = at + timedelta(hours=2)
+        _record(conn, "event.living_remote", "double", later)
+        _record(conn, "scene.bedtime", "activated", later + timedelta(seconds=5))
+
+    (film,) = _found(mod, conn, "event.living_remote", "scene.movie_night")
+    (bed,) = _found(mod, conn, "event.living_remote", "scene.bedtime")
+
+    assert film.details["trigger"]["state"] == "single"
+    assert bed.details["trigger"]["state"] == "double"
+    bed_auto = json.loads(mod.PatternAnalyzer()._generate_automation(bed))
+    assert "event_type == 'double'" in bed_auto["condition"][-1]["value_template"]
