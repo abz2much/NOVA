@@ -1,3 +1,11 @@
+## [8.65.1] Copied code removed from twelve more files
+
+### Changed
+- **Nothing you will notice.** Twelve more files were rewritten so Nova no longer carries code copied from the project it was forked from. Chat, voice, memory, automations and the AI tools work exactly as before.
+
+### Fixed
+- **Outdoor temperature.** If the first outdoor temperature sensor had no reading (unavailable or unknown), Nova stopped looking and acted as if there was no outdoor temperature, even when another outdoor sensor was fine. It now tries the next one. This feeds the freeze risk alert and the door left open temperature check.
+
 ## [8.65.0] Change Nova's banter by voice
 
 ### Added

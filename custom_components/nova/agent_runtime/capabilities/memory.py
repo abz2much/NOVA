@@ -262,68 +262,76 @@ async def _exec_lookup_relations(hass: HomeAssistant, args: dict) -> str:
 
 
 async def _exec_ignore(hass: HomeAssistant, args: dict) -> str:
-    """Add an ignore rule via the cognitive core."""
+    """Add an ignore rule through the cognitive core."""
     try:
         from ... import cognitive_core
-        result = cognitive_core.ignore(
-            entity_pattern=args.get("entity_pattern", ""),
-            duration_minutes=int(args.get("duration_minutes", 0)),
-            reason=args.get("reason", "user request"),
-        )
-        return json.dumps(result)
+        pattern = args.get("entity_pattern", "")
+        minutes = int(args.get("duration_minutes", 0))
+        why = args.get("reason", "user request")
+        rule = cognitive_core.ignore(
+            entity_pattern=pattern, duration_minutes=minutes, reason=why)
+        return json.dumps(rule)
     except Exception as exc:
         return json.dumps({"error": tool_error_text(exc, "ignore")})
 
 
 async def _exec_unignore(hass: HomeAssistant, args: dict) -> str:
-    """Remove an ignore rule."""
+    """Take an ignore rule away again."""
     try:
         from ... import cognitive_core
-        result = cognitive_core.unignore(args.get("entity_pattern", ""))
-        return json.dumps(result)
+        outcome = cognitive_core.unignore(args.get("entity_pattern", ""))
+        return json.dumps(outcome)
     except Exception as exc:
         return json.dumps({"error": tool_error_text(exc, "unignore")})
 
 
+def _log_agent(compose) -> None:
+    """Put one line in the Nova log under AGENT. ``compose`` builds the text,
+    so a problem while building it is swallowed along with any logging problem."""
+    try:
+        from ...websocket import nova_log
+        nova_log("AGENT", compose())
+    except Exception:
+        pass
+
+
 async def _exec_search_documents(hass: HomeAssistant, args: dict) -> str:
-    """Document RAG agent — retrieve from ingested manuals/receipts (v6.55.0),
-    semantic (Ollama) when enabled, else keyword (v6.57.0)."""
+    """Search the ingested manuals and receipts, the document RAG agent
+    (v6.55.0). It answers by meaning through Ollama when that is on and by
+    keyword otherwise (v6.57.0)."""
     try:
         from ... import documents
-        hits = await documents.search_documents_async(hass, args.get("query", ""), 4)
-        if not hits:
+        query = args.get("query", "")
+        found = await documents.search_documents_async(hass, query, 4)
+        if not found:
             return json.dumps({
                 "results": [],
                 "note": "nothing in the document library matched — it may be "
                         "empty (add files to /config/nova/documents and "
                         "ingest) or the answer isn't in the paperwork",
             })
-        try:
-            from ...websocket import nova_log
-            engine = hits[0].get("engine", "keyword") if hits else "keyword"
-            nova_log("AGENT", f"document search '{args.get('query','')}' "
-                                f"→ {len(hits)} hits ({engine})")
-        except Exception:
-            pass
-        return json.dumps({"results": hits})
+        _log_agent(lambda: (
+            f"document search '{query}' → {len(found)} hits "
+            f"({found[0].get('engine', 'keyword')})"))
+        return json.dumps({"results": found})
     except Exception as exc:
         return json.dumps({"error": tool_error_text(exc, "search_documents")})
 
 
+def _ingest_summary(res: dict) -> str:
+    embedded = (f", {res.get('embedded_chunks', 0)} embedded"
+                if res.get("semantic") else "")
+    return (f"document ingest: {res.get('files_ingested', 0)} files, "
+            f"{res.get('total_chunks', 0)} chunks{embedded}")
+
+
 async def _exec_ingest_documents(hass: HomeAssistant, args: dict) -> str:
-    """Re-scan the documents folder (v6.55.0), embedding for semantic search
-    when enabled (v6.57.0)."""
+    """Scan the documents folder again (v6.55.0). Chunks are embedded for
+    semantic search when that is on (v6.57.0)."""
     try:
         from ... import documents
         res = await documents.ingest_directory_async(hass)
-        try:
-            from ...websocket import nova_log
-            extra = (f", {res.get('embedded_chunks',0)} embedded"
-                     if res.get("semantic") else "")
-            nova_log("AGENT", f"document ingest: {res.get('files_ingested',0)} "
-                                f"files, {res.get('total_chunks',0)} chunks{extra}")
-        except Exception:
-            pass
+        _log_agent(lambda: _ingest_summary(res))
         return json.dumps(res)
     except Exception as exc:
         return json.dumps({"error": tool_error_text(exc, "ingest_documents")})
