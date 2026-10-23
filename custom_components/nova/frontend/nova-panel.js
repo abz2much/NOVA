@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.66.2
+ * v8.67.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.66.2 ",
+      console.log("%c Nova Panel %c v8.67.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1185,14 +1185,10 @@ ${this._htmlDashboardBody()}`;
   }
 
   // ─── Memory ───────────────────────────────────────────────────────────
-  // Ported from Classic's own Memory tab (nova-panel.js): curated facts
-  // ("What Nova Knows" + TEACH form), a Pending Confirmation queue for
-  // facts staged via "remember that…" but not yet approved, and Person
-  // Routines (habits confidently attributed to one person). Each section
-  // patches its own container after a fetch/action rather than doing a
-  // full _render() — the TEACH inputs are free text the user may be
-  // mid-typing, and a full re-render would wipe them the same way it
-  // would for AI Models/Cameras/Appliances.
+  // Four sections: what Nova knows (with the TEACH form), facts waiting for
+  // a yes, relations between things, and habits tied to one person. Each
+  // section redraws only its own box after a fetch or an action, so text
+  // half typed into TEACH is never wiped by a full render.
   _htmlMemory() {
     return `
         <div class="panel">
@@ -1245,14 +1241,36 @@ ${this._htmlDashboardBody()}`;
     `;
   }
 
+  // One call to Nova: { reply } on success, { failed } with the error text.
+  async _memAsk(msg) {
+    try {
+      return { reply: await this._hass.callWS(msg) };
+    } catch (err) {
+      return { failed: String(err), err };
+    }
+  }
+
+  // Stores a new fact list, keeping the waiting list and stats unless given.
+  // The tab may act before its first load, when there is nothing to keep.
+  _keepKnowledge(facts, pending) {
+    const was = this._knowledge || {};
+    this._knowledge = { facts, pending: pending ?? was.pending ?? [], stats: was.stats ?? {} };
+  }
+
+  // Calls fn(id, button) when a button carrying a numeric data-id is clicked.
+  _memBind(box, selector, fn) {
+    box.querySelectorAll(selector).forEach(btn => btn.addEventListener("click", () => {
+      const id = parseInt(btn.getAttribute("data-id"), 10);
+      if (!isNaN(id)) fn(id, btn);
+    }));
+  }
+
   async _fetchKnowledge() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/get_knowledge" });
-      this._knowledge = { facts: res?.facts || [], pending: res?.pending || [], stats: res?.stats || {} };
-    } catch (err) {
-      this._knowledge = { facts: [], pending: [], stats: {}, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/get_knowledge" });
+    this._knowledge = failed
+      ? { facts: [], pending: [], stats: {}, error: failed }
+      : { facts: reply?.facts || [], pending: reply?.pending || [], stats: reply?.stats || {} };
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
     this._renderPendingFacts();
@@ -1260,158 +1278,141 @@ ${this._htmlDashboardBody()}`;
 
   async _fetchPersonRoutines() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/get_person_routines" });
-      this._personRoutines = { groups: res?.routines || {} };
-    } catch (err) {
-      this._personRoutines = { groups: {}, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/get_person_routines" });
+    this._personRoutines = failed ? { groups: {}, error: failed } : { groups: reply?.routines || {} };
     this._personRoutinesLoaded = true;
     this._renderPersonRoutines();
   }
 
   _renderPersonRoutines() {
-    const list = this.shadowRoot?.getElementById("newProutineList");
-    if (!list) return;
-    const groups = this._personRoutines?.groups || {};
-    const people = Object.keys(groups).sort();
-    if (this._personRoutines?.error) {
-      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`);
+    const box = this.shadowRoot?.getElementById("newProutineList");
+    if (!box) return;
+    const state = this._personRoutines || {};
+    if (state.error) {
+      this._setHtml(box, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(state.error) })}</div>`);
       return;
     }
+    const groups = state.groups || {}, people = Object.keys(groups).sort();
     if (!people.length) {
-      this._setHtml(list, this._personRoutinesLoaded
+      this._setHtml(box, this._personRoutinesLoaded
         ? `<div class="stub-body">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
         : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    this._setHtml(list, people.map(person => {
-      const items = groups[person]
-        .slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-        .map(r => {
-          const pct = Math.round((r.confidence || 0) * 100);
-          return `
+    // "person_alex" reads "Person Alex". Capitalise first, then escape, so a
+    // name holding & or quotes is not turned into a broken entity.
+    const title = key => this._esc(key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()));
+    const surest = (a, b) => (b.confidence || 0) - (a.confidence || 0);
+    const habit = r => `
             <div class="cfg-row">
               <label>${this._esc(r.description)}</label>
-              <span class="toggle-desc">${pct}% · ×${r.occurrences || "?"}</span>
+              <span class="toggle-desc">${Math.round((r.confidence || 0) * 100)}% · ×${r.occurrences || "?"}</span>
             </div>`;
-        }).join("");
-      const label = this._esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
-      return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join(""));
+    this._setHtml(box, people
+      .map(person => `<div class="mode-bind-head">${title(person)}</div>${groups[person].slice().sort(surest).map(habit).join("")}`)
+      .join(""));
   }
 
   _renderKnowledgeList() {
-    const list = this.shadowRoot?.getElementById("newMemList");
-    if (!list) return;
-    const facts = this._knowledge?.facts || [];
-    const count = this.shadowRoot?.getElementById("newMemCount");
+    const root = this.shadowRoot;
+    const box = root?.getElementById("newMemList");
+    if (!box) return;
+    const known = this._knowledge || {}, facts = known.facts || [];
+    const count = root.getElementById("newMemCount");
     if (count) this._setText(count, this._t(facts.length === 1 ? "{count} fact" : "{count} facts", { count: facts.length }));
-    if (this._knowledge?.error) {
-      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`);
+    if (known.error) {
+      this._setHtml(box, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(known.error) })}</div>`);
       return;
     }
     if (!facts.length) {
-      this._setHtml(list, this._knowledgeLoaded
+      this._setHtml(box, this._knowledgeLoaded
         ? `<div class="stub-body">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
         : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    const groups = {};
-    facts.forEach(f => { (groups[f.subject] = groups[f.subject] || []).push(f); });
-    const labels = { household: "Household", primary: "About me" };
-    const order = Object.keys(groups).sort(
-      (a, b) => (a === "household" ? -1 : b === "household" ? 1 : a.localeCompare(b)));
-    this._setHtml(list, order.map(subj => {
-      const items = groups[subj].map(f => {
-        const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
-        const hedge = soft
-          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
-          : "";
-        const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
-        return `
+    // Household first, then the other subjects by name.
+    const bySubject = {};
+    for (const f of facts) (bySubject[f.subject] = bySubject[f.subject] || []).push(f);
+    const subjectNames = { household: "Household", primary: "About me" };
+    const rank = s => (s === "household" ? 0 : 1);
+    const subjects = Object.keys(bySubject).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    // A fact not stated outright, or held at under 90%, carries a "~" saying how sure Nova is.
+    const factRow = f => {
+      const sure = f.confidence ?? 1;
+      const hedge = f.source !== "stated" || sure < 0.9
+        ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round(sure * 100) })}">~</span>`
+        : "";
+      const expiry = f.expires_at ? `<span title="expires">⌛</span>` : "";
+      return `
           <div class="cfg-row" data-id="${f.id}">
             <label>${this._esc(f.key)}</label>
             <div style="display:flex;align-items:center;gap:6px">
-              <span class="toggle-desc">${this._esc(f.value)}${hedge}${exp}</span>
+              <span class="toggle-desc">${this._esc(f.value)}${hedge}${expiry}</span>
               <button class="new-mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
             </div>
           </div>`;
-      }).join("");
-      const label = labels[subj] || this._esc(subj.replace(/_/g, " "));
-      return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join(""));
-    list.querySelectorAll(".new-mem-forget").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._forgetKnowledge(id);
-      });
-    });
+    };
+    this._setHtml(box, subjects
+      .map(subj => `<div class="mode-bind-head">${subjectNames[subj] || this._esc(subj.replace(/_/g, " "))}</div>${bySubject[subj].map(factRow).join("")}`)
+      .join(""));
+    this._memBind(box, ".new-mem-forget", id => this._forgetKnowledge(id));
   }
 
   async _teachKnowledge() {
     const root = this.shadowRoot;
     if (!root || !this._hass) return;
-    const keyEl = root.getElementById("newMemKey");
-    const valEl = root.getElementById("newMemVal");
-    const subjEl = root.getElementById("newMemSubject");
-    const key = (keyEl?.value || "").trim();
-    const value = (valEl?.value || "").trim();
+    const [keyEl, valEl, subjEl] = ["newMemKey", "newMemVal", "newMemSubject"].map(id => root.getElementById(id));
+    const key = (keyEl?.value || "").trim(), value = (valEl?.value || "").trim();
     const subject = subjEl?.value || "household";
     if (!key || !value) return;
-    try {
-      const res = await this._hass.callWS({
-        type: "nova/add_knowledge", key, value, subject,
-        kind: subject === "primary" ? "preference" : "fact",
-      });
-      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
-      if (keyEl) keyEl.value = "";
-      if (valEl) valEl.value = "";
+    const kind = subject === "primary" ? "preference" : "fact";
+    const { reply, failed, err } = await this._memAsk({ type: "nova/add_knowledge", key, value, subject, kind });
+    if (failed) {
+      console.error("Nova: teach failed", err);
+    } else {
+      this._keepKnowledge(reply?.facts || []);
+      [keyEl, valEl].forEach(el => { if (el) el.value = ""; });
       if (keyEl) keyEl.focus();
-    } catch (err) { console.error("Nova: teach failed", err); }
+    }
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
   }
 
   async _forgetKnowledge(id) {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/forget_knowledge", fact_id: id });
-      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
-    } catch (err) { console.error("Nova: forget failed", err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/forget_knowledge", fact_id: id });
+    if (failed) console.error("Nova: forget failed", err);
+    else this._keepKnowledge(reply?.facts || []);
     this._renderKnowledgeList();
   }
 
   async _pendingFactAction(id, action) {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/pending_fact_action", fact_id: id, action });
-      this._knowledge = { facts: res?.facts || this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-    } catch (err) { console.error(`Nova: ${action} failed`, err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/pending_fact_action", fact_id: id, action });
+    if (failed) console.error(`Nova: ${action} failed`, err);
+    else this._keepKnowledge(reply?.facts || this._knowledge?.facts || [], reply?.pending || []);
     this._renderKnowledgeList();
     this._renderPendingFacts();
   }
 
   async _editPendingFact(id, value) {
     if (!this._hass || !value) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/edit_pending_fact", fact_id: id, value });
-      this._knowledge = { facts: this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-    } catch (err) { console.error("Nova: edit pending fact failed", err); }
+    const { reply, failed, err } = await this._memAsk({ type: "nova/edit_pending_fact", fact_id: id, value });
+    if (failed) console.error("Nova: edit pending fact failed", err);
+    else this._keepKnowledge(this._knowledge?.facts || [], reply?.pending || []);
     this._renderPendingFacts();
   }
 
   _renderPendingFacts() {
     const root = this.shadowRoot;
-    const panel = root?.getElementById("newPendingPanel");
-    const list = root?.getElementById("newPendingList");
-    const countEl = root?.getElementById("newPendingCount");
-    if (!panel || !list) return;
-    const pending = this._knowledge?.pending || [];
-    panel.hidden = pending.length === 0;
-    if (!pending.length) { this._setHtml(list, ""); return; }
-    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: pending.length }));
-    this._setHtml(list, pending.map(f => `
+    const panel = root?.getElementById("newPendingPanel"), box = root?.getElementById("newPendingList");
+    if (!panel || !box) return;
+    const waiting = this._knowledge?.pending || [];
+    panel.hidden = !waiting.length;
+    if (!waiting.length) { this._setHtml(box, ""); return; }
+    const countEl = root.getElementById("newPendingCount");
+    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: waiting.length }));
+    this._setHtml(box, waiting.map(f => `
       <div class="cfg-row" data-id="${f.id}">
         <label>${this._esc(f.key)}</label>
         <input class="cfg-field new-pending-edit-val" style="flex:1" data-id="${f.id}" value="${this._esc(f.value)}">
@@ -1421,36 +1422,20 @@ ${this._htmlDashboardBody()}`;
         <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
       </div>`).join(""));
-    list.querySelectorAll(".new-pending-confirm").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._pendingFactAction(id, "confirm");
-      });
-    });
-    list.querySelectorAll(".new-pending-reject").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        if (!isNaN(id)) this._pendingFactAction(id, "reject");
-      });
-    });
-    list.querySelectorAll(".new-pending-save-edit").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        const input = list.querySelector(`.new-pending-edit-val[data-id="${id}"]`);
-        const value = (input?.value || "").trim();
-        if (!isNaN(id) && value) this._editPendingFact(id, value);
-      });
+    this._memBind(box, ".new-pending-confirm", id => this._pendingFactAction(id, "confirm"));
+    this._memBind(box, ".new-pending-reject", id => this._pendingFactAction(id, "reject"));
+    this._memBind(box, ".new-pending-save-edit", id => {
+      const typed = (box.querySelector(`.new-pending-edit-val[data-id="${id}"]`)?.value || "").trim();
+      if (typed) this._editPendingFact(id, typed);
     });
   }
 
   async _fetchRelations() {
     if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/list_relations" });
-      this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-    } catch (err) {
-      this._relations = { pending: [], confirmed: [], cap: 500, error: String(err) };
-    }
+    const { reply, failed } = await this._memAsk({ type: "nova/list_relations" });
+    this._relations = failed
+      ? { pending: [], confirmed: [], cap: 500, error: failed }
+      : { pending: reply?.pending || [], confirmed: reply?.confirmed || [], cap: reply?.cap || 500 };
     this._relationsLoaded = true;
     this._renderRelations();
   }
@@ -1566,27 +1551,21 @@ ${this._htmlDashboardBody()}`;
   }
 
   // ─── Intrusion ────────────────────────────────────────────────────────
-  // Ported from Classic's own Intrusion tab (nova-panel.js). Safety-relevant
-  // (call-off/acknowledge affect real escalation), so this is a straight
-  // port of Classic's exact websocket calls and semantics — no new
-  // behavior invented here. The timeout select and vision-confirm toggle
-  // reuse the generic .cfg-field/.toggle-btn autosave already wired for
-  // Settings (see _saveSetting's dashboard-only render guard above).
+  // Safety relevant: call off and acknowledge change real escalation, so
+  // this tab only shows Nova's state and sends its exact websocket actions.
+  // The timeout select and vision toggle save through _saveSetting like
+  // the controls on the Settings tab.
   _htmlIntrusion() {
     return `
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">Intrusion</div>
-            <div class="panel-meta" id="newIntrStatus">—</div>
+        <div class="panel"> <div class="panel-head">
+            <div class="panel-title">Intrusion</div> <div class="panel-meta" id="newIntrStatus">—</div>
           </div>
           <div class="stub-body">Last intrusion snapshot and false-alarm call-off. When Nova confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".</div>
           <div id="newIntrBody"><div class="stub-body">Loading…</div></div>
         </div>
 
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">Intrusion Log</div>
-            <div class="panel-meta" id="newIlogLearn">—</div>
+        <div class="panel"> <div class="panel-head">
+            <div class="panel-title">Intrusion Log</div> <div class="panel-meta" id="newIlogLearn">—</div>
           </div>
           <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
           <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
@@ -1595,180 +1574,162 @@ ${this._htmlDashboardBody()}`;
     `;
   }
 
+  // Sends one nova/intrusion action and returns the reply.
+  _intrSend(action, extra) {
+    return this._hass.callWS(Object.assign({ type: "nova/intrusion", action }, extra));
+  }
+
   async _fetchIntrusion() {
     if (!this._hass) return;
-    try {
-      const cfg = this._liveData?.config || {};
-      if (cfg.intrusion_response_timeout != null) this._intrTimeout = cfg.intrusion_response_timeout;
-    } catch (_) {}
-    try {
-      this._intr = await this._hass.callWS({ type: "nova/intrusion", action: "status" });
-    } catch (_) {
-      this._intr = { error: true };
-    }
+    const timeout = this._liveData?.config?.intrusion_response_timeout;
+    if (timeout != null) this._intrTimeout = timeout;
+    let status;
+    try { status = await this._intrSend("status"); } catch (_) { status = { error: true }; }
+    this._intr = status;
     this._renderIntrusionStatus();
   }
 
   _renderIntrusionStatus() {
-    const root = this.shadowRoot;
-    const body = root?.getElementById("newIntrBody");
-    const statusEl = root?.getElementById("newIntrStatus");
+    const root = this.shadowRoot, body = root?.getElementById("newIntrBody");
     if (!body) return;
-    const s = this._intr || {};
+    const badge = root.getElementById("newIntrStatus"), s = this._intr || {};
     if (s.error) {
       this._setHtml(body, `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`);
-      if (statusEl) this._setText(statusEl, "—");
+      if (badge) this._setText(badge, "—");
       return;
     }
-    if (statusEl) {
-      this._setHtml(statusEl, s.called_off
-        ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
-        : `<span class="diag-ok">ARMED</span>`);
-    }
-    const snap = s.last_snapshot;
-    let html = "";
-    if (snap && snap.image_b64) {
-      const when = snap.ts ? new Date(snap.ts * 1000).toLocaleString() : "";
-      html += `<div class="intr-snap">
-        <img src="data:image/jpeg;base64,${snap.image_b64}" alt="intrusion snapshot" class="intr-img">
-        <div class="toggle-desc">${this._esc((snap.camera || "").replace("camera.", "").replace(/_/g, " "))} · ${this._esc(when)}</div>
-      </div>`;
+    if (badge) this._setHtml(badge, s.called_off
+      ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
+      : `<span class="diag-ok">ARMED</span>`);
+
+    const parts = [];
+    const shot = s.last_snapshot;
+    if (shot && shot.image_b64) {
+      const camName = (shot.camera || "").replace("camera.", "").replace(/_/g, " ");
+      const taken = shot.ts ? new Date(shot.ts * 1000).toLocaleString() : "";
+      parts.push(`<div class="intr-snap">
+        <img src="data:image/jpeg;base64,${shot.image_b64}" alt="intrusion snapshot" class="intr-img">
+        <div class="toggle-desc">${this._esc(camName)} · ${this._esc(taken)}</div>
+      </div>`);
     } else {
-      html += `<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
+      parts.push(`<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`);
     }
-    if (s.false_alarms_24h) {
-      html += `<div class="stub-body">${this._tHtml(s.false_alarms_24h === 1 ? "{count} false alarm called off in the last 24h" : "{count} false alarms called off in the last 24h", { count: s.false_alarms_24h })}</div>`;
+    const falseAlarms = s.false_alarms_24h;
+    if (falseAlarms) {
+      const line = falseAlarms === 1 ? "{count} false alarm called off in the last 24h" : "{count} false alarms called off in the last 24h";
+      parts.push(`<div class="stub-body">${this._tHtml(line, { count: falseAlarms })}</div>`);
     }
-    if (s.acknowledged) {
-      html += `<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
-    }
-    html += `
-      <div class="cfg-row">
-        <label>Auto-escalate if no response after</label>
-        <select class="cfg-field" data-cfg-key="intrusion_response_timeout">${this._optSelect([["60", "1 min"], ["120", "2 min"], ["180", "3 min"], ["300", "5 min"], ["600", "10 min"]], String(this._intrTimeout || 120))}</select>
+    if (s.acknowledged) parts.push(`<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`);
+    const waits = [["60", "1 min"], ["120", "2 min"], ["180", "3 min"], ["300", "5 min"], ["600", "10 min"]];
+    const vision = this._liveData?.config?.intrusion_vision_confirm !== false;
+    parts.push(`
+      <div class="cfg-row"> <label>Auto-escalate if no response after</label>
+        <select class="cfg-field" data-cfg-key="intrusion_response_timeout">${this._optSelect(waits, String(this._intrTimeout || 120))}</select>
       </div>
-      <div class="cfg-row">
-        <label>Confirm Frigate person with Nova vision before alarming</label>
-        <button class="toggle-btn ${this._liveData?.config?.intrusion_vision_confirm !== false ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${this._liveData?.config?.intrusion_vision_confirm !== false ? "false" : "true"}">${this._liveData?.config?.intrusion_vision_confirm !== false ? "ON" : "OFF"}</button>
+      <div class="cfg-row"> <label>Confirm Frigate person with Nova vision before alarming</label>
+        <button class="toggle-btn ${vision ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${vision ? "false" : "true"}">${vision ? "ON" : "OFF"}</button>
       </div>
       <div class="mode-grid">
         <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
         <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
-      </div>`;
-    this._setHtml(body, html);
+      </div>`);
+    this._setHtml(body, parts.join(""));
+
     body.querySelectorAll(".toggle-btn[data-cfg-key], select.cfg-field[data-cfg-key]").forEach(el => {
-      if (el.tagName === "BUTTON") {
-        el.addEventListener("click", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.getAttribute("data-cfg-val") === "true"));
-      } else {
-        el.addEventListener("change", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.value));
-      }
+      const save = value => this._saveSetting(el.getAttribute("data-cfg-key"), value);
+      if (el.tagName === "BUTTON") el.addEventListener("click", () => save(el.getAttribute("data-cfg-val") === "true"));
+      else el.addEventListener("change", () => save(el.value));
     });
-    const dismissBtn = body.querySelector(".new-intr-dismiss");
-    dismissBtn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      dismissBtn.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/intrusion", action: "dismiss", reason: "panel" });
-        await this._fetchIntrusion();
-      } catch (err) {
-        console.error("Nova: intrusion dismiss failed", err);
-        dismissBtn.disabled = false;
-      }
-    });
-    const ackBtn = body.querySelector(".new-intr-ack");
-    ackBtn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      ackBtn.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/intrusion", action: "acknowledge", reason: "panel" });
-        await this._fetchIntrusion();
-      } catch (err) {
-        console.error("Nova: intrusion acknowledge failed", err);
-        ackBtn.disabled = false;
-      }
-    });
+    // Call off and acknowledge: the button stays disabled until the fresh
+    // status redraws it, and comes back only when the action failed.
+    const action = (selector, name) => {
+      const btn = body.querySelector(selector);
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        btn.disabled = true;
+        try {
+          await this._intrSend(name, { reason: "panel" });
+          await this._fetchIntrusion();
+        } catch (err) {
+          console.error(`Nova: intrusion ${name} failed`, err);
+          btn.disabled = false;
+        }
+      });
+    };
+    action(".new-intr-dismiss", "dismiss");
+    action(".new-intr-ack", "acknowledge");
   }
 
   async _fetchIntrusionLog() {
     const root = this.shadowRoot;
-    const body = root?.getElementById("newIlogBody");
-    const side = root?.getElementById("newIlogLearn");
+    const body = root?.getElementById("newIlogBody"), learned = root?.getElementById("newIlogLearn");
     if (!this._hass || !body) return;
     try {
-      const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
-      this._ilog = res;
-      const L = res?.learning || {};
-      if (side) this._setText(side, this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 }));
-      this._setHtml(body, this._renderIntrusionLogHtml(res));
+      const log = await this._intrSend("log", { limit: 40 });
+      this._ilog = log;
+      const tally = log?.learning || {};
+      if (learned) this._setText(learned, this._t("{labelled}/{events} labelled", { labelled: tally.labeled || 0, events: tally.events || 0 }));
+      this._setHtml(body, this._renderIntrusionLogHtml(log));
       this._wireIntrusionLabels();
-    } catch (err) {
+    } catch (_) {
       this._setHtml(body, `<div class="stub-body">Could not load the log.</div>`);
     }
   }
 
   _renderIntrusionLogHtml(res) {
-    const evs = (res && res.events) || [];
-    if (!evs.length) {
-      return `<div class="stub-body">No intrusion events recorded yet.</div>`;
-    }
-    const damped = ((res.learning || {}).damped_patterns || []).length;
-    let html = "";
-    if (damped) {
-      html += `<div class="stub-body">${this._tHtml(damped === 1 ? "Nova has learned {count} benign pattern — low-confidence alerts for these stay quiet." : "Nova has learned {count} benign patterns — low-confidence alerts for these stay quiet.", { count: damped })}</div>`;
-    }
-    for (const e of evs) {
-      const when = new Date((e.ts || 0) * 1000).toLocaleString();
-      const kindCls = { confirmed: "diag-down", unresolved: "diag-warn", investigating: "diag-off" }[e.kind] || "diag-off";
-      const label = e.label || "";
-      html += `<div class="new-ilog-item" data-ev="${this._esc(e.id)}">
-        <div class="cfg-row">
-          <span class="${kindCls}">${this._esc((e.kind || "").toUpperCase())}</span>
-          <span class="toggle-desc">${this._esc(when)}</span>
+    const events = (res && res.events) || [];
+    if (!events.length) return `<div class="stub-body">No intrusion events recorded yet.</div>`;
+    const quiet = ((res.learning || {}).damped_patterns || []).length;
+    const head = quiet
+      ? `<div class="stub-body">${this._tHtml(quiet === 1 ? "Nova has learned {count} benign pattern — low-confidence alerts for these stay quiet." : "Nova has learned {count} benign patterns — low-confidence alerts for these stay quiet.", { count: quiet })}</div>`
+      : "";
+    const tone = { confirmed: "diag-down", unresolved: "diag-warn", investigating: "diag-off" };
+    const row = e => {
+      const label = e.label || "", on = v => (label === v ? " mode-chip-on" : "");
+      return `<div class="new-ilog-item" data-ev="${this._esc(e.id)}">
+        <div class="cfg-row"> <span class="${tone[e.kind] || "diag-off"}">${this._esc((e.kind || "").toUpperCase())}</span>
+          <span class="toggle-desc">${this._esc(new Date((e.ts || 0) * 1000).toLocaleString())}</span>
         </div>
         <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
         ${e.image_b64 ? `<img class="intr-img" src="data:image/jpeg;base64,${e.image_b64}" alt="snapshot">` : ""}
         <div class="mode-grid">
-          <button class="mode-chip new-ilog-btn${label === "real" ? " mode-chip-on" : ""}" data-label="real">REAL</button>
-          <button class="mode-chip new-ilog-btn${label === "false" ? " mode-chip-on" : ""}" data-label="false">FALSE ALARM</button>
+          <button class="mode-chip new-ilog-btn${on("real")}" data-label="real">REAL</button>
+          <button class="mode-chip new-ilog-btn${on("false")}" data-label="false">FALSE ALARM</button>
           ${label ? `<button class="mode-chip new-ilog-btn" data-label="">CLEAR</button>` : ""}
         </div>
       </div>`;
-    }
-    return html;
+    };
+    return head + events.map(row).join("");
   }
 
   _wireIntrusionLabels() {
     const body = this.shadowRoot?.getElementById("newIlogBody");
-    body?.querySelectorAll(".new-ilog-btn").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const item = btn.closest(".new-ilog-item");
-        const id = item?.getAttribute("data-ev");
-        if (!id || !this._hass) return;
-        try {
-          await this._hass.callWS({ type: "nova/intrusion", action: "label", event_id: id, label: btn.getAttribute("data-label") });
-          await this._fetchIntrusionLog();
-        } catch (err) { console.error("Nova: intrusion label failed", err); }
-      });
-    });
+    if (!body) return;
+    body.querySelectorAll(".new-ilog-btn").forEach(btn => btn.addEventListener("click", async () => {
+      const eventId = btn.closest(".new-ilog-item")?.getAttribute("data-ev");
+      if (!eventId || !this._hass) return;
+      try {
+        await this._intrSend("label", { event_id: eventId, label: btn.getAttribute("data-label") });
+        await this._fetchIntrusionLog();
+      } catch (err) { console.error("Nova: intrusion label failed", err); }
+    }));
   }
 
   _wireIntrusion() {
-    const root = this.shadowRoot;
     this._fetchIntrusion();
-    const refreshBtn = root.getElementById("newIlogRefresh");
-    if (refreshBtn) {
-      refreshBtn.addEventListener("click", async () => {
-        refreshBtn.disabled = true;
-        const orig = refreshBtn.textContent;
-        this._setText(refreshBtn, "⟳ LOADING…");
-        try { await this._fetchIntrusionLog(); }
-        finally { refreshBtn.disabled = false; this._setText(refreshBtn, orig); }
-      });
-    } else {
-      this._fetchIntrusionLog();
-    }
+    const refresh = this.shadowRoot.getElementById("newIlogRefresh");
+    if (!refresh) { this._fetchIntrusionLog(); return; }
+    refresh.addEventListener("click", async () => {
+      const label = refresh.textContent;
+      refresh.disabled = true;
+      this._setText(refresh, "⟳ LOADING…");
+      try { await this._fetchIntrusionLog(); } finally {
+        refresh.disabled = false;
+        this._setText(refresh, label);
+      }
+    });
   }
-
   // ─── Chat ─────────────────────────────────────────────────────────────
   // Type to Nova from the panel. Each message goes through nova/chat, open to
   // any Home Assistant user, to Nova's own conversation agent. The server keeps
@@ -8700,420 +8661,445 @@ ${this._htmlDashboardBody()}`;
     return `${big ? `<div class="pc-cap">Solar made</div><div class="pc-big"><span class="pc-fig" data-unit="kWh">${n(d.solar_today_kwh, 1)}</span></div>` : ""}${now}${svg}`
       + (rows.length ? `<div class="pc-rows">${rows.map(([label, value]) => `<div class="pc-row"><span>${label}</span><b>${value}</b></div>`).join("")}</div>` : "");
   }
-  // ─── Floor Plan Editor: rooms only (v7.101.16) ──────────────────────────
-  // Ported from Classic's _renderFloorPlanEditor/_renderEditableSVG/
-  // _wireFloorPlanDrag — same floor_plan_rooms config, same working-copy
-  // pattern, room drag/resize/add/remove/save/reset. Property line, outdoor
-  // zones, camera placement, and the AI camera-coverage feature stay
-  // Classic-only for now ("Edit advanced layout in Classic" below) — ported
-  // separately later if it turns out to matter.
+  // ─── Floor plan: stored layout, working copies and shared helpers ──────
+  // The plan is kept in config as floor_plan_rooms (rooms and outdoor zones
+  // per floor), floor_plan_entities (device pins), floor_plan_cameras,
+  // floor_plan_elements (windows, doors, dormers) and floor_plan_property
+  // (the lot outline). The editor changes deep copies of each and writes
+  // them back only on Save.
 
   // The starting plan for a home with no saved plan. It shows only what the
   // home has (8.26.0 garage, 8.27.0 the rest). A saved plan is never changed.
   _defaultFloorPlan() {
     const cfg = this._data()?.config || {};
-    const feat = cfg.home_features || {};
+    const has = cfg.home_features || {};
     const plan = this._defaultFloorPlanBase();
-    // The basement floor only in a home with a basement. (Its old device
-    // labels, sump pump and washer among them, were guesses: gone in 8.27.0.)
-    if (!feat.basement) delete plan.bsmt;
-    // The upper floor only when Stories is more than 1, and stairs only
-    // where there is another floor to reach.
+    // A basement floor only where there is a basement, an upper floor only
+    // when Stories is more than 1, and stairs only with a floor to reach.
+    // (The basement's old guessed device labels went in 8.27.0.)
+    if (!has.basement) delete plan.bsmt;
     if (String(cfg.home_stories ?? "1.5") === "1") delete plan["2f"];
-    if (!plan["2f"] && !plan.bsmt) plan["1f"].rooms = plan["1f"].rooms.filter(r => r.type !== "stairs");
+    const ground = plan["1f"];
+    if (!plan["2f"] && !plan.bsmt) ground.rooms = ground.rooms.filter(r => r.type !== "stairs");
     if (cfg.has_garage) return plan;
-    // No garage: a back door opens from the kitchen at the rear. The garage's
-    // space is a utility room only when Home Assistant has a Utility area.
-    const f = plan["1f"];
-    f.viewBox = "0 0 320 162";
-    f.rooms = f.rooms
-      .filter(r => r.name !== "Garage" || feat.utility)
-      .map(r => r.name === "Garage" ? { ...r, name: "Utility Room", y: r.y + 12 } : { ...r, y: r.y + 12 });
-    f.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
+    // With no garage the back door opens from the kitchen at the rear, and
+    // the garage's space is a utility room only when Home Assistant has one.
+    ground.viewBox = "0 0 320 162";
+    ground.rooms = ground.rooms
+      .filter(r => r.name !== "Garage" || has.utility)
+      .map(r => (r.name === "Garage" ? { ...r, name: "Utility Room", y: r.y + 12 } : { ...r, y: r.y + 12 }));
+    ground.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
     return plan;
   }
   _defaultFloorPlanBase() {
-    return {
-      "1f": {
-        label: "1st Floor", viewBox: "0 0 320 150",
-        rooms: [
-          { name: "Garage", x: 5, y: 5, w: 100, h: 88, type: "room" },
-          { name: "Kitchen", x: 115, y: 5, w: 65, h: 40, type: "room" },
-          { name: "Bath", x: 185, y: 5, w: 28, h: 22, type: "bath" },
-          { name: "Guest Room", x: 218, y: 5, w: 95, h: 40, type: "room" },
-          { name: "Dining Room", x: 115, y: 50, w: 65, h: 38, type: "room" },
-          { name: "Stairs", x: 185, y: 32, w: 28, h: 32, type: "stairs" },
-          { name: "Living Room", x: 218, y: 50, w: 95, h: 38, type: "room" },
-          { name: "Downstairs Hallway", x: 115, y: 93, w: 198, h: 20, type: "room" },
-          { name: "Front Door", x: 185, y: 117, w: 50, h: 12, type: "door" },
-        ],
-      },
-      "2f": {
-        label: "2nd Floor", viewBox: "0 0 320 140",
-        rooms: [
-          { name: "Bedroom 2", x: 50, y: 25, w: 95, h: 80, type: "room" },
-          { name: "Bath", x: 150, y: 25, w: 30, h: 40, type: "bath" },
-          { name: "Master Bedroom", x: 185, y: 25, w: 85, h: 80, type: "room" },
-          { name: "Upstairs Hallway", x: 150, y: 70, w: 30, h: 35, type: "room" },
-          { name: "Stairs", x: 150, y: 108, w: 25, h: 20, type: "stairs" },
-        ],
-      },
-      "bsmt": {
-        label: "Basement", viewBox: "0 0 320 130",
-        rooms: [
-          { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
-          { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
-        ],
-      },
-    };
+    const ground = [
+      { name: "Garage", x: 5, y: 5, w: 100, h: 88, type: "room" },
+      { name: "Kitchen", x: 115, y: 5, w: 65, h: 40, type: "room" },
+      { name: "Bath", x: 185, y: 5, w: 28, h: 22, type: "bath" },
+      { name: "Guest Room", x: 218, y: 5, w: 95, h: 40, type: "room" },
+      { name: "Dining Room", x: 115, y: 50, w: 65, h: 38, type: "room" },
+      { name: "Stairs", x: 185, y: 32, w: 28, h: 32, type: "stairs" },
+      { name: "Living Room", x: 218, y: 50, w: 95, h: 38, type: "room" },
+      { name: "Downstairs Hallway", x: 115, y: 93, w: 198, h: 20, type: "room" },
+      { name: "Front Door", x: 185, y: 117, w: 50, h: 12, type: "door" },
+    ];
+    const upper = [
+      { name: "Bedroom 2", x: 50, y: 25, w: 95, h: 80, type: "room" },
+      { name: "Bath", x: 150, y: 25, w: 30, h: 40, type: "bath" },
+      { name: "Master Bedroom", x: 185, y: 25, w: 85, h: 80, type: "room" },
+      { name: "Upstairs Hallway", x: 150, y: 70, w: 30, h: 35, type: "room" },
+      { name: "Stairs", x: 150, y: 108, w: 25, h: 20, type: "stairs" },
+    ];
+    const lower = [
+      { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
+      { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
+    ];
+    const floor = (label, height, rooms) => ({ label, viewBox: `0 0 320 ${height}`, rooms });
+    return { "1f": floor("1st Floor", 150, ground), "2f": floor("2nd Floor", 140, upper), "bsmt": floor("Basement", 130, lower) };
+  }
+
+  // A config value that may be stored as JSON text or as an object. Empty
+  // or unreadable text gives null.
+  _fpStored(key) {
+    const raw = this._data()?.config?.[key];
+    try {
+      if (typeof raw === "string") return raw ? JSON.parse(raw) : null;
+      return raw || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  // A working copy of one stored part, made on first use and kept until Save.
+  _fpWorking(field, read) {
+    if (!this[field]) this[field] = JSON.parse(JSON.stringify(read()));
+    return this[field];
+  }
+  // One floor's list inside a per-floor store, created empty when missing.
+  _fpFloorList(store, floor) {
+    if (!Array.isArray(store[floor])) store[floor] = [];
+    return store[floor];
   }
 
   _getFloorPlan() {
-    try {
-      const raw = this._data()?.config?.floor_plan_rooms;
-      if (raw) {
-        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-        if (parsed && typeof parsed === "object" && Object.keys(parsed).length) return parsed;
-      }
-    } catch (_) {}
+    const saved = this._fpStored("floor_plan_rooms");
+    if (saved && typeof saved === "object" && Object.keys(saved).length) return saved;
     return this._defaultFloorPlan();
   }
+  _getEditingPlan() { return this._fpWorking("_editingPlan", () => this._getFloorPlan()); }
 
-  _getEditingPlan() {
-    if (this._editingPlan) return this._editingPlan;
-    this._editingPlan = JSON.parse(JSON.stringify(this._getFloorPlan()));
-    return this._editingPlan;
-  }
-
-  _fpUnits() { return (this._data()?.config?.floor_plan_units === "metric") ? "metric" : "imperial"; }
+  // Plan units are a fifth of a foot: one 50 unit grid square is 10 ft.
+  _fpUnits() { return this._data()?.config?.floor_plan_units === "metric" ? "metric" : "imperial"; }
   _fpUnitLabel() { return this._fpUnits() === "metric" ? "m" : "ft"; }
   _fpToReal(u) {
-    const ft = (u || 0) * 0.2;
-    return this._fpUnits() === "metric" ? Math.round(ft * 0.3048 * 10) / 10 : Math.round(ft * 10) / 10;
+    const feet = (u || 0) * 0.2;
+    const shown = this._fpUnits() === "metric" ? feet * 0.3048 : feet;
+    return Math.round(shown * 10) / 10;
   }
-  _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === "metric" ? "m" : "'"); }
+  // The other way: feet or metres typed in a field back to plan units, at
+  // least 8 so an opening or a camera's reach never shrinks to nothing.
+  _fpFromReal(v) {
+    const feet = this._fpUnits() === "metric" ? v / 0.3048 : v;
+    return Math.max(8, Math.round(feet * 5));
+  }
+  _fpDim(u) { return `${this._fpToReal(u)}${this._fpUnits() === "metric" ? "m" : "'"}`; }
 
-  // Devices pinned on the floor plan (Floor Plan Editor Phase 2, v7.101.18) —
-  // live-state markers, drag to move, tap to open HA's more-info.
-  _getFloorEntities() {
-    const raw = this._data()?.config?.floor_plan_entities;
-    let e = {};
-    try { e = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { e = {}; }
-    return e || {};
+  // The box around a list of rooms, from each room's x, y, w and h.
+  _fpRoomBox(r) { return { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }; }
+  _fpBounds(rooms) {
+    const box = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 };
+    for (const r of rooms) {
+      const own = this._fpRoomBox(r);
+      box.x0 = Math.min(box.x0, own.x0); box.y0 = Math.min(box.y0, own.y0);
+      box.x1 = Math.max(box.x1, own.x1); box.y1 = Math.max(box.y1, own.y1);
+    }
+    return box;
   }
-  _getEditingEntities() {
-    if (this._editingEntities) return this._editingEntities;
-    this._editingEntities = JSON.parse(JSON.stringify(this._getFloorEntities()));
-    return this._editingEntities;
+  // The box around a list of [x, y] points.
+  _fpPointBounds(pts) {
+    const box = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 };
+    for (const p of pts) {
+      box.x0 = Math.min(box.x0, p[0]); box.y0 = Math.min(box.y0, p[1]);
+      box.x1 = Math.max(box.x1, p[0]); box.y1 = Math.max(box.y1, p[1]);
+    }
+    return box;
   }
-  _entsFor(floor) {
-    const e = this._getEditingEntities();
-    if (!Array.isArray(e[floor])) e[floor] = [];
-    return e[floor];
-  }
+
+  // Device pins: live state markers, drag to move, tap for HA's more-info.
+  _getFloorEntities() { return this._fpStored("floor_plan_entities") || {}; }
+  _getEditingEntities() { return this._fpWorking("_editingEntities", () => this._getFloorEntities()); }
+  _entsFor(floor) { return this._fpFloorList(this._getEditingEntities(), floor); }
+  // A pin's colour, name and short state. Unknown entities show their id.
   _entMarkerStyle(eid) {
+    const dim = "var(--ink-faint)", gold = "var(--gold)", warn = "var(--warn)";
+    const [domain, objectId] = eid.split(".");
     const st = this._hass && this._hass.states ? this._hass.states[eid] : null;
-    const dom = (eid.split(".")[0] || "");
-    const dim = "var(--ink-faint)";
-    if (!st) return { color: dim, name: (eid.split(".")[1] || eid), val: "—" };
-    const s = st.state, dc = (st.attributes && st.attributes.device_class) || "";
-    const name = (st.attributes && st.attributes.friendly_name) || eid;
-    let color = dim, val = s;
-    const offish = ["off", "unavailable", "unknown", "idle", "standby", "none"];
-    if (dom === "sensor") {
-      const u = (st.attributes && st.attributes.unit_of_measurement) || "";
-      val = (s === "unknown" || s === "unavailable") ? "—" : (s + u);
-      color = "var(--gold)";
-    } else if (dom === "binary_sensor") {
-      const on = s === "on";
-      if (["door", "window", "garage_door", "opening"].indexOf(dc) >= 0) { color = on ? "var(--warn)" : dim; val = on ? "OPEN" : "SHUT"; }
-      else if (["motion", "occupancy", "presence"].indexOf(dc) >= 0) { color = on ? "var(--gold)" : dim; val = on ? "DET" : "—"; }
-      else { color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
-    } else if (dom === "lock") { const locked = s === "locked"; color = locked ? dim : "#ff5a5a"; val = locked ? "LOCK" : "OPEN"; }
-    else if (dom === "cover") { const open = s === "open" || s === "opening"; color = open ? "var(--warn)" : dim; val = open ? "OPEN" : "SHUT"; }
-    else if (dom === "person" || dom === "device_tracker") { const home = s === "home"; color = home ? "var(--gold)" : dim; val = home ? "HOME" : "AWAY"; }
-    else if (dom === "climate") { color = "var(--gold)"; const t = st.attributes && st.attributes.current_temperature; val = (t != null) ? (t + "°") : s; }
-    else { const on = offish.indexOf(s) < 0; color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
-    return { color, name, val };
+    if (!st) return { color: dim, name: objectId || eid, val: "—" };
+    const s = st.state, at = st.attributes || {}, name = at.friendly_name || eid;
+    const lit = (on, color, val) => ({ color: on ? color : dim, name, val });
+    switch (domain) {
+      case "sensor":
+        return { color: gold, name, val: s === "unknown" || s === "unavailable" ? "—" : s + (at.unit_of_measurement || "") };
+      case "binary_sensor": {
+        const on = s === "on", dc = at.device_class || "";
+        if (["door", "window", "garage_door", "opening"].includes(dc)) return lit(on, warn, on ? "OPEN" : "SHUT");
+        if (["motion", "occupancy", "presence"].includes(dc)) return lit(on, gold, on ? "DET" : "—");
+        return lit(on, gold, on ? "ON" : "OFF");
+      }
+      case "lock": {
+        const locked = s === "locked";
+        return { color: locked ? dim : "#ff5a5a", name, val: locked ? "LOCK" : "OPEN" };
+      }
+      case "cover": {
+        const open = s === "open" || s === "opening";
+        return lit(open, warn, open ? "OPEN" : "SHUT");
+      }
+      case "person":
+      case "device_tracker": {
+        const home = s === "home";
+        return lit(home, gold, home ? "HOME" : "AWAY");
+      }
+      case "climate": {
+        const t = at.current_temperature;
+        return { color: gold, name, val: t != null ? t + "°" : s };
+      }
+      default: {
+        const on = !["off", "unavailable", "unknown", "idle", "standby", "none"].includes(s);
+        return lit(on, gold, on ? "ON" : "OFF");
+      }
+    }
   }
   _fpBgOpacity() {
-    const op = parseFloat(this._data()?.config?.floor_plan_bg_opacity);
-    return (isFinite(op) && op >= 0 && op <= 1) ? op : 0.2;
+    const v = parseFloat(this._data()?.config?.floor_plan_bg_opacity);
+    return v >= 0 && v <= 1 ? v : 0.2;
   }
 
-  // Property line + outdoor zones (Phase 3a) — same geometry helpers as
-  // Classic, same floor_plan_property config, same zone-as-polygon-room
-  // representation in floor_plan_rooms.
+  // Outdoor zones are rooms with a points outline; plain rooms are boxes.
+  _fpHasOutline(r) { return !!r && Array.isArray(r.points) && r.points.length >= 3; }
   _zonePoints(r) {
-    if (r && Array.isArray(r.points) && r.points.length >= 3) return r.points;
-    const x = r.x || 0, y = r.y || 0, w = r.w || 40, h = r.h || 40;
-    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    if (this._fpHasOutline(r)) return r.points;
+    const left = r.x || 0, top = r.y || 0, right = left + (r.w || 40), bottom = top + (r.h || 40);
+    return [[left, top], [right, top], [right, bottom], [left, bottom]];
   }
   _ensureZonePoints(rm) {
-    if (!Array.isArray(rm.points) || rm.points.length < 3) rm.points = this._zonePoints(rm).map(p => [p[0], p[1]]);
+    if (!this._fpHasOutline(rm)) rm.points = this._zonePoints(rm).map(p => p.slice(0, 2));
     return rm.points;
   }
+  // Keeps a shaped room's x, y, w and h on the box around its outline.
   _syncRoomBBox(rm) {
-    if (!rm || !Array.isArray(rm.points) || rm.points.length < 3) return;
-    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-    rm.points.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
-    rm.x = Math.round(x0); rm.y = Math.round(y0); rm.w = Math.round(x1 - x0); rm.h = Math.round(y1 - y0);
+    if (!this._fpHasOutline(rm)) return;
+    const b = this._fpPointBounds(rm.points);
+    rm.x = Math.round(b.x0); rm.y = Math.round(b.y0);
+    rm.w = Math.round(b.x1 - b.x0); rm.h = Math.round(b.y1 - b.y0);
   }
-  _propPathD(pts) { return pts.map((p, k) => (k ? "L" : "M") + p[0] + " " + p[1]).join(" ") + " Z"; }
+  _propPathD(pts) { return pts.map((p, k) => `${k ? "L" : "M"}${p[0]} ${p[1]}`).join(" ") + " Z"; }
+
+  // The lot outline, stored as { points: [...] }.
   _getProperty() {
-    const raw = this._data()?.config?.floor_plan_property;
-    let p = null;
-    try { p = typeof raw === "string" ? (raw ? JSON.parse(raw) : null) : (raw || null); } catch (_) { p = null; }
-    return (p && Array.isArray(p.points)) ? p.points : [];
+    const stored = this._fpStored("floor_plan_property");
+    return stored && Array.isArray(stored.points) ? stored.points : [];
   }
-  _propertyPts() {
-    if (!this._editingProperty) this._editingProperty = JSON.parse(JSON.stringify(this._getProperty()));
-    return this._editingProperty;
-  }
+  _propertyPts() { return this._fpWorking("_editingProperty", () => this._getProperty()); }
   _setProperty(pts) { this._editingProperty = pts; }
+  // The lot's size in the chosen units (shoelace area, 0.04 sq ft per unit²).
   _propertyArea(pts) {
     if (!pts || pts.length < 3) return "";
-    let a = 0;
-    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
-    const sqFt = Math.abs(a) / 2 * 0.04;
-    if (this._fpUnits() === "metric") {
-      const sqM = sqFt * 0.092903;
-      return sqM >= 10000 ? (sqM / 10000).toFixed(2) + " ha" : Math.round(sqM).toLocaleString() + " m²";
+    const twice = pts.reduce((sum, p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      return sum + (p[0] * q[1] - q[0] * p[1]);
+    }, 0);
+    const sqFt = Math.abs(twice) / 2 * 0.04;
+    if (this._fpUnits() !== "metric") {
+      return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
     }
-    return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
+    const sqM = sqFt * 0.092903;
+    return sqM >= 10000 ? (sqM / 10000).toFixed(2) + " ha" : Math.round(sqM).toLocaleString() + " m²";
   }
 
-  // Windows/doors/dormers ("openings", Phase 3c) — same floor_plan_elements
-  // config and geometry as Classic. Feeds _planGeometry's wall gaps below,
-  // so AI camera-coverage now accounts for doorways instead of treating
-  // every wall as solid.
-  _getFloorElements() {
-    const raw = this._data()?.config?.floor_plan_elements;
-    let el = {};
-    try { el = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { el = {}; }
-    return el || {};
-  }
-  _getEditingElements() {
-    if (this._editingElements) return this._editingElements;
-    this._editingElements = JSON.parse(JSON.stringify(this._getFloorElements()));
-    return this._editingElements;
-  }
-  _elemsFor(floor) {
-    const el = this._getEditingElements();
-    if (!Array.isArray(el[floor])) el[floor] = [];
-    return el[floor];
-  }
+  // Windows, doors and dormers ("openings"). Their gaps let camera coverage
+  // see through doorways rather than treating every wall as solid.
+  _getFloorElements() { return this._fpStored("floor_plan_elements") || {}; }
+  _getEditingElements() { return this._fpWorking("_editingElements", () => this._getFloorElements()); }
+  _elemsFor(floor) { return this._fpFloorList(this._getEditingElements(), floor); }
+  // Entities a door or window can be bound to: covers, locks, and opening
+  // sensors by device class or by a door-like word in the id or name.
   _doorEntityOptions(selected) {
     const states = this._hass?.states || {};
-    const cands = [];
-    const OPEN_DC = ["door", "window", "garage_door", "opening"];
-    const OPEN_RE = /door|garage|gate|cellar|bulkhead|hatch|window|contact|entry|slider|sash|casement|patio|french|skylight|opening|sliding/i;
-    Object.keys(states).forEach(eid => {
-      const dom = eid.split(".")[0];
+    const doorWords = /door|garage|gate|cellar|bulkhead|hatch|window|contact|entry|slider|sash|casement|patio|french|skylight|opening|sliding/i;
+    const fits = eid => {
+      const domain = eid.split(".")[0];
+      if (domain === "cover" || domain === "lock") return true;
       const at = states[eid].attributes || {};
-      const dc = at.device_class || "";
-      const fn = at.friendly_name || "";
-      const ok = dom === "cover" || dom === "lock"
-        || (dom === "binary_sensor" && (OPEN_DC.includes(dc) || OPEN_RE.test(eid) || OPEN_RE.test(fn)));
-      if (ok) cands.push(eid);
-    });
-    cands.sort();
-    if (selected && !cands.includes(selected)) cands.unshift(selected);
-    const opts = cands.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? " selected" : ""}>${this._esc(this._entName(eid))}</option>`).join("");
+      return domain === "binary_sensor" && (["door", "window", "garage_door", "opening"].includes(at.device_class || "")
+        || doorWords.test(eid) || doorWords.test(at.friendly_name || ""));
+    };
+    const picks = Object.keys(states).filter(fits).sort();
+    if (selected && !picks.includes(selected)) picks.unshift(selected);
+    const opts = picks.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? " selected" : ""}>${this._esc(this._entName(eid))}</option>`).join("");
     return `<option value=""${selected ? "" : " selected"}>— auto-detect —</option>${opts}`;
   }
 
-  // Cameras + AI coverage (Phase 3b) — same config/geometry as Classic.
-  _getFloorCameras() {
-    const raw = this._data()?.config?.floor_plan_cameras;
-    let c = {};
-    try { c = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { c = {}; }
-    return c || {};
-  }
-  _getEditingCameras() {
-    if (this._editingCameras) return this._editingCameras;
-    this._editingCameras = JSON.parse(JSON.stringify(this._getFloorCameras()));
-    return this._editingCameras;
-  }
-  _camsFor(floor) {
-    const c = this._getEditingCameras();
-    if (!Array.isArray(c[floor])) c[floor] = [];
-    return c[floor];
-  }
+  // Cameras placed on the plan, for the cone and AI coverage.
+  _getFloorCameras() { return this._fpStored("floor_plan_cameras") || {}; }
+  _getEditingCameras() { return this._fpWorking("_editingCameras", () => this._getFloorCameras()); }
+  _camsFor(floor) { return this._fpFloorList(this._getEditingCameras(), floor); }
   _cameraEntityOptions(selected) {
     const states = this._hass?.states || {};
-    const eids = Object.keys(states).filter(e => e.startsWith("camera.")).sort();
-    if (selected && !eids.includes(selected)) eids.unshift(selected);
-    const opts = eids.map(e => {
-      const st = states[e];
-      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
-      return `<option value="${this._esc(e)}"${e === selected ? " selected" : ""}>${this._esc(fn)}</option>`;
-    }).join("");
+    const ids = Object.keys(states).filter(id => id.startsWith("camera.")).sort();
+    if (selected && !ids.includes(selected)) ids.unshift(selected);
+    const label = id => (states[id] && states[id].attributes && states[id].attributes.friendly_name) || id;
+    const opts = ids.map(id => `<option value="${this._esc(id)}"${id === selected ? " selected" : ""}>${this._esc(label(id))}</option>`).join("");
     return `<option value="">— camera —</option>${opts}`;
   }
+  // ─── Floor plan maths: walls, sight lines and camera coverage ──────────
+  // Every result here is pinned in scripts/smoke_panel.js, so keep the
+  // arithmetic in the same order when changing anything below.
+
+  // The crossing point of segment A (x1,y1 to x2,y2) and segment B
+  // (x3,y3 to x4,y4), or null when they are parallel or do not meet.
   _segIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
-    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-    if (Math.abs(den) < 1e-9) return null;
-    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
-    const u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den;
-    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
-    return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
-  }
-  _planGeometry(floor) {
-    const plan = this._getEditingPlan()[floor];
-    const rooms = (plan && plan.rooms) || [];
-    const walls = [], gaps = [];
-    rooms.forEach(r => {
-      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") return;
-      const rp = this._zonePoints(r);
-      for (let wi = 0; wi < rp.length; wi++) { const a = rp[wi], b = rp[(wi + 1) % rp.length]; walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] }); }
-    });
-    let fb = null;
-    if (rooms.length) {
-      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-      rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
-      fb = { x0: mnx, y0: mny, x1: mxx, y1: mxy };
-    }
-    (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type !== "door" && e.type !== "window") return;
-      const ow = e.w || 20;
-      let bb = fb;
-      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
-        const rr = rooms.filter(r => r.name === e.room)[0];
-        if (rr) bb = { x0: rr.x, y0: rr.y, x1: rr.x + rr.w, y1: rr.y + rr.h };
-      }
-      if (!bb) return;
-      const p = e.pos != null ? e.pos : 0.5;
-      let gx0, gy0, gx1, gy1;
-      if (e.wall === "front") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y0; }
-      else if (e.wall === "back") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y1; }
-      else if (e.wall === "left") { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x0; }
-      else { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x1; }
-      gaps.push({ x0: gx0, y0: gy0, x1: gx1, y1: gy1 });
-    });
-    return { walls, gaps };
-  }
-  _inGap(x, y, gaps) {
-    const tol = 2.5;
-    for (let i = 0; i < gaps.length; i++) {
-      const g = gaps[i];
-      if (x >= Math.min(g.x0, g.x1) - tol && x <= Math.max(g.x0, g.x1) + tol
-        && y >= Math.min(g.y0, g.y1) - tol && y <= Math.max(g.y0, g.y1) + tol) return true;
-    }
-    return false;
-  }
-  _losClear(x1, y1, x2, y2, geo) {
-    for (let i = 0; i < geo.walls.length; i++) {
-      const w = geo.walls[i];
-      const ip = this._segIntersect(x1, y1, x2, y2, w.x0, w.y0, w.x1, w.y1);
-      if (ip && !this._inGap(ip.x, ip.y, geo.gaps)) return false;
-    }
-    return true;
-  }
-  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
-    const dx = px - cx, dy = py - cy;
-    if (Math.hypot(dx, dy) > rng) return false;
-    const a = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (Math.abs(((a - ang + 540) % 360) - 180) > half) return false;
-    return this._losClear(cx, cy, px, py, geo);
-  }
-  _computeCoverage(floor, cam, geo) {
-    const plan = this._getEditingPlan()[floor];
-    if (!plan || !plan.rooms || !plan.rooms.length) return {};
-    geo = geo || this._planGeometry(floor);
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5), half = fov / 2;
-    const cov = {};
-    plan.rooms.forEach(r => {
-      if (r.type === "door" || r.type === "stairs") return;
-      let hit = 0, tot = 0;
-      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
-        const pts = this._zonePoints(r);
-        let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-        pts.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });
-        const nx = 6, ny = 6;
-        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
-          const px = bx0 + (i + 0.5) / nx * (bx1 - bx0), py = by0 + (j + 0.5) / ny * (by1 - by0);
-          if (!this._pointInPoly(px, py, pts)) continue;
-          tot++;
-          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
-        }
-      } else {
-        const nx = 4, ny = 4;
-        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
-          const px = r.x + (i + 0.5) / nx * r.w, py = r.y + (j + 0.5) / ny * r.h;
-          tot++;
-          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
-        }
-      }
-      if (hit > 0 && tot > 0) cov[r.name] = Math.round(hit / tot * 100) / 100;
-    });
-    return cov;
-  }
-  _pointInPoly(x, y, pts) {
-    let inside = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
-      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
-    }
-    return inside;
-  }
-  _coneD(cam) {
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
-    const a1 = (ang - fov / 2) * Math.PI / 180, a2 = (ang + fov / 2) * Math.PI / 180;
-    const x1 = cx + rng * Math.cos(a1), y1 = cy + rng * Math.sin(a1);
-    const x2 = cx + rng * Math.cos(a2), y2 = cy + rng * Math.sin(a2);
-    const large = fov > 180 ? 1 : 0;
-    return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${rng} ${rng} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
-  }
-  _rayCast(cx, cy, ang, range, geo) {
-    const ex = cx + range * Math.cos(ang), ey = cy + range * Math.sin(ang);
-    let best = range;
-    for (let i = 0; i < geo.walls.length; i++) {
-      const w = geo.walls[i];
-      const ip = this._segIntersect(cx, cy, ex, ey, w.x0, w.y0, w.x1, w.y1);
-      if (!ip || this._inGap(ip.x, ip.y, geo.gaps)) continue;
-      const d = Math.hypot(ip.x - cx, ip.y - cy);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-  _clippedCone(cam, geo) {
-    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
-    const N = Math.max(24, Math.round(fov / 3)), a0 = (ang - fov / 2) * Math.PI / 180, step = (fov * Math.PI / 180) / N;
-    let d = `M ${cx} ${cy}`;
-    for (let i = 0; i <= N; i++) {
-      const a = a0 + i * step, dist = this._rayCast(cx, cy, a, rng, geo);
-      d += ` L ${(cx + dist * Math.cos(a)).toFixed(1)} ${(cy + dist * Math.sin(a)).toFixed(1)}`;
-    }
-    return d + " Z";
-  }
-  _roomAt(floor, x, y) {
-    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    for (let i = 0; i < rooms.length; i++) {
-      const r = rooms[i];
-      if (r.type === "stairs" || r.type === "door") continue;
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.name;
-    }
-    let best = null, bd = 1e18;
-    rooms.forEach(r => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, d = (cx - x) * (cx - x) + (cy - y) * (cy - y); if (d < bd) { bd = d; best = r.name; } });
-    return best || "the area";
-  }
-  _openingDescriptions(floor) {
-    const out = [];
-    (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room) {
-        out.push((e.kind === "cased" ? "cased opening at " : "interior door at ") + e.room);
-      }
-    });
-    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    if (rooms.some(r => r.type === "stairs")) out.push("open staircase");
-    return out;
+    const ax = x1 - x2, ay = y1 - y2, bx = x3 - x4, by = y3 - y4, cx = x1 - x3, cy = y1 - y3;
+    const cross = ax * by - ay * bx;
+    if (Math.abs(cross) < 1e-9) return null;
+    const along = (cx * by - cy * bx) / cross;
+    const onB = (cx * ay - cy * ax) / cross;
+    if (along < 0 || along > 1 || onB < 0 || onB > 1) return null;
+    return { x: x1 + along * (x2 - x1), y: y1 + along * (y2 - y1) };
   }
 
+  // Solid walls (the outline of every walled room) and the gaps doors and
+  // windows leave in them. Stairs, door rooms and outdoor zones add no walls.
+  _planGeometry(floor) {
+    const rooms = (this._getEditingPlan()[floor] || {}).rooms || [];
+    const walls = [];
+    for (const r of rooms) {
+      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") continue;
+      const corners = this._zonePoints(r);
+      corners.forEach((a, k) => {
+        const b = corners[(k + 1) % corners.length];
+        walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] });
+      });
+    }
+    // Outside openings sit on the whole floor's outline, inside ones on their room.
+    const outline = rooms.length ? this._fpBounds(rooms) : null;
+    const span = (lo, hi, along, half) => { const mid = lo + along * (hi - lo); return [mid - half, mid + half]; };
+    const gaps = [];
+    for (const e of this._elemsFor(floor) || []) {
+      if (e.type !== "door" && e.type !== "window") continue;
+      let box = outline;
+      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
+        const own = rooms.find(r => r.name === e.room);
+        if (own) box = this._fpRoomBox(own);
+      }
+      if (!box) continue;
+      const half = (e.w || 20) / 2, along = e.pos != null ? e.pos : 0.5;
+      if (e.wall === "front" || e.wall === "back") {
+        const [from, to] = span(box.x0, box.x1, along, half), y = e.wall === "front" ? box.y0 : box.y1;
+        gaps.push({ x0: from, y0: y, x1: to, y1: y });
+      } else {
+        const [from, to] = span(box.y0, box.y1, along, half), x = e.wall === "left" ? box.x0 : box.x1;
+        gaps.push({ x0: x, y0: from, x1: x, y1: to });
+      }
+    }
+    return { walls, gaps };
+  }
+
+  // True when (x, y) lies in a door or window gap, give or take 2.5 units.
+  _inGap(x, y, gaps) {
+    const within = (v, a, b) => v >= Math.min(a, b) - 2.5 && v <= Math.max(a, b) + 2.5;
+    return gaps.some(g => within(x, g.x0, g.x1) && within(y, g.y0, g.y1));
+  }
+
+  // True when no solid wall stands between the two points.
+  _losClear(x1, y1, x2, y2, geo) {
+    return geo.walls.every(w => {
+      const hit = this._segIntersect(x1, y1, x2, y2, w.x0, w.y0, w.x1, w.y1);
+      return !hit || this._inGap(hit.x, hit.y, geo.gaps);
+    });
+  }
+
+  // True when the point is in range, inside the cone and in plain sight.
+  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
+    const offX = px - cx, offY = py - cy;
+    if (Math.hypot(offX, offY) > rng) return false;
+    const bearing = Math.atan2(offY, offX) * 180 / Math.PI;
+    if (Math.abs(((bearing - ang + 540) % 360) - 180) > half) return false;
+    return this._losClear(cx, cy, px, py, geo);
+  }
+
+  // A camera's aim with the editor's defaults: facing up the plan, 90° wide,
+  // reaching 55 units and never less than 5.
+  _camAim(cam) {
+    const or = (v, fallback) => (v != null ? v : fallback);
+    return { x: cam.x, y: cam.y, ang: or(cam.angle, 270), fov: or(cam.fov, 90), rng: Math.max(or(cam.range, 55), 5) };
+  }
+
+  // Calls visit(x, y) at the centre of each cell of an n by n grid over a box.
+  _fpGrid(x0, y0, w, h, n, visit) {
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) visit(x0 + (i + 0.5) / n * w, y0 + (j + 0.5) / n * h);
+    }
+  }
+
+  // The share of each room one camera sees, to two places: a 4 by 4 sample
+  // for a plain room, 6 by 6 (inside the outline only) for a shaped room or
+  // zone. Rooms it cannot see at all are left out.
+  _computeCoverage(floor, cam, geo) {
+    const rooms = (this._getEditingPlan()[floor] || {}).rooms || [];
+    if (!rooms.length) return {};
+    const sight = geo || this._planGeometry(floor), aim = this._camAim(cam), half = aim.fov / 2;
+    const share = {};
+    for (const r of rooms) {
+      if (r.type === "door" || r.type === "stairs") continue;
+      let seen = 0, tried = 0;
+      const tally = (px, py) => {
+        tried++;
+        if (this._pointCovered(px, py, aim.x, aim.y, aim.ang, half, aim.rng, sight)) seen++;
+      };
+      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
+        const outline = this._zonePoints(r), box = this._fpPointBounds(outline);
+        this._fpGrid(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 6, (px, py) => {
+          if (this._pointInPoly(px, py, outline)) tally(px, py);
+        });
+      } else {
+        this._fpGrid(r.x, r.y, r.w, r.h, 4, tally);
+      }
+      if (seen > 0 && tried > 0) share[r.name] = Math.round(seen / tried * 100) / 100;
+    }
+    return share;
+  }
+
+  // Even-odd test: a ray from the point crosses the outline an odd number of times.
+  _pointInPoly(x, y, pts) {
+    let inside = false;
+    pts.forEach((p, i) => {
+      const q = pts[(i || pts.length) - 1];
+      if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) inside = !inside;
+    });
+    return inside;
+  }
+
+  // The full cone as an SVG path: two edges and the arc at full range.
+  _coneD(cam) {
+    const aim = this._camAim(cam);
+    const rim = deg => {
+      const rad = deg * Math.PI / 180;
+      return `${(aim.x + aim.rng * Math.cos(rad)).toFixed(1)} ${(aim.y + aim.rng * Math.sin(rad)).toFixed(1)}`;
+    };
+    const wide = aim.fov > 180 ? 1 : 0;
+    return `M ${aim.x} ${aim.y} L ${rim(aim.ang - aim.fov / 2)} A ${aim.rng} ${aim.rng} 0 ${wide} 1 ${rim(aim.ang + aim.fov / 2)} Z`;
+  }
+
+  // How far a ray from (cx, cy) at angle ang (radians) gets before a solid wall.
+  _rayCast(cx, cy, ang, range, geo) {
+    const endX = cx + range * Math.cos(ang), endY = cy + range * Math.sin(ang);
+    let nearest = range;
+    for (const w of geo.walls) {
+      const hit = this._segIntersect(cx, cy, endX, endY, w.x0, w.y0, w.x1, w.y1);
+      if (!hit || this._inGap(hit.x, hit.y, geo.gaps)) continue;
+      const dist = Math.hypot(hit.x - cx, hit.y - cy);
+      if (dist < nearest) nearest = dist;
+    }
+    return nearest;
+  }
+
+  // The cone cut short by walls: one ray at least every 3 degrees, 24 at least.
+  _clippedCone(cam, geo) {
+    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
+    const aim = this._camAim(cam);
+    const rays = Math.max(24, Math.round(aim.fov / 3));
+    const start = (aim.ang - aim.fov / 2) * Math.PI / 180, step = (aim.fov * Math.PI / 180) / rays;
+    const path = [`M ${aim.x} ${aim.y}`];
+    for (let k = 0; k <= rays; k++) {
+      const a = start + k * step, reach = this._rayCast(aim.x, aim.y, a, aim.rng, geo);
+      path.push(`L ${(aim.x + reach * Math.cos(a)).toFixed(1)} ${(aim.y + reach * Math.sin(a)).toFixed(1)}`);
+    }
+    return path.join(" ") + " Z";
+  }
+
+  // The room a point is in, or else the room whose centre is nearest.
+  _roomAt(floor, x, y) {
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    const holder = rooms.find(r => r.type !== "stairs" && r.type !== "door"
+      && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+    if (holder) return holder.name;
+    let nearest = null, best = 1e18;
+    for (const r of rooms) {
+      const dx = r.x + r.w / 2 - x, dy = r.y + r.h / 2 - y, d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; nearest = r.name; }
+    }
+    return nearest || "the area";
+  }
+
+  // Plain notes on inside openings and stairs, sent with a coverage request.
+  _openingDescriptions(floor) {
+    const lead = { cased: "cased opening at ", interior: "interior door at " };
+    const notes = (this._elemsFor(floor) || [])
+      .filter(e => e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room)
+      .map(e => lead[e.kind] + e.room);
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    if (rooms.some(r => r.type === "stairs")) notes.push("open staircase");
+    return notes;
+  }
   // An imported layout file is text from outside, and the editor writes its
   // names, floor keys and values into HTML and SVG attributes. Drop the
   // characters that can close an attribute or open a tag, in keys and values
@@ -9175,12 +9161,7 @@ ${this._htmlDashboardBody()}`;
   _renderPlanEntitiesNew(floor) {
     const ents = this._entsFor(floor);
     const op = this._fpBgOpacity();
-    let hasBg = false;
-    try {
-      const b = this._data()?.config?.floor_plan_bg;
-      const bd = typeof b === "string" ? JSON.parse(b || "{}") : (b || {});
-      hasBg = !!bd[floor];
-    } catch (_) {}
+    const hasBg = !!(this._fpStored("floor_plan_bg") || {})[floor];
     const chips = ents.length
       ? ents.map((e, i) => `<span class="new-pl-chip">${this._esc(this._entMarkerStyle(e.e).name)}<button class="fpn-ent-del" data-ei="${i}" title="Remove">×</button></span>`).join("")
       : `<span class="toggle-desc">No devices placed on this floor yet.</span>`;
@@ -9289,14 +9270,10 @@ ${this._htmlDashboardBody()}`;
     svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-sm)"/>`;
     svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-lg)"/>`;
 
-    const bgs = this._data()?.config?.floor_plan_bg;
-    if (bgs) {
-      try {
-        const bgData = typeof bgs === "string" ? JSON.parse(bgs) : bgs;
-        if (bgData && bgData[floor]) {
-          svg += `<image href="${bgData[floor]}" x="0" y="0" width="100%" height="100%" opacity="${this._fpBgOpacity()}" preserveAspectRatio="xMidYMid meet"/>`;
-        }
-      } catch (_) {}
+    // A traced-over image of the real plan, escaped like any stored text.
+    const traced = (this._fpStored("floor_plan_bg") || {})[floor];
+    if (traced) {
+      svg += `<image href="${this._esc(traced)}" x="0" y="0" width="100%" height="100%" opacity="${this._fpBgOpacity()}" preserveAspectRatio="xMidYMid meet"/>`;
     }
 
     // Property boundary (the lot) — draw behind rooms; vertices are draggable.
@@ -9344,8 +9321,8 @@ ${this._htmlDashboardBody()}`;
     // Placed openings as wall markers.
     const els = this._elemsFor(floor) || [];
     if (els.length && floorData.rooms && floorData.rooms.length) {
-      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-      floorData.rooms.forEach(r => { if (r.type === "outdoor") return; mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+      const house = this._fpBounds(floorData.rooms.filter(r => r.type !== "outdoor"));
+      const mnx = house.x0, mny = house.y0, mxx = house.x1, mxy = house.y1;
       els.forEach((e, i) => {
         if (e.type === "dormer") {
           const dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === "rear" ? mxy : mny;
@@ -9398,659 +9375,527 @@ ${this._htmlDashboardBody()}`;
     return svg;
   }
 
-  // Re-renders just this one card (not the whole settings grid) so an
-  // in-progress edit elsewhere on the page isn't disturbed and scroll
-  // position is preserved — mirrors Classic's _rerenderFloorEditor().
+  // Redraws only this card, so an edit in progress elsewhere on the
+  // settings page is left alone and the scroll position holds.
   _rerenderFloorPlanCard() {
     const card = this.shadowRoot?.getElementById("settings-card-floor_plan_editor");
     if (!card) return;
-    const c = NovaPanel.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
+    const meta = NovaPanel.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
     this._setHtml(card, `
-        <div class="panel-head"><div class="panel-title">${this._esc(c.title)}</div></div>
+        <div class="panel-head"><div class="panel-title">${this._esc(meta.title)}</div></div>
         ${this._floorPlanEditorCardBody()}`);
     this._wireFloorPlanEditor();
   }
 
+  // A layout file is usable when it has at least one floor and every floor
+  // is an object whose rooms, if any, are a list of objects.
+  _fpLayoutUsable(layout) {
+    const isObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+    if (!isObj(layout) || !Object.keys(layout).length) return false;
+    return Object.values(layout).every(f => isObj(f)
+      && (f.rooms === undefined || (Array.isArray(f.rooms) && f.rooms.every(isObj))));
+  }
+
+  // Saves one config key and mirrors it into the live data.
+  async _fpSaveKey(key, value, live = value) {
+    await this._hass.callWS({ type: "nova/update_config", key, value });
+    if (this._liveData?.config) this._liveData.config[key] = live;
+  }
+
   _wireFloorPlanEditor() {
     const root = this.shadowRoot;
-    if (!root || !root.getElementById("fpnCanvas")) return;   // card not in the DOM right now
+    if (!root || !root.getElementById("fpnCanvas")) return;   // the card is not on screen
+    const on = (id, type, fn) => { const el = root.getElementById(id); if (el) el.addEventListener(type, fn); return el; };
+    const each = (sel, type, fn) => root.querySelectorAll(sel).forEach(el => el.addEventListener(type, () => fn(el)));
+    const redraw = () => this._rerenderFloorPlanCard();
+    const floorRooms = () => ((this._getEditingPlan()[this._editorFloor] || {}).rooms) || [];
+    const idx = (el, attr) => parseInt(el.getAttribute(attr));
+    const stamp = () => Date.now().toString(36);
+    // The middle of everything on the floor, where new pins and cameras land.
+    const middle = () => {
+      const rooms = floorRooms();
+      if (!rooms.length) return [100, 80];
+      const b = this._fpBounds(rooms);
+      return [Math.round((b.x0 + b.x1) / 2), Math.round((b.y0 + b.y1) / 2)];
+    };
 
-    root.querySelectorAll(".fpn-floor-tab").forEach(btn => {
-      btn.addEventListener("click", () => {
-        this._editorFloor = btn.getAttribute("data-fpn-floor");
-        this._editVB = null;
-        this._rerenderFloorPlanCard();
-      });
+    // Floors, zoom and units.
+    each(".fpn-floor-tab", "click", btn => {
+      this._editorFloor = btn.getAttribute("data-fpn-floor");
+      this._editVB = null;
+      redraw();
     });
-    const fit = root.getElementById("fpnZoomFit");
-    if (fit) fit.addEventListener("click", () => { this._editVB = null; this._rerenderFloorPlanCard(); });
-
-    const units = root.getElementById("fpnUnits");
-    if (units) units.addEventListener("click", async () => {
-      const next = this._fpUnits() === "metric" ? "imperial" : "metric";
-      try {
-        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_units", value: next });
-        if (this._liveData?.config) this._liveData.config.floor_plan_units = next;
-      } catch (err) { console.error("Nova: floor plan units save failed", err); }
-      this._rerenderFloorPlanCard();
+    on("fpnZoomFit", "click", () => { this._editVB = null; redraw(); });
+    on("fpnUnits", "click", async () => {
+      try { await this._fpSaveKey("floor_plan_units", this._fpUnits() === "metric" ? "imperial" : "metric"); }
+      catch (err) { console.error("Nova: floor plan units save failed", err); }
+      redraw();
     });
 
-    const addRoom = root.getElementById("fpnAddRoom");
-    if (addRoom) addRoom.addEventListener("click", () => {
-      const plan = this._getEditingPlan();
-      const floor = this._editorFloor;
-      if (!plan[floor]) return;
+    // Rooms, outdoor zones and the lot.
+    on("fpnAddRoom", "click", () => {
+      const level = this._getEditingPlan()[this._editorFloor];
+      if (!level) return;
       const name = window.prompt(this._tx("Room name:"));
       if (!name) return;
       const type = window.prompt(this._tx("Type (room, bath, stairs, door):"), "room") || "room";
-      plan[floor].rooms = plan[floor].rooms || [];
-      plan[floor].rooms.push({ name, x: 50, y: 50, w: 60, h: 40, type });
-      this._rerenderFloorPlanCard();
+      (level.rooms = level.rooms || []).push({ name, x: 50, y: 50, w: 60, h: 40, type });
+      redraw();
     });
-
-    const addZone = root.getElementById("fpnAddZone");
-    if (addZone) addZone.addEventListener("click", () => {
-      const plan = this._getEditingPlan();
-      const floor = this._editorFloor;
-      if (!plan[floor]) return;
+    on("fpnAddZone", "click", () => {
+      const level = this._getEditingPlan()[this._editorFloor];
+      if (!level) return;
       const name = window.prompt(this._tx("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):"));
       if (!name) return;
-      plan[floor].rooms = plan[floor].rooms || [];
-      const house = plan[floor].rooms.filter(r => r.type !== "outdoor");
-      let zx = 40, zy = 40, zw = 90, zh = 70;
+      level.rooms = level.rooms || [];
+      // A new zone sits just below the house, at least 90 units wide.
+      const house = level.rooms.filter(r => r.type !== "outdoor");
+      let [x, y, w] = [40, 40, 90];
       if (house.length) {
-        let hx0 = 1e9, hx1 = -1e9, hy1 = -1e9;
-        house.forEach(r => { hx0 = Math.min(hx0, r.x); hx1 = Math.max(hx1, r.x + r.w); hy1 = Math.max(hy1, r.y + r.h); });
-        zx = Math.round(hx0); zy = Math.round(hy1 + 25); zw = Math.round(Math.max(hx1 - hx0, 90));
+        const b = this._fpBounds(house);
+        x = Math.round(b.x0); y = Math.round(b.y1 + 25); w = Math.round(Math.max(b.x1 - b.x0, 90));
       }
-      plan[floor].rooms.push({ name, x: zx, y: zy, w: zw, h: zh, type: "outdoor", points: [[zx, zy], [zx + zw, zy], [zx + zw, zy + zh], [zx, zy + zh]] });
-      this._rerenderFloorPlanCard();
+      const h = 70;
+      level.rooms.push({ name, x, y, w, h, type: "outdoor", points: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
+      redraw();
     });
-
-    const addProperty = root.getElementById("fpnAddProperty");
-    if (addProperty) addProperty.addEventListener("click", () => {
-      const cur = this._propertyPts();
-      if (cur.length >= 3) {
-        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); this._rerenderFloorPlanCard(); }
+    on("fpnAddProperty", "click", () => {
+      if (this._propertyPts().length >= 3) {
+        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); redraw(); }
         return;
       }
-      const floor = this._editorFloor;
-      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-      rooms.forEach(r => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); });
-      if (!isFinite(x0)) { x0 = 20; y0 = 20; x1 = 220; y1 = 170; }
-      const m = Math.max(150, Math.max(x1 - x0, y1 - y0) * 0.7);
-      this._setProperty([[Math.round(x0 - m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y1 + m)], [Math.round(x0 - m), Math.round(y1 + m)]]);
-      this._rerenderFloorPlanCard();
+      // A rectangle around the floor with a generous margin; a floor with
+      // no rooms gets one around a 200 by 150 box near the origin.
+      const rooms = floorRooms();
+      let b = this._fpBounds(rooms);
+      if (!rooms.length || !isFinite(b.x0)) b = { x0: 20, y0: 20, x1: 220, y1: 170 };
+      const m = Math.max(150, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.7);
+      const [l, t, r, btm] = [b.x0 - m, b.y0 - m, b.x1 + m, b.y1 + m].map(Math.round);
+      this._setProperty([[l, t], [r, t], [r, btm], [l, btm]]);
+      redraw();
     });
 
-    const addElem = (type, kind) => {
-      const floor = this._editorFloor;
-      this._elemsFor(floor).push({ id: "e" + Date.now().toString(36), type, kind, wall: "front", pos: 0.5, w: 20, entity: "" });
-      this._rerenderFloorPlanCard();
-    };
-    const opAddWindow = root.getElementById("opAddWindow"); if (opAddWindow) opAddWindow.addEventListener("click", () => addElem("window", null));
-    const opAddExtdoor = root.getElementById("opAddExtdoor"); if (opAddExtdoor) opAddExtdoor.addEventListener("click", () => addElem("door", "exterior"));
-    const opAddCellar = root.getElementById("opAddCellar"); if (opAddCellar) opAddCellar.addEventListener("click", () => addElem("door", "cellar"));
-    const opAddIntdoor = root.getElementById("opAddIntdoor"); if (opAddIntdoor) opAddIntdoor.addEventListener("click", () => addElem("door", "interior"));
-    const opAddCased = root.getElementById("opAddCased"); if (opAddCased) opAddCased.addEventListener("click", () => addElem("door", "cased"));
-    const opAddFdormer = root.getElementById("opAddFdormer");
-    if (opAddFdormer) opAddFdormer.addEventListener("click", () => {
-      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "front", pos: 0.5, entity: "" });
-      this._rerenderFloorPlanCard();
+    // Windows, doors and dormers.
+    const addOpening = item => { this._elemsFor(this._editorFloor).push(item); redraw(); };
+    [["opAddWindow", "window", null], ["opAddExtdoor", "door", "exterior"], ["opAddCellar", "door", "cellar"],
+      ["opAddIntdoor", "door", "interior"], ["opAddCased", "door", "cased"]].forEach(([id, type, kind]) => on(id, "click",
+      () => addOpening({ id: "e" + stamp(), type, kind, wall: "front", pos: 0.5, w: 20, entity: "" })));
+    [["opAddFdormer", "front"], ["opAddRdormer", "rear"]].forEach(([id, slope]) => on(id, "click",
+      () => addOpening({ id: "e" + stamp(), type: "dormer", slope, pos: 0.5, entity: "" })));
+    each(".op-field-new", "change", f => {
+      const item = this._elemsFor(this._editorFloor)[idx(f, "data-i")];
+      if (!item) return;
+      const key = f.getAttribute("data-op");
+      if (key === "w") item.w = this._fpFromReal(parseFloat(f.value) || 4);
+      else item[key] = key === "pos" ? parseFloat(f.value) : f.value;
+      redraw();
     });
-    const opAddRdormer = root.getElementById("opAddRdormer");
-    if (opAddRdormer) opAddRdormer.addEventListener("click", () => {
-      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "rear", pos: 0.5, entity: "" });
-      this._rerenderFloorPlanCard();
-    });
-    root.querySelectorAll(".op-field-new").forEach(f => {
-      f.addEventListener("change", () => {
-        const arr = this._elemsFor(this._editorFloor), e = arr[parseInt(f.getAttribute("data-i"))];
-        if (!e) return;
-        const op = f.getAttribute("data-op");
-        if (op === "w") e.w = this._fpFromReal(parseFloat(f.value) || 4);
-        else if (op === "pos") e.pos = parseFloat(f.value);
-        else e[op] = f.value;
-        this._rerenderFloorPlanCard();
-      });
-    });
-    root.querySelectorAll(".op-del-new").forEach(b => b.addEventListener("click", () => {
-      this._elemsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-i")), 1);
-      this._rerenderFloorPlanCard();
-    }));
-    const glowMarker = (i, on) => {
-      const m = root.querySelector(`.fpn-op-marker[data-op-marker="${i}"]`);
-      if (m) m.classList.toggle("op-glow", on);
-    };
+    each(".op-del-new", "click", b => { this._elemsFor(this._editorFloor).splice(idx(b, "data-i"), 1); redraw(); });
+    // Pointing at an opening's row lights up its marker on the plan.
     root.querySelectorAll(".op-row-new").forEach(row => {
-      const i = row.getAttribute("data-i");
-      row.addEventListener("mouseenter", () => glowMarker(i, true));
-      row.addEventListener("mouseleave", () => glowMarker(i, false));
-      const ent = row.querySelector(".op-ent-new");
-      if (ent) {
-        ent.addEventListener("focus", () => glowMarker(i, true));
-        ent.addEventListener("blur", () => glowMarker(i, false));
-      }
+      const marker = () => root.querySelector(`.fpn-op-marker[data-op-marker="${row.getAttribute("data-i")}"]`);
+      const glow = lit => () => { const m = marker(); if (m) m.classList.toggle("op-glow", lit); };
+      row.addEventListener("mouseenter", glow(true));
+      row.addEventListener("mouseleave", glow(false));
+      const pick = row.querySelector(".op-ent-new");
+      if (pick) { pick.addEventListener("focus", glow(true)); pick.addEventListener("blur", glow(false)); }
     });
 
-    const camAdd = root.getElementById("fpnCamAdd");
-    if (camAdd) camAdd.addEventListener("click", () => {
-      const floor = this._editorFloor;
-      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-      let ccx = 100, ccy = 80;
-      if (rooms.length) {
-        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
-        ccx = Math.round((mnx + mxx) / 2); ccy = Math.round((mny + mxy) / 2);
-      }
-      this._camsFor(floor).push({ id: "c" + Date.now().toString(36), x: ccx, y: ccy, angle: 270, fov: 90, range: 55, entity: "", indoor: true });
-      this._rerenderFloorPlanCard();
+    // Cameras.
+    on("fpnCamAdd", "click", () => {
+      const [x, y] = middle();
+      this._camsFor(this._editorFloor).push({ id: "c" + stamp(), x, y, angle: 270, fov: 90, range: 55, entity: "", indoor: true });
+      redraw();
     });
-    const setCamField = (f) => {
-      const cam = this._camsFor(this._editorFloor)[parseInt(f.getAttribute("data-ci"))];
+    const camOf = el => this._camsFor(this._editorFloor)[idx(el, "data-ci")];
+    const applyCamField = f => {
+      const cam = camOf(f);
       if (!cam) return null;
-      const k = f.getAttribute("data-cam");
-      if (k === "range") cam.range = this._fpFromReal(parseFloat(f.value) || 10);
-      else if (k === "angle" || k === "fov") cam[k] = parseFloat(f.value);
-      else cam[k] = f.value;
+      const key = f.getAttribute("data-cam");
+      if (key === "range") cam.range = this._fpFromReal(parseFloat(f.value) || 10);
+      else cam[key] = key === "angle" || key === "fov" ? parseFloat(f.value) : f.value;
       return cam;
     };
     root.querySelectorAll(".cam-field-new").forEach(f => {
+      // While a slider moves only the cone is redrawn; letting go redraws the card.
       f.addEventListener("input", () => {
-        const cam = setCamField(f);
+        const cam = applyCamField(f);
         if (!cam || f.getAttribute("data-cam") === "entity") return;
-        const g = root.querySelector(`.fpn-cam[data-cam-idx="${f.getAttribute("data-ci")}"]`);
-        if (g) { const cone = g.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", this._clippedCone(cam, this._planGeometry(this._editorFloor))); }
+        const cone = root.querySelector(`.fpn-cam[data-cam-idx="${f.getAttribute("data-ci")}"] .fpn-cam-cone`);
+        if (cone) cone.setAttribute("d", this._clippedCone(cam, this._planGeometry(this._editorFloor)));
       });
-      f.addEventListener("change", () => { setCamField(f); this._rerenderFloorPlanCard(); });
+      f.addEventListener("change", () => { applyCamField(f); redraw(); });
     });
-    root.querySelectorAll(".cam-io-new").forEach(b => b.addEventListener("click", () => {
-      const cam = this._camsFor(this._editorFloor)[parseInt(b.getAttribute("data-ci"))];
-      if (!cam) return; cam.indoor = (cam.indoor === false); this._rerenderFloorPlanCard();
-    }));
-    root.querySelectorAll(".cam-del-new").forEach(b => b.addEventListener("click", () => {
-      this._camsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ci")), 1);
-      this._rerenderFloorPlanCard();
-    }));
-    const camCompute = root.getElementById("fpnCamCompute");
-    if (camCompute) camCompute.addEventListener("click", async () => {
-      const floor = this._editorFloor;
-      const cams = this._camsFor(floor);
+    each(".cam-io-new", "click", b => { const cam = camOf(b); if (!cam) return; cam.indoor = cam.indoor === false; redraw(); });
+    each(".cam-del-new", "click", b => { this._camsFor(this._editorFloor).splice(idx(b, "data-ci"), 1); redraw(); });
+    const compute = on("fpnCamCompute", "click", async () => {
+      const floor = this._editorFloor, cams = this._camsFor(floor);
       if (!cams.length) return;
-      camCompute.disabled = true;
+      compute.disabled = true;
       const geo = this._planGeometry(floor), openings = this._openingDescriptions(floor);
       for (const cam of cams) {
-        const cand = this._computeCoverage(floor, cam, geo);
-        const ctx = { entity: cam.entity || "", room: this._roomAt(floor, cam.x, cam.y), fov: cam.fov || 90, range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates: cand, openings };
-        try { cam.coverage = await this._hass.callWS({ type: "nova/compute_camera_coverage", camera: ctx }); } catch (err) { /* keep going */ }
+        const candidates = this._computeCoverage(floor, cam, geo);
+        const camera = { entity: cam.entity || "", room: this._roomAt(floor, cam.x, cam.y), fov: cam.fov || 90,
+          range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates, openings };
+        try { cam.coverage = await this._hass.callWS({ type: "nova/compute_camera_coverage", camera }); } catch (_) { /* the next camera still runs */ }
       }
-      this._rerenderFloorPlanCard();
+      redraw();
     });
 
-    const save = root.getElementById("fpnSave");
-    if (save) save.addEventListener("click", async () => {
-      const hasProperty = this._editingProperty !== null && this._editingProperty !== undefined;
-      if (!this._editingPlan && !this._editingEntities && !this._editingCameras && !this._editingElements && !hasProperty) return;
-      const savedPlan = this._editingPlan, savedEnts = this._editingEntities,
-        savedCams = this._editingCameras, savedEls = this._editingElements, savedProp = this._editingProperty;
+    // Save, reset, export and import.
+    on("fpnSave", "click", async () => {
+      const plan = this._editingPlan, ents = this._editingEntities, cams = this._editingCameras,
+        els = this._editingElements, prop = this._editingProperty, hasProp = prop != null;
+      if (!plan && !ents && !cams && !els && !hasProp) return;
+      const writes = [["floor_plan_rooms", plan], ["floor_plan_entities", ents], ["floor_plan_cameras", cams], ["floor_plan_elements", els]]
+        .filter(([, v]) => v);
+      if (hasProp) writes.push(["floor_plan_property", { points: prop }]);
       try {
-        if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
-        if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
-        if (savedCams) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_cameras", value: JSON.stringify(savedCams) });
-        if (savedEls) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_elements", value: JSON.stringify(savedEls) });
-        if (hasProperty) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: savedProp }) });
-        if (this._liveData?.config) {
-          if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
-          if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
-          if (savedCams) this._liveData.config.floor_plan_cameras = savedCams;
-          if (savedEls) this._liveData.config.floor_plan_elements = savedEls;
-          if (hasProperty) this._liveData.config.floor_plan_property = { points: savedProp };
-        }
-        this._editingPlan = null;
-        this._editingEntities = null;
-        this._editingCameras = null;
-        this._editingElements = null;
-        this._editingProperty = null;
+        for (const [key, v] of writes) await this._hass.callWS({ type: "nova/update_config", key, value: JSON.stringify(v) });
+        if (this._liveData?.config) writes.forEach(([key, v]) => { this._liveData.config[key] = v; });
+        this._editingPlan = this._editingEntities = this._editingCameras = this._editingElements = this._editingProperty = null;
       } catch (err) { console.error("Nova: floor plan save failed", err); }
     });
-
-    const reset = root.getElementById("fpnReset");
-    if (reset) reset.addEventListener("click", async () => {
-      try {
-        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: "" });
-        if (this._liveData?.config) this._liveData.config.floor_plan_rooms = {};
-      } catch (err) { console.error("Nova: floor plan reset failed", err); }
+    on("fpnReset", "click", async () => {
+      try { await this._fpSaveKey("floor_plan_rooms", "", {}); }
+      catch (err) { console.error("Nova: floor plan reset failed", err); }
       this._editingPlan = null;
       this._editorFloor = null;
-      this._rerenderFloorPlanCard();
+      redraw();
     });
-
-    // Export/Import the floor plan layout as JSON — a manual backup/restore,
-    // or a way to copy a layout between installs.
-    const fpExport = root.getElementById("fpnExport");
-    if (fpExport) fpExport.addEventListener("click", () => {
+    // A layout file is a manual backup, or a way to move a plan to another install.
+    on("fpnExport", "click", () => {
       try {
-        const data = JSON.stringify(this._getEditingPlan(), null, 2);
-        const blob = new Blob([data], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "nova-floor-plan.json";
-        a.click();
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(new Blob([JSON.stringify(this._getEditingPlan(), null, 2)], { type: "application/json" }));
+        link.href = url;
+        link.download = "nova-floor-plan.json";
+        link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch (err) { console.error("Nova: floor plan export failed", err); }
     });
-    const fpImportBtn = root.getElementById("fpnImport");
-    const fpImportFile = root.getElementById("fpnImportFile");
-    if (fpImportBtn && fpImportFile) {
-      fpImportBtn.addEventListener("click", () => fpImportFile.click());
-      fpImportFile.addEventListener("change", () => {
-        const file = fpImportFile.files && fpImportFile.files[0];
+    const importFile = root.getElementById("fpnImportFile");
+    if (importFile && root.getElementById("fpnImport")) {
+      on("fpnImport", "click", () => importFile.click());
+      importFile.addEventListener("change", () => {
+        const file = importFile.files && importFile.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = ev => {
           try {
-            const parsed = JSON.parse(ev.target.result);
-            if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) throw new Error("empty");
-            this._editingPlan = this._fpCleanImport(parsed);
-            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(this._editingPlan)[0];
-            this._rerenderFloorPlanCard();
+            const layout = this._fpCleanImport(JSON.parse(ev.target.result));
+            if (!this._fpLayoutUsable(layout)) throw new Error("no usable floors");
+            this._editingPlan = layout;
+            if (!layout[this._editorFloor]) this._editorFloor = Object.keys(layout)[0];
+            redraw();
           } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
         };
         reader.readAsText(file);
-        fpImportFile.value = "";
+        importFile.value = "";
       });
     }
 
-    const entAdd = root.getElementById("fpnEntAdd");
-    if (entAdd) entAdd.addEventListener("click", () => {
-      const inp = root.getElementById("fpnEntInput");
-      const val = inp && inp.value.trim();
-      if (!val) return;
-      if (!(this._hass && this._hass.states && this._hass.states[val])) return;
-      const floor = this._editorFloor;
-      if (this._entsFor(floor).some(x => x.e === val)) return;
-      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-      let ecx = 100, ecy = 80;
-      if (rooms.length) {
-        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
-        ecx = Math.round((mnx + mxx) / 2); ecy = Math.round((mny + mxy) / 2);
-      }
-      this._entsFor(floor).push({ e: val, x: ecx, y: ecy });
-      this._rerenderFloorPlanCard();
+    // Device pins and the traced-over image.
+    on("fpnEntAdd", "click", () => {
+      const input = root.getElementById("fpnEntInput");
+      const eid = input && input.value.trim();
+      if (!eid || !(this._hass && this._hass.states && this._hass.states[eid])) return;
+      const pins = this._entsFor(this._editorFloor);
+      if (pins.some(p => p.e === eid)) return;
+      const [x, y] = middle();
+      pins.push({ e: eid, x, y });
+      redraw();
     });
-    root.querySelectorAll(".fpn-ent-del").forEach(b => b.addEventListener("click", () => {
-      this._entsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ei")), 1);
-      this._rerenderFloorPlanCard();
-    }));
-    const bgUpBtn = root.getElementById("fpnBgUpload");
-    const bgFileInput = root.getElementById("fpnBgFile");
-    if (bgUpBtn && bgFileInput) {
-      bgUpBtn.addEventListener("click", () => bgFileInput.click());
-      bgFileInput.addEventListener("change", async () => {
-        const file = bgFileInput.files && bgFileInput.files[0];
+    // Camera and opening rows share this button style; only pin chips carry data-ei.
+    each(".fpn-ent-del[data-ei]", "click", b => { this._entsFor(this._editorFloor).splice(idx(b, "data-ei"), 1); redraw(); });
+    const bgFile = root.getElementById("fpnBgFile");
+    if (bgFile && root.getElementById("fpnBgUpload")) {
+      on("fpnBgUpload", "click", () => bgFile.click());
+      bgFile.addEventListener("change", async () => {
+        const file = bgFile.files && bgFile.files[0];
         if (!file) return;
         const floor = this._editorFloor;
         try {
-          const dataUrl = await new Promise((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(String(r.result));
-            r.onerror = () => reject(new Error("read failed"));
-            r.readAsDataURL(file);
+          const image = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error("read failed"));
+            reader.readAsDataURL(file);
           });
-          let bgs = {};
-          try {
-            const raw = this._data()?.config?.floor_plan_bg;
-            if (raw) bgs = typeof raw === "string" ? JSON.parse(raw) : raw;
-          } catch (_) {}
-          bgs[floor] = dataUrl;
-          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg", value: JSON.stringify(bgs) });
-          if (this._liveData?.config) this._liveData.config.floor_plan_bg = JSON.stringify(bgs);
-          this._rerenderFloorPlanCard();
+          const all = this._fpStored("floor_plan_bg") || {};
+          all[floor] = image;
+          await this._fpSaveKey("floor_plan_bg", JSON.stringify(all));
+          redraw();
         } catch (err) {
           console.error("Nova: floor plan background upload failed", err);
         } finally {
-          bgFileInput.value = "";
+          bgFile.value = "";
         }
       });
     }
-
-    const bgOp = root.getElementById("fpnBgOp");
-    if (bgOp) {
-      const bgVal = root.getElementById("fpnBgOpVal");
-      bgOp.addEventListener("input", () => {
-        if (bgVal) this._setText(bgVal, Math.round(parseFloat(bgOp.value) * 100) + "%");
+    const opacity = root.getElementById("fpnBgOp");
+    if (opacity) {
+      const shown = root.getElementById("fpnBgOpVal");
+      opacity.addEventListener("input", () => {
+        if (shown) this._setText(shown, Math.round(parseFloat(opacity.value) * 100) + "%");
         const img = root.querySelector("#fpnSvg image");
-        if (img) img.setAttribute("opacity", bgOp.value);
+        if (img) img.setAttribute("opacity", opacity.value);
       });
-      bgOp.addEventListener("change", async () => {
-        const v = String(parseFloat(bgOp.value));
-        try {
-          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg_opacity", value: v });
-          if (this._liveData?.config) this._liveData.config.floor_plan_bg_opacity = v;
-        } catch (err) { console.error("Nova: floor plan bg opacity save failed", err); }
+      opacity.addEventListener("change", async () => {
+        try { await this._fpSaveKey("floor_plan_bg_opacity", String(parseFloat(opacity.value))); }
+        catch (err) { console.error("Nova: floor plan bg opacity save failed", err); }
       });
     }
 
     this._wireFloorPlanDrag();
   }
 
+  // Pointer handling on the plan. One listener per event type on the SVG
+  // looks at what was pressed; jsdom cannot run the screen maths, so
+  // scripts/smoke_panel.js drives this with stand-ins for them.
   _wireFloorPlanDrag() {
     const svgEl = this.shadowRoot.getElementById("fpnSvg");
     if (!svgEl) return;
-    const self = this;
-    const plan = this._getEditingPlan();
-    const floor = this._editorFloor;
-    const rooms = plan[floor]?.rooms;
-    if (!rooms) return;
+    const floor = this._editorFloor, level = this._getEditingPlan()[floor];
+    if (!level) return;
+    const rooms = level.rooms || [];   // an imported floor may have none yet
+    let drag = null, pan = null;
 
-    let dragging = null, panning = null;
-
-    function svgPoint(e) {
+    const toPlan = e => {
       const pt = svgEl.createSVGPoint();
-      const ctm = svgEl.getScreenCTM().inverse();
       pt.x = e.clientX; pt.y = e.clientY;
-      return pt.matrixTransform(ctm);
-    }
-    const vbFromAttr = () => {
-      const p = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
-      return { x: p[0], y: p[1], w: p[2], h: p[3] };
+      return pt.matrixTransform(svgEl.getScreenCTM().inverse());
     };
-    function applyVB() {
-      const v = self._editVB; if (!v) return;
+    const viewOf = () => {
+      const [x, y, w, h] = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
+      return { x, y, w, h };
+    };
+    const showView = () => {
+      const v = this._editVB;
+      if (!v) return;
       svgEl.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
       svgEl.querySelectorAll(".fpn-grid-rect").forEach(r => {
         r.setAttribute("x", v.x); r.setAttribute("y", v.y); r.setAttribute("width", v.w); r.setAttribute("height", v.h);
       });
-    }
-    function redraw() {
-      const canvas = self.shadowRoot.getElementById("fpnCanvas");
-      if (canvas) {
-        self._setHtml(canvas, self._renderFloorPlanSVG(plan, floor));
-        setTimeout(() => self._wireFloorPlanDrag(), 10);
-      }
-    }
-
-    svgEl.querySelectorAll(".fpn-drag-room").forEach(g => {
-      const rect = g.querySelector(".fpn-drag-rect");
-      if (!rect) return;
-      rect.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        const idx = parseInt(g.getAttribute("data-idx"));
-        const rm = rooms[idx]; if (!rm) return;
-        const pt = svgPoint(e);
-        dragging = { idx, startX: pt.x, startY: pt.y, origX: rm.x, origY: rm.y, resize: false };
-        rect.setAttribute("stroke-width", "2.5");
-      });
-      g.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const idx = parseInt(g.getAttribute("data-idx"));
-        const rm = rooms[idx]; if (!rm) return;
-        if (window.confirm(self._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(idx, 1); redraw(); }
-      });
-    });
-
-    svgEl.querySelectorAll(".fpn-resize-handle").forEach(handle => {
-      handle.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const idx = parseInt(handle.getAttribute("data-idx"));
-        const rm = rooms[idx]; if (!rm) return;
-        const pt = svgPoint(e);
-        dragging = { idx, startX: pt.x, startY: pt.y, origW: rm.w, origH: rm.h, resize: true };
-      });
-    });
-
-    // Outdoor zone polygons: drag body (move), drag corner (reshape), add/remove corners
-    svgEl.querySelectorAll(".fpn-zone-path").forEach(pth => {
-      pth.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const zi = parseInt(pth.getAttribute("data-zone-idx"));
-        const rm = rooms[zi]; if (!rm) return;
-        self._ensureZonePoints(rm);
-        const pt = svgPoint(e);
-        dragging = { zoneBody: true, zi, startX: pt.x, startY: pt.y, ddx: 0, ddy: 0 };
-      });
-    });
-    svgEl.querySelectorAll(".fpn-zone-vtx").forEach(v => {
-      v.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const zi = parseInt(v.getAttribute("data-zone-idx")), vi = parseInt(v.getAttribute("data-vtx"));
-        const rm = rooms[zi]; if (!rm) return;
-        const pts = self._ensureZonePoints(rm); const p = pts[vi]; if (!p) return;
-        const pt = svgPoint(e);
-        dragging = { zoneVtx: true, zi, vi, startX: pt.x, startY: pt.y, origX: p[0], origY: p[1] };
-      });
-      v.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const zi = parseInt(v.getAttribute("data-zone-idx")), vi = parseInt(v.getAttribute("data-vtx"));
-        const rm = rooms[zi]; if (!rm) return;
-        const pts = self._ensureZonePoints(rm);
-        if (pts.length <= 3) return;
-        pts.splice(vi, 1); self._syncRoomBBox(rm); self._rerenderFloorPlanCard();
-      });
-    });
-    svgEl.querySelectorAll(".fpn-zone-mid").forEach(m => {
-      m.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const zi = parseInt(m.getAttribute("data-zone-idx")), ei = parseInt(m.getAttribute("data-edge"));
-        const rm = rooms[zi]; if (!rm) return;
-        const pts = self._ensureZonePoints(rm);
-        const a = pts[ei], b = pts[(ei + 1) % pts.length]; if (!a || !b) return;
-        pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
-        self._rerenderFloorPlanCard();
-      });
-    });
-
-    // Property boundary: drag a corner, add a corner (edge midpoint), remove (right-click)
-    svgEl.querySelectorAll(".fpn-prop-vtx").forEach(v => {
-      v.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const pi = parseInt(v.getAttribute("data-prop-vtx"));
-        const p = (self._propertyPts() || [])[pi];
-        if (!p) return;
-        const pt = svgPoint(e);
-        dragging = { propVtx: pi, startX: pt.x, startY: pt.y, origX: p[0], origY: p[1], property: true };
-      });
-      v.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const pi = parseInt(v.getAttribute("data-prop-vtx"));
-        const pts = self._propertyPts();
-        if (pts.length <= 3) return;
-        pts.splice(pi, 1); self._rerenderFloorPlanCard();
-      });
-    });
-    svgEl.querySelectorAll(".fpn-prop-mid").forEach(m => {
-      m.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const ei = parseInt(m.getAttribute("data-prop-edge"));
-        const pts = self._propertyPts();
-        const a = pts[ei], b = pts[(ei + 1) % pts.length];
-        if (!a || !b) return;
-        pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
-        self._rerenderFloorPlanCard();
-      });
-    });
-
-    // Camera drag + right-click delete
-    svgEl.querySelectorAll(".fpn-cam").forEach(g => {
-      const dot = g.querySelector(".fpn-cam-dot");
-      if (dot) dot.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const ci = parseInt(g.getAttribute("data-cam-idx"));
-        const cam = (self._camsFor(floor) || [])[ci];
-        if (!cam) return;
-        const pt = svgPoint(e);
-        dragging = { camIdx: ci, startX: pt.x, startY: pt.y, origX: cam.x, origY: cam.y, camera: true, geo: self._planGeometry(floor) };
-      });
-      g.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const ci = parseInt(g.getAttribute("data-cam-idx"));
-        const arr = self._camsFor(floor);
-        if (arr[ci] && window.confirm(self._tx("Delete this camera?"))) { arr.splice(ci, 1); redraw(); }
-      });
-    });
-
-    // Device pins — drag to move (saved with the plan); a tap with no drag
-    // opens the entity's controls; right-click removes it.
-    svgEl.querySelectorAll(".fpn-ent").forEach(g => {
-      g.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        const ei = parseInt(g.getAttribute("data-ent-idx"));
-        const ent = (self._entsFor(floor) || [])[ei];
-        if (!ent) return;
-        const pt = svgPoint(e);
-        dragging = { entIdx: ei, startX: pt.x, startY: pt.y, origX: ent.x, origY: ent.y, entity: true, moved: false, entId: g.getAttribute("data-ent-id") };
-      });
-      g.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        const ei = parseInt(g.getAttribute("data-ent-idx"));
-        const arr = self._entsFor(floor);
-        if (arr[ei] && window.confirm(self._tx("Remove this device from the plan?"))) { arr.splice(ei, 1); redraw(); }
-      });
-    });
-
-    svgEl.addEventListener("mousemove", (e) => {
-      if (panning) {
-        const rect = svgEl.getBoundingClientRect();
-        const sx = panning.w / rect.width, sy = panning.h / rect.height;
-        self._editVB = {
-          x: panning.vbX - (e.clientX - panning.sx) * sx, y: panning.vbY - (e.clientY - panning.sy) * sy,
-          w: panning.w, h: panning.h,
-        };
-        applyVB();
-        return;
-      }
-      if (!dragging) return;
-      const pt = svgPoint(e);
-      if (dragging.zoneVtx) {
-        const rm = rooms[dragging.zi]; if (!rm || !rm.points) return;
-        const p = rm.points[dragging.vi]; if (!p) return;
-        p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
-        p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
-        if (g) {
-          const path = g.querySelector(".fpn-zone-path"); if (path) path.setAttribute("d", self._propPathD(rm.points));
-          const dot = g.querySelector(`.fpn-zone-vtx[data-vtx="${dragging.vi}"]`); if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
-        }
-        return;
-      }
-      if (dragging.zoneBody) {
-        dragging.ddx = Math.round(pt.x - dragging.startX); dragging.ddy = Math.round(pt.y - dragging.startY);
-        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
-        if (g) g.setAttribute("transform", `translate(${dragging.ddx},${dragging.ddy})`);
-        return;
-      }
-      if (dragging.property) {
-        const p = (self._propertyPts() || [])[dragging.propVtx];
-        if (!p) return;
-        p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
-        p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const dot = svgEl.querySelector(`.fpn-prop-vtx[data-prop-vtx="${dragging.propVtx}"]`);
-        if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
-        const path = svgEl.querySelector(".fpn-prop-path");
-        if (path) path.setAttribute("d", self._propPathD(self._propertyPts()));
-        return;
-      }
-      if (dragging.camera) {
-        const cam = (self._camsFor(floor) || [])[dragging.camIdx];
-        if (!cam) return;
-        cam.x = Math.round(dragging.origX + (pt.x - dragging.startX));
-        cam.y = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const gc = svgEl.querySelector(`.fpn-cam[data-cam-idx="${dragging.camIdx}"]`);
-        if (gc) {
-          const dot = gc.querySelector(".fpn-cam-dot"); if (dot) { dot.setAttribute("cx", cam.x); dot.setAttribute("cy", cam.y); }
-          const cone = gc.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", self._clippedCone(cam, dragging.geo));
-          const tx = gc.querySelector("text"); if (tx) { tx.setAttribute("x", cam.x); tx.setAttribute("y", cam.y - 5); }
-        }
-        return;
-      }
-      if (dragging.entity) {
-        const ent = (self._entsFor(floor) || [])[dragging.entIdx];
-        if (!ent) return;
-        const nx = Math.round(dragging.origX + (pt.x - dragging.startX));
-        const ny = Math.round(dragging.origY + (pt.y - dragging.startY));
-        if (Math.abs(nx - dragging.origX) > 1 || Math.abs(ny - dragging.origY) > 1) dragging.moved = true;
-        ent.x = nx; ent.y = ny;
-        const ge = svgEl.querySelector(`.fpn-ent[data-ent-idx="${dragging.entIdx}"]`);
-        if (ge) {
-          const dot = ge.querySelector(".fpn-ent-dot"); if (dot) { dot.setAttribute("cx", nx); dot.setAttribute("cy", ny); }
-          const nm = ge.querySelector(".fpn-ent-nm"); if (nm) { nm.setAttribute("x", nx); nm.setAttribute("y", ny - 4); }
-          const vl = ge.querySelector(".fpn-ent-val"); if (vl) { vl.setAttribute("x", nx); vl.setAttribute("y", ny + 6.5); }
-        }
-        return;
-      }
-      const rm = rooms[dragging.idx];
-      if (!rm) return;
-      if (dragging.resize) {
-        rm.w = Math.max(15, Math.round(dragging.origW + (pt.x - dragging.startX)));
-        rm.h = Math.max(10, Math.round(dragging.origH + (pt.y - dragging.startY)));
-      } else {
-        rm.x = Math.round(dragging.origX + (pt.x - dragging.startX));
-        rm.y = Math.round(dragging.origY + (pt.y - dragging.startY));
-      }
-      const g = svgEl.querySelector(`.fpn-drag-room[data-idx="${dragging.idx}"]`);
-      if (g) {
-        const r = g.querySelector(".fpn-drag-rect");
-        if (r) { r.setAttribute("x", rm.x); r.setAttribute("y", rm.y); r.setAttribute("width", rm.w); r.setAttribute("height", rm.h); }
-        const t = g.querySelector("text");
-        if (t) { t.setAttribute("x", rm.x + rm.w / 2); t.setAttribute("y", rm.y + rm.h / 2); }
-        const rh = g.querySelector(".fpn-resize-handle");
-        if (rh) { rh.setAttribute("x", rm.x + rm.w - 8); rh.setAttribute("y", rm.y + rm.h - 8); }
-      }
-    });
-
-    const endDrag = () => {
-      if (panning) { panning = null; return; }
-      if (!dragging) return;
-      if (dragging.zoneBody) {
-        const rm = rooms[dragging.zi];
-        if (rm && rm.points && (dragging.ddx || dragging.ddy)) rm.points.forEach(p => { p[0] += dragging.ddx; p[1] += dragging.ddy; });
-      }
-      if ((dragging.zoneVtx || dragging.zoneBody) && rooms[dragging.zi]) self._syncRoomBBox(rooms[dragging.zi]);
-      // A device pin clicked without dragging → open its HA more-info controls.
-      if (dragging.entity && !dragging.moved && dragging.entId) {
-        self.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
-      }
-      const heavy = dragging.camera || dragging.property || dragging.zoneVtx || dragging.zoneBody;
-      dragging = null;
-      if (heavy) self._rerenderFloorPlanCard(); else redraw();
     };
-    svgEl.addEventListener("mouseup", endDrag);
-    svgEl.addEventListener("mouseleave", endDrag);
+    // Quick redraw of the plan alone; the card is redrawn where lists change.
+    const redrawPlan = () => {
+      const canvas = this.shadowRoot.getElementById("fpnCanvas");
+      if (!canvas) return;
+      this._setHtml(canvas, this._renderFloorPlanSVG(this._getEditingPlan(), floor));
+      setTimeout(() => this._wireFloorPlanDrag(), 10);
+    };
+    const num = (el, attr) => parseInt(el.getAttribute(attr));
+    const place = (el, attrs) => { if (el) Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); };
+    const moved = (from, start, now) => Math.round(from + (now - start));
+    const midpoint = (pts, edge) => {
+      const a = pts[edge], b = pts[(edge + 1) % pts.length];
+      if (!a || !b) return false;
+      pts.splice(edge + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
+      return true;
+    };
+    const begin = (e, state) => { const pt = toPlan(e); drag = Object.assign({ startX: pt.x, startY: pt.y }, state); };
 
-    svgEl.addEventListener("wheel", (e) => {
+    // Pressing the left button on an item starts its drag. Return true when
+    // the press was used and must go no further than the plan.
+    const press = (e, t) => {
+      if (t.classList.contains("fpn-drag-rect") && t.closest(".fpn-drag-room")) {
+        const i = num(t.closest(".fpn-drag-room"), "data-idx"), rm = rooms[i];
+        if (!rm) return false;
+        begin(e, { idx: i, origX: rm.x, origY: rm.y, resize: false });
+        t.setAttribute("stroke-width", "2.5");
+        return false;   // a room drag still lets the press bubble on
+      }
+      if (t.classList.contains("fpn-resize-handle")) {
+        const i = num(t, "data-idx"), rm = rooms[i];
+        if (rm) begin(e, { idx: i, origW: rm.w, origH: rm.h, resize: true });
+        return true;
+      }
+      if (t.classList.contains("fpn-zone-path")) {
+        const zi = num(t, "data-zone-idx"), rm = rooms[zi];
+        if (rm) { this._ensureZonePoints(rm); begin(e, { zoneBody: true, zi, ddx: 0, ddy: 0 }); }
+        return true;
+      }
+      if (t.classList.contains("fpn-zone-vtx")) {
+        const zi = num(t, "data-zone-idx"), vi = num(t, "data-vtx"), rm = rooms[zi];
+        const p = rm && this._ensureZonePoints(rm)[vi];
+        if (p) begin(e, { zoneVtx: true, zi, vi, origX: p[0], origY: p[1] });
+        return true;
+      }
+      if (t.classList.contains("fpn-zone-mid")) {
+        const rm = rooms[num(t, "data-zone-idx")];
+        if (rm && midpoint(this._ensureZonePoints(rm), num(t, "data-edge"))) this._rerenderFloorPlanCard();
+        return true;
+      }
+      if (t.classList.contains("fpn-prop-vtx")) {
+        const pi = num(t, "data-prop-vtx"), p = (this._propertyPts() || [])[pi];
+        if (p) begin(e, { propVtx: pi, origX: p[0], origY: p[1], property: true });
+        return true;
+      }
+      if (t.classList.contains("fpn-prop-mid")) {
+        if (midpoint(this._propertyPts(), num(t, "data-prop-edge"))) this._rerenderFloorPlanCard();
+        return true;
+      }
+      if (t.classList.contains("fpn-cam-dot") && t.closest(".fpn-cam")) {
+        const ci = num(t.closest(".fpn-cam"), "data-cam-idx"), cam = (this._camsFor(floor) || [])[ci];
+        if (cam) begin(e, { camIdx: ci, origX: cam.x, origY: cam.y, camera: true, geo: this._planGeometry(floor) });
+        return true;
+      }
+      const pin = t.closest(".fpn-ent");
+      if (pin) {
+        const ei = num(pin, "data-ent-idx"), ent = (this._entsFor(floor) || [])[ei];
+        if (ent) begin(e, { entIdx: ei, origX: ent.x, origY: ent.y, entity: true, moved: false, entId: pin.getAttribute("data-ent-id") });
+        return true;
+      }
+      return false;
+    };
+    const ITEMS = ".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-cam, .fpn-ent";
+    svgEl.addEventListener("mousedown", e => {
+      const t = e.target;
+      if (e.button === 0 && t !== svgEl && t.closest && svgEl.contains(t)) {
+        const before = drag;
+        const stop = press(e, t);
+        if (stop || drag !== before) {
+          e.preventDefault();
+          if (stop) e.stopPropagation();
+          return;
+        }
+      }
+      if (drag) return;
+      // The middle button anywhere, or the left button on empty space, pans.
+      const empty = e.button === 0 && !t.closest(ITEMS);
+      if (e.button !== 1 && !empty) return;
       e.preventDefault();
-      const v = self._editVB || vbFromAttr();
-      const p = svgPoint(e);
-      const f = e.deltaY < 0 ? 0.85 : 1.18;
-      const nw = Math.max(60, Math.min(8000, v.w * f)), nh = Math.max(42, Math.min(8000, v.h * f));
-      const fx = nw / v.w, fy = nh / v.h;
-      self._editVB = { x: p.x - (p.x - v.x) * fx, y: p.y - (p.y - v.y) * fy, w: nw, h: nh };
-      applyVB();
-    }, { passive: false });
-
-    svgEl.addEventListener("mousedown", (e) => {
-      if (dragging) return;
-      const mid = e.button === 1;
-      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-cam, .fpn-ent");
-      if (!mid && !bg) return;
-      e.preventDefault();
-      const v = self._editVB || vbFromAttr();
-      self._editVB = { x: v.x, y: v.y, w: v.w, h: v.h };
-      panning = { sx: e.clientX, sy: e.clientY, vbX: v.x, vbY: v.y, w: v.w, h: v.h };
+      const v = this._editVB || viewOf();
+      this._editVB = { x: v.x, y: v.y, w: v.w, h: v.h };
+      pan = { sx: e.clientX, sy: e.clientY, vbX: v.x, vbY: v.y, w: v.w, h: v.h };
     });
-  }
 
+    // Right-click removes rooms, corners, cameras and pins.
+    svgEl.addEventListener("contextmenu", e => {
+      const t = e.target;
+      const room = t.closest(".fpn-drag-room"), cam = t.closest(".fpn-cam"), pin = t.closest(".fpn-ent");
+      if (t.classList.contains("fpn-zone-vtx")) {
+        e.preventDefault();
+        const rm = rooms[num(t, "data-zone-idx")];
+        if (!rm) return;
+        const pts = this._ensureZonePoints(rm);
+        if (pts.length <= 3) return;
+        pts.splice(num(t, "data-vtx"), 1); this._syncRoomBBox(rm); this._rerenderFloorPlanCard();
+      } else if (t.classList.contains("fpn-prop-vtx")) {
+        e.preventDefault();
+        const pts = this._propertyPts();
+        if (pts.length <= 3) return;
+        pts.splice(num(t, "data-prop-vtx"), 1); this._rerenderFloorPlanCard();
+      } else if (room) {
+        e.preventDefault();
+        const i = num(room, "data-idx"), rm = rooms[i];
+        if (rm && window.confirm(this._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(i, 1); redrawPlan(); }
+      } else if (cam) {
+        e.preventDefault();
+        const list = this._camsFor(floor), ci = num(cam, "data-cam-idx");
+        if (list[ci] && window.confirm(this._tx("Delete this camera?"))) { list.splice(ci, 1); redrawPlan(); }
+      } else if (pin) {
+        e.preventDefault();
+        const list = this._entsFor(floor), ei = num(pin, "data-ent-idx");
+        if (list[ei] && window.confirm(this._tx("Remove this device from the plan?"))) { list.splice(ei, 1); redrawPlan(); }
+      }
+    });
+
+    // Moving updates the dragged item's own SVG nodes; the model moves with it.
+    const follow = pt => {
+      const d = drag, dx = pt.x - d.startX, dy = pt.y - d.startY;
+      if (d.zoneVtx) {
+        const rm = rooms[d.zi], p = rm && rm.points && rm.points[d.vi];
+        if (!p) return;
+        p[0] = moved(d.origX, d.startX, pt.x); p[1] = moved(d.origY, d.startY, pt.y);
+        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${d.zi}"]`);
+        if (g) {
+          place(g.querySelector(".fpn-zone-path"), { d: this._propPathD(rm.points) });
+          place(g.querySelector(`.fpn-zone-vtx[data-vtx="${d.vi}"]`), { cx: p[0], cy: p[1] });
+        }
+      } else if (d.zoneBody) {
+        d.ddx = Math.round(dx); d.ddy = Math.round(dy);
+        place(svgEl.querySelector(`.fpn-zone[data-zone-idx="${d.zi}"]`), { transform: `translate(${d.ddx},${d.ddy})` });
+      } else if (d.property) {
+        const p = (this._propertyPts() || [])[d.propVtx];
+        if (!p) return;
+        p[0] = moved(d.origX, d.startX, pt.x); p[1] = moved(d.origY, d.startY, pt.y);
+        place(svgEl.querySelector(`.fpn-prop-vtx[data-prop-vtx="${d.propVtx}"]`), { cx: p[0], cy: p[1] });
+        place(svgEl.querySelector(".fpn-prop-path"), { d: this._propPathD(this._propertyPts()) });
+      } else if (d.camera) {
+        const cam = (this._camsFor(floor) || [])[d.camIdx];
+        if (!cam) return;
+        cam.x = moved(d.origX, d.startX, pt.x); cam.y = moved(d.origY, d.startY, pt.y);
+        const g = svgEl.querySelector(`.fpn-cam[data-cam-idx="${d.camIdx}"]`);
+        if (g) {
+          place(g.querySelector(".fpn-cam-dot"), { cx: cam.x, cy: cam.y });
+          place(g.querySelector(".fpn-cam-cone"), { d: this._clippedCone(cam, d.geo) });
+          place(g.querySelector("text"), { x: cam.x, y: cam.y - 5 });
+        }
+      } else if (d.entity) {
+        const ent = (this._entsFor(floor) || [])[d.entIdx];
+        if (!ent) return;
+        const x = moved(d.origX, d.startX, pt.x), y = moved(d.origY, d.startY, pt.y);
+        if (Math.abs(x - d.origX) > 1 || Math.abs(y - d.origY) > 1) d.moved = true;
+        ent.x = x; ent.y = y;
+        const g = svgEl.querySelector(`.fpn-ent[data-ent-idx="${d.entIdx}"]`);
+        if (g) {
+          place(g.querySelector(".fpn-ent-dot"), { cx: x, cy: y });
+          place(g.querySelector(".fpn-ent-nm"), { x, y: y - 4 });
+          place(g.querySelector(".fpn-ent-val"), { x, y: y + 6.5 });
+        }
+      } else {
+        const rm = rooms[d.idx];
+        if (!rm) return;
+        if (d.resize) {
+          rm.w = Math.max(15, Math.round(d.origW + dx)); rm.h = Math.max(10, Math.round(d.origH + dy));
+        } else {
+          rm.x = moved(d.origX, d.startX, pt.x); rm.y = moved(d.origY, d.startY, pt.y);
+        }
+        const g = svgEl.querySelector(`.fpn-drag-room[data-idx="${d.idx}"]`);
+        if (g) {
+          place(g.querySelector(".fpn-drag-rect"), { x: rm.x, y: rm.y, width: rm.w, height: rm.h });
+          place(g.querySelector("text"), { x: rm.x + rm.w / 2, y: rm.y + rm.h / 2 });
+          place(g.querySelector(".fpn-resize-handle"), { x: rm.x + rm.w - 8, y: rm.y + rm.h - 8 });
+        }
+      }
+    };
+    svgEl.addEventListener("mousemove", e => {
+      if (pan) {
+        const box = svgEl.getBoundingClientRect();
+        this._editVB = { x: pan.vbX - (e.clientX - pan.sx) * (pan.w / box.width), y: pan.vbY - (e.clientY - pan.sy) * (pan.h / box.height), w: pan.w, h: pan.h };
+        showView();
+      } else if (drag) {
+        follow(toPlan(e));
+      }
+    });
+
+    const finish = () => {
+      if (pan) { pan = null; return; }
+      if (!drag) return;
+      const d = drag, zone = rooms[d.zi];
+      if (d.zoneBody && zone && zone.points && (d.ddx || d.ddy)) zone.points.forEach(p => { p[0] += d.ddx; p[1] += d.ddy; });
+      if ((d.zoneVtx || d.zoneBody) && zone) this._syncRoomBBox(zone);
+      // A pin pressed without moving opens its Home Assistant controls.
+      if (d.entity && !d.moved && d.entId) {
+        this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: d.entId }, bubbles: true, composed: true }));
+      }
+      drag = null;
+      if (d.camera || d.property || d.zoneVtx || d.zoneBody) this._rerenderFloorPlanCard(); else redrawPlan();
+    };
+    svgEl.addEventListener("mouseup", finish);
+    svgEl.addEventListener("mouseleave", finish);
+
+    // The wheel zooms about the pointer, within fixed limits.
+    svgEl.addEventListener("wheel", e => {
+      e.preventDefault();
+      const v = this._editVB || viewOf(), at = toPlan(e), f = e.deltaY < 0 ? 0.85 : 1.18;
+      const w = Math.max(60, Math.min(8000, v.w * f)), h = Math.max(42, Math.min(8000, v.h * f));
+      this._editVB = { x: at.x - (at.x - v.x) * (w / v.w), y: at.y - (at.y - v.y) * (h / v.h), w, h };
+      showView();
+    }, { passive: false });
+  }
   _css() {
     return `
       :host{

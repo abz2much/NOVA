@@ -1,3 +1,14 @@
+## [8.67.0] Floor plan editor fixes
+
+### Fixed
+- **Opening width and camera range.** Changing an opening's width or a camera's range in the floor plan editor did nothing. Both now save, in feet or metres.
+- **Device pins kept.** Removing a camera or an opening also removed the first device pin on that floor. It no longer does.
+- **Empty or broken floors.** A layout file with a broken floor is now refused instead of breaking the editor. A floor with no rooms keeps its camera and pin controls, and a property line drawn on it now appears next to the plan.
+- **Memory tab.** A fact taught before the list had loaded was saved but not shown. A person's routines heading with & or quotes in the name now shows correctly.
+
+### Changed
+- **Nothing else you will notice.** Parts of the panel were tidied, and some Italian and Portuguese wording reads more naturally. The CLEAR button now reads as an action in both. The floor plan, memory and intrusion views work as before.
+
 ## [8.66.2] Internal tidy
 
 ### Changed

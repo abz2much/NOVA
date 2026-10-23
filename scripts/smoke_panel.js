@@ -4580,6 +4580,450 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["an absent label list gives an empty datalist without throwing", emptyOpts === ""]);
   cfgLive.available_labels = savedLabels;
 
+  // ── Pinned results: floor plan maths and the memory, intrusion and floor
+  // plan markup, for fixed inputs. Any change to coordinates, rounding, hit
+  // testing or the markup these parts draw changes a fingerprint below.
+  {
+    const crypto = require("crypto");
+    const PINS = {
+      geometry: "a836aa626ac3def0",
+      floorHelpers: "b94425681aba57c7",
+      editorMarkup: "fa1ab165a9a30f0a",
+      memoryMarkup: "85c7ab87155e29f7",
+      intrusionMarkup: "88c37a0e4f95ee4d",
+      editorDrag: "1394062ae0bd2b40",
+    };
+    const flat = s => String(s).replace(/\s+/g, " ").trim();
+    const pin = (name, value) => {
+      const got = crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+      checks.push([`pinned results: ${name} are unchanged` + (got === PINS[name] ? "" : ` (got ${got})`), got === PINS[name]]);
+    };
+    const saved = {
+      strings: elNew._uiStrings, live: elNew._liveData, hass: elNew._hass,
+      plan: elNew._editingPlan, ents: elNew._editingEntities, cams: elNew._editingCameras,
+      els: elNew._editingElements, prop: elNew._editingProperty, floor: elNew._editorFloor, vb: elNew._editVB,
+      knowledge: elNew._knowledge, kLoaded: elNew._knowledgeLoaded, routines: elNew._personRoutines,
+      rLoaded: elNew._personRoutinesLoaded, relations: elNew._relations, relLoaded: elNew._relationsLoaded,
+      intr: elNew._intr, intrTimeout: elNew._intrTimeout, callWS: hass.callWS,
+    };
+    // Dates and grouped numbers depend on the machine's time zone and locale.
+    const W = window, dateText = W.Date.prototype.toLocaleString, numText = W.Number.prototype.toLocaleString;
+    W.Date.prototype.toLocaleString = function () { return this.toISOString(); };
+    W.Number.prototype.toLocaleString = function () { return String(this.valueOf()); };
+    elNew._uiStrings = null;
+    const cfg = { floor_plan_units: "imperial" };
+    elNew._liveData = Object.assign({}, saved.live, { config: cfg });
+    elNew._hass = Object.assign({}, hass, { states: {
+      "binary_sensor.front_door": { state: "on", attributes: { device_class: "door", friendly_name: "Front Door" } },
+      "binary_sensor.back_door": { state: "off", attributes: { device_class: "door" } },
+      "binary_sensor.hall_motion": { state: "on", attributes: { device_class: "motion", friendly_name: "Hall Motion" } },
+      "binary_sensor.leak": { state: "off", attributes: { device_class: "moisture" } },
+      "binary_sensor.patio_contact": { state: "unavailable", attributes: {} },
+      "lock.front": { state: "locked", attributes: { friendly_name: "Front Lock" } },
+      "lock.side": { state: "unlocked", attributes: {} },
+      "cover.garage": { state: "opening", attributes: {} },
+      "person.alex": { state: "home", attributes: { friendly_name: "Alex" } },
+      "device_tracker.phone": { state: "not_home", attributes: {} },
+      "climate.hall": { state: "heat", attributes: { current_temperature: 20.5 } },
+      "climate.den": { state: "off", attributes: {} },
+      "sensor.temp": { state: "21.4", attributes: { unit_of_measurement: "°C" } },
+      "sensor.gone": { state: "unavailable", attributes: {} },
+      "light.kitchen": { state: "on", attributes: {} },
+      "media_player.tv": { state: "standby", attributes: {} },
+      "camera.hall": { state: "idle", attributes: { friendly_name: "Hall Cam" } },
+      "camera.yard": { state: "idle", attributes: {} },
+    } });
+
+    // The floor plan used by every geometry check: rooms, a polygon room, an
+    // outdoor zone, stairs, a door room, and openings on every wall.
+    const PLAN = { tf: { label: "Test Floor", viewBox: "0 0 260 200", rooms: [
+      { name: "Hall", x: 10, y: 10, w: 100, h: 60, type: "room" },
+      { name: "Den", x: 110, y: 10, w: 70, h: 60, type: "room" },
+      { name: "Bath", x: 180, y: 10, w: 30, h: 30, type: "bath" },
+      { name: "Stairs", x: 180, y: 40, w: 30, h: 30, type: "stairs" },
+      { name: "Entry", x: 60, y: 70, w: 40, h: 10, type: "door" },
+      { name: "Nook", x: 120, y: 75, w: 50, h: 20, type: "room", points: [[120, 75], [170, 75], [145, 95]] },
+      { name: "Yard", x: 10, y: 100, w: 200, h: 80, type: "outdoor", points: [[10, 100], [210, 100], [210, 180], [10, 180]] },
+    ], labels: [{ x: 30, y: 190, text: "North" }] }, empty: { label: "Empty", rooms: [] } };
+    const ELEMS = { tf: [
+      { id: "e1", type: "window", wall: "front", pos: 0.3, w: 20 },
+      { id: "e2", type: "door", kind: "exterior", wall: "back", pos: 0.5 },
+      { id: "e3", type: "door", kind: "interior", room: "Den", wall: "left", pos: 0.5, w: 16, entity: "binary_sensor.back_door" },
+      { id: "e4", type: "door", kind: "cased", room: "Hall", wall: "right", pos: 0.25 },
+      { id: "e5", type: "door", kind: "exterior", wall: "left" },
+      { id: "e6", type: "door", kind: "cellar", wall: "right", pos: 0.9, w: 12 },
+      { id: "e7", type: "dormer", slope: "rear", pos: 0.4 },
+      { id: "e8", type: "dormer", slope: "front" },
+      { id: "e9", type: "door", kind: "interior", room: "Missing", wall: "front", pos: 0.1 },
+    ] };
+    const CAMS = [
+      { x: 60, y: 40, angle: 0, fov: 90, range: 80 },
+      { x: 150, y: 40, angle: 180, fov: 120, range: 120, indoor: true },
+      { x: 100, y: 140, angle: 270, fov: 200, range: 70, indoor: false },
+      { x: 30, y: 20 },
+      { x: 200, y: 60, angle: 135, fov: 40, range: 2 },
+      { x: 0, y: 0, angle: 45, fov: 170, range: 400 },
+    ];
+    elNew._editingPlan = JSON.parse(JSON.stringify(PLAN));
+    elNew._editingElements = JSON.parse(JSON.stringify(ELEMS));
+    elNew._editingCameras = { tf: JSON.parse(JSON.stringify(CAMS)) };
+    elNew._editingEntities = { tf: [{ e: "binary_sensor.front_door", x: 20, y: 30 }, { e: "sensor.a_very_long_entity_name_here", x: 90, y: 50 }, { e: "lock.side", x: 5, y: 5 }] };
+    elNew._editingProperty = [[0, 0], [250, 0], [250, 195], [0, 195]];
+    elNew._editorFloor = "tf";
+    elNew._editVB = null;
+
+    const geo = elNew._planGeometry("tf");
+    const g = { geo, empty: elNew._planGeometry("empty"), none: elNew._planGeometry("nope") };
+    g.seg = [
+      elNew._segIntersect(0, 0, 10, 10, 0, 10, 10, 0), elNew._segIntersect(0, 0, 10, 0, 0, 1, 10, 1),
+      elNew._segIntersect(0, 0, 1, 1, 5, 0, 5, 10), elNew._segIntersect(0, 0, 10, 0, 10, -5, 10, 5),
+      elNew._segIntersect(1.5, 2.25, 97.3, 40.1, 50, -3, 52.5, 88.8),
+    ];
+    g.gap = [[60, 10], [60, 13], [60, 13.6], [110, 40], [10, 40], [300, 300]].map(p => elNew._inGap(p[0], p[1], geo.gaps));
+    g.los = [[60, 40, 150, 40], [60, 40, 60, 5], [20, 20, 30, 30], [150, 40, 150, 90], [100, 140, 100, 60]].map(p => elNew._losClear(p[0], p[1], p[2], p[3], geo));
+    g.covered = [[100, 40, 60, 40, 0, 45, 80], [60, 100, 60, 40, 0, 45, 80], [20, 40, 60, 40, 0, 45, 80], [61, 40, 60, 40, 350, 5, 10], [60, 40, 60, 40, 0, 45, 80]].map(p => elNew._pointCovered(p[0], p[1], p[2], p[3], p[4], p[5], p[6], geo));
+    g.poly = [[145, 80], [121, 94], [10, 100], [209.9, 179.9], [0, 0]].map(p => elNew._pointInPoly(p[0], p[1], PLAN.tf.rooms[5].points));
+    g.coverage = CAMS.map(c => elNew._computeCoverage("tf", c, geo));
+    g.coverageOwnGeo = elNew._computeCoverage("tf", CAMS[1]);
+    g.coverageEmpty = [elNew._computeCoverage("empty", CAMS[0]), elNew._computeCoverage("nope", CAMS[0])];
+    g.cone = CAMS.map(c => elNew._coneD(c));
+    g.clipped = CAMS.map(c => elNew._clippedCone(c, geo)).concat([elNew._clippedCone(CAMS[0], null), elNew._clippedCone(CAMS[0], { walls: [], gaps: [] })]);
+    g.ray = [[60, 40, 0, 200], [60, 40, Math.PI / 2, 200], [150, 40, Math.PI, 15], [30, 20, 1.234, 99]].map(p => elNew._rayCast(p[0], p[1], p[2], p[3], geo));
+    g.roomAt = [[20, 20], [190, 50], [190, 20], [65, 75], [500, 500], [140, 80]].map(p => elNew._roomAt("tf", p[0], p[1])).concat([elNew._roomAt("empty", 1, 1), elNew._roomAt("nope", 1, 1)]);
+    g.openings = [elNew._openingDescriptions("tf"), elNew._openingDescriptions("empty")];
+    pin("geometry", g);
+
+    const h = {};
+    const defaults = [{}, { home_stories: "1" }, { home_stories: 2, has_garage: true }, { home_features: { basement: true, utility: true } },
+      { home_features: { utility: true }, home_stories: "1" }].map(c => { elNew._liveData.config = c; return elNew._defaultFloorPlan(); });
+    h.defaults = defaults;
+    h.getPlan = [JSON.stringify(PLAN), PLAN, "{}", "not json", "", null].map(v => { elNew._liveData.config = { floor_plan_rooms: v }; return elNew._getFloorPlan(); });
+    h.units = ["imperial", "metric", undefined].map(u => {
+      elNew._liveData.config = { floor_plan_units: u };
+      return [elNew._fpUnits(), elNew._fpUnitLabel(), elNew._fpToReal(55), elNew._fpToReal(0), elNew._fpToReal(undefined), elNew._fpToReal(123.4),
+        elNew._fpDim(100), elNew._fpDim(7), elNew._propertyArea([[0, 0], [250, 0], [250, 195], [0, 195]]),
+        elNew._propertyArea([[0, 0], [5000, 0], [5000, 5000], [0, 5000]]), elNew._propertyArea([[0, 0], [10, 0]]), elNew._propertyArea(null)];
+    });
+    elNew._liveData.config = cfg;
+    h.opacity = ["0.5", 0, 1, "1.5", "-1", "abc", undefined].map(v => { elNew._liveData.config = { floor_plan_bg_opacity: v }; return elNew._fpBgOpacity(); });
+    h.stored = [
+      ["floor_plan_entities", '{"tf":[{"e":"light.kitchen","x":1,"y":2}]}'], ["floor_plan_entities", "bad"], ["floor_plan_entities", ""],
+      ["floor_plan_elements", { tf: [] }], ["floor_plan_elements", null], ["floor_plan_cameras", '{"tf":[{"x":1}]}'], ["floor_plan_cameras", "{"],
+      ["floor_plan_property", '{"points":[[1,2],[3,4],[5,6]]}'], ["floor_plan_property", '{"points":"x"}'], ["floor_plan_property", { points: [[0, 0]] }],
+    ].map(([k, v]) => {
+      elNew._liveData.config = { [k]: v };
+      return k === "floor_plan_entities" ? elNew._getFloorEntities() : k === "floor_plan_elements" ? elNew._getFloorElements()
+        : k === "floor_plan_cameras" ? elNew._getFloorCameras() : elNew._getProperty();
+    });
+    elNew._liveData.config = cfg;
+    h.markers = Object.keys(elNew._hass.states).concat(["switch.missing"]).map(eid => elNew._entMarkerStyle(eid));
+    h.zone = [PLAN.tf.rooms[0], PLAN.tf.rooms[5], { name: "Bare" }, { x: 3, y: 4, points: [[1, 1], [2, 2]] }].map(r => elNew._zonePoints(r));
+    const zr = { x: 0, y: 0, w: 10, h: 10 };
+    h.ensure = [elNew._ensureZonePoints(zr), zr.points];
+    const sync = { points: [[3.4, 7.6], [40.5, 2.2], [22.2, 30.7]] };
+    elNew._syncRoomBBox(sync); elNew._syncRoomBBox(null); elNew._syncRoomBBox({ points: [[1, 1]] });
+    h.sync = sync;
+    h.path = [elNew._propPathD([[1, 2], [3, 4], [5, 6]]), elNew._propPathD([])];
+    h.doorOpts = [elNew._doorEntityOptions(""), elNew._doorEntityOptions("binary_sensor.elsewhere"), elNew._doorEntityOptions("lock.front")];
+    h.camOpts = [elNew._cameraEntityOptions(""), elNew._cameraEntityOptions("camera.yard"), elNew._cameraEntityOptions("camera.gone")];
+    h.listsFor = [elNew._entsFor("new1"), elNew._elemsFor("new2"), elNew._camsFor("new3")];
+    pin("floorHelpers", h);
+
+    const e = {};
+    e.card = flat(elNew._floorPlanEditorCardBody());
+    e.svg = flat(elNew._renderFloorPlanSVG(elNew._editingPlan, "tf"));
+    elNew._editVB = { x: -10, y: -5, w: 300, h: 210 };
+    e.svgZoomed = flat(elNew._renderFloorPlanSVG(elNew._editingPlan, "tf"));
+    elNew._editVB = null;
+    e.svgEmpty = [flat(elNew._renderFloorPlanSVG(elNew._editingPlan, "empty")), elNew._renderFloorPlanSVG(elNew._editingPlan, "nope")];
+    elNew._editingCameras.tf[1].coverage = { covered: ["Den", "Hall<b>"], reason: "Clear view <i>" };
+    elNew._editingCameras.tf[2].coverage = { covered: [], reason: "Too far" };
+    e.cams = flat(elNew._renderCamerasNew("tf"));
+    e.camsEmpty = flat(elNew._renderCamerasNew("empty"));
+    e.openings = [flat(elNew._renderOpeningsNew("tf")), flat(elNew._renderOpeningsNew("2f")), flat(elNew._renderOpeningsNew("empty"))];
+    e.ents = [flat(elNew._renderPlanEntitiesNew("tf")), flat(elNew._renderPlanEntitiesNew("empty"))];
+    elNew._liveData.config = { floor_plan_units: "metric", floor_plan_bg_opacity: "0.35", floor_plan_bg: JSON.stringify({ tf: "data:image/png;base64,AAAA" }) };
+    e.metric = [flat(elNew._renderPlanEntitiesNew("tf")), flat(elNew._renderOpeningsNew("tf")), flat(elNew._renderCamerasNew("tf")), flat(elNew._renderFloorPlanSVG(elNew._editingPlan, "tf"))];
+    elNew._liveData.config = cfg;
+    elNew._editingProperty = [];
+    e.noProperty = flat(elNew._fpnAddPropertyButton());
+    e.clean = [elNew._fpCleanImport({ a: 'x<y>"z`', b: [1, "<b>", { c: null }], __proto__: { bad: 1 }, constructor: 1, prototype: 2, "k<>": true }),
+      elNew._fpCleanImport(5), elNew._fpCleanImport(JSON.parse('{"__proto__":{"x":1},"ok":"y"}'))];
+    let deep = "end"; for (let i = 0; i < 15; i++) deep = [deep];
+    e.cleanDeep = elNew._fpCleanImport(deep);
+    pin("editorMarkup", e);
+
+    // Memory and intrusion markup, drawn into their own tabs.
+    const tabBtn = id => Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === id);
+    hass.callWS = async () => ({});
+    tabBtn("memory").click();
+    await new Promise(r => setTimeout(r, 20));
+    const mr = elNew.shadowRoot, m = {};
+    m.page = flat(elNew._htmlMemory());
+    elNew._knowledge = { facts: [
+      { id: 1, subject: "household", key: "trash day", value: "Tuesday", source: "stated", confidence: 1 },
+      { id: 2, subject: "primary", key: "coffee", value: "black <no sugar>", source: "inferred", confidence: 0.61 },
+      { id: 3, subject: "household", key: "wifi", value: "guest", source: "stated", confidence: 0.5, expires_at: 99 },
+      { id: 4, subject: "pet_care", key: "walks", value: "twice", source: "stated" },
+    ], pending: [{ id: 7, key: "car", value: 'blue "estate"' }, { id: 8, key: "bin", value: "green" }], stats: {} };
+    elNew._knowledgeLoaded = true;
+    elNew._renderKnowledgeList(); elNew._renderPendingFacts();
+    m.known = [flat(mr.getElementById("newMemList").innerHTML), mr.getElementById("newMemCount").textContent,
+      flat(mr.getElementById("newPendingList").innerHTML), mr.getElementById("newPendingCount").textContent, mr.getElementById("newPendingPanel").hidden];
+    elNew._knowledge = { facts: [{ id: 1, subject: "household", key: "a", value: "b", source: "stated", confidence: 1 }], pending: [], stats: {} };
+    elNew._renderKnowledgeList(); elNew._renderPendingFacts();
+    m.one = [flat(mr.getElementById("newMemList").innerHTML), mr.getElementById("newMemCount").textContent, mr.getElementById("newPendingPanel").hidden];
+    elNew._knowledge = { facts: [], pending: [], stats: {}, error: "Boom <x>" };
+    elNew._renderKnowledgeList();
+    m.error = flat(mr.getElementById("newMemList").innerHTML);
+    elNew._knowledge = { facts: [], pending: [], stats: {} };
+    elNew._knowledgeLoaded = false; elNew._renderKnowledgeList();
+    m.loading = flat(mr.getElementById("newMemList").innerHTML);
+    elNew._knowledgeLoaded = true; elNew._renderKnowledgeList();
+    m.empty = flat(mr.getElementById("newMemList").innerHTML);
+    elNew._personRoutines = { groups: { person_alex: [{ description: "Coffee at 7", confidence: 0.82, occurrences: 12 }, { description: "Gym", confidence: 0.91 }], sam: [{ description: "Late <tv>" }] } };
+    elNew._personRoutinesLoaded = true; elNew._renderPersonRoutines();
+    m.routines = flat(mr.getElementById("newProutineList").innerHTML);
+    elNew._personRoutines = { groups: {}, error: "Nope" }; elNew._renderPersonRoutines();
+    m.routinesError = flat(mr.getElementById("newProutineList").innerHTML);
+    elNew._personRoutines = { groups: {} }; elNew._renderPersonRoutines();
+    m.routinesEmpty = flat(mr.getElementById("newProutineList").innerHTML);
+    elNew._personRoutinesLoaded = false; elNew._renderPersonRoutines();
+    m.routinesLoading = flat(mr.getElementById("newProutineList").innerHTML);
+    elNew._relations = { pending: [{ id: 3, subject: "Alex", predicate: "owns", object: "bike <red>" }], confirmed: [{ id: 4, subject: "Den", predicate: "adjacent_to", object: "Hall" }], cap: 500 };
+    elNew._relationsLoaded = true; elNew._renderRelations();
+    m.relations = [flat(mr.getElementById("newRelationsPending").innerHTML), flat(mr.getElementById("newRelationsList").innerHTML), mr.getElementById("newRelationsCount").textContent];
+    elNew._relations = { pending: [], confirmed: [], cap: 500 }; elNew._renderRelations();
+    m.relationsEmpty = [flat(mr.getElementById("newRelationsPending").innerHTML), flat(mr.getElementById("newRelationsList").innerHTML)];
+    elNew._relations = { pending: [], confirmed: [], cap: 500, error: "x & y" }; elNew._renderRelations();
+    m.relationsError = flat(mr.getElementById("newRelationsList").innerHTML);
+    m.relErrors = ["invalid_subject", "invalid_object", "invalid_predicate", "self_relation", "duplicate", "not_found", "other", undefined].map(c => elNew._relationErrorText(c));
+    pin("memoryMarkup", m);
+
+    tabBtn("intrusion").click();
+    await new Promise(r => setTimeout(r, 20));
+    const ir = elNew.shadowRoot, n = {};
+    n.page = flat(elNew._htmlIntrusion());
+    const intrState = [
+      { error: true },
+      { called_off: true, suppressed_for: 42, last_snapshot: { image_b64: "QUJD", camera: "camera.front_porch", ts: 0 }, false_alarms_24h: 1, acknowledged: true },
+      { called_off: false, last_snapshot: { camera: "camera.x" }, false_alarms_24h: 3 },
+      {},
+    ];
+    n.status = intrState.map((s, i) => {
+      elNew._intr = s; elNew._intrTimeout = i === 2 ? 300 : undefined;
+      elNew._liveData.config = i === 3 ? { intrusion_vision_confirm: false } : {};
+      elNew._renderIntrusionStatus();
+      return [flat(ir.getElementById("newIntrBody").innerHTML), flat(ir.getElementById("newIntrStatus").innerHTML)];
+    });
+    elNew._liveData.config = cfg;
+    n.log = [
+      null, { events: [] },
+      { learning: { damped_patterns: [1] }, events: [{ id: "a", ts: 0, kind: "confirmed", breach: "Front <door>", reason: "person", image_b64: "QUJD", label: "real" },
+        { id: "b", kind: "unresolved", camera: "camera.yard", label: "false" }, { id: "c", kind: "investigating" }, { id: "d", kind: "weird" }] },
+      { learning: { damped_patterns: [1, 2] }, events: [{ id: "e" }] },
+    ].map(r => flat(elNew._renderIntrusionLogHtml(r)));
+    pin("intrusionMarkup", n);
+
+    // The editor's drag, resize, pan and zoom, run under small stand-ins for
+    // the SVG screen maths jsdom lacks (one screen pixel is one plan unit).
+    const SVGp = W.SVGSVGElement.prototype, Ep = W.Element.prototype;
+    const svgStubs = { pt: SVGp.createSVGPoint, ctm: SVGp.getScreenCTM, box: Ep.getBoundingClientRect };
+    SVGp.createSVGPoint = function () { return { x: 0, y: 0, matrixTransform() { return { x: this.x, y: this.y }; } }; };
+    SVGp.getScreenCTM = function () { return { inverse() { return {}; } }; };
+    Ep.getBoundingClientRect = function () { return { left: 0, top: 0, width: 520, height: 400, right: 520, bottom: 400 }; };
+    tabBtn("settings").click();
+    await new Promise(r => setTimeout(r, 20));
+    elNew._liveData.config = { floor_plan_units: "imperial" };
+    elNew._editingPlan = JSON.parse(JSON.stringify(PLAN));
+    elNew._editingElements = JSON.parse(JSON.stringify(ELEMS));
+    elNew._editingCameras = { tf: JSON.parse(JSON.stringify(CAMS)) };
+    elNew._editingEntities = { tf: [{ e: "light.kitchen", x: 40, y: 30 }, { e: "lock.front", x: 70, y: 50 }] };
+    elNew._editingProperty = [[0, 0], [250, 0], [250, 195], [0, 195]];
+    elNew._editorFloor = "tf"; elNew._editVB = null;
+    elNew._rerenderFloorPlanCard();
+    const moreInfo = [];
+    const onMore = ev => moreInfo.push(ev.detail.entityId);
+    elNew.addEventListener("hass-more-info", onMore);
+    const svg = () => elNew.shadowRoot.getElementById("fpnSvg");
+    const q = sel => elNew.shadowRoot.querySelector(sel);
+    const mouse = (el, type, x, y, button = 0) => el.dispatchEvent(new W.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button }));
+    const drag = async (sel, from, to) => {
+      const el = q(sel);
+      if (!el) return "missing " + sel;
+      mouse(el, "mousedown", from[0], from[1]);
+      mouse(svg(), "mousemove", to[0], to[1]);
+      mouse(svg(), "mouseup", to[0], to[1]);
+      await new Promise(r => setTimeout(r, 30));
+      return "ok";
+    };
+    const d = { steps: [] };
+    const snap = () => JSON.parse(JSON.stringify({ rooms: elNew._editingPlan.tf.rooms, cams: elNew._editingCameras.tf, ents: elNew._editingEntities.tf, prop: elNew._editingProperty, vb: elNew._editVB }));
+    d.steps.push(await drag('.fpn-drag-room[data-idx="0"] .fpn-drag-rect', [10, 10], [25, 17]), snap());
+    d.steps.push(await drag('.fpn-resize-handle[data-idx="1"]', [0, 0], [12.6, -40]), snap());
+    d.steps.push(await drag('.fpn-zone-vtx[data-zone-idx="6"][data-vtx="1"]', [0, 0], [5.4, 3.6]), snap());
+    d.steps.push(await drag('.fpn-zone-path[data-zone-idx="6"]', [0, 0], [10, -4]), snap());
+    mouse(q('.fpn-zone-mid[data-zone-idx="6"][data-edge="0"]'), "mousedown", 0, 0);
+    q('.fpn-zone-vtx[data-zone-idx="6"][data-vtx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    d.steps.push(snap());
+    d.steps.push(await drag('.fpn-prop-vtx[data-prop-vtx="2"]', [0, 0], [-20.4, 7]), snap());
+    mouse(q('.fpn-prop-mid[data-prop-edge="3"]'), "mousedown", 0, 0);
+    q('.fpn-prop-vtx[data-prop-vtx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    d.steps.push(snap());
+    const camEl = q('.fpn-cam[data-cam-idx="0"] .fpn-cam-dot');
+    mouse(camEl, "mousedown", 0, 0);
+    mouse(svg(), "mousemove", 7.7, 8.2);
+    d.steps.push(q('.fpn-cam[data-cam-idx="0"] .fpn-cam-cone').getAttribute("d"), q('.fpn-cam[data-cam-idx="0"] text').getAttribute("y"));
+    mouse(svg(), "mouseup", 7.7, 8.2);
+    await new Promise(r => setTimeout(r, 30));
+    d.steps.push(snap());
+    d.steps.push(await drag('.fpn-ent[data-ent-idx="0"]', [0, 0], [0.5, 0.5]), snap(), moreInfo.slice());
+    const entEl = q('.fpn-ent[data-ent-idx="1"]');
+    mouse(entEl, "mousedown", 0, 0);
+    mouse(svg(), "mousemove", 9, -3);
+    d.steps.push(q('.fpn-ent[data-ent-idx="1"] .fpn-ent-nm').getAttribute("y"), q('.fpn-ent[data-ent-idx="1"] .fpn-ent-val').getAttribute("y"));
+    mouse(svg(), "mouseleave", 9, -3);
+    await new Promise(r => setTimeout(r, 30));
+    d.steps.push(snap(), moreInfo.slice());
+    mouse(svg(), "mousedown", 100, 100);
+    mouse(svg(), "mousemove", 152, 60);
+    d.steps.push(svg().getAttribute("viewBox"), q(".fpn-grid-rect").getAttribute("width"));
+    mouse(svg(), "mouseup", 152, 60);
+    mouse(svg(), "mousedown", 0, 0, 1);
+    mouse(svg(), "mousemove", -26, 13);
+    mouse(svg(), "mouseup", 0, 0);
+    svg().dispatchEvent(new W.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 80, clientY: 60, deltaY: -100 }));
+    svg().dispatchEvent(new W.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 10, clientY: 20, deltaY: 100 }));
+    d.steps.push(snap(), svg().getAttribute("viewBox"));
+    for (let i = 0; i < 40; i++) svg().dispatchEvent(new W.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 0, clientY: 0, deltaY: i < 20 ? -1 : 1 }));
+    d.steps.push(snap());
+    q('.fpn-drag-room[data-idx="2"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 30));
+    q('.fpn-cam[data-cam-idx="1"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 30));
+    q('.fpn-ent[data-ent-idx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 30));
+    mouse(q('.fpn-drag-room[data-idx="0"] .fpn-drag-rect'), "mousedown", 0, 0, 2);
+    mouse(svg(), "mousemove", 50, 50);
+    mouse(svg(), "mouseup", 50, 50);
+    await new Promise(r => setTimeout(r, 30));
+    d.steps.push(snap());
+    // The editor's own fields: aim, wall, position, room, camera entity, indoor.
+    const field = (sel, value, type) => { const f = q(sel); f.value = value; f.dispatchEvent(new W.Event(type, { bubbles: true })); };
+    field('.cam-field-new[data-cam="angle"][data-ci="0"]', "45", "input");
+    d.steps.push(q('.fpn-cam[data-cam-idx="0"] .fpn-cam-cone').getAttribute("d"));
+    field('.cam-field-new[data-cam="angle"][data-ci="0"]', "45", "change");
+    field('.cam-field-new[data-cam="fov"][data-ci="1"]', "60", "change");
+    field('.cam-field-new[data-cam="entity"][data-ci="0"]', "camera.hall", "change");
+    q('.cam-io-new[data-ci="2"]').click();
+    field('.op-field-new[data-op="wall"][data-i="0"]', "left", "change");
+    field('.op-field-new[data-op="pos"][data-i="1"]', "0.62", "change");
+    field('.op-field-new[data-op="room"][data-i="2"]', "Hall", "change");
+    field('.op-field-new[data-op="slope"][data-i="6"]', "front", "change");
+    field('.op-field-new[data-op="entity"][data-i="1"]', "lock.front", "change");
+    q('.op-row-new[data-i="0"]').dispatchEvent(new W.MouseEvent("mouseenter"));
+    d.steps.push(!!q('.fpn-op-marker[data-op-marker="0"]').classList.contains("op-glow"));
+    q('.op-row-new[data-i="0"]').dispatchEvent(new W.MouseEvent("mouseleave"));
+    d.steps.push(!!q('.fpn-op-marker[data-op-marker="0"]').classList.contains("op-glow"));
+    q("#opAddCased").click(); q("#opAddFdormer") && q("#opAddFdormer").click();
+    q("#fpnCamAdd").click();
+    global.__promptQueue = ["Porch", "door"];
+    q("#fpnAddRoom").click();
+    global.__promptQueue = ["Drive"];
+    q("#fpnAddZone").click();
+    d.after = JSON.parse(JSON.stringify({ cams: elNew._editingCameras.tf, els: elNew._editingElements.tf.map(x => Object.assign({}, x, { id: x.id ? "id" : x.id })), rooms: elNew._editingPlan.tf.rooms }));
+    d.after.cams.forEach(c => { if (c.id) c.id = "id"; });
+    elNew.removeEventListener("hass-more-info", onMore);
+    SVGp.createSVGPoint = svgStubs.pt; SVGp.getScreenCTM = svgStubs.ctm; Ep.getBoundingClientRect = svgStubs.box;
+    pin("editorDrag", d);
+
+    // Fixes from the panel tidy: each check failed before it.
+    const card = () => elNew.shadowRoot.getElementById("settings-card-floor_plan_editor");
+    elNew._liveData.config = { floor_plan_units: "imperial" };
+    elNew._editingPlan = JSON.parse(JSON.stringify(PLAN));
+    elNew._editingElements = JSON.parse(JSON.stringify(ELEMS));
+    elNew._editingCameras = { tf: JSON.parse(JSON.stringify(CAMS)) };
+    elNew._editorFloor = "tf";
+    elNew._rerenderFloorPlanCard();
+    field('.op-field-new[data-op="w"][data-i="0"]', "6", "change");
+    field('.cam-field-new[data-cam="range"][data-ci="0"]', "20", "change");
+    const imperialSizes = [elNew._editingElements.tf[0].w, elNew._editingCameras.tf[0].range];
+    elNew._liveData.config = { floor_plan_units: "metric" };
+    elNew._rerenderFloorPlanCard();
+    field('.cam-field-new[data-cam="range"][data-ci="1"]', "3", "change");
+    field('.op-field-new[data-op="w"][data-i="5"]', "0.1", "change");
+    checks.push(["floor plan editor: an opening's width and a camera's range save in plan units, in feet and in metres",
+      imperialSizes[0] === 30 && imperialSizes[1] === 100
+      && elNew._editingCameras.tf[1].range === 49 && elNew._editingElements.tf[5].w === 8]);
+
+    elNew._liveData.config = { floor_plan_units: "imperial" };
+    elNew._rerenderFloorPlanCard();
+    const importLayout = async (layout, ready) => {
+      const input = card().querySelector("#fpnImportFile");
+      Object.defineProperty(input, "files", { value: [new W.File([JSON.stringify(layout)], "plan.json", { type: "application/json" })], configurable: true });
+      input.dispatchEvent(new W.Event("change"));
+      for (let i = 0; i < 400 && !ready(); i++) await new Promise(r => setTimeout(r, 5));
+    };
+    await importLayout({ tf: null, other: { label: "Other", rooms: [] } }, () => false);
+    const brokenRefused = !!elNew._editingPlan.tf && Array.isArray(elNew._editingPlan.tf.rooms) && !!card()?.querySelector("#fpnSvg");
+    await importLayout({ tf: { label: "Bare floor" } }, () => /Bare floor/.test(card()?.textContent || ""));
+    const camsBefore = elNew._editingCameras.tf.length;
+    q('.fpn-cam[data-cam-idx="0"]')?.dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    checks.push(["floor plan editor: an import with a broken floor is refused, and a floor with no rooms keeps its camera controls",
+      brokenRefused && /Bare floor/.test(card()?.textContent || "") && elNew._editingCameras.tf.length === camsBefore - 1]);
+
+    elNew._editingPlan = JSON.parse(JSON.stringify(PLAN));
+    elNew._editingElements = JSON.parse(JSON.stringify(ELEMS));
+    elNew._editingEntities = { tf: [{ e: "light.kitchen", x: 1, y: 1 }, { e: "lock.front", x: 2, y: 2 }] };
+    elNew._editingCameras = { tf: JSON.parse(JSON.stringify(CAMS)) };
+    elNew._editorFloor = "tf";
+    elNew._rerenderFloorPlanCard();
+    q('.cam-del-new[data-ci="0"]').click();
+    q('.op-del-new[data-i="0"]').click();
+    checks.push(["floor plan editor: removing a camera or an opening leaves the device pins alone",
+      elNew._editingEntities.tf.length === 2 && elNew._editingCameras.tf.length === CAMS.length - 1
+      && elNew._editingElements.tf.length === ELEMS.tf.length - 1]);
+    elNew._editingProperty = [];
+    elNew._editorFloor = "empty";
+    elNew._rerenderFloorPlanCard();
+    q("#fpnAddProperty").click();
+    checks.push(["floor plan editor: a property line drawn on a floor with no rooms lands around the origin",
+      JSON.stringify(elNew._editingProperty) === "[[-130,-130],[370,-130],[370,320],[-130,320]]"]);
+
+    elNew._liveData.config = { floor_plan_bg: JSON.stringify({ tf: 'data:image/png;base64,AA" onload="window.__fpBg=1' }) };
+    const bgBox = W.document.createElement("div");
+    bgBox.innerHTML = elNew._renderFloorPlanSVG({ tf: PLAN.tf }, "tf");   // i18n-ok: test markup
+    const bgImg = bgBox.querySelector("image");
+    checks.push(["floor plan editor: a stored background image cannot add attributes to the plan",
+      !!bgImg && !bgImg.hasAttribute("onload") && bgImg.getAttribute("href") === 'data:image/png;base64,AA" onload="window.__fpBg=1']);
+
+    tabBtn("memory").click();
+    await new Promise(r => setTimeout(r, 20));
+    hass.callWS = async (msg) => msg.type === "nova/add_knowledge"
+      ? { facts: [{ id: 9, subject: "household", key: msg.key, value: msg.value, source: "stated", confidence: 1 }] } : {};
+    elNew._knowledge = undefined;
+    elNew.shadowRoot.getElementById("newMemKey").value = "bin day";
+    elNew.shadowRoot.getElementById("newMemVal").value = "Friday";
+    await elNew._teachKnowledge();
+    checks.push(["memory tab: a fact taught before the list has loaded is shown, not dropped",
+      /bin day/.test(elNew.shadowRoot.getElementById("newMemList").textContent)
+      && elNew.shadowRoot.getElementById("newMemKey").value === ""]);
+    elNew._personRoutines = { groups: { "tom_&_jerry": [{ description: "Naps", confidence: 0.9 }], 'the_"twins"': [{ description: "Walks", confidence: 0.8 }] } };
+    elNew._personRoutinesLoaded = true; elNew._renderPersonRoutines();
+    const heads = Array.from(elNew.shadowRoot.querySelectorAll("#newProutineList .mode-bind-head")).map(x => x.textContent);
+    checks.push(["memory tab: a person name with & or quotes shows as written, with each word capitalised",
+      heads.join("|") === 'The "Twins"|Tom & Jerry']);
+
+    hass.callWS = saved.callWS;
+    elNew._uiStrings = saved.strings; elNew._liveData = saved.live; elNew._hass = saved.hass;
+    elNew._editingPlan = saved.plan; elNew._editingEntities = saved.ents; elNew._editingCameras = saved.cams;
+    elNew._editingElements = saved.els; elNew._editingProperty = saved.prop; elNew._editorFloor = saved.floor; elNew._editVB = saved.vb;
+    elNew._knowledge = saved.knowledge; elNew._knowledgeLoaded = saved.kLoaded; elNew._personRoutines = saved.routines;
+    elNew._personRoutinesLoaded = saved.rLoaded; elNew._relations = saved.relations; elNew._relationsLoaded = saved.relLoaded;
+    elNew._intr = saved.intr; elNew._intrTimeout = saved.intrTimeout;
+    W.Date.prototype.toLocaleString = dateText; W.Number.prototype.toLocaleString = numText;
+  }
+
   // _t and _tHtml (8.15.0): with no translation the English is unchanged;
   // with one, the value moves with it, and only _tHtml escapes the
   // translation's own text.

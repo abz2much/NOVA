@@ -1,163 +1,190 @@
+  // ─── Floor plan maths: walls, sight lines and camera coverage ──────────
+  // Every result here is pinned in scripts/smoke_panel.js, so keep the
+  // arithmetic in the same order when changing anything below.
+
+  // The crossing point of segment A (x1,y1 to x2,y2) and segment B
+  // (x3,y3 to x4,y4), or null when they are parallel or do not meet.
   _segIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
-    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-    if (Math.abs(den) < 1e-9) return null;
-    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
-    const u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den;
-    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
-    return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
-  }
-  _planGeometry(floor) {
-    const plan = this._getEditingPlan()[floor];
-    const rooms = (plan && plan.rooms) || [];
-    const walls = [], gaps = [];
-    rooms.forEach(r => {
-      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") return;
-      const rp = this._zonePoints(r);
-      for (let wi = 0; wi < rp.length; wi++) { const a = rp[wi], b = rp[(wi + 1) % rp.length]; walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] }); }
-    });
-    let fb = null;
-    if (rooms.length) {
-      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-      rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
-      fb = { x0: mnx, y0: mny, x1: mxx, y1: mxy };
-    }
-    (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type !== "door" && e.type !== "window") return;
-      const ow = e.w || 20;
-      let bb = fb;
-      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
-        const rr = rooms.filter(r => r.name === e.room)[0];
-        if (rr) bb = { x0: rr.x, y0: rr.y, x1: rr.x + rr.w, y1: rr.y + rr.h };
-      }
-      if (!bb) return;
-      const p = e.pos != null ? e.pos : 0.5;
-      let gx0, gy0, gx1, gy1;
-      if (e.wall === "front") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y0; }
-      else if (e.wall === "back") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y1; }
-      else if (e.wall === "left") { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x0; }
-      else { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x1; }
-      gaps.push({ x0: gx0, y0: gy0, x1: gx1, y1: gy1 });
-    });
-    return { walls, gaps };
-  }
-  _inGap(x, y, gaps) {
-    const tol = 2.5;
-    for (let i = 0; i < gaps.length; i++) {
-      const g = gaps[i];
-      if (x >= Math.min(g.x0, g.x1) - tol && x <= Math.max(g.x0, g.x1) + tol
-        && y >= Math.min(g.y0, g.y1) - tol && y <= Math.max(g.y0, g.y1) + tol) return true;
-    }
-    return false;
-  }
-  _losClear(x1, y1, x2, y2, geo) {
-    for (let i = 0; i < geo.walls.length; i++) {
-      const w = geo.walls[i];
-      const ip = this._segIntersect(x1, y1, x2, y2, w.x0, w.y0, w.x1, w.y1);
-      if (ip && !this._inGap(ip.x, ip.y, geo.gaps)) return false;
-    }
-    return true;
-  }
-  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
-    const dx = px - cx, dy = py - cy;
-    if (Math.hypot(dx, dy) > rng) return false;
-    const a = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (Math.abs(((a - ang + 540) % 360) - 180) > half) return false;
-    return this._losClear(cx, cy, px, py, geo);
-  }
-  _computeCoverage(floor, cam, geo) {
-    const plan = this._getEditingPlan()[floor];
-    if (!plan || !plan.rooms || !plan.rooms.length) return {};
-    geo = geo || this._planGeometry(floor);
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5), half = fov / 2;
-    const cov = {};
-    plan.rooms.forEach(r => {
-      if (r.type === "door" || r.type === "stairs") return;
-      let hit = 0, tot = 0;
-      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
-        const pts = this._zonePoints(r);
-        let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-        pts.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });
-        const nx = 6, ny = 6;
-        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
-          const px = bx0 + (i + 0.5) / nx * (bx1 - bx0), py = by0 + (j + 0.5) / ny * (by1 - by0);
-          if (!this._pointInPoly(px, py, pts)) continue;
-          tot++;
-          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
-        }
-      } else {
-        const nx = 4, ny = 4;
-        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
-          const px = r.x + (i + 0.5) / nx * r.w, py = r.y + (j + 0.5) / ny * r.h;
-          tot++;
-          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
-        }
-      }
-      if (hit > 0 && tot > 0) cov[r.name] = Math.round(hit / tot * 100) / 100;
-    });
-    return cov;
-  }
-  _pointInPoly(x, y, pts) {
-    let inside = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
-      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
-    }
-    return inside;
-  }
-  _coneD(cam) {
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
-    const a1 = (ang - fov / 2) * Math.PI / 180, a2 = (ang + fov / 2) * Math.PI / 180;
-    const x1 = cx + rng * Math.cos(a1), y1 = cy + rng * Math.sin(a1);
-    const x2 = cx + rng * Math.cos(a2), y2 = cy + rng * Math.sin(a2);
-    const large = fov > 180 ? 1 : 0;
-    return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${rng} ${rng} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
-  }
-  _rayCast(cx, cy, ang, range, geo) {
-    const ex = cx + range * Math.cos(ang), ey = cy + range * Math.sin(ang);
-    let best = range;
-    for (let i = 0; i < geo.walls.length; i++) {
-      const w = geo.walls[i];
-      const ip = this._segIntersect(cx, cy, ex, ey, w.x0, w.y0, w.x1, w.y1);
-      if (!ip || this._inGap(ip.x, ip.y, geo.gaps)) continue;
-      const d = Math.hypot(ip.x - cx, ip.y - cy);
-      if (d < best) best = d;
-    }
-    return best;
-  }
-  _clippedCone(cam, geo) {
-    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
-    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
-    const N = Math.max(24, Math.round(fov / 3)), a0 = (ang - fov / 2) * Math.PI / 180, step = (fov * Math.PI / 180) / N;
-    let d = `M ${cx} ${cy}`;
-    for (let i = 0; i <= N; i++) {
-      const a = a0 + i * step, dist = this._rayCast(cx, cy, a, rng, geo);
-      d += ` L ${(cx + dist * Math.cos(a)).toFixed(1)} ${(cy + dist * Math.sin(a)).toFixed(1)}`;
-    }
-    return d + " Z";
-  }
-  _roomAt(floor, x, y) {
-    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    for (let i = 0; i < rooms.length; i++) {
-      const r = rooms[i];
-      if (r.type === "stairs" || r.type === "door") continue;
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.name;
-    }
-    let best = null, bd = 1e18;
-    rooms.forEach(r => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, d = (cx - x) * (cx - x) + (cy - y) * (cy - y); if (d < bd) { bd = d; best = r.name; } });
-    return best || "the area";
-  }
-  _openingDescriptions(floor) {
-    const out = [];
-    (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room) {
-        out.push((e.kind === "cased" ? "cased opening at " : "interior door at ") + e.room);
-      }
-    });
-    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    if (rooms.some(r => r.type === "stairs")) out.push("open staircase");
-    return out;
+    const ax = x1 - x2, ay = y1 - y2, bx = x3 - x4, by = y3 - y4, cx = x1 - x3, cy = y1 - y3;
+    const cross = ax * by - ay * bx;
+    if (Math.abs(cross) < 1e-9) return null;
+    const along = (cx * by - cy * bx) / cross;
+    const onB = (cx * ay - cy * ax) / cross;
+    if (along < 0 || along > 1 || onB < 0 || onB > 1) return null;
+    return { x: x1 + along * (x2 - x1), y: y1 + along * (y2 - y1) };
   }
 
+  // Solid walls (the outline of every walled room) and the gaps doors and
+  // windows leave in them. Stairs, door rooms and outdoor zones add no walls.
+  _planGeometry(floor) {
+    const rooms = (this._getEditingPlan()[floor] || {}).rooms || [];
+    const walls = [];
+    for (const r of rooms) {
+      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") continue;
+      const corners = this._zonePoints(r);
+      corners.forEach((a, k) => {
+        const b = corners[(k + 1) % corners.length];
+        walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] });
+      });
+    }
+    // Outside openings sit on the whole floor's outline, inside ones on their room.
+    const outline = rooms.length ? this._fpBounds(rooms) : null;
+    const span = (lo, hi, along, half) => { const mid = lo + along * (hi - lo); return [mid - half, mid + half]; };
+    const gaps = [];
+    for (const e of this._elemsFor(floor) || []) {
+      if (e.type !== "door" && e.type !== "window") continue;
+      let box = outline;
+      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
+        const own = rooms.find(r => r.name === e.room);
+        if (own) box = this._fpRoomBox(own);
+      }
+      if (!box) continue;
+      const half = (e.w || 20) / 2, along = e.pos != null ? e.pos : 0.5;
+      if (e.wall === "front" || e.wall === "back") {
+        const [from, to] = span(box.x0, box.x1, along, half), y = e.wall === "front" ? box.y0 : box.y1;
+        gaps.push({ x0: from, y0: y, x1: to, y1: y });
+      } else {
+        const [from, to] = span(box.y0, box.y1, along, half), x = e.wall === "left" ? box.x0 : box.x1;
+        gaps.push({ x0: x, y0: from, x1: x, y1: to });
+      }
+    }
+    return { walls, gaps };
+  }
+
+  // True when (x, y) lies in a door or window gap, give or take 2.5 units.
+  _inGap(x, y, gaps) {
+    const within = (v, a, b) => v >= Math.min(a, b) - 2.5 && v <= Math.max(a, b) + 2.5;
+    return gaps.some(g => within(x, g.x0, g.x1) && within(y, g.y0, g.y1));
+  }
+
+  // True when no solid wall stands between the two points.
+  _losClear(x1, y1, x2, y2, geo) {
+    return geo.walls.every(w => {
+      const hit = this._segIntersect(x1, y1, x2, y2, w.x0, w.y0, w.x1, w.y1);
+      return !hit || this._inGap(hit.x, hit.y, geo.gaps);
+    });
+  }
+
+  // True when the point is in range, inside the cone and in plain sight.
+  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
+    const offX = px - cx, offY = py - cy;
+    if (Math.hypot(offX, offY) > rng) return false;
+    const bearing = Math.atan2(offY, offX) * 180 / Math.PI;
+    if (Math.abs(((bearing - ang + 540) % 360) - 180) > half) return false;
+    return this._losClear(cx, cy, px, py, geo);
+  }
+
+  // A camera's aim with the editor's defaults: facing up the plan, 90° wide,
+  // reaching 55 units and never less than 5.
+  _camAim(cam) {
+    const or = (v, fallback) => (v != null ? v : fallback);
+    return { x: cam.x, y: cam.y, ang: or(cam.angle, 270), fov: or(cam.fov, 90), rng: Math.max(or(cam.range, 55), 5) };
+  }
+
+  // Calls visit(x, y) at the centre of each cell of an n by n grid over a box.
+  _fpGrid(x0, y0, w, h, n, visit) {
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) visit(x0 + (i + 0.5) / n * w, y0 + (j + 0.5) / n * h);
+    }
+  }
+
+  // The share of each room one camera sees, to two places: a 4 by 4 sample
+  // for a plain room, 6 by 6 (inside the outline only) for a shaped room or
+  // zone. Rooms it cannot see at all are left out.
+  _computeCoverage(floor, cam, geo) {
+    const rooms = (this._getEditingPlan()[floor] || {}).rooms || [];
+    if (!rooms.length) return {};
+    const sight = geo || this._planGeometry(floor), aim = this._camAim(cam), half = aim.fov / 2;
+    const share = {};
+    for (const r of rooms) {
+      if (r.type === "door" || r.type === "stairs") continue;
+      let seen = 0, tried = 0;
+      const tally = (px, py) => {
+        tried++;
+        if (this._pointCovered(px, py, aim.x, aim.y, aim.ang, half, aim.rng, sight)) seen++;
+      };
+      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
+        const outline = this._zonePoints(r), box = this._fpPointBounds(outline);
+        this._fpGrid(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 6, (px, py) => {
+          if (this._pointInPoly(px, py, outline)) tally(px, py);
+        });
+      } else {
+        this._fpGrid(r.x, r.y, r.w, r.h, 4, tally);
+      }
+      if (seen > 0 && tried > 0) share[r.name] = Math.round(seen / tried * 100) / 100;
+    }
+    return share;
+  }
+
+  // Even-odd test: a ray from the point crosses the outline an odd number of times.
+  _pointInPoly(x, y, pts) {
+    let inside = false;
+    pts.forEach((p, i) => {
+      const q = pts[(i || pts.length) - 1];
+      if ((p[1] > y) !== (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0]) inside = !inside;
+    });
+    return inside;
+  }
+
+  // The full cone as an SVG path: two edges and the arc at full range.
+  _coneD(cam) {
+    const aim = this._camAim(cam);
+    const rim = deg => {
+      const rad = deg * Math.PI / 180;
+      return `${(aim.x + aim.rng * Math.cos(rad)).toFixed(1)} ${(aim.y + aim.rng * Math.sin(rad)).toFixed(1)}`;
+    };
+    const wide = aim.fov > 180 ? 1 : 0;
+    return `M ${aim.x} ${aim.y} L ${rim(aim.ang - aim.fov / 2)} A ${aim.rng} ${aim.rng} 0 ${wide} 1 ${rim(aim.ang + aim.fov / 2)} Z`;
+  }
+
+  // How far a ray from (cx, cy) at angle ang (radians) gets before a solid wall.
+  _rayCast(cx, cy, ang, range, geo) {
+    const endX = cx + range * Math.cos(ang), endY = cy + range * Math.sin(ang);
+    let nearest = range;
+    for (const w of geo.walls) {
+      const hit = this._segIntersect(cx, cy, endX, endY, w.x0, w.y0, w.x1, w.y1);
+      if (!hit || this._inGap(hit.x, hit.y, geo.gaps)) continue;
+      const dist = Math.hypot(hit.x - cx, hit.y - cy);
+      if (dist < nearest) nearest = dist;
+    }
+    return nearest;
+  }
+
+  // The cone cut short by walls: one ray at least every 3 degrees, 24 at least.
+  _clippedCone(cam, geo) {
+    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
+    const aim = this._camAim(cam);
+    const rays = Math.max(24, Math.round(aim.fov / 3));
+    const start = (aim.ang - aim.fov / 2) * Math.PI / 180, step = (aim.fov * Math.PI / 180) / rays;
+    const path = [`M ${aim.x} ${aim.y}`];
+    for (let k = 0; k <= rays; k++) {
+      const a = start + k * step, reach = this._rayCast(aim.x, aim.y, a, aim.rng, geo);
+      path.push(`L ${(aim.x + reach * Math.cos(a)).toFixed(1)} ${(aim.y + reach * Math.sin(a)).toFixed(1)}`);
+    }
+    return path.join(" ") + " Z";
+  }
+
+  // The room a point is in, or else the room whose centre is nearest.
+  _roomAt(floor, x, y) {
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    const holder = rooms.find(r => r.type !== "stairs" && r.type !== "door"
+      && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+    if (holder) return holder.name;
+    let nearest = null, best = 1e18;
+    for (const r of rooms) {
+      const dx = r.x + r.w / 2 - x, dy = r.y + r.h / 2 - y, d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; nearest = r.name; }
+    }
+    return nearest || "the area";
+  }
+
+  // Plain notes on inside openings and stairs, sent with a coverage request.
+  _openingDescriptions(floor) {
+    const lead = { cased: "cased opening at ", interior: "interior door at " };
+    const notes = (this._elemsFor(floor) || [])
+      .filter(e => e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room)
+      .map(e => lead[e.kind] + e.room);
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    if (rooms.some(r => r.type === "stairs")) notes.push("open staircase");
+    return notes;
+  }
