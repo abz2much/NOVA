@@ -1328,3 +1328,45 @@ async def test_the_whole_home_meter_is_not_also_an_appliance(
     assert set(am._MON.sensors) == {"sensor.washer_power"}
     am._on_state_changed(_event(am, "sensor.whole_house_power", "900"))
     assert am._MON.delta.last_reading == 900.0
+
+
+# ── 8.66: stop forgets the state listener it has removed ────────────────────
+
+async def test_stopping_twice_removes_the_listener_once(am, fake_hass, timers, listens, no_persisted):
+    # Home Assistant logs an error with a traceback when a listener is removed
+    # twice. Before 8.66 stop() kept the removed listener, so a second stop
+    # (unload after a panel reload that found nothing) removed it again.
+    _power(fake_hass, "sensor.washer_power", "0")
+    await am.start(fake_hass, {})
+    await am.stop()
+    await am.stop()
+    assert listens[0]["cancelled"] == 1 and timers[0]["cancelled"] == 1
+    assert am._MON.unsub is None
+
+
+async def test_a_reload_that_finds_nothing_leaves_no_listener_behind(
+        am, fake_hass, timers, listens, no_persisted):
+    _power(fake_hass, "sensor.washer_power", "0")
+    await am.start(fake_hass, {})
+    fake_hass.states.remove("sensor.washer_power")
+    await am.start(fake_hass, {})
+    assert am.is_running() is False
+    await am.stop()
+    assert listens[0]["cancelled"] == 1
+
+
+# ── characterisation (8.66): pinned before the rewrite of the type table ────
+
+def test_appliance_type_values_and_order(am):
+    assert [(t.name, t.value) for t in am.ApplianceType] == [
+        ("WASHER", ("washer", 50, 10, 120, 60)),
+        ("DRYER", ("dryer", 100, 15, 120, 90)),
+        ("DISHWASHER", ("dishwasher", 30, 5, 120, 60)),
+        ("OVEN", ("oven", 500, 20, 180, 120)),
+        ("MICROWAVE", ("microwave", 200, 10, 30, 15)),
+        ("GENERIC", ("appliance", 50, 10, 120, 60)),
+    ]
+    t = am.ApplianceType.OVEN
+    assert (t.label, t.run_threshold, t.idle_threshold, t.sustained_seconds,
+            t.settle_seconds) == ("oven", 500, 20, 180, 120)
+    assert all(type(v) is int for t in am.ApplianceType for v in t.value[1:])
