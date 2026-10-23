@@ -15,8 +15,6 @@ import sys
 import pytest
 
 from fakes import FakeHass  # tests/conftest.py puts this on sys.path
-import subprocess
-from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 _MONITOR = (pathlib.Path(__file__).resolve().parents[2]
             / "custom_components" / "nova" / "diagnostics" / "monitor.py")

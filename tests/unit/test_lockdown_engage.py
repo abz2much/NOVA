@@ -13,7 +13,7 @@ import types
 
 import pytest
 import sys
-from cognitive_safety_kit import _isolated_core, cc, clock, service_calls  # noqa: F401
+from cognitive_safety_kit import _isolated_core, cc, service_calls  # noqa: F401
 
 FRONT = "lock.front"
 GARAGE = "cover.garage_door"

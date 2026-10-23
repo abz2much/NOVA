@@ -3,14 +3,7 @@ from __future__ import annotations
 
 import json
 import types
-import asyncio
-import sqlite3
-import sys
-import threading
-from datetime import datetime, timedelta
-import pytest
 import yaml
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 
 def _module(load):

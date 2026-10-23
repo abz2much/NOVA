@@ -14,13 +14,7 @@ import sqlite3
 
 import pytest
 from ws_sources import ws_text
-import asyncio
-import sys
-import threading
-import types
-from datetime import datetime, timedelta
 import yaml
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 NOVA_DIR = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 

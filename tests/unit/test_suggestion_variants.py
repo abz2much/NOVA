@@ -8,14 +8,9 @@ from __future__ import annotations
 
 import sqlite3
 
-import asyncio
 import sys
-import threading
 import types
-from datetime import datetime, timedelta
 import pytest
-import yaml
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 
 def _sequence(models, *, release, count):

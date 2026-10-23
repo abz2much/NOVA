@@ -8,8 +8,6 @@ Since 8.28.0 nothing is exempt by default; the list used here is the kind an
 older install keeps after its one time migration.
 """
 import pytest
-import pathlib
-import subprocess
 from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 DOWN = "lock.downstairs_thermo_lock"

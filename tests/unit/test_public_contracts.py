@@ -26,7 +26,6 @@ import contract_extract as ce
 from ws_sources import ws_tree
 import pathlib
 import subprocess
-from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 _WRITE = os.environ.get("NOVA_WRITE_CONTRACTS") == "1"
 

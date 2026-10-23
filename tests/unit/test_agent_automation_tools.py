@@ -7,12 +7,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-import asyncio
-import sqlite3
-import threading
-from datetime import datetime, timedelta
-import yaml
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
+from fakes import FakeHass
 
 SAFE = "RuntimeError (details are in the Home Assistant log)"
 

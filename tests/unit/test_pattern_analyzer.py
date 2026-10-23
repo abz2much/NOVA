@@ -13,12 +13,9 @@ from datetime import date, datetime, time as clock, timedelta
 
 import pytest
 import asyncio
-import sys
 import threading
-import types
 from datetime import datetime, timedelta
-import yaml
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
+from fakes import FakeHass
 import json
 
 # Columns of the history tables, as the logger writes them. Built into DDL

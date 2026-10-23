@@ -16,8 +16,6 @@ import types
 import pytest
 
 from fakes import FakeHass
-import pathlib
-import subprocess
 from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 

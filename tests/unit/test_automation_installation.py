@@ -19,9 +19,7 @@ import yaml
 from fakes import FakeAutomationInventory
 import asyncio
 import sqlite3
-import threading
-from datetime import datetime, timedelta
-from fakes import FakeAutomationInventory as FileInventory, FakeHass
+from fakes import FakeAutomationInventory as FileInventory
 
 
 class _Services:

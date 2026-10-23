@@ -13,9 +13,6 @@ import math
 import types
 
 import pytest
-import pathlib
-import subprocess
-from cognitive_safety_kit import _isolated_core, cc  # noqa: F401
 
 # A made up home point well away from Ireland, so the region defaults are
 # the "anywhere else" ones.
