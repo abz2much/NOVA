@@ -282,49 +282,29 @@
         }
       }
     },
-    "conversation_summary": {
-      "name": "Summarise conversations",
-      "description": "Nova sums up recent conversations and reads the summary out.",
+    "check_packages": {
+      "name": "Check for parcels and post",
+      "description": "Looks at the porch or doorbell cameras now for delivered parcels or post and announces anything new.",
       "fields": {
-        "hours": {
-          "name": "Hours to cover",
-          "description": "How far back to look. Default 24."
-        },
-        "device_id": {
-          "name": "Device",
-          "description": "Only include conversations from this device. Leave empty for all."
-        },
-        "announce": {
-          "name": "Speak the summary",
-          "description": "Read the summary out on the speakers. On unless switched off."
-        },
-        "store": {
-          "name": "Save the summary",
-          "description": "Keep the summary in the conversation store. On unless switched off."
+        "entity_id": {
+          "name": "Camera",
+          "description": "A camera to check. Leave empty to use the porch and doorbell cameras found automatically."
         }
       }
     },
-    "sentinel_start": {
-      "name": "Start Sentinel",
-      "description": "Turns on Sentinel, which watches doors, locks, motion and anything unusual and speaks up when needed."
+    "diagnose_doorbell": {
+      "name": "Check the doorbell",
+      "description": "Runs the doorbell checks and sends the results as an event."
     },
-    "sentinel_stop": {
-      "name": "Stop Sentinel",
-      "description": "Turns Sentinel off."
-    },
-    "database_purge": {
-      "name": "Clear old conversations",
-      "description": "Deletes stored conversations older than the number of days given.",
+    "train_doorbell_backlog": {
+      "name": "Learn from past doorbell events",
+      "description": "Looks at the Nest doorbell's stored events with Nova's vision and adds the results to the doorbell training data. Works only as far as the Nest integration makes its stored media available.",
       "fields": {
-        "days": {
-          "name": "Days to keep",
-          "description": "Anything older is deleted. Default 30."
+        "limit": {
+          "name": "Most events",
+          "description": "The most past events to look at in one run."
         }
       }
-    },
-    "database_stats": {
-      "name": "Conversation store figures",
-      "description": "Counts what the conversation store holds and sends the figures as a nova_db_stats event."
     },
     "briefing": {
       "name": "Give a briefing",
@@ -386,125 +366,25 @@
         }
       }
     },
-    "nap": {
-      "name": "Pause announcements",
-      "description": "Holds back everything except critical alerts for a while. Smoke, leaks and forced entry are still announced.",
+    "conversation_summary": {
+      "name": "Summarise conversations",
+      "description": "Nova sums up recent conversations and reads the summary out.",
       "fields": {
-        "duration_minutes": {
-          "name": "Minutes",
-          "description": "How long to stay quiet."
-        }
-      }
-    },
-    "shush": {
-      "name": "Silence an entity or category",
-      "description": "Stops Nova announcing a given entity or category from now on. With nothing filled in, it silences whatever Nova has just said.",
-      "fields": {
-        "entity_id": {
-          "name": "Entity",
-          "description": "The entity to silence, for example sensor.washer_power."
+        "hours": {
+          "name": "Hours to cover",
+          "description": "How far back to look. Default 24."
         },
-        "category": {
-          "name": "Category",
-          "description": "One of: appliances, doors_windows, presence, energy, security, climate, lights, schedule."
+        "device_id": {
+          "name": "Device",
+          "description": "Only include conversations from this device. Leave empty for all."
         },
-        "all": {
-          "name": "Everything",
-          "description": "Silence every announcement that is not critical until nova.unshush is used. Kept across restarts; critical safety alerts always get through."
-        }
-      }
-    },
-    "unshush": {
-      "name": "Lift silencing",
-      "description": "Undoes a shush. With nothing filled in, every silencing is lifted.",
-      "fields": {
-        "entity_id": {
-          "name": "Entity",
-          "description": "The entity to hear again."
+        "announce": {
+          "name": "Speak the summary",
+          "description": "Read the summary out on the speakers. On unless switched off."
         },
-        "category": {
-          "name": "Category",
-          "description": "The category to hear again."
-        }
-      }
-    },
-    "observer_start": {
-      "name": "Start the observer",
-      "description": "Turns on the observer, which notices changes around the home and speaks up about the interesting ones."
-    },
-    "observer_stop": {
-      "name": "Stop the observer",
-      "description": "Turns the observer off."
-    },
-    "observer_status": {
-      "name": "Observer status",
-      "description": "Sends a nova_observer_status event with the observer's state: whether it runs, what is silenced, the last announcement and the sleep state."
-    },
-    "create_automation": {
-      "name": "Create an automation",
-      "description": "Creates a Home Assistant automation from the parts given.",
-      "fields": {
-        "alias": {
-          "name": "Name",
-          "description": "A readable name for the automation."
-        },
-        "trigger": {
-          "name": "Trigger",
-          "description": "The trigger, in Home Assistant's format."
-        },
-        "action": {
-          "name": "Action",
-          "description": "The action, in Home Assistant's format."
-        }
-      }
-    },
-    "diagnose_doorbell": {
-      "name": "Check the doorbell",
-      "description": "Runs the doorbell checks and sends the results as an event."
-    },
-    "test_notify": {
-      "name": "Test notification",
-      "description": "Sends a test push notification to the phone set up for alerts."
-    },
-    "test_tts": {
-      "name": "Test the voice",
-      "description": "Plays a short Nova voice test on the broadcast speakers."
-    },
-    "test_routing": {
-      "name": "Test speaker routing",
-      "description": "For diagnosis only: writes where Nova would speak to the Home Assistant log, including the voice, the broadcast target, occupied areas and each room's reply speaker. Nothing is switched or spoken."
-    },
-    "lockdown": {
-      "name": "Lockdown",
-      "description": "Starts or ends lockdown. Starting it locks every lock and closes every open door. Windows already open stay as they are; a window opened during lockdown counts as a breach.",
-      "fields": {
-        "state": {
-          "name": "State",
-          "description": "on starts lockdown, off ends it."
-        },
-        "reason": {
-          "name": "Reason",
-          "description": "An optional note for the log, for example \"away for the weekend\"."
-        }
-      }
-    },
-    "train_doorbell_backlog": {
-      "name": "Learn from past doorbell events",
-      "description": "Looks at the Nest doorbell's stored events with Nova's vision and adds the results to the doorbell training data. Works only as far as the Nest integration makes its stored media available.",
-      "fields": {
-        "limit": {
-          "name": "Most events",
-          "description": "The most past events to look at in one run."
-        }
-      }
-    },
-    "check_packages": {
-      "name": "Check for parcels and post",
-      "description": "Looks at the porch or doorbell cameras now for delivered parcels or post and announces anything new.",
-      "fields": {
-        "entity_id": {
-          "name": "Camera",
-          "description": "A camera to check. Leave empty to use the porch and doorbell cameras found automatically."
+        "store": {
+          "name": "Save the summary",
+          "description": "Keep the summary in the conversation store. On unless switched off."
         }
       }
     },
@@ -551,6 +431,126 @@
           "description": "Optional. Only match the key for this subject (household or primary)."
         }
       }
+    },
+    "observer_start": {
+      "name": "Start the observer",
+      "description": "Turns on the observer, which notices changes around the home and speaks up about the interesting ones."
+    },
+    "observer_stop": {
+      "name": "Stop the observer",
+      "description": "Turns the observer off."
+    },
+    "observer_status": {
+      "name": "Observer status",
+      "description": "Sends a nova_observer_status event with the observer's state: whether it runs, what is silenced, the last announcement and the sleep state."
+    },
+    "sentinel_start": {
+      "name": "Start Sentinel",
+      "description": "Turns on Sentinel, which watches doors, locks, motion and anything unusual and speaks up when needed."
+    },
+    "sentinel_stop": {
+      "name": "Stop Sentinel",
+      "description": "Turns Sentinel off."
+    },
+    "nap": {
+      "name": "Pause announcements",
+      "description": "Holds back everything except critical alerts for a while. Smoke, leaks and forced entry are still announced.",
+      "fields": {
+        "duration_minutes": {
+          "name": "Minutes",
+          "description": "How long to stay quiet."
+        }
+      }
+    },
+    "shush": {
+      "name": "Silence an entity or category",
+      "description": "Stops Nova announcing a given entity or category from now on. With nothing filled in, it silences whatever Nova has just said.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The entity to silence, for example sensor.washer_power."
+        },
+        "category": {
+          "name": "Category",
+          "description": "One of: appliances, doors_windows, presence, energy, security, climate, lights, schedule."
+        },
+        "all": {
+          "name": "Everything",
+          "description": "Silence every announcement that is not critical until nova.unshush is used. Kept across restarts; critical safety alerts always get through."
+        }
+      }
+    },
+    "unshush": {
+      "name": "Lift silencing",
+      "description": "Undoes a shush. With nothing filled in, every silencing is lifted.",
+      "fields": {
+        "entity_id": {
+          "name": "Entity",
+          "description": "The entity to hear again."
+        },
+        "category": {
+          "name": "Category",
+          "description": "The category to hear again."
+        }
+      }
+    },
+    "lockdown": {
+      "name": "Lockdown",
+      "description": "Starts or ends lockdown. Starting it locks every lock and closes every open door. Windows already open stay as they are; a window opened during lockdown counts as a breach.",
+      "fields": {
+        "state": {
+          "name": "State",
+          "description": "on starts lockdown, off ends it."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "An optional note for the log, for example \"away for the weekend\"."
+        }
+      }
+    },
+    "create_automation": {
+      "name": "Create an automation",
+      "description": "Creates a Home Assistant automation from the parts given.",
+      "fields": {
+        "alias": {
+          "name": "Name",
+          "description": "A readable name for the automation."
+        },
+        "trigger": {
+          "name": "Trigger",
+          "description": "The trigger, in Home Assistant's format."
+        },
+        "action": {
+          "name": "Action",
+          "description": "The action, in Home Assistant's format."
+        }
+      }
+    },
+    "test_notify": {
+      "name": "Test notification",
+      "description": "Sends a test push notification to the phone set up for alerts."
+    },
+    "test_tts": {
+      "name": "Test the voice",
+      "description": "Plays a short Nova voice test on the broadcast speakers."
+    },
+    "test_routing": {
+      "name": "Test speaker routing",
+      "description": "For diagnosis only: writes where Nova would speak to the Home Assistant log, including the voice, the broadcast target, occupied areas and each room's reply speaker. Nothing is switched or spoken."
+    },
+    "database_purge": {
+      "name": "Clear old conversations",
+      "description": "Deletes stored conversations older than the number of days given.",
+      "fields": {
+        "days": {
+          "name": "Days to keep",
+          "description": "Anything older is deleted. Default 30."
+        }
+      }
+    },
+    "database_stats": {
+      "name": "Conversation store figures",
+      "description": "Counts what the conversation store holds and sends the figures as a nova_db_stats event."
     },
     "backup": {
       "name": "Back up Nova",
