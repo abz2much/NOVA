@@ -94,10 +94,8 @@ def _weather_reading(hass, default_unit):
 
 
 def _outdoor_sensor_reading(hass, default_unit):
-    """Read the first temperature sensor that looks like an outdoor one.
-
-    Only that first match counts: if its state is not a number the search
-    ends there and nothing is returned."""
+    """Read the first temperature sensor that looks like an outdoor one and has
+    a numeric state. A matching sensor with no reading is skipped."""
     for state in hass.states.async_all("sensor"):
         if state.attributes.get("device_class") != "temperature":
             continue
@@ -108,7 +106,7 @@ def _outdoor_sensor_reading(hass, default_unit):
         try:
             value = float(state.state)
         except (ValueError, TypeError):
-            return None
+            continue
         return value, state.attributes.get("unit_of_measurement") or default_unit
     return None
 

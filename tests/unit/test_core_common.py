@@ -172,10 +172,18 @@ def test_sensors_that_are_not_outdoor_temperatures_are_ignored(cc):
     assert cc.discover_outdoor_temp(hass) is None
 
 
-def test_the_first_outdoor_sensor_decides_even_when_it_has_no_reading(cc):
+def test_an_outdoor_sensor_with_no_reading_is_skipped(cc):
     hass = _hass()
     hass.states.set("sensor.outdoor_a", "unavailable", device_class="temperature")
-    hass.states.set("sensor.outdoor_b", "9", device_class="temperature")
+    hass.states.set("sensor.outdoor_b", "9", device_class="temperature",
+                    unit_of_measurement="°C")
+    assert cc.discover_outdoor_temp(hass) == (9.0, "°C")
+
+
+def test_outdoor_sensors_that_all_lack_a_reading_give_none(cc):
+    hass = _hass()
+    hass.states.set("sensor.outdoor_a", "unavailable", device_class="temperature")
+    hass.states.set("sensor.outdoor_b", "unknown", device_class="temperature")
     assert cc.discover_outdoor_temp(hass) is None
 
 
