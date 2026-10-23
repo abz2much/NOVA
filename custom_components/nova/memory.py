@@ -72,60 +72,54 @@ def _ensure_initialized():
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def store_memory(
-    text: str,
-    *,
-    role: str = "user",
-    device_id: str = "",
-    conversation_id: str = "",
-    subject: Optional[str] = None,
-    turn_id: Optional[str] = None,
-) -> bool:
+def store_memory(text: str, *, role: str = "user", device_id: str = "",
+                 conversation_id: str = "", subject: Optional[str] = None,
+                 turn_id: Optional[str] = None) -> bool:
     """
-    Store a conversation turn in long-term memory.
-    Called from conversation.py after each user/assistant message.
+    Keep one conversation turn in long-term memory. conversation.py calls
+    this after every user and assistant message. True means it was stored.
 
-    `subject` (Phase 2) — the resolved person this turn belongs to, for
-    person-scoped continuity across a conversation_id change. `turn_id`
-    (Phase 2) — the triggering user message's conversations.id (as a
-    string), shared by both halves of one exchange, for coherent pairing on
-    retrieval. Both are added to metadata ONLY when a real value is given —
-    never written as null/None, so legacy records (neither key present)
-    keep reading back exactly as before.
+    `subject` (Phase 2) names the person the turn belongs to, so continuity
+    can follow them when the conversation_id changes. `turn_id` (Phase 2) is
+    the conversations.id of the user message that started the exchange, as a
+    string. Both halves of an exchange share it, which lets retrieval pair
+    them. Each goes into the metadata only when it has a real value and is
+    never written as null, so older records, which have neither key, read
+    back exactly as they did.
     """
     if not text or len(text.strip()) < 5:
         return False
 
     _ensure_initialized()
-    ts = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    stamp = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-    metadata = {
+    meta = {
         "role": role,
         "device_id": device_id or "",
         "conversation_id": conversation_id or "",
-        "timestamp": ts,
+        "timestamp": stamp,
     }
     if subject:
-        metadata["subject"] = subject
+        meta["subject"] = subject
     if turn_id:
-        metadata["turn_id"] = str(turn_id)
+        meta["turn_id"] = str(turn_id)
 
-    if _fts_available:
-        try:
-            import json
-            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                                  busy_timeout_ms=None)
-            conn.execute(
-                "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
-                (text, json.dumps(metadata), ts),
-            )
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as exc:
-            _LOGGER.debug("FTS5 store failed: %s", exc)
-
-    return False
+    if not _fts_available:
+        return False
+    try:
+        import json
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
+        conn.execute(
+            "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
+            (text, json.dumps(meta), stamp),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        _LOGGER.debug("FTS5 store failed: %s", exc)
+        return False
+    return True
 
 
 def _like_escape(value: str) -> str:
@@ -149,6 +143,32 @@ def _metadata_like_pattern(key: str, value: str) -> str:
     import json
     fragment = f'"{key}": {json.dumps(value)}'
     return "%" + _like_escape(fragment) + "%"
+
+
+def _hit_from_row(row, conversation_id: Optional[str],
+                  subject: Optional[str]) -> Optional[dict]:
+    """The search hit for one FTS row, or None when its stored metadata puts it
+    outside the requested conversation or subject. The check here is the
+    authoritative one; the SQL LIKE pre-filter only narrows the candidates."""
+    import json
+    try:
+        meta = json.loads(row["metadata"])
+    except Exception:
+        meta = {}
+    if conversation_id and meta.get("conversation_id") != conversation_id:
+        return None
+    if subject and meta.get("subject") != subject:
+        return None
+    rank = row["rank"]
+    return {
+        "text": row["content"],
+        "role": meta.get("role", ""),
+        "timestamp": meta.get("timestamp", ""),
+        "score": round(abs(rank) * 0.1, 3) if rank else 0,
+        "conversation_id": meta.get("conversation_id") or None,
+        "subject": meta.get("subject") or None,
+        "turn_id": meta.get("turn_id") or None,
+    }
 
 
 def search_memory(
@@ -179,7 +199,6 @@ def search_memory(
 
     if _fts_available:
         try:
-            import json
             conn = _store.connect(_db_path(), mkdir=False,
                                   busy_timeout_ms=None)
             # FTS5 MATCH query
@@ -211,24 +230,10 @@ def search_memory(
 
             memories = []
             for row in rows:
-                meta = {}
-                try:
-                    meta = json.loads(row["metadata"])
-                except Exception:
-                    pass
-                if conversation_id and meta.get("conversation_id") != conversation_id:
+                hit = _hit_from_row(row, conversation_id, subject)
+                if hit is None:
                     continue
-                if subject and meta.get("subject") != subject:
-                    continue
-                memories.append({
-                    "text": row["content"],
-                    "role": meta.get("role", ""),
-                    "timestamp": meta.get("timestamp", ""),
-                    "score": round(abs(row["rank"]) * 0.1, 3) if row["rank"] else 0,
-                    "conversation_id": meta.get("conversation_id") or None,
-                    "subject": meta.get("subject") or None,
-                    "turn_id": meta.get("turn_id") or None,
-                })
+                memories.append(hit)
                 if len(memories) >= k:
                     break
             return memories
@@ -390,22 +395,19 @@ def get_conversation_context(query: str, k: int = 3,
 
 
 def get_memory_stats() -> dict:
-    """Return memory system stats for the panel."""
+    """Memory figures for the panel: which backend answers and how many
+    memories it holds."""
     _ensure_initialized()
-    stats = {
-        "backend": "none",
-        "total_memories": 0,
-    }
-
-    if _fts_available:
-        try:
-            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                                  busy_timeout_ms=None)
-            row = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
-            conn.close()
-            stats["backend"] = "fts5"
-            stats["total_memories"] = row[0] if row else 0
-        except Exception:
-            pass
-
-    return stats
+    report = {"backend": "none", "total_memories": 0}
+    if not _fts_available:
+        return report
+    try:
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
+        counted = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
+        conn.close()
+    except Exception:
+        return report
+    report["backend"] = "fts5"
+    report["total_memories"] = counted[0] if counted else 0
+    return report
