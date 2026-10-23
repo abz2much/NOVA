@@ -1,200 +1,200 @@
 #!/usr/bin/env python3
-"""Nova pre-release audit.
+"""Static checks run before every release and in CI.
 
-Two checks that the old ast.parse gate missed:
+    python3 scripts/audit.py [component_dir]
 
-  1. COMPILE  — py_compile (real bytecode compile) of every module. Unlike
-     ast.parse, this enforces __future__ positioning and other compile-stage
-     rules, matching how Home Assistant actually imports the integration.
+The component directory defaults to custom_components/nova. Four checks run
+over every module in it:
 
-  2. IMPORTS  — resolves every relative import (top-level AND lazy/nested)
-     across the package and verifies each imported name actually exists in the
-     target module (or its __all__). Catches wrong relative levels
-     (e.g. `from .automation` inside a subpackage that needed `..automation`)
-     and stale exports — failures that are invisible to per-file syntax checks.
+  COMPILE       Every module compiles to bytecode, as it must for Home
+                Assistant to import it. Stricter than a plain parse: a
+                misplaced __future__ import fails here. Nothing is written.
+  IMPORTS       Every relative import, at the top of a module or inside a
+                function, points at a module that exists and names something
+                that module defines. A wrong number of dots or a stale name
+                otherwise only shows when that line runs.
+  NAMES         pyflakes finds names used but never defined, which compile
+                accepts and which only fail when the code runs. Skipped, and
+                reported as skipped, when pyflakes is not installed.
+  ARCHITECTURE  No import cycles at import time, packages import only in
+                the allowed direction, and the compatibility modules do not
+                grow.
 
-Run from anywhere:  python3 scripts/audit.py [component_dir]
-Default component dir: custom_components/nova
-Exit code 0 = clean, 1 = problems found.
+Prints one line per check and each problem under it, then AUDIT CLEAN (exit
+0) or AUDIT FAILED (exit 1).
 """
 from __future__ import annotations
 
 import ast
+import io
 import pathlib
-import py_compile
 import sys
+
+_PARSE_CACHE: dict[pathlib.Path, ast.Module] = {}
 
 
 def _component_dir() -> pathlib.Path:
     if len(sys.argv) > 1:
         return pathlib.Path(sys.argv[1])
-    here = pathlib.Path(__file__).resolve().parent
-    return here.parent / "custom_components" / "nova"
+    return pathlib.Path(__file__).resolve().parents[1] / "custom_components" / "nova"
 
 
 def _modules(root: pathlib.Path) -> list[pathlib.Path]:
-    return [f for f in root.rglob("*.py") if "__pycache__" not in str(f)]
+    return [p for p in root.rglob("*.py") if "__pycache__" not in p.parts]
 
+
+def _parse(path: pathlib.Path) -> ast.Module:
+    tree = _PARSE_CACHE.get(path)
+    if tree is None:
+        tree = _PARSE_CACHE[path] = ast.parse(path.read_text(encoding="utf-8"))
+    return tree
+
+
+# ── COMPILE ──────────────────────────────────────────────────────────────────
 
 def compile_gate(files: list[pathlib.Path]) -> list[str]:
+    """Compiles each module in memory, so no .pyc lands in the source tree,
+    and reports where it fails and why."""
     problems = []
-    for f in files:
+    for path in files:
         try:
-            py_compile.compile(str(f), doraise=True)
-        except py_compile.PyCompileError as exc:
-            problems.append(f"{f}: {str(exc).splitlines()[0]}")
+            compile(path.read_bytes(), str(path), "exec", dont_inherit=True)
+        except SyntaxError as err:
+            problems.append(f"{path}:{err.lineno}: {type(err).__name__}: {err.msg}")
+        except Exception as err:   # null bytes, a bad source encoding
+            problems.append(f"{path}: {type(err).__name__}: {err}")
     return problems
 
 
-# ── relative-import resolution ────────────────────────────────────────────────
-_PARSE_CACHE: dict[pathlib.Path, ast.Module] = {}
+# ── IMPORTS ──────────────────────────────────────────────────────────────────
 
+def _bound_names(stmts: list[ast.stmt], into: set[str]) -> set[str]:
+    """Names a module binds when it is imported: definitions, assignments and
+    imports, including those inside top-level if, try and with blocks."""
+    def targets(node: ast.AST) -> None:
+        if isinstance(node, ast.Name):
+            into.add(node.id)
+        elif isinstance(node, (ast.Tuple, ast.List)):
+            for part in node.elts:
+                targets(part)
 
-def _parse(p: pathlib.Path) -> ast.Module:
-    if p not in _PARSE_CACHE:
-        _PARSE_CACHE[p] = ast.parse(p.read_text())
-    return _PARSE_CACHE[p]
+    for stmt in stmts:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            into.add(stmt.name)
+        elif isinstance(stmt, ast.Assign):
+            for target in stmt.targets:
+                targets(target)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            into.add(stmt.target.id)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            into.update(alias.asname or alias.name.split(".")[0] for alias in stmt.names)
+        elif isinstance(stmt, ast.If):
+            _bound_names(stmt.body + stmt.orelse, into)
+        elif isinstance(stmt, ast.Try):
+            _bound_names(stmt.body + stmt.orelse + stmt.finalbody, into)
+            for handler in stmt.handlers:
+                _bound_names(handler.body, into)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            _bound_names(stmt.body, into)
+    return into
 
 
 def _toplevel_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
-
-    def add_target(tg: ast.AST) -> None:
-        if isinstance(tg, ast.Name):
-            names.add(tg.id)
-        elif isinstance(tg, (ast.Tuple, ast.List)):
-            for e in tg.elts:
-                add_target(e)
-
-    def scan(body: list[ast.stmt]) -> None:
-        for n in body:
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                names.add(n.name)
-            elif isinstance(n, ast.Assign):
-                for t in n.targets:
-                    add_target(t)
-            elif isinstance(n, ast.AnnAssign):
-                if isinstance(n.target, ast.Name):
-                    names.add(n.target.id)
-            elif isinstance(n, (ast.Import, ast.ImportFrom)):
-                for a in n.names:
-                    names.add(a.asname or a.name.split(".")[0])
-            elif isinstance(n, ast.Try):
-                scan(n.body)
-                for h in n.handlers:
-                    scan(h.body)
-                scan(n.orelse)
-                scan(n.finalbody)
-            elif isinstance(n, ast.If):
-                scan(n.body)
-                scan(n.orelse)
-            elif isinstance(n, (ast.With, ast.AsyncWith)):
-                scan(n.body)
-
-    scan(tree.body)
-    return names
+    return _bound_names(tree.body, set())
 
 
 def _dunder_all(tree: ast.Module) -> set[str] | None:
-    for n in tree.body:
-        if isinstance(n, ast.Assign):
-            for t in n.targets:
-                if isinstance(t, ast.Name) and t.id == "__all__":
-                    try:
-                        return set(ast.literal_eval(n.value))
-                    except Exception:
-                        return None
+    """The first top-level ``__all__ = [...]``, or None when absent or not a literal."""
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets):
+            try:
+                return set(ast.literal_eval(stmt.value))
+            except Exception:
+                return None
     return None
 
 
-def _resolve(curfile: pathlib.Path, level: int, module: str | None) -> pathlib.Path | None:
-    base = curfile.parent
-    for _ in range(level - 1):
-        base = base.parent
-    if module:
-        parts = module.split(".")
-        as_mod = base.joinpath(*parts).with_suffix(".py")
-        as_pkg = base.joinpath(*parts, "__init__.py")
-        if as_mod.exists():
-            return as_mod
-        if as_pkg.exists():
-            return as_pkg
-        return None
-    return base / "__init__.py"
+def _package_dir(path: pathlib.Path, level: int) -> pathlib.Path:
+    """The directory a relative import with this many dots starts from."""
+    return path.parents[level - 1]
+
+
+def _is_submodule(directory: pathlib.Path, name: str) -> bool:
+    return (directory / f"{name}.py").exists() or (directory / name / "__init__.py").exists()
+
+
+def _resolve(path: pathlib.Path, level: int, module: str | None) -> pathlib.Path | None:
+    start = _package_dir(path, level)
+    if not module:
+        return start / "__init__.py"
+    parts = module.split(".")
+    for candidate in (start.joinpath(*parts).with_suffix(".py"), start.joinpath(*parts, "__init__.py")):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def import_gate(files: list[pathlib.Path]) -> list[str]:
     problems = []
-    for f in files:
-        for node in ast.walk(_parse(f)):
-            if not (isinstance(node, ast.ImportFrom) and node.level and node.level >= 1):
+    for path in files:
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, ast.ImportFrom) or not node.level:
                 continue
-            if node.module is None:  # from . import x, y
-                base = f.parent
-                for _ in range(node.level - 1):
-                    base = base.parent
-                for a in node.names:
-                    nm = a.name
-                    if (base / f"{nm}.py").exists() or (base / nm / "__init__.py").exists():
+            dots = "." * node.level
+            if node.module is None:
+                # from . import x: a sibling module, or a name the package defines.
+                start = _package_dir(path, node.level)
+                init = start / "__init__.py"
+                for alias in node.names:
+                    if _is_submodule(start, alias.name):
                         continue
-                    ini = base / "__init__.py"
-                    if ini.exists() and nm in _toplevel_names(_parse(ini)):
+                    if init.exists() and alias.name in _toplevel_names(_parse(init)):
                         continue
-                    problems.append(f"{f}: from {'.' * node.level} import {nm} → unresolved")
-            else:
-                target = _resolve(f, node.level, node.module)
-                if target is None:
-                    problems.append(f"{f}: from {'.' * node.level}{node.module} → module not found")
+                    problems.append(f"{path}: from {dots} import {alias.name} → unresolved")
+                continue
+            target = _resolve(path, node.level, node.module)
+            if target is None:
+                problems.append(f"{path}: from {dots}{node.module} → module not found")
+                continue
+            tree = _parse(target)
+            known = (_dunder_all(tree) or set()) | _toplevel_names(tree)
+            for alias in node.names:
+                if alias.name == "*" or alias.name in known:
                     continue
-                tt = _parse(target)
-                allset = _dunder_all(tt)
-                valid = (allset if allset is not None else set()) | _toplevel_names(tt)
-                for a in node.names:
-                    if a.name == "*":
-                        continue
-                    # `from .package import submodule` imports the submodule.
-                    if target.name == "__init__.py" and (
-                            (target.parent / f"{a.name}.py").exists()
-                            or (target.parent / a.name / "__init__.py").exists()):
-                        continue
-                    if a.name not in valid:
-                        problems.append(
-                            f"{f}: from {'.' * node.level}{node.module} import {a.name} → not found in {target.name}"
-                        )
+                # from .package import submodule
+                if target.name == "__init__.py" and _is_submodule(target.parent, alias.name):
+                    continue
+                problems.append(f"{path}: from {dots}{node.module} import {alias.name} → not found in {target.name}")
     return problems
 
 
-def undefined_names_gate(files: list[pathlib.Path]) -> list[str]:
-    """Catch references to names that don't exist in scope (v6.78.1).
+# ── NAMES ────────────────────────────────────────────────────────────────────
 
-    py_compile happily accepts a NameError inside a nested function — it's only
-    raised at runtime, and if the caller wraps it in `except Exception` it fails
-    silently forever. That is exactly how a scheduled briefing shipped calling an
-    undefined `groq_client`. pyflakes resolves scopes statically and catches it.
+def undefined_names_gate(files: list[pathlib.Path]) -> list[str] | None:
+    """pyflakes' undefined-name reports, or None when pyflakes is missing.
 
-    Skipped (not failed) when pyflakes isn't installed, so the gate never blocks
-    a machine that lacks it."""
+    A NameError inside a function compiles fine and, behind an
+    ``except Exception``, can fail quietly for ever: a scheduled briefing once
+    shipped calling a client that did not exist. Unused imports and the like
+    are style, so only undefined names count."""
     try:
         from pyflakes.api import check
         from pyflakes.reporter import Reporter
     except Exception:
-        return []
-    import io
-    problems: list[str] = []
-    for f in files:
-        out, err = io.StringIO(), io.StringIO()
+        return None
+    problems = []
+    for path in files:
+        found, errors = io.StringIO(), io.StringIO()
         try:
-            check(f.read_text(), str(f), Reporter(out, err))
+            check(path.read_text(encoding="utf-8"), str(path), Reporter(found, errors))
         except Exception:
             continue
-        for line in out.getvalue().splitlines():
-            # only undefined names — unused imports/vars are style, not bugs
-            if "undefined name" in line:
-                problems.append(line.strip())
+        problems += [line.strip() for line in found.getvalue().splitlines() if "undefined name" in line]
     return problems
 
 
-# ── Architecture ───────────────────────────────────────────────────────────
+# ── ARCHITECTURE ─────────────────────────────────────────────────────────────
 # Which capability package may import which. Every package may import the
 # top-level core modules; leaf packages may import nothing else in Nova.
 # A new edge fails the audit: add it here deliberately, in the same change,
@@ -236,160 +236,147 @@ FACADE_LIMITS = {
 }
 
 
-def _module_name(root: pathlib.Path, f: pathlib.Path) -> str:
-    parts = list(f.relative_to(root).with_suffix("").parts)
+def _module_name(root: pathlib.Path, path: pathlib.Path) -> str:
+    parts = list(path.relative_to(root).with_suffix("").parts)
     if parts[-1] == "__init__":
-        parts = parts[:-1]
+        parts.pop()
     return ".".join(parts)
 
 
-def _module_level_nodes(body: list) -> list:
-    """Statements that run at import time, including inside top-level
-    if/try blocks (but not function or class bodies)."""
+def _import_time_nodes(stmts: list[ast.stmt]) -> list[ast.stmt]:
+    """Statements run when the module is imported, including those inside
+    top-level if and try blocks, but not function or class bodies."""
     out = []
-    for node in body:
-        out.append(node)
-        if isinstance(node, (ast.If, ast.Try)):
-            nested = list(node.body) + list(node.orelse) + list(getattr(node, "finalbody", []))
-            for handler in getattr(node, "handlers", []):
-                nested += handler.body
-            out += _module_level_nodes(nested)
+    for stmt in stmts:
+        out.append(stmt)
+        if isinstance(stmt, ast.If):
+            out += _import_time_nodes(stmt.body + stmt.orelse)
+        elif isinstance(stmt, ast.Try):
+            out += _import_time_nodes(stmt.body + stmt.orelse + stmt.finalbody
+                                      + [s for h in stmt.handlers for s in h.body])
     return out
 
 
 def _import_edges(root: pathlib.Path, files: list[pathlib.Path]):
-    """(import-time edges, all edges) between Nova modules. `from . import x`
+    """Edges between Nova modules: (import time only, all). ``from . import x``
     where x is a submodule points at x, not at the package."""
-    mods = {_module_name(root, f): f for f in files}
-    eager: dict[str, set[str]] = {m: set() for m in mods}
-    every: dict[str, set[str]] = {m: set() for m in mods}
-    for name, f in mods.items():
-        tree = _parse(f)
-        top = {id(n) for n in _module_level_nodes(tree.body)}
-        base = name.split(".") if name else []
-        if f.name != "__init__.py":
-            base = base[:-1]
+    modules = {_module_name(root, p): p for p in files}
+    eager: dict[str, set[str]] = {m: set() for m in modules}
+    every: dict[str, set[str]] = {m: set() for m in modules}
+    for name, path in modules.items():
+        tree = _parse(path)
+        at_import = {id(n) for n in _import_time_nodes(tree.body)}
+        package = name.split(".") if name else []
+        if path.name != "__init__.py":
+            package = package[:-1]
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.ImportFrom) and node.level):
+            if not isinstance(node, ast.ImportFrom) or not node.level:
                 continue
-            anchor = base[:len(base) - (node.level - 1)] if node.level > 1 else base
+            anchor = package[:len(package) - (node.level - 1)] if node.level > 1 else package
             target = ".".join(anchor + (node.module.split(".") if node.module else []))
             for alias in node.names:
                 sub = f"{target}.{alias.name}".strip(".")
-                dest = sub if sub in mods else target
-                if dest in mods and dest != name:
+                dest = sub if sub in modules else target
+                if dest in modules and dest != name:
                     every[name].add(dest)
-                    if id(node) in top:
+                    if id(node) in at_import:
                         eager[name].add(dest)
     return eager, every
 
 
 def _cycles(edges: dict[str, set[str]]) -> list[list[str]]:
-    index: dict[str, int] = {}
+    """Strongly connected groups of more than one module (Tarjan)."""
+    order: dict[str, int] = {}
     low: dict[str, int] = {}
     stack: list[str] = []
-    on_stack: set[str] = set()
-    found: list[list[str]] = []
-    counter = [0]
+    groups: list[list[str]] = []
 
     def visit(v: str) -> None:
-        index[v] = low[v] = counter[0]
-        counter[0] += 1
+        order[v] = low[v] = len(order)
         stack.append(v)
-        on_stack.add(v)
         for w in edges[v]:
-            if w not in index:
+            if w not in order:
                 visit(w)
                 low[v] = min(low[v], low[w])
-            elif w in on_stack:
-                low[v] = min(low[v], index[w])
-        if low[v] == index[v]:
-            comp = []
+            elif w in stack:
+                low[v] = min(low[v], order[w])
+        if low[v] == order[v]:
+            group = []
             while True:
                 w = stack.pop()
-                on_stack.discard(w)
-                comp.append(w)
+                group.append(w)
                 if w == v:
                     break
-            if len(comp) > 1:
-                found.append(sorted(comp))
+            if len(group) > 1:
+                groups.append(sorted(group))
 
     for v in sorted(edges):
-        if v not in index:
+        if v not in order:
             visit(v)
-    return found
+    return groups
 
 
 def architecture_gate(root: pathlib.Path, files: list[pathlib.Path]) -> list[str]:
-    problems = []
     eager, every = _import_edges(root, files)
-    for comp in _cycles(eager):
-        problems.append("import-time cycle: " + " -> ".join(m or "<package>" for m in comp))
+    problems = ["import-time cycle: " + " -> ".join(m or "<package>" for m in group) for group in _cycles(eager)]
 
-    def package(m: str) -> str:
-        head = m.split(".")[0]
-        return head if "." in m or (root / head).is_dir() else ""
+    def package_of(module: str) -> str:
+        head = module.split(".")[0]
+        return head if "." in module or (root / head).is_dir() else ""
 
     for src, dests in sorted(every.items()):
-        sp = package(src)
+        src_pkg = package_of(src)
+        if not src_pkg:
+            continue
         for dest in sorted(dests):
-            dp = package(dest)
-            if sp == dp or not sp:
+            dest_pkg = package_of(dest)
+            if dest_pkg == src_pkg:
                 continue
-            if sp in LEAF_PACKAGES:
-                problems.append(f"leaf package {sp} imports {dest or '<package>'} ({src})")
-            elif not dp:
-                continue
-            elif dp not in ALLOWED_PACKAGE_DEPS.get(sp, set()):
-                problems.append(f"{sp} may not import {dp} ({src} -> {dest})")
+            if src_pkg in LEAF_PACKAGES:
+                problems.append(f"leaf package {src_pkg} imports {dest or '<package>'} ({src})")
+            elif dest_pkg and dest_pkg not in ALLOWED_PACKAGE_DEPS.get(src_pkg, set()):
+                problems.append(f"{src_pkg} may not import {dest_pkg} ({src} -> {dest})")
 
     for facade, (max_lines, allowed) in sorted(FACADE_LIMITS.items()):
-        f = root / f"{facade}.py"
-        if not f.is_file():
+        path = root / f"{facade}.py"
+        if not path.is_file():
             problems.append(f"compatibility module {facade}.py is missing")
             continue
-        lines = f.read_text(encoding="utf-8").count("\n")
+        # Every line counts, the last one too when it has no newline.
+        lines = len(path.read_text(encoding="utf-8").splitlines())
         if lines > max_lines:
             problems.append(f"compatibility module {facade}.py grew to {lines} lines (limit {max_lines})")
-        defs = {n.name for n in _parse(f).body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-        extra = sorted(defs - set(allowed))
+        defined = {n.name for n in _parse(path).body
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        extra = sorted(defined - set(allowed))
         if extra:
             problems.append(f"compatibility module {facade}.py gained definitions: {extra}")
     return problems
 
 
+# ── report ───────────────────────────────────────────────────────────────────
+
 def main() -> int:
-    root = _component_dir()
-    if not root.is_dir():
-        print(f"audit: component dir not found: {root}")
+    component = _component_dir()
+    if not component.is_dir():
+        print(f"audit: component dir not found: {component}")
         return 1
-    files = _modules(root)
-
-    compile_problems = compile_gate(files)
-    import_problems = import_gate(files)
-    undefined_problems = undefined_names_gate(files)
-    architecture_problems = architecture_gate(root, files)
-
-    print(f"COMPILE  : {'OK (' + str(len(files)) + ' modules)' if not compile_problems else 'FAIL'}")
-    for p in compile_problems:
-        print(f"  ✗ {p}")
-    print(f"IMPORTS  : {'OK' if not import_problems else 'FAIL'}")
-    for p in import_problems:
-        print(f"  ✗ {p}")
-    print(f"NAMES    : {'OK' if not undefined_problems else 'FAIL'}")
-    for p in undefined_problems:
-        print(f"  ✗ {p}")
-    print(f"ARCHITECTURE: {'OK' if not architecture_problems else 'FAIL'}")
-    for p in architecture_problems:
-        print(f"  ✗ {p}")
-
-    if compile_problems or import_problems or undefined_problems or architecture_problems:
-        print("\nAUDIT FAILED")
-        return 1
-    print("\nAUDIT CLEAN")
-    return 0
+    files = _modules(component)
+    names = undefined_names_gate(files)
+    results = [
+        ("COMPILE  ", compile_gate(files), f"OK ({len(files)} modules)"),
+        ("IMPORTS  ", import_gate(files), "OK"),
+        ("NAMES    ", names or [], "OK" if names is not None else "SKIPPED (pyflakes not installed)"),
+        ("ARCHITECTURE", architecture_gate(component, files), "OK"),
+    ]
+    for label, problems, passed in results:
+        print(f"{label}: {'FAIL' if problems else passed}")
+        for problem in problems:
+            print(f"  ✗ {problem}")
+    failed = any(problems for _, problems, _ in results)
+    print("\nAUDIT FAILED" if failed else "\nAUDIT CLEAN")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
