@@ -1,3 +1,8 @@
+## [8.65.2] Copied code removed from eighteen more files
+
+### Changed
+- **Nothing you will notice.** Eighteen more files were rewritten so Nova no longer carries code copied from the project it was forked from. Alerts, announcements, voice, the panel and the AI tools work exactly as before.
+
 ## [8.65.1] Copied code removed from twelve more files
 
 ### Changed
