@@ -1,9 +1,33 @@
-"""Tests for StateLogger (person column + migration) and the state-change
-listener's sole-occupant stamping — v6.41.0, groundwork for per-person
-routine learning."""
+"""Who-did-it stamping in the pattern store.
+
+Two layers are covered here: StateLogger writing rows (with the person
+columns, and their migration onto an older patterns.db), and the
+state_changed listener deciding which person, if any, a change is put down
+to. Other listener rules (ignores, rate limit, areas) live in
+test_cognitive_core_tick.py.
+"""
+from __future__ import annotations
+
 import sqlite3
 
 import pytest
+
+# Every column the person work added to state_changes.
+PERSON_COLUMNS = {"person", "person_confidence", "detection_confidence",
+                  "source_entity_id", "source_confidence"}
+
+
+def columns(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return {info[1] for info in conn.execute("PRAGMA table_info(state_changes)")}
+
+
+def stored(db_path, entity_id, *fields):
+    """Every row logged for `entity_id`, as tuples of the asked-for fields."""
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute(
+            f"SELECT {', '.join(fields)} FROM state_changes WHERE entity_id = ? ORDER BY id",
+            (entity_id,)).fetchall()
 
 
 @pytest.fixture
@@ -12,240 +36,145 @@ def cc(load):
 
 
 @pytest.fixture
-def logger(cc, tmp_path, monkeypatch):
-    lg = cc.StateLogger.__new__(cc.StateLogger)
-    lg._last_states = {}
-    lg._db_path = str(tmp_path / "patterns.db")
-    lg._init_db()
-    return lg
+def store(cc, tmp_path):
+    return cc.StateLogger(str(tmp_path / "learning" / "patterns.db"))
 
 
-def test_fresh_db_has_person_column(logger):
-    with sqlite3.connect(logger._db_path) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(state_changes)")}
-    assert "person" in cols
+# ── the logger itself ───────────────────────────────────────────────────────
+
+def test_a_new_store_has_every_person_column(store):
+    assert PERSON_COLUMNS <= columns(store._db_path)
 
 
-def test_log_state_change_stores_person(logger):
-    logger.log_state_change("light.kitchen", "off", "on", person="Username")
-    with sqlite3.connect(logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id = ?",
-            ("light.kitchen",),
-        ).fetchone()
-    assert row[0] == "Username"
+@pytest.mark.parametrize("kwargs, expected", [
+    ({}, ("unknown", 0.0)),
+    ({"person": "alex"}, ("alex", 0.0)),
+    ({"person": "alex", "person_confidence": 0.8}, ("alex", 0.8)),
+])
+def test_the_person_is_stored_with_its_confidence(store, kwargs, expected):
+    store.log_state_change("light.kitchen", "off", "on", **kwargs)
+    assert stored(store._db_path, "light.kitchen", "person", "person_confidence") == [expected]
 
 
-def test_log_state_change_defaults_to_unknown(logger):
-    logger.log_state_change("light.kitchen", "off", "on")
-    with sqlite3.connect(logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id = ?",
-            ("light.kitchen",),
-        ).fetchone()
-    assert row[0] == "unknown"
+def test_what_caused_the_change_is_kept(store):
+    store.log_state_change("light.porch", "off", "on", triggered_by="automation",
+                           source_entity_id="automation.porch_schedule",
+                           source_confidence=1.0)
+    assert stored(store._db_path, "light.porch",
+                  "triggered_by", "source_entity_id", "source_confidence") == [
+        ("automation", "automation.porch_schedule", 1.0)]
 
 
-def test_migration_adds_person_to_existing_db(cc, tmp_path):
-    """An install upgrading from pre-6.41 has state_changes without the
-    person column — _init_db must migrate it in place, not just for fresh DBs."""
-    db_path = tmp_path / "old_patterns.db"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript("""
-            CREATE TABLE state_changes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL, entity_id TEXT NOT NULL,
-                domain TEXT NOT NULL, old_state TEXT, new_state TEXT NOT NULL,
-                area_id TEXT, hour INTEGER, day_of_week INTEGER,
-                triggered_by TEXT DEFAULT 'system'
-            );
-        """)
-        conn.execute(
-            "INSERT INTO state_changes (timestamp, entity_id, domain, "
-            "old_state, new_state, hour, day_of_week) "
-            "VALUES ('2026-01-01T00:00:00','light.x','light','off','on',0,0)")
-
-    lg = cc.StateLogger.__new__(cc.StateLogger)
-    lg._last_states = {}
-    lg._db_path = str(db_path)
-    lg._init_db()  # should migrate, not error
-
-    with sqlite3.connect(str(db_path)) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(state_changes)")}
-        assert "person" in cols
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id='light.x'"
-        ).fetchone()
-        assert row[0] == "unknown"  # pre-existing rows get the default
+@pytest.mark.parametrize("forced, rows", [(False, 0), (True, 1)])
+def test_a_noisy_domain_needs_the_opt_in(store, forced, rows):
+    store.log_state_change("binary_sensor.garage_door_1", "off", "on", force_include=forced)
+    assert len(stored(store._db_path, "binary_sensor.garage_door_1", "id")) == rows
 
 
-# ── listener stamping (sole-occupant only) ───────────────────────────────────
+LEGACY_SCHEMA = """
+    CREATE TABLE state_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL, entity_id TEXT NOT NULL, domain TEXT NOT NULL,
+        old_state TEXT, new_state TEXT NOT NULL, area_id TEXT,
+        hour INTEGER, day_of_week INTEGER, triggered_by TEXT DEFAULT 'system'
+    );
+    INSERT INTO state_changes (timestamp, entity_id, domain, old_state,
+                               new_state, hour, day_of_week)
+    VALUES ('2026-01-01T07:30:00', 'light.hall', 'light', 'off', 'on', 7, 3);
+"""
+
+
+def test_an_older_store_gains_the_person_columns_in_place(cc, tmp_path):
+    """A pattern store from before person stamping must be upgraded, not
+    only fresh ones, and its existing rows keep their data."""
+    path = str(tmp_path / "legacy.db")
+    with sqlite3.connect(path) as conn:
+        conn.executescript(LEGACY_SCHEMA)
+
+    first = cc.StateLogger(path)
+    cc.StateLogger(path)                     # a second start must be harmless
+
+    assert PERSON_COLUMNS <= columns(path)
+    assert stored(path, "light.hall", "person", "person_confidence",
+                  "new_state", "hour", "day_of_week") == [("unknown", 0.0, "on", 7, 3)]
+    first.log_state_change("light.hall", "on", "off", person="sam")
+    assert [r[0] for r in stored(path, "light.hall", "person")] == ["unknown", "sam"]
+
+
+# ── the listener's attribution ──────────────────────────────────────────────
 
 @pytest.fixture
-def core_state(cc, fake_hass, monkeypatch, tmp_path):
+def listening(cc, fake_hass, monkeypatch, tmp_path):
+    """A running core with a fresh store and an empty per-entity rate limit."""
     core = cc._CoreState()
     core.hass = fake_hass
     core.running = True
-    core.state_logger = cc.StateLogger.__new__(cc.StateLogger)
-    core.state_logger._last_states = {}
-    core.state_logger._db_path = str(tmp_path / "patterns.db")
-    core.state_logger._init_db()
+    core.state_logger = cc.StateLogger(str(tmp_path / "patterns.db"))
     monkeypatch.setattr(cc, "_CORE", core)
-    cc._PATTERN_LOG_LAST.clear()   # reset per-entity pattern-log rate limit
+    monkeypatch.setattr(cc, "_PATTERN_LOG_LAST", {})
     return core
 
 
-def _event(cc, entity_id, old, new):
+def switch_on(cc, entity_id="light.den"):
     from homeassistant.core import State
-    old_state = State(entity_id, old) if old is not None else None
-    new_state = State(entity_id, new)
-    return cc.Event("state_changed", {
-        "entity_id": entity_id, "old_state": old_state, "new_state": new_state,
-    })
+    cc._on_state_changed(cc.Event("state_changed", {
+        "entity_id": entity_id,
+        "old_state": State(entity_id, "off"),
+        "new_state": State(entity_id, "on"),
+    }))
 
 
-def test_listener_stamps_unknown_with_no_presence_signal(cc, core_state):
-    # No identity patch needed — with nothing home, it's a
-    # real "unknown" from the resolver, not just an untouched default.
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row is not None and row[0] == "unknown"
-
-
-def test_listener_stamps_known_person_when_home(cc, core_state, load, monkeypatch):
-    # v6.77.0: the listener now uses the room-aware quick_identify, which
-    # carries confidence as well as the name.
+def presence_says(monkeypatch, load, person, confidence, how, candidates):
     identity = load("identity")
+    name = identity.UNKNOWN if person is None else person
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
-                            "Username", 0.6, "sole_occupant", {"Username": 0.6}))
-
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person, person_confidence FROM state_changes "
-            "WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row is not None and row[0] == "Username"
-    assert row[1] == pytest.approx(0.6)
+                            name, confidence, how, candidates))
 
 
-def test_listener_records_probable_person_below_threshold(cc, core_state, load, monkeypatch):
-    """v6.77.0: a clear front-runner that didn't clear the confidence bar is
-    recorded WITH low confidence rather than discarded as unknown — this is what
-    lets a multi-occupant house build per-person routines at all."""
-    identity = load("identity")
-    monkeypatch.setattr(identity, "quick_identify",
-                        lambda hass, area=None: identity.Identification(
-                            identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Username3": 0.42, "Username": 0.10}))
-
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person, person_confidence FROM state_changes "
-            "WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row[0] == "Username3"          # the clear front-runner is kept
-    assert 0 < row[1] < 0.45           # but flagged as uncertain
-
-
-def test_listener_keeps_unknown_when_candidates_are_tied(cc, core_state, load, monkeypatch):
-    """A genuine coin-flip must stay unknown — we don't invent attribution."""
-    identity = load("identity")
-    monkeypatch.setattr(identity, "quick_identify",
-                        lambda hass, area=None: identity.Identification(
-                            identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Username3": 0.30, "Username": 0.28}))
-
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row[0] == "unknown"
-
-
-def test_listener_records_clear_leader_as_best_guess(cc, core_state, load, monkeypatch):
-    """A clear leader below the certainty bar is recorded as a low-confidence
-    best-guess (v7.9.0) so per-person routines accumulate and firm up."""
-    identity = load("identity")
-    monkeypatch.setattr(identity, "quick_identify",
-                        lambda hass, area=None: identity.Identification(
-                            identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Username": 0.30, "Username3": 0.15}))
-
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person, person_confidence FROM state_changes "
-            "WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row[0] == "Username"
-    assert 0.0 < row[1] <= 0.44
-
-
-def test_listener_survives_identity_failure(cc, core_state, load, monkeypatch):
-    identity = load("identity")
-
-    def _boom(hass, area_id=None):
-        raise RuntimeError("boom")
-    monkeypatch.setattr(identity, "quick_identify", _boom)
-
-    ev = _event(cc, "light.den", "off", "on")
-    cc._on_state_changed(ev)  # must not raise
-
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT person FROM state_changes WHERE entity_id='light.den'"
-        ).fetchone()
-    assert row is not None and row[0] == "unknown"
-
-
-def test_log_state_change_skips_noisy_domain_by_default(core_state):
-    """binary_sensor/device_tracker are excluded from pattern learning by default."""
-    core_state.state_logger.log_state_change("binary_sensor.garage_door_1", "off", "on")
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        rows = conn.execute(
-            "SELECT 1 FROM state_changes WHERE entity_id='binary_sensor.garage_door_1'"
-        ).fetchall()
-    assert rows == []
-
-
-def test_log_state_change_force_include_records_noisy_domain(core_state):
-    """force_include (the user opt-in) records a normally-skipped entity (v7.11.0)."""
-    core_state.state_logger.log_state_change(
-        "binary_sensor.garage_door_1", "off", "on", force_include=True)
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        rows = conn.execute(
-            "SELECT 1 FROM state_changes WHERE entity_id='binary_sensor.garage_door_1'"
-        ).fetchall()
+def stamp(listening, entity_id="light.den"):
+    rows = stored(listening.state_logger._db_path, entity_id, "person", "person_confidence")
     assert len(rows) == 1
+    return rows[0]
 
 
-def test_state_logger_persists_source_provenance(core_state):
-    core_state.state_logger.log_state_change(
-        "light.porch", "off", "on",
-        triggered_by="automation",
-        source_entity_id="automation.porch_schedule",
-        source_confidence=1.0,
-    )
-    with sqlite3.connect(core_state.state_logger._db_path) as conn:
-        row = conn.execute(
-            "SELECT triggered_by, source_entity_id, source_confidence "
-            "FROM state_changes WHERE entity_id='light.porch'"
-        ).fetchone()
-    assert row == ("automation", "automation.porch_schedule", 1.0)
+def test_nobody_home_is_stamped_unknown(cc, listening):
+    # No presence stub: with nobody home the real quick check says unknown.
+    switch_on(cc)
+    assert stamp(listening) == ("unknown", 0.0)
+
+
+def test_a_confident_identification_is_stamped_as_is(cc, listening, load, monkeypatch):
+    presence_says(monkeypatch, load, "alex", 0.6, "sole_occupant", {"alex": 0.6})
+    switch_on(cc)
+    person, confidence = stamp(listening)
+    assert person == "alex" and confidence == pytest.approx(0.6)
+
+
+# Below the bar, a clear leader is kept as a capped low-confidence guess so
+# that person's routines can still build up; a near tie stays unknown.
+@pytest.mark.parametrize("candidates, person, confidence", [
+    ({"sam": 0.42, "alex": 0.10}, "sam", 0.36),
+    ({"alex": 0.30, "sam": 0.15}, "alex", 0.21),
+    ({"alex": 0.90}, "alex", 0.44),                     # capped
+    ({"sam": 0.30, "alex": 0.28}, "unknown", 0.0),      # coin flip
+    ({"sam": 0.0, "alex": 0.0}, "unknown", 0.0),        # no signal at all
+])
+def test_a_best_guess_below_the_bar(cc, listening, load, monkeypatch,
+                                    candidates, person, confidence):
+    presence_says(monkeypatch, load, None, 0.0, "low_confidence", candidates)
+    switch_on(cc)
+    got_person, got_confidence = stamp(listening)
+    assert got_person == person
+    assert got_confidence == pytest.approx(confidence)
+    assert got_confidence <= 0.44
+
+
+def test_a_broken_presence_check_still_logs_the_change(cc, listening, load, monkeypatch):
+    identity = load("identity")
+
+    def _fail(hass, area_id=None):
+        raise RuntimeError("presence offline")
+    monkeypatch.setattr(identity, "quick_identify", _fail)
+    switch_on(cc)                            # must not raise
+    assert stamp(listening) == ("unknown", 0.0)
