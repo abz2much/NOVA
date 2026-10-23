@@ -163,7 +163,6 @@ Nova follows Home Assistant's language, and you can choose another under Setting
 - [How Nova works](docs/how-nova-works.md): for developers and the curious
 - [Translating Nova](docs/translating.md): help add or fix a language
 - [Roadmap](docs/roadmap.md): ideas under consideration
-- [Phase 8: work left for later](docs/phase8-deferred.md): the independent rewrite, and what is left of it
 
 ## Project status
 

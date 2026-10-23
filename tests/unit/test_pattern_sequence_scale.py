@@ -1,232 +1,244 @@
-"""Sequence detection: correctness + scaling.
+"""Sequence learning ("after A, B follows"): what it finds, the ten minute
+window, the delay it measures and emits, the conditions it attaches, and
+that it stays fast on a large history.
 
-The old detector was an O(N^2) SQL self-join with datetime()-wrapped comparisons
-that defeated the index — on a large history it never finished, which stalled the
-whole analyze() pass so no suggestions were ever stored. These pin the new
-single-pass window: it finds real sequences, respects the 10-minute window, and
-completes quickly on a large history.
+The detector makes a single pass with a sliding window. An earlier SQL self
+join never finished on a big store, which stalled the whole analysis so no
+suggestion was ever stored; the timing checks below guard against that.
 """
+from __future__ import annotations
+
+import json
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as clock, timedelta
 
 import pytest
 
-_SCHEMA = """
-CREATE TABLE state_changes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL, entity_id TEXT NOT NULL, domain TEXT NOT NULL,
-    old_state TEXT, new_state TEXT NOT NULL, area_id TEXT,
-    hour INTEGER, day_of_week INTEGER, triggered_by TEXT DEFAULT 'system',
-    person TEXT DEFAULT 'unknown'
-);
-CREATE INDEX idx_sc_ts ON state_changes(timestamp);
-"""
+_COLUMNS = ("timestamp", "entity_id", "domain", "old_state", "new_state",
+            "area_id", "hour", "day_of_week", "person")
 
 
 @pytest.fixture
-def analyzer(load):
+def mod(load):
     return load("pattern_analyzer")
 
 
-def _conn(path):
-    conn = sqlite3.connect(str(path))
-    conn.executescript(_SCHEMA)
-    conn.commit()
-    conn.row_factory = sqlite3.Row
-    return conn
+def _start(days_back: int = 12) -> datetime:
+    """Local midnight ``days_back`` days ago, so hours below are exact."""
+    return datetime.combine(date.today(), clock()) - timedelta(days=days_back)
 
 
-def _insert(conn, entity, state, dt):
-    dom = entity.split(".", 1)[0]
-    conn.execute(
-        "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, "
-        "new_state, area_id, hour, day_of_week, person) VALUES (?,?,?,?,?,?,?,?,?)",
-        (dt.isoformat(), entity, dom, "off", state, "", dt.hour, dt.weekday(), "unknown"))
+class _Store:
+    """An in-memory history with the logger's columns and a time index."""
+
+    def __init__(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        cols = ", ".join(f"{c} {'INTEGER' if c in ('hour', 'day_of_week') else 'TEXT'}"
+                         for c in _COLUMNS)
+        self.db.executescript(
+            f"CREATE TABLE state_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, {cols},"
+            " triggered_by TEXT DEFAULT 'system');"
+            "CREATE INDEX sc_by_time ON state_changes(timestamp);")
+        self.rows = 0
+
+    def add(self, *events):
+        """Each event is (entity_id, new_state, when)."""
+        self.db.executemany(
+            f"INSERT INTO state_changes ({', '.join(_COLUMNS)}) VALUES "
+            f"({', '.join('?' * len(_COLUMNS))})",
+            [(when.isoformat(), entity, entity.split(".")[0], "off", state, "",
+              when.hour, when.weekday(), "unknown") for entity, state, when in events])
+        self.rows += len(events)
+        return self
+
+    def daily_pair(self, first, then, *, hour, gap_s, days=8, first_state="on",
+                   then_state="on"):
+        """``first`` reaches its state at ``hour`` each day, ``then`` follows
+        ``gap_s`` seconds later."""
+        for n in range(days):
+            at = _start() + timedelta(days=n, hours=hour)
+            self.add((first, first_state, at),
+                     (then, then_state, at + timedelta(seconds=gap_s)))
+        return self
+
+    def busy_days(self, days=15):
+        """A thousand changes a day across thirty switches, one a minute."""
+        for n in range(days):
+            day = _start(days) + timedelta(days=n)
+            self.add(*[(f"switch.n{i % 30}", "on" if i % 2 else "off",
+                        day + timedelta(minutes=i)) for i in range(1000)])
+        return self
 
 
-def test_sequence_detected_within_window(analyzer, tmp_path):
-    conn = _conn(tmp_path / "seq.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):                       # 8 days: light.a on, then light.b 2 min later
-        t = base + timedelta(days=d, hours=18)
-        _insert(conn, "light.a", "on", t)
-        _insert(conn, "light.b", "on", t + timedelta(minutes=2))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
-    m = [p for p in pats if p.pattern_type == "sequence"
-         and p.details["trigger"]["entity"] == "light.a"
-         and p.details["action"]["entity"] == "light.b"]
-    assert m, "expected the light.a -> light.b sequence"
-    assert m[0].occurrences >= 5
-    assert m[0].description.startswith("When a turns on, b turns on shortly after")
+def _pair(patterns, first, then):
+    return [p for p in patterns
+            if p.details.get("trigger", {}).get("entity") == first
+            and p.details.get("action", {}).get("entity") == then]
 
 
-def test_pairs_outside_window_not_counted(analyzer, tmp_path):
-    conn = _conn(tmp_path / "seq2.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):                       # 30 min apart — outside the 10-min window
-        t = base + timedelta(days=d, hours=18)
-        _insert(conn, "light.a", "on", t)
-        _insert(conn, "light.b", "on", t + timedelta(minutes=30))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
-    m = [p for p in pats
-         if p.details.get("trigger", {}).get("entity") == "light.a"
-         and p.details.get("action", {}).get("entity") == "light.b"]
-    assert not m
+def _sequence(mod, *, delay, condition=None, first=("switch.a", "on"),
+              then=("light.b", "on")):
+    return mod.DetectedPattern(
+        pattern_type="sequence", description="learned chain",
+        entity_ids=[first[0], then[0]], confidence=0.7, occurrences=8,
+        details={"trigger": {"entity": first[0], "state": first[1]},
+                 "action": {"entity": then[0], "state": then[1]},
+                 "delay_seconds": delay, "condition": condition})
 
 
-def test_sequence_scales_on_large_history(analyzer, tmp_path):
-    conn = _conn(tmp_path / "big.db")
-    base = datetime.now() - timedelta(days=15)
-    n = 0
-    for d in range(15):                       # 15 days x 1000 dense events = 15k rows
-        day = base + timedelta(days=d)
-        for i in range(1000):
-            _insert(conn, f"switch.n{i % 30}", "on" if i % 2 else "off",
-                    day + timedelta(seconds=i * 60))
-            n += 1
-    conn.commit()
-    assert n >= 15000
-    pa = analyzer.PatternAnalyzer()
-    start = time.monotonic()
-    pats = pa._find_sequence_patterns(conn)          # old O(N^2) join would hang here
-    elapsed = time.monotonic() - start
-    assert isinstance(pats, list)
-    assert elapsed < 10.0, f"sequence detection too slow on 15k rows: {elapsed:.1f}s"
+# ── what is found ───────────────────────────────────────────────────────────
+
+def test_a_follow_on_inside_the_window_is_found_with_its_count_and_wording(mod):
+    store = _Store().daily_pair("light.a", "light.b", hour=18, gap_s=120)
+
+    (seq,) = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db),
+                   "light.a", "light.b")
+
+    assert seq.pattern_type == "sequence"
+    assert seq.occurrences == 8
+    assert seq.details["delay_seconds"] == 120
+    assert seq.description.startswith(
+        "When a turns on, b turns on shortly after (8 times in 30 days, ~120s later)")
 
 
-def test_sequence_scales_on_large_history_with_camera_events(analyzer, tmp_path):
-    """Phase 4, v7.109.0: camera_event.* rows go through the SAME
-    state_changes table and the SAME sequence detector as everything else,
-    with no special-cased domain handling — confirms mixing a realistic
-    volume of them into the large history doesn't regress the O(N)
-    performance guarantee test_sequence_scales_on_large_history already
-    pins. (Whether a SPECIFIC sequence surfaces depends on
-    pair_counts.most_common(15)'s existing cutoff against whatever else is
-    in the same window — same as any other entity; see
-    test_camera_event_sequence_detected_within_window for a correctness
-    check on a clean, uncontested dataset.)"""
-    conn = _conn(tmp_path / "big_with_camera.db")
-    base = datetime.now() - timedelta(days=15)
-    n = 0
-    for d in range(15):
-        day = base + timedelta(days=d)
-        for i in range(1000):
-            _insert(conn, f"switch.n{i % 30}", "on" if i % 2 else "off",
-                    day + timedelta(seconds=i * 60))
-            n += 1
-        # A realistic volume of camera detections each day — several
-        # cameras, several labels, interleaved throughout the day.
-        for h, cam, label in ((7, "front_door", "person"), (12, "driveway", "vehicle"),
-                              (19, "front_door", "person"), (22, "backyard", "animal")):
-            _insert(conn, f"camera_event.{cam}", label, day + timedelta(hours=h))
-            n += 1
-    conn.commit()
-    assert n >= 15000
+@pytest.mark.parametrize("gap_minutes, learned", [
+    (9, True),
+    (10, True),     # the edge of the window still counts
+    (11, False),
+    (30, False),
+])
+def test_only_follow_ons_within_ten_minutes_count(mod, gap_minutes, learned):
+    store = _Store().daily_pair("light.a", "light.b", hour=18, gap_s=gap_minutes * 60)
 
-    pa = analyzer.PatternAnalyzer()
-    start = time.monotonic()
-    pats = pa._find_sequence_patterns(conn)
-    elapsed = time.monotonic() - start
-    assert isinstance(pats, list)
-    assert elapsed < 10.0, f"sequence detection too slow with camera events mixed in: {elapsed:.1f}s"
+    found = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db),
+                  "light.a", "light.b")
+
+    assert bool(found) is learned
 
 
-def test_camera_event_sequence_detected_within_window(analyzer, tmp_path):
-    """Correctness, on a clean dataset (no flood competing for the top-15
-    cutoff): a camera_event trigger followed by a real entity's action —
-    the task's own 'person appears at the front door, then the porch light
-    turns on' example — is detected exactly like any other entity pair."""
-    conn = _conn(tmp_path / "camera_seq.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):
-        t = base + timedelta(days=d, hours=19)
-        _insert(conn, "camera_event.front_door", "person", t)
-        _insert(conn, "light.porch", "on", t + timedelta(seconds=20))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
-    m = [p for p in pats if p.details["trigger"]["entity"] == "camera_event.front_door"
-         and p.details["action"]["entity"] == "light.porch"]
-    assert m, "expected the camera_event.front_door -> light.porch sequence"
-    assert m[0].occurrences >= 5
-    assert m[0].description.startswith("When front door turns person, porch turns on")
+def test_a_switch_can_drive_a_light_and_the_real_gap_is_measured(mod):
+    store = _Store().daily_pair("switch.trigger", "light.follower", hour=18, gap_s=90)
+
+    (seq,) = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db),
+                   "switch.trigger", "light.follower")
+
+    assert seq.details["delay_seconds"] == 90
+    assert "~90s later" in seq.description
 
 
-def test_cross_domain_sequence_with_measured_delay(analyzer, tmp_path):
-    # a switch triggering a light ~90s later — cross-domain, was impossible before
-    conn = _conn(tmp_path / "xd.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):
-        t = base + timedelta(days=d, hours=18)
-        _insert(conn, "switch.trigger", "on", t)
-        _insert(conn, "light.follower", "on", t + timedelta(seconds=90))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
-    m = [p for p in pats if p.details["trigger"]["entity"] == "switch.trigger"
-         and p.details["action"]["entity"] == "light.follower"]
-    assert m, "cross-domain switch->light sequence should be found"
-    assert 80 <= m[0].details["delay_seconds"] <= 100   # measured, ~90s
-    assert "later" in m[0].description
+def test_a_camera_detection_can_be_the_trigger(mod):
+    # Someone at the front door, then the porch light: an uncontested history.
+    store = _Store().daily_pair("camera_event.front_door", "light.porch", hour=19,
+                                gap_s=20, first_state="person")
+
+    (seq,) = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db),
+                   "camera_event.front_door", "light.porch")
+
+    assert seq.occurrences >= 5
+    assert seq.description.startswith("When front door turns person, porch turns on")
 
 
-def test_generate_automation_uses_measured_delay(analyzer):
-    import json
-    pa = analyzer.PatternAnalyzer()
-    p = analyzer.DetectedPattern(
-        pattern_type="sequence", description="x",
-        entity_ids=["switch.a", "light.b"], confidence=0.7, occurrences=8,
-        details={"trigger": {"entity": "switch.a", "state": "on"},
-                 "action": {"entity": "light.b", "state": "on"},
-                 "delay_seconds": 90})
-    auto = json.loads(pa._generate_automation(p))
-    assert auto["trigger"]["platform"] == "state"
-    delays = [a for a in auto["action"] if isinstance(a, dict) and "delay" in a]
-    assert delays and delays[0]["delay"] == "00:01:30"   # 90s, not hardcoded 60s
+def test_a_camera_detection_is_never_learned_as_something_to_do(mod):
+    # camera_event.* is not a real entity, so it has no service to call.
+    store = _Store().daily_pair("light.porch", "camera_event.front_door", hour=19,
+                                gap_s=20, then_state="person")
+
+    found = mod.PatternAnalyzer()._find_sequence_patterns(store.db)
+
+    assert _pair(found, "light.porch", "camera_event.front_door") == []
 
 
-def test_generate_automation_omits_tiny_delay(analyzer):
-    import json
-    pa = analyzer.PatternAnalyzer()
-    p = analyzer.DetectedPattern(
-        pattern_type="sequence", description="x",
-        entity_ids=["switch.a", "light.b"], confidence=0.7, occurrences=8,
-        details={"trigger": {"entity": "switch.a", "state": "on"},
-                 "action": {"entity": "light.b", "state": "on"},
-                 "delay_seconds": 5})
-    auto = json.loads(pa._generate_automation(p))
-    delays = [a for a in auto["action"] if isinstance(a, dict) and "delay" in a]
-    assert not delays   # near-immediate -> no awkward tiny wait
+# ── conditions attached to a learned sequence ───────────────────────────────
+
+def test_dark_evenings_give_a_sun_condition_rather_than_a_clock_window(mod, monkeypatch):
+    monkeypatch.setattr(mod, "_is_dark_at", lambda epoch, lat, lon: True)
+    store = _Store().daily_pair("binary_sensor.hall_motion", "light.hall", hour=20, gap_s=30)
+
+    (seq,) = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db, 40.7, -74.0),
+                   "binary_sensor.hall_motion", "light.hall")
+
+    assert seq.details["condition"] == [
+        {"condition": "sun", "after": "sunset", "before": "sunrise"}]
+    assert "after dark" in seq.description
 
 
-def test_sequence_prefers_sun_condition_over_time(analyzer, tmp_path, monkeypatch):
-    # With location present and the action consistently dark, the detector should
-    # attach a sun condition (not a fixed time window).
-    monkeypatch.setattr(analyzer, "_is_dark_at", lambda e, lat, lon: True)
-    conn = _conn(tmp_path / "sun.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):
-        t = base + timedelta(days=d, hours=20)
-        _insert(conn, "binary_sensor.hall_motion", "on", t)
-        _insert(conn, "light.hall", "on", t + timedelta(seconds=30))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn, 40.7, -74.0)
-    m = [p for p in pats if p.details["trigger"]["entity"] == "binary_sensor.hall_motion"]
-    assert m and m[0].details["condition"] == [{
-        "condition": "sun", "after": "sunset", "before": "sunrise"}]
-    assert "after dark" in m[0].description
+def test_without_a_location_the_clock_window_is_used(mod):
+    store = _Store().daily_pair("binary_sensor.hall_motion", "light.hall", hour=20, gap_s=30)
+
+    (seq,) = _pair(mod.PatternAnalyzer()._find_sequence_patterns(store.db, None, None),
+                   "binary_sensor.hall_motion", "light.hall")
+
+    assert seq.details["condition"] == [
+        {"condition": "time", "after": "19:00:00", "before": "21:00:00"}]
+    assert "mostly between 19:00 and 21:00" in seq.description
 
 
-def test_sequence_falls_back_to_time_without_location(analyzer, tmp_path):
-    # No location → no sun check → the fixed time window is used instead.
-    conn = _conn(tmp_path / "notloc.db")
-    base = datetime.now() - timedelta(days=12)
-    for d in range(8):
-        t = base + timedelta(days=d, hours=20)
-        _insert(conn, "binary_sensor.hall_motion", "on", t)
-        _insert(conn, "light.hall", "on", t + timedelta(seconds=30))
-    conn.commit()
-    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn, None, None)
-    m = [p for p in pats if p.details["trigger"]["entity"] == "binary_sensor.hall_motion"]
-    assert m and m[0].details["condition"][0]["condition"] == "time"
+# ── the automation a sequence becomes ───────────────────────────────────────
+
+@pytest.mark.parametrize("measured, wait", [
+    (0, None),
+    (5, None),              # near immediate: no awkward little wait
+    (14, None),
+    (15, "00:00:15"),
+    (90, "00:01:30"),       # the measured gap, not a fixed minute
+    (92, "00:01:30"),       # rounded to five seconds
+    (600, "00:10:00"),
+])
+def test_the_emitted_wait_follows_the_measured_gap(mod, measured, wait):
+    auto = json.loads(mod.PatternAnalyzer()._generate_automation(
+        _sequence(mod, delay=measured)))
+
+    waits = [step["delay"] for step in auto["action"]
+             if isinstance(step, dict) and "delay" in step]
+    assert auto["trigger"] == {"platform": "state", "entity_id": "switch.a", "to": "on"}
+    assert waits == ([] if wait is None else [wait])
+    assert auto["action"][-1] == {"service": "light.turn_on", "entity_id": "light.b"}
+
+
+def test_an_action_without_a_service_becomes_advice(mod):
+    pattern = _sequence(mod, delay=30, then=("climate.lounge", "heat"))
+
+    advice = json.loads(mod.PatternAnalyzer()._generate_automation(pattern))
+
+    assert advice["type"] == "manual_review"
+    assert "trigger" not in advice
+
+
+# ── scale ───────────────────────────────────────────────────────────────────
+
+def _timed(mod, conn):
+    started = time.perf_counter()
+    result = mod.PatternAnalyzer()._find_sequence_patterns(conn)
+    return result, time.perf_counter() - started
+
+
+def test_fifteen_thousand_changes_are_paired_quickly(mod):
+    store = _Store().busy_days()
+    assert store.rows >= 15000
+
+    result, took = _timed(mod, store.db)
+
+    assert isinstance(result, list)
+    assert took < 10.0, f"sequence pass took {took:.1f}s on {store.rows} rows"
+
+
+def test_camera_detections_mixed_into_a_large_history_stay_quick(mod):
+    # Camera rows share the table and the detector with everything else, with
+    # no special handling; mixing them in must not slow the pass down. Whether
+    # a given pair survives the candidate cut-off here is not the point; the
+    # clean dataset above covers that.
+    store = _Store().busy_days()
+    cameras = (("front_door", "person", 7), ("driveway", "vehicle", 12),
+               ("front_door", "person", 19), ("backyard", "animal", 22))
+    for n in range(15):
+        day = _start(15) + timedelta(days=n)
+        store.add(*[(f"camera_event.{where}", label, day + timedelta(hours=at))
+                    for where, label, at in cameras])
+    assert store.rows >= 15000
+
+    result, took = _timed(mod, store.db)
+
+    assert isinstance(result, list)
+    assert took < 10.0, f"sequence pass took {took:.1f}s with camera rows mixed in"

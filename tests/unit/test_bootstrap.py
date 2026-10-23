@@ -1,411 +1,359 @@
-"""Tests for the in-process bootstrap (v6.28.0).
+"""The in-process voice setup (bootstrap.py, v6.28.0).
 
-The live Supervisor/pipeline effects can't run in this sandbox (no Supervisor,
-no aiohttp), so these cover the orchestration *guards* (the safety gates that
-protect a real HA), the run-once marker, the pipeline setup, and the in-process
-Wyoming/engine logic. Module-level aiohttp imports are stubbed.
+No Supervisor and no aiohttp exist here, so the live add-on calls are faked.
+What this file pins: the gates that keep a real Home Assistant safe (switched
+off by default, Supervisor only, once per version unless forced), the run-once
+marker, how the Nova Assist pipeline is built or repaired, the Wyoming reload,
+engine discovery and the Repair notices a run raises. test_bootstrap_spec.py
+covers the Supervisor REST calls and the remaining failure paths.
 """
-import contextlib
+import inspect
 import sys
-import types
-from types import SimpleNamespace
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
-# Stub aiohttp + the HA aiohttp client helper before bootstrap is imported.
-if "aiohttp" not in sys.modules:
-    _aiohttp = types.ModuleType("aiohttp")
-    _aiohttp.ClientTimeout = lambda **kw: None
-    _aiohttp.ClientSession = object
-    sys.modules["aiohttp"] = _aiohttp
+
+def _aiohttp_stand_in():
+    stand_in = ModuleType("aiohttp")
+    stand_in.ClientTimeout = lambda **kw: None
+    stand_in.ClientSession = object
+    return stand_in
+
+
+# bootstrap imports aiohttp at module level; the real package is not installed.
+sys.modules.setdefault("aiohttp", _aiohttp_stand_in())
+
+AGENT = "conversation.nova"
+OLD_NOVA_VOICE = "en_GB-nova-high"
 
 
 @pytest.fixture
-def bootstrap(load):
-    return load("bootstrap")
+def boot(load, tmp_path, monkeypatch):
+    module = load("bootstrap")
+    monkeypatch.setattr(module, "MARKER_PATH", Path(tmp_path) / ".bootstrap_done")
+    monkeypatch.setattr(module, "PIPER_DIR", Path(tmp_path) / "piper")
+    return module
 
 
 @pytest.fixture
-def nova_config(load):
-    return load("nova_config")
+def settings(load, monkeypatch):
+    """A dict standing in for nova_config; tests fill it in."""
+    values: dict = {}
+    monkeypatch.setattr(load("nova_config"), "get",
+                        lambda key, default=None: values.get(key, default))
+    return values
 
 
-@pytest.fixture(autouse=True)
-def _isolate_fs(tmp_path, monkeypatch, bootstrap):
-    from pathlib import Path
-    monkeypatch.setattr(bootstrap, "MARKER_PATH", Path(tmp_path / ".bootstrap_done"))
-    monkeypatch.setattr(bootstrap, "PIPER_DIR", Path(tmp_path / "piper"))
-    yield
+@pytest.fixture
+def supervised(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "test-token")
 
 
-# ── supervisor detection ─────────────────────────────────────────────────────
+def _returning(value):
+    async def _answer(*args, **kwargs):
+        return value
+    return _answer
 
-def test_is_supervised_reflects_token(bootstrap, monkeypatch):
+
+def _fake_phases(boot, monkeypatch, *, addons=True, pipeline=True, agent=AGENT):
+    """Replace every live phase; returns the slugs _ensure_addon was asked for."""
+    asked = []
+
+    async def _addon(hass, slug, friendly):
+        asked.append(slug)
+        return addons
+    monkeypatch.setattr(boot, "_ensure_addon", _addon)
+    monkeypatch.setattr(boot, "_reload_wyoming", _returning(0))
+    monkeypatch.setattr(boot, "_wait_for_agent", _returning(agent))
+    monkeypatch.setattr(boot, "_create_pipeline", _returning(pipeline))
+    return asked
+
+
+# ── is this a Supervisor install? ───────────────────────────────────────────
+
+def test_supervised_only_with_a_token(boot, monkeypatch):
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-    assert bootstrap.is_supervised() is False
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    assert bootstrap.is_supervised() is True
-    assert bootstrap.supervisor_token() == "tok"
+    assert boot.is_supervised() is False
+    assert boot.supervisor_token() == ""
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "test-token")
+    assert boot.is_supervised() is True
+    assert boot.supervisor_token() == "test-token"
 
 
-# ── run-once marker ──────────────────────────────────────────────────────────
+# ── the marker that makes it run once per version ───────────────────────────
 
-def test_marker_roundtrip(bootstrap):
-    assert bootstrap._read_marker() == {}
-    bootstrap._write_marker("6.28.0", {"addons_ok": True})
-    m = bootstrap._read_marker()
-    assert m["version"] == "6.28.0" and m["addons_ok"] is True
-
-
-# ── no voice download ────────────────────────────────────────────────────────
-
-def test_bootstrap_has_no_voice_download(bootstrap):
-    """Nova uses Home Assistant's default voice; nothing is fetched from
-    anywhere, and no voice file is ever written."""
-    for name in ("HF_BASE", "HF_REVISION", "EXPECTED_SHA256",
-                 "_download_voice", "_download_file", "resolve_installed_quality"):
-        assert not hasattr(bootstrap, name)
+def test_marker_written_then_read_back(boot):
+    assert boot._read_marker() == {}
+    boot._write_marker("6.28.0", {"addons_ok": True})
+    assert boot._read_marker() == {"version": "6.28.0", "addons_ok": True}
 
 
-# ── async_run_bootstrap guards (the safety gates) ────────────────────────────
+@pytest.mark.parametrize("name", ["HF_BASE", "HF_REVISION", "EXPECTED_SHA256",
+                                  "_download_voice", "_download_file",
+                                  "resolve_installed_quality"])
+def test_no_voice_is_downloaded(boot, name):
+    """Nova uses Home Assistant's default voice: nothing is fetched and no
+    voice file is written, so none of the old download machinery remains."""
+    assert not hasattr(boot, name)
 
-def _switched_on(k, d=None):
-    """The voice add-on install switched on (it is off until set up, 8.41.0)."""
-    return True if k == "auto_bootstrap" else d
 
+# ── the gates in front of a run ─────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_a_new_install_installs_nothing(bootstrap, nova_config, fake_hass, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: d)
-    status = await bootstrap.async_run_bootstrap(fake_hass)
+@pytest.mark.parametrize("switch", [None, False], ids=["fresh-install", "switched-off"])
+async def test_off_unless_switched_on(boot, settings, supervised, fake_hass, monkeypatch, switch):
+    """A new install leaves the voice add-on setup off until it is set up
+    (8.41.0), and switching it off keeps it off."""
+    if switch is not None:
+        settings["auto_bootstrap"] = switch
+    asked = _fake_phases(boot, monkeypatch)
+    status = await boot.async_run_bootstrap(fake_hass)
     assert status["skipped"] == "auto_bootstrap disabled"
+    assert status["addons_ok"] is False and status["supervised"] is False
+    assert asked == []
+    assert boot._read_marker() == {}
 
 
-@pytest.mark.asyncio
-async def test_skips_when_flag_disabled(bootstrap, nova_config, fake_hass, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get",
-                        lambda k, d=None: False if k == "auto_bootstrap" else d)
-    status = await bootstrap.async_run_bootstrap(fake_hass)
-    assert status["skipped"] == "auto_bootstrap disabled"
-    assert status["addons_ok"] is False
-
-
-@pytest.mark.asyncio
-async def test_skips_without_supervisor(bootstrap, nova_config, fake_hass, monkeypatch):
+async def test_needs_the_supervisor(boot, settings, fake_hass, monkeypatch):
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-    monkeypatch.setattr(nova_config, "get", _switched_on)
-    status = await bootstrap.async_run_bootstrap(fake_hass)
+    settings["auto_bootstrap"] = True
+    asked = _fake_phases(boot, monkeypatch)
+    status = await boot.async_run_bootstrap(fake_hass)
     assert status["supervised"] is False
     assert "Supervisor" in status["skipped"]
+    assert asked == []
 
 
-@pytest.mark.asyncio
-async def test_skips_when_already_bootstrapped(bootstrap, nova_config, fake_hass, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get", _switched_on)
-    version = bootstrap._current_version()
-    bootstrap._write_marker(version, {"addons_ok": True})
-    status = await bootstrap.async_run_bootstrap(fake_hass)
+async def test_same_version_runs_only_once(boot, settings, supervised, fake_hass, monkeypatch):
+    settings["auto_bootstrap"] = True
+    boot._write_marker(boot._current_version(), {"addons_ok": True})
+    asked = _fake_phases(boot, monkeypatch)
+    status = await boot.async_run_bootstrap(fake_hass)
     assert status["skipped"] == "already bootstrapped this version"
+    assert status["supervised"] is True
+    assert asked == []
 
 
-@pytest.mark.asyncio
-async def test_force_overrides_marker(bootstrap, nova_config, fake_hass, monkeypatch):
-    # force=True must NOT early-return on the marker; it should proceed past the
-    # marker gate (and then do real work, which we cut short by failing addons).
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get", _switched_on)
-    bootstrap._write_marker(bootstrap._current_version(), {"addons_ok": True})
-
-    async def _no_addon(hass, slug, friendly):
-        return False
-    monkeypatch.setattr(bootstrap, "_ensure_addon", _no_addon)
-
-    monkeypatch.setattr(bootstrap, "_reload_wyoming",
-                        lambda hass: _async_return(0))
-    monkeypatch.setattr(bootstrap, "_wait_for_agent",
-                        lambda hass, **kw: _async_return(None))
-
-    status = await bootstrap.async_run_bootstrap(fake_hass, force=True)
-    assert status["skipped"] is None          # did not skip on marker
-    assert status["addons_ok"] is False        # ran phase 1
+async def test_force_runs_past_the_marker(boot, settings, supervised, fake_hass, monkeypatch):
+    settings["auto_bootstrap"] = True
+    version = boot._current_version()
+    boot._write_marker(version, {"addons_ok": True})
+    asked = _fake_phases(boot, monkeypatch, addons=False, agent=None)
+    status = await boot.async_run_bootstrap(fake_hass, force=True)
+    assert status["skipped"] is None                 # the marker did not stop it
+    assert status["addons_ok"] is False              # phase one really ran
+    assert asked == list(boot.REQUIRED_ADDONS)
+    rewritten = boot._read_marker()
+    assert rewritten["version"] == version and rewritten["addons_ok"] is False
 
 
-# ── in-process Wyoming reload ────────────────────────────────────────────────
+async def test_full_run_builds_the_pipeline_and_no_voice(boot, settings, supervised,
+                                                         fake_hass, monkeypatch):
+    settings.update(auto_bootstrap=True, auto_pipeline=True)
+    _fake_phases(boot, monkeypatch)
+    status = await boot.async_run_bootstrap(fake_hass)
+    assert status["addons_ok"] is True
+    assert status["wyoming_ok"] is True
+    assert status["pipeline_ok"] is True
+    assert "voice_ok" not in status
 
-@pytest.mark.asyncio
-async def test_reload_wyoming_reloads_each_entry(bootstrap):
+
+# ── Wyoming and engine discovery ────────────────────────────────────────────
+
+async def test_every_wyoming_entry_is_reloaded(boot):
     reloaded = []
 
-    class _Entries:
-        def async_entries(self, domain):
-            assert domain == "wyoming"
-            return [SimpleNamespace(entry_id="w1"), SimpleNamespace(entry_id="w2")]
+    async def _reload(entry_id):
+        reloaded.append(entry_id)
 
-        async def async_reload(self, eid):
-            reloaded.append(eid)
-
-    hass = SimpleNamespace(config_entries=_Entries())
-    n = await bootstrap._reload_wyoming(hass)
-    assert n == 2 and reloaded == ["w1", "w2"]
-
-
-# ── engine / agent discovery ─────────────────────────────────────────────────
-
-def test_find_engine_prefers_hint(bootstrap, fake_hass):
-    fake_hass.states.set("stt.faster_whisper", "idle")
-    fake_hass.states.set("stt.something_else", "idle")
-    assert bootstrap._find_engine(fake_hass, "stt", "whisper") == "stt.faster_whisper"
+    def _entries(domain):
+        assert domain == "wyoming"
+        return [SimpleNamespace(entry_id=eid) for eid in ("wy-a", "wy-b")]
+    hass = SimpleNamespace(config_entries=SimpleNamespace(
+        async_entries=_entries, async_reload=_reload))
+    assert await boot._reload_wyoming(hass) == 2
+    assert reloaded == ["wy-a", "wy-b"]
 
 
-def test_find_engine_falls_back_to_first(bootstrap, fake_hass):
-    fake_hass.states.set("tts.piper", "idle")
-    assert bootstrap._find_engine(fake_hass, "tts", "piper") == "tts.piper"
-    # no match for hint → first available
-    assert bootstrap._find_engine(fake_hass, "tts", "nope") == "tts.piper"
+@pytest.mark.parametrize("present, domain, hint, expected", [
+    (["stt.faster_whisper", "stt.something_else"], "stt", "whisper", "stt.faster_whisper"),
+    (["stt.something_else", "stt.faster_whisper"], "stt", "whisper", "stt.faster_whisper"),
+    (["tts.piper"], "tts", "piper", "tts.piper"),
+    (["tts.piper"], "tts", "nope", "tts.piper"),       # no match: the first there is
+])
+def test_engine_choice(boot, fake_hass, present, domain, hint, expected):
+    for entity_id in present:
+        fake_hass.states.set(entity_id, "idle")
+    assert boot._find_engine(fake_hass, domain, hint) == expected
 
 
-def _async_return(value):
-    async def _coro():
-        return value
-    return _coro()
+# ── building or repairing the Nova pipeline ─────────────────────────────────
 
-
-# ── _create_pipeline — behavioural (not source-inspection) ──────────────────
-
-class _FakePipeline:
-    def __init__(self, name="Nova", conversation_engine=None, tts_voice=None):
+class _Pipeline:
+    def __init__(self, conversation_engine=None, tts_voice=None, name="Nova"):
         self.name = name
         self.conversation_engine = conversation_engine
         self.tts_voice = tts_voice
 
 
-class _FakeAssistPipelineModule:
-    """Minimal stand-in for homeassistant.components.assist_pipeline."""
+class _AssistComponent:
+    """Just enough of homeassistant.components.assist_pipeline."""
 
-    def __init__(self, existing=None, create_result=None, update_raises_first=False):
-        self._existing = existing or []
-        self._create_result = create_result
-        self.updates: list[dict] = []
-        self._update_raises_first = update_raises_first
-        self._raised_once = False
+    def __init__(self, existing=(), made=None):
+        self.existing = list(existing)
+        self.made = made
+        self.updates = []
 
     def async_get_pipelines(self, hass):
-        return list(self._existing)
+        return list(self.existing)
 
-    async def async_create_default_pipeline(self, hass, stt_engine_id, tts_engine_id, pipeline_name):
-        return self._create_result
+    async def async_create_default_pipeline(self, hass, stt_engine_id, tts_engine_id,
+                                            pipeline_name):
+        return self.made
 
-    async def async_update_pipeline(self, hass, pipeline, **kwargs):
-        if self._update_raises_first and not self._raised_once:
-            self._raised_once = True
-            raise RuntimeError("tts_voice rejected on this HA version")
-        self.updates.append(kwargs)
-        for k, v in kwargs.items():
-            setattr(pipeline, k, v)
+    async def async_update_pipeline(self, hass, pipeline, **changes):
+        self.updates.append(changes)
+        for field, value in changes.items():
+            setattr(pipeline, field, value)
 
 
-@contextlib.contextmanager
-def _install_assist_pipeline(fake):
-    components = sys.modules["homeassistant.components"]
-    sys.modules["homeassistant.components.assist_pipeline"] = fake
-    components.assist_pipeline = fake
-    try:
-        yield fake
-    finally:
-        del sys.modules["homeassistant.components.assist_pipeline"]
-        del components.assist_pipeline
+@pytest.fixture
+def assist(monkeypatch, fake_hass):
+    """Installs a fake assist_pipeline component and the agent plus engines a
+    pipeline needs; returns a function that sets the component up."""
+    for entity_id in (AGENT, "stt.faster_whisper", "tts.piper"):
+        fake_hass.states.set(entity_id, "idle")
+
+    def _install(**kwargs):
+        component = _AssistComponent(**kwargs)
+        monkeypatch.setitem(sys.modules, "homeassistant.components.assist_pipeline", component)
+        monkeypatch.setattr(sys.modules["homeassistant.components"], "assist_pipeline",
+                            component, raising=False)
+        return component
+    return _install
 
 
-def _hass_with_agent_and_engines(fake_hass):
-    fake_hass.states.set("conversation.nova", "idle")
-    fake_hass.states.set("stt.faster_whisper", "idle")
-    fake_hass.states.set("tts.piper", "idle")
-    return fake_hass
+async def test_new_pipeline_gets_nova_as_agent_and_the_default_voice(boot, assist, fake_hass):
+    made = _Pipeline()
+    component = assist(made=made)
+    assert await boot._create_pipeline(fake_hass) is True
+    assert component.updates == [{"conversation_engine": AGENT}]
+    assert made.conversation_engine == AGENT
+    assert made.tts_voice is None                    # Home Assistant's default voice
 
 
-async def test_create_pipeline_new_sets_agent_only(bootstrap, fake_hass):
-    _hass_with_agent_and_engines(fake_hass)
-    created = _FakePipeline(name="Nova")
-    fake = _FakeAssistPipelineModule(existing=[], create_result=created)
-    with _install_assist_pipeline(fake):
-        ok = await bootstrap._create_pipeline(fake_hass)
-    assert ok is True
-    assert fake.updates == [{"conversation_engine": "conversation.nova"}]
-    assert created.tts_voice is None  # Home Assistant's default voice
+@pytest.mark.parametrize("agent, voice, on_disk, updates, voice_after", [
+    # The old Nova voice whose model file has gone falls back to the default.
+    (AGENT, OLD_NOVA_VOICE, False, [{"tts_voice": None}], None),
+    # Still on disk: left as it is.
+    (AGENT, OLD_NOVA_VOICE, True, [], OLD_NOVA_VOICE),
+    # Somebody else's chosen voice is never touched.
+    (AGENT, "en_GB-alba-medium", None, [], "en_GB-alba-medium"),
+    # Another agent answering is put right.
+    ("conversation.other", None, None, [{"conversation_engine": AGENT}], None),
+], ids=["old-voice-gone", "old-voice-present", "other-voice", "wrong-agent"])
+async def test_existing_pipeline_is_repaired_only_where_needed(
+        boot, assist, fake_hass, monkeypatch, agent, voice, on_disk, updates, voice_after):
+    existing = _Pipeline(conversation_engine=agent, tts_voice=voice)
+    component = assist(existing=[existing])
+    if on_disk is not None:
+        monkeypatch.setattr(boot, "_legacy_voice_present", lambda v: on_disk)
+    assert await boot._create_pipeline(fake_hass) is True
+    assert component.updates == updates
+    assert existing.tts_voice == voice_after
+    assert existing.conversation_engine == AGENT
 
 
-async def test_create_pipeline_existing_clears_missing_nova_voice(bootstrap, fake_hass, monkeypatch):
-    """A pipeline left pointing at the old Nova voice, whose file is gone,
-    falls back to Home Assistant's default voice."""
-    _hass_with_agent_and_engines(fake_hass)
-    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
-                              tts_voice="en_GB-nova-high")
-    fake = _FakeAssistPipelineModule(existing=[existing])
-    monkeypatch.setattr(bootstrap, "_legacy_voice_present", lambda v: False)
-    with _install_assist_pipeline(fake):
-        ok = await bootstrap._create_pipeline(fake_hass)
-    assert ok is True
-    assert fake.updates == [{"tts_voice": None}]
-    assert existing.tts_voice is None
+@pytest.mark.parametrize("fragment", [
+    "async_update_pipeline",
+    "conversation_engine=agent",   # sets the agent
+    "tts_voice",                   # matches a Nova pipeline by its voice too
+    "== agent",                    # skips a pipeline that is already right
+])
+def test_startup_agent_repair_source(boot, fragment):
+    """The repair that runs on every start must find a Nova pipeline by name
+    or by its Nova voice, leave a correct one alone and set the agent through
+    async_update_pipeline."""
+    assert fragment in inspect.getsource(boot.async_ensure_pipeline_agent)
 
 
-async def test_create_pipeline_existing_keeps_nova_voice_when_file_present(bootstrap, fake_hass, monkeypatch):
-    _hass_with_agent_and_engines(fake_hass)
-    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
-                              tts_voice="en_GB-nova-high")
-    fake = _FakeAssistPipelineModule(existing=[existing])
-    monkeypatch.setattr(bootstrap, "_legacy_voice_present", lambda v: True)
-    with _install_assist_pipeline(fake):
-        ok = await bootstrap._create_pipeline(fake_hass)
-    assert ok is True
-    assert fake.updates == []
-    assert existing.tts_voice == "en_GB-nova-high"
+def test_startup_agent_repair_is_scheduled(boot):
+    # Wired into the background runner, outside the Supervisor and marker
+    # gates, so it can be neither raced nor skipped.
+    assert "async_ensure_pipeline_agent" in inspect.getsource(boot.schedule_bootstrap)
 
 
-async def test_create_pipeline_existing_leaves_other_voice_alone(bootstrap, fake_hass):
-    _hass_with_agent_and_engines(fake_hass)
-    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
-                              tts_voice="en_GB-alba-medium")
-    fake = _FakeAssistPipelineModule(existing=[existing])
-    with _install_assist_pipeline(fake):
-        ok = await bootstrap._create_pipeline(fake_hass)
-    assert ok is True
-    assert fake.updates == []
+# ── Repair notices for the voice setup (v8.6.0) ─────────────────────────────
+
+@pytest.fixture
+def notices(load, monkeypatch):
+    """Captures the voice setup notices instead of raising Repair issues."""
+    seen = []
+    repairs = load("repair_notices")
+    monkeypatch.setattr(repairs, "note_voice_setup_step",
+                        lambda hass, step, number, total: seen.append(("step", step, number, total)))
+    monkeypatch.setattr(repairs, "note_voice_setup_incomplete",
+                        lambda hass, failed: seen.append(("incomplete", list(failed))))
+    monkeypatch.setattr(repairs, "clear_voice_setup", lambda hass: seen.append(("clear",)))
+    return seen
 
 
-async def test_create_pipeline_existing_repairs_agent(bootstrap, fake_hass):
-    _hass_with_agent_and_engines(fake_hass)
-    existing = _FakePipeline(name="Nova", conversation_engine="conversation.other",
-                              tts_voice=None)
-    fake = _FakeAssistPipelineModule(existing=[existing])
-    with _install_assist_pipeline(fake):
-        ok = await bootstrap._create_pipeline(fake_hass)
-    assert ok is True
-    assert fake.updates == [{"conversation_engine": "conversation.nova"}]
+@pytest.fixture
+def switched_on(settings, supervised):
+    settings.update(auto_bootstrap=True, auto_pipeline=True)
+    return settings
 
 
-# ── async_run_bootstrap — builds the pipeline without a voice ───────────────
-
-@pytest.mark.asyncio
-async def test_run_bootstrap_builds_pipeline_without_voice(bootstrap, nova_config, fake_hass, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    cfg = {"auto_pipeline": True, "auto_bootstrap": True}
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
-
-    async def _fake_ensure_addon(hass, slug, friendly):
-        return True
-    monkeypatch.setattr(bootstrap, "_ensure_addon", _fake_ensure_addon)
-    monkeypatch.setattr(bootstrap, "_reload_wyoming", lambda hass: _async_return(0))
-    monkeypatch.setattr(bootstrap, "_wait_for_agent", lambda hass, **kw: _async_return("conversation.nova"))
-
-    async def _fake_create_pipeline(hass):
-        return True
-    monkeypatch.setattr(bootstrap, "_create_pipeline", _fake_create_pipeline)
-
-    status = await bootstrap.async_run_bootstrap(fake_hass)
-    assert status["addons_ok"] is True
-    assert status["pipeline_ok"] is True
-    assert "voice_ok" not in status
+@pytest.mark.parametrize("with_pipeline, expected", [
+    (True, [("step", "addons", 1, 3), ("step", "wyoming", 2, 3),
+            ("step", "pipeline", 3, 3), ("clear",)]),
+    (False, [("step", "addons", 1, 2), ("step", "wyoming", 2, 2), ("clear",)]),
+], ids=["three-steps", "two-steps"])
+async def test_first_run_shows_progress_then_clears(boot, switched_on, notices, fake_hass,
+                                                    monkeypatch, with_pipeline, expected):
+    switched_on["auto_pipeline"] = with_pipeline
+    _fake_phases(boot, monkeypatch)
+    await boot.async_run_bootstrap(fake_hass)
+    assert notices == expected
 
 
-def test_ensure_pipeline_agent_repairs_by_name_or_voice(bootstrap):
-    """The every-startup repair must catch a Nova pipeline by name OR its Nova
-    voice, skip when already correct, set the agent via async_update_pipeline, and
-    run outside the Supervisor/marker gate (so it can't be raced or skipped)."""
-    import inspect
-    src = inspect.getsource(bootstrap.async_ensure_pipeline_agent)
-    assert "async_update_pipeline" in src
-    assert "conversation_engine=agent" in src
-    assert "tts_voice" in src               # matches by Nova voice too
-    assert "== agent" in src                # idempotent: skip when already right
-    sched = inspect.getsource(bootstrap.schedule_bootstrap)
-    assert "async_ensure_pipeline_agent" in sched   # wired to run every start
+async def test_failures_are_named_in_the_incomplete_notice(boot, switched_on, notices,
+                                                           fake_hass, monkeypatch):
+    _fake_phases(boot, monkeypatch, addons=False, pipeline=False)
+    await boot.async_run_bootstrap(fake_hass)
+    assert notices[-1] == ("incomplete", ["Piper, Whisper, openWakeWord", "Assist pipeline"])
 
 
-# ── Voice setup Repair notices (v8.6.0) ──────────────────────────────────────
-
-class _Notices:
-    def __init__(self):
-        self.calls = []
-
-    def note_voice_setup_step(self, hass, step, number, total):
-        self.calls.append(("step", step, number, total))
-
-    def note_voice_setup_incomplete(self, hass, failed):
-        self.calls.append(("incomplete", list(failed)))
-
-    def clear_voice_setup(self, hass):
-        self.calls.append(("clear",))
+async def test_rerun_after_an_update_is_quiet(boot, switched_on, notices, fake_hass, monkeypatch):
+    boot._write_marker("0.0.1", {"addons_ok": True, "pipeline_ok": True})
+    _fake_phases(boot, monkeypatch)
+    await boot.async_run_bootstrap(fake_hass)
+    assert notices == [("clear",)]
 
 
-def _wire_run(bootstrap, nova_config, monkeypatch, load, *, addons=True, pipeline=True, cfg=None):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    cfg = {"auto_pipeline": True, "auto_bootstrap": True, **(cfg or {})}
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
-    rn = load("repair_notices")
-    notices = _Notices()
-    for name in ("note_voice_setup_step", "note_voice_setup_incomplete", "clear_voice_setup"):
-        monkeypatch.setattr(rn, name, getattr(notices, name))
+async def test_skipped_start_rechecks_a_failed_pipeline(boot, switched_on, notices, fake_hass,
+                                                        monkeypatch, load):
+    boot._write_marker(boot._current_version(),
+                       {"addons_ok": True, "pipeline_tried": True, "pipeline_ok": False})
+    _fake_phases(boot, monkeypatch)
+    health = load("setup_health")
 
-    async def _addon(hass, slug, friendly):
-        return addons
-    monkeypatch.setattr(bootstrap, "_ensure_addon", _addon)
-    monkeypatch.setattr(bootstrap, "_reload_wyoming", lambda hass: _async_return(0))
-    monkeypatch.setattr(bootstrap, "_wait_for_agent", lambda hass, **kw: _async_return("conversation.nova"))
-
-    async def _pipe(hass):
-        return pipeline
-    monkeypatch.setattr(bootstrap, "_create_pipeline", _pipe)
-    return notices
-
-
-async def test_first_run_shows_each_step_then_clears(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls == [("step", "addons", 1, 3), ("step", "wyoming", 2, 3),
-                             ("step", "pipeline", 3, 3), ("clear",)]
-
-
-async def test_first_run_without_auto_pipeline_has_two_steps(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load, cfg={"auto_pipeline": False})
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls == [("step", "addons", 1, 2), ("step", "wyoming", 2, 2), ("clear",)]
-
-
-async def test_failures_raise_incomplete_naming_parts(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load, addons=False, pipeline=False)
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls[-1] == ("incomplete", ["Piper, Whisper, openWakeWord", "Assist pipeline"])
-
-
-async def test_version_update_rerun_shows_no_progress(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    bootstrap._write_marker("0.0.1", {"addons_ok": True, "pipeline_ok": True})
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls == [("clear",)]
-
-
-async def test_skip_rechecks_failed_pipeline_live(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    bootstrap._write_marker(bootstrap._current_version(),
-                            {"addons_ok": True, "pipeline_tried": True, "pipeline_ok": False})
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
-    sh = load("setup_health")
-    monkeypatch.setattr(sh, "_check_assist_pipeline", lambda hass: {"status": "warn"})
-    status = await bootstrap.async_run_bootstrap(fake_hass)
+    monkeypatch.setattr(health, "_check_assist_pipeline", lambda hass: {"status": "warn"})
+    status = await boot.async_run_bootstrap(fake_hass)
     assert status["skipped"] == "already bootstrapped this version"
-    assert notices.calls == [("incomplete", ["Assist pipeline"])]
+    assert notices == [("incomplete", ["Assist pipeline"])]
 
-    notices.calls.clear()
-    monkeypatch.setattr(sh, "_check_assist_pipeline", lambda hass: {"status": "ok"})
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls == [("clear",)]
+    # Fixed by hand since: the next start clears the notice.
+    notices.clear()
+    monkeypatch.setattr(health, "_check_assist_pipeline", lambda hass: {"status": "ok"})
+    await boot.async_run_bootstrap(fake_hass)
+    assert notices == [("clear",)]
 
 
-async def test_no_notices_without_supervisor(bootstrap, nova_config, fake_hass, monkeypatch, load):
-    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
+async def test_no_notices_without_the_supervisor(boot, switched_on, notices, fake_hass,
+                                                 monkeypatch):
+    _fake_phases(boot, monkeypatch)
     monkeypatch.delenv("SUPERVISOR_TOKEN")
-    await bootstrap.async_run_bootstrap(fake_hass)
-    assert notices.calls == []
+    await boot.async_run_bootstrap(fake_hass)
+    assert notices == []

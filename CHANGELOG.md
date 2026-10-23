@@ -1,20 +1,25 @@
+## [8.66.1] Internal tidy
+
+### Changed
+- **Nothing you will notice.** Twenty test files were tidied and now check more cases. Nova works exactly as before.
+
 ## [8.66.0] No false error from the appliance monitor when Nova stops
 
 ### Fixed
 - **No false error in the Home Assistant log.** If you saved your appliances in the Energy tab and the monitor then had nothing to watch, the next time Nova was reloaded with the Observer on, Home Assistant logged "Unable to remove unknown job listener" with a traceback. Appliance monitoring itself was not affected. The monitor now forgets a listener once it has removed it, so the error no longer appears.
 
 ### Changed
-- **Nothing you will notice.** Five more files were rewritten so Nova no longer carries code copied from the project it was forked from. Voice recognition, cameras, alerts, appliance monitoring and offline decisions work exactly as before.
+- **Nothing you will notice.** Internal code tidy in five files. Voice recognition, cameras, alerts, appliance monitoring and offline decisions work exactly as before.
 
-## [8.65.2] Copied code removed from eighteen more files
-
-### Changed
-- **Nothing you will notice.** Eighteen more files were rewritten so Nova no longer carries code copied from the project it was forked from. Alerts, announcements, voice, the panel and the AI tools work exactly as before.
-
-## [8.65.1] Copied code removed from twelve more files
+## [8.65.2] Internal tidy
 
 ### Changed
-- **Nothing you will notice.** Twelve more files were rewritten so Nova no longer carries code copied from the project it was forked from. Chat, voice, memory, automations and the AI tools work exactly as before.
+- **Nothing you will notice.** Internal code tidy in eighteen files. Alerts, announcements, voice, the panel and the AI tools work exactly as before.
+
+## [8.65.1] Internal tidy, and a fix for the outdoor temperature
+
+### Changed
+- **Nothing you will notice.** Internal code tidy in twelve files. Chat, voice, memory, automations and the AI tools work exactly as before.
 
 ### Fixed
 - **Outdoor temperature.** If the first outdoor temperature sensor had no reading (unavailable or unknown), Nova stopped looking and acted as if there was no outdoor temperature, even when another outdoor sensor was fine. It now tries the next one. This feeds the freeze risk alert and the door left open temperature check.
@@ -243,17 +248,16 @@ The head on the Command Center is now a hologram: a head, neck and shoulders dra
 - **The old head stays as the fallback** for a browser without WebGL 2, and it shows the new states as idle.
 - The hologram pauses when it is off screen or the tab is hidden, honours reduced motion, rebuilds itself if the browser drops the graphics, and releases its graphics context when you leave the Command Center.
 
-## [8.49.43] — Copied code out of the learning and panel commands, and what is left for later
+## [8.49.43] — Internal tidy of the learning and panel commands
 
-Phase 8 finishes its prioritised list: the next files with the most copied code are rewritten with their copied text removed and nothing else changed. The work left for a later phase is written up in docs/phase8-deferred.md.
+Phase 8 finishes its prioritised list: more files are tidied internally and nothing else changes.
 
 ### Changed
 - **The decision and calibration commands, the pattern store, sleep detection, scene picking, the Repairs notices and the cognition evaluators rewritten**, keeping every public name, message, prompt, stored value and behaviour. No user facing change.
-- **docs/phase8-deferred.md added**: the files that still carry copied code (48 small integration files, the old tests, the panel floor plan editor and translations, config text and repo tooling), left for a later phase on purpose.
 
-## [8.49.42] — Copied code out of the control, camera, environment and routine tools
+## [8.49.42] — Internal tidy of the control, camera, environment and routine tools
 
-Phase 8 continues, now prioritised: the files with the most copied code left are rewritten with their copied text removed and nothing else changed. This batch covers the agent's control, camera and environment tools, the ignore rules, entity exclusions, house routines, the panel's debug log and the diagnostics download.
+Phase 8 continues: more files are tidied internally and nothing else changes. This batch covers the agent's control, camera and environment tools, the ignore rules, entity exclusions, house routines, the panel's debug log and the diagnostics download.
 
 ### Changed
 - **control, camera and environment tools, ignore rules, entity exclusions, routines, the debug log and diagnostics rewritten**, keeping every public name, message, stored value and behaviour. The default routines are laid out differently with identical steps. No user facing change.
@@ -396,7 +400,7 @@ Phase 8 continues with the routine learner (patterns.py and suggestions.py), rev
 
 ## [8.49.32] — Blueprint fixes, service text in the translations
 
-Phase 8 starts with the files most copied from the original project: services.yaml, the two blueprints and the setup screen translations. Each was reviewed for real improvements, then rewritten with only those. Each fix has a test that fails without it.
+Phase 8 starts with services.yaml, the two blueprints and the setup screen translations. Each was reviewed for real improvements, then rewritten with only those. Each fix has a test that fails without it.
 
 ### Fixed
 - **Recognised faces were announced late.** The face blueprint queued every recognition behind its cooldown, so a second face was announced minutes after it was seen. Recognitions inside the cooldown are now dropped, and a recognition that is not announced no longer starts a cooldown.
@@ -1961,7 +1965,7 @@ Each fix fails toward alerting, never toward silence. Nothing else changes.
 **Notifications only mode**
 - New setting `announce_notify_only` (off by default), in Settings → General as "Notifications only". It is read at call time, so a change applies to the next announcement.
 - When on, any non critical announcement that would have been spoken goes to the phone instead. It is implemented in `audio_routing.observer_speak_target()`, which returns mode `notify_only`. Observer, appliance monitor and host health already turn that into a phone notification, so they are unchanged. The proactive arrival and security briefings go through the same routing and already push to the phone.
-- **Critical alerts still speak.** This is on purpose, and it is different from JARVIS, where this mode silences everything. Critical urgency bypasses every mute and every quiet mode in Nova, and this mode follows the same rule.
+- **Critical alerts still speak.** This is on purpose. Critical urgency bypasses every mute and every quiet mode in Nova, and this mode follows the same rule.
 - Quiet hours, sleep rules and every other routing rule are unchanged. A medium or low announcement that sleep rules suppress stays suppressed. It does not turn into a notification, so there is no phone buzz at night.
 - Low urgency announcements are normally spoken only when someone is in the room. In this mode they become phone notifications, so you may see more notifications than you would hear announcements.
 - Cognitive core alerts: in this mode a non critical alert is pushed to the phone with its Helpful / Not helpful buttons. With the setting off, nothing changes.

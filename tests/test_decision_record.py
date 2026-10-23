@@ -1,427 +1,434 @@
-"""Decision Record (v7.32.0) — immutable per-decision record with a single outcome."""
+"""Decision records, from the store out to the code that feeds and judges it.
 
-import os
-import tempfile
+Each proactive decision leaves one row. Its outcome is written once and then
+frozen. The callers (cognition, the suggestion store and the intrusion
+call-off) must pass their facts through untouched, and a broken store must
+never break the decision it was meant to describe.
+"""
+import sqlite3
+from contextlib import closing
 
-def _tmp():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    os.unlink(path)  # let the module create it
-    return path
+import pytest
 
+NOW = 1_700_000_000.0
 
-def test_record_and_get_round_trips_granular_split(load):
-    dr = load("decision_record")
-    db = _tmp()
-    try:
-        rid = dr.record(
-            "anticipation_departure",
-            observation={"event": "Gym", "mins_to": 20, "presence": "home"},
-            interpretation={"predicted": "leaving soon", "pattern": "gym_mon"},
-            evidence={"travel_min": 12},
-            decision="announce departure heads-up",
-            reason="recurring event + travel time",
-            confidence=0.72,
-            db_path=db,
-        )
-        assert isinstance(rid, int) and rid > 0
-        rec = dr.get(rid, db_path=db)
-        assert rec is not None
-        # observation and interpretation stay separate structured objects
-        assert rec["observation"] == {"event": "Gym", "mins_to": 20, "presence": "home"}
-        assert rec["interpretation"]["predicted"] == "leaving soon"
-        assert rec["evidence"]["travel_min"] == 12
-        assert rec["decision"] == "announce departure heads-up"
-        assert abs(rec["confidence"] - 0.72) < 1e-9
-        # deterministic predictor -> no model metadata
-        assert rec["model"] is None and rec["tokens"] is None
-        # unjudged by default
-        assert rec["outcome"] is None
-    finally:
-        os.path.exists(db) and os.unlink(db)
+# Full suggestions table as the analyser writes and later updates it.
+SUGGESTION_COLUMNS = (
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT, description TEXT, "
+    "automation_yaml TEXT, confidence REAL, pattern_count INTEGER, pattern_type TEXT, "
+    "entity_ids TEXT, details TEXT, status TEXT, dismissed_at TEXT, approved_at TEXT"
+)
 
 
-def test_outcome_is_set_once_then_immutable(load):
-    dr = load("decision_record")
-    db = _tmp()
-    try:
-        rid = dr.record("intrusion", decision="alert", reason="door open while away", db_path=db)
-        assert dr.set_outcome(rid, dr.OUTCOME_WRONG, source="dismiss_intrusion", db_path=db) is True
-        rec = dr.get(rid, db_path=db)
-        assert rec["outcome"] == "wrong" and rec["outcome_source"] == "dismiss_intrusion"
-        # a second attempt must NOT overwrite — the record is immutable once judged
-        assert dr.set_outcome(rid, dr.OUTCOME_GOOD, source="oops", db_path=db) is False
-        assert dr.get(rid, db_path=db)["outcome"] == "wrong"
-    finally:
-        os.path.exists(db) and os.unlink(db)
+class Spy:
+    """Stands in for a function: keeps every call and answers ``result``."""
+
+    def __init__(self, result=True):
+        self.result = result
+        self.calls = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.result
 
 
-def test_set_outcome_missing_record_is_false(load):
-    dr = load("decision_record")
-    db = _tmp()
-    try:
-        dr.record("suggestion", db_path=db)
-        assert dr.set_outcome(99999, dr.OUTCOME_UNNECESSARY, db_path=db) is False
-        assert dr.set_outcome(None, dr.OUTCOME_WRONG, db_path=db) is False
-    finally:
-        os.path.exists(db) and os.unlink(db)
+def _sql(path, statement, params=()):
+    """Run one statement on a database file, commit and close it."""
+    with closing(sqlite3.connect(path)) as conn:
+        rows = conn.execute(statement, params).fetchall()
+        conn.commit()
+    return rows
 
 
-def test_recent_filters_by_kind_and_unjudged(load):
-    dr = load("decision_record")
-    db = _tmp()
-    try:
-        a = dr.record("anticipation_departure", ts=100.0, db_path=db)
-        b = dr.record("intrusion", ts=200.0, db_path=db)
-        dr.record("anticipation_departure", ts=300.0, db_path=db)
-        dr.set_outcome(a, dr.OUTCOME_GOOD, db_path=db)
-        # newest first
-        assert [r["kind"] for r in dr.recent(db_path=db)][0] == "anticipation_departure"
-        # by kind
-        assert all(r["kind"] == "intrusion" for r in dr.recent(kind="intrusion", db_path=db))
-        assert dr.recent(kind="intrusion", db_path=db)[0]["id"] == b
-        # only-unjudged excludes the one we judged
-        unjudged_ids = {r["id"] for r in dr.recent(only_unjudged=True, db_path=db)}
-        assert a not in unjudged_ids
-    finally:
-        os.path.exists(db) and os.unlink(db)
+def _explode(*_args, **_kwargs):
+    raise RuntimeError("store unavailable")
 
 
-def test_stats_counts_by_outcome(load):
-    dr = load("decision_record")
-    db = _tmp()
-    try:
-        r1 = dr.record("suggestion", db_path=db)
-        r2 = dr.record("suggestion", db_path=db)
-        dr.record("intrusion", db_path=db)  # left unjudged
-        dr.set_outcome(r1, dr.OUTCOME_GOOD, db_path=db)
-        dr.set_outcome(r2, dr.OUTCOME_UNNECESSARY, db_path=db)
-        s = dr.stats(db_path=db)
-        assert s["total"] == 3 and s["judged"] == 2
-        assert s["good"] == 1 and s["unnecessary"] == 1 and s["wrong"] == 0
-    finally:
-        os.path.exists(db) and os.unlink(db)
+@pytest.fixture
+def store(load, tmp_path, monkeypatch):
+    """The decision record module, writing to a private database."""
+    module = load("decision_record")
+    monkeypatch.setattr(module, "_DEFAULT_DB", str(tmp_path / "records.db"))
+    return module
 
 
-def test_record_failure_is_soft_returns_none(load, tmp_path):
-    dr = load("decision_record")
-    # a FILE where a directory is expected -> connect fails -> best-effort returns None (no raise)
-    blocker = tmp_path / "not_a_dir"
-    blocker.write_text("x")
-    assert dr.record("intrusion", db_path=str(blocker / "decisions.db")) is None
+@pytest.fixture
+def analyser(load, tmp_path, monkeypatch):
+    """A pattern analyser on an empty suggestions table, with automation
+    generation stubbed out."""
+    patterns = load("pattern_analyzer")
+    path = str(tmp_path / "suggestions.db")
+    _sql(path, f"CREATE TABLE suggestions ({SUGGESTION_COLUMNS})")
+    engine = patterns.PatternAnalyzer()
+    engine._db = path
+    monkeypatch.setattr(engine, "_generate_automation", lambda _pattern: "{}")
+    engine.module = patterns
+    return engine
 
 
-def test_cognition_log_decision_forwards_granular_split(load, monkeypatch):
-    """The anticipation wiring must pass observation/interpretation through intact."""
-    cog = load("cognition")
-    dr = load("decision_record")
-    captured = {}
-
-    def fake_record(kind, **kw):
-        captured["kind"] = kind
-        captured.update(kw)
-        return 1
-
-    monkeypatch.setattr(dr, "record", fake_record)
-    cog._log_decision(
-        "anticipation_departure",
-        {"event": "Gym", "minutes_until": 20},
-        {"predicted": "leave soon"},
-        "announce departure heads-up",
-        "recurring calendar event",
-        confidence=0.7,
-    )
-    assert captured["kind"] == "anticipation_departure"
-    assert captured["observation"] == {"event": "Gym", "minutes_until": 20}
-    assert captured["interpretation"] == {"predicted": "leave soon"}
-    assert captured["decision"] == "announce departure heads-up"
-    assert abs(captured["confidence"] - 0.7) < 1e-9
+def _seed_suggestion(engine, suggestion_id):
+    _sql(engine._db, "INSERT INTO suggestions (id, status) VALUES (?, 'pending')",
+         (suggestion_id,))
 
 
-def test_cognition_log_decision_never_raises(load, monkeypatch):
-    cog = load("cognition")
-    dr = load("decision_record")
-
-    def boom(*a, **k):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(dr, "record", boom)
-    # must swallow — logging a decision can never break the decision
-    cog._log_decision("anticipation_overdue", {}, {}, "x", "y")
+def _status_of(engine, suggestion_id):
+    found = _sql(engine._db, "SELECT status FROM suggestions WHERE id = ?", (suggestion_id,))
+    return found[0][0] if found else None
 
 
-def test_suggestion_store_records_decision(load, monkeypatch, tmp_path):
-    """Creating a new automation suggestion must log a 'suggestion' decision (Phase 1b)."""
-    import sqlite3
-
-    pa = load("pattern_analyzer")
-    dr = load("decision_record")
-    db = str(tmp_path / "patterns.db")
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "CREATE TABLE suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT, "
-        "description TEXT, automation_yaml TEXT, confidence REAL, pattern_count INTEGER, "
-        "pattern_type TEXT, entity_ids TEXT, details TEXT, status TEXT)"
-    )
-    conn.commit()
-    conn.close()
-
-    an = pa.PatternAnalyzer()
-    an._db = db
-    monkeypatch.setattr(an, "_generate_automation", lambda p: "{}")
-
-    captured = {}
-
-    def fake_record(kind, **kw):
-        captured["kind"] = kind
-        captured.update(kw)
-        return 1
-
-    monkeypatch.setattr(dr, "record", fake_record)
-
-    pat = pa.DetectedPattern(
-        pattern_type="time_routine",
-        description="Porch light at 18:00",
-        entity_ids=["light.porch"],
-        confidence=0.82,
-        occurrences=6,
-    )
-    assert an._store_suggestion(pat) is True
-    assert captured["kind"] == "suggestion"
-    assert captured["observation"]["pattern_type"] == "time_routine"
-    assert captured["observation"]["entities"] == ["light.porch"]
-    assert captured["observation"]["occurrences"] == 6
-    assert captured["interpretation"]["suggested"] == "Porch light at 18:00"
-    assert abs(captured["confidence"] - 0.82) < 1e-9
+def _porch_pattern(engine, **overrides):
+    fields = dict(pattern_type="time_routine", description="Porch light at 18:00",
+                  entity_ids=["light.porch"], confidence=0.82, occurrences=6)
+    fields.update(overrides)
+    return engine.module.DetectedPattern(**fields)
 
 
-def test_suggestion_store_survives_record_failure(load, monkeypatch, tmp_path):
-    """A logging failure must NOT flip the store result to False (own try/except)."""
-    import sqlite3
-
-    pa = load("pattern_analyzer")
-    dr = load("decision_record")
-    db = str(tmp_path / "patterns.db")
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "CREATE TABLE suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT, "
-        "description TEXT, automation_yaml TEXT, confidence REAL, pattern_count INTEGER, "
-        "pattern_type TEXT, entity_ids TEXT, details TEXT, status TEXT)"
-    )
-    conn.commit()
-    conn.close()
-
-    an = pa.PatternAnalyzer()
-    an._db = db
-    monkeypatch.setattr(an, "_generate_automation", lambda p: "{}")
-
-    def boom(*a, **k):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(dr, "record", boom)
-    pat = pa.DetectedPattern(pattern_type="time_routine", description="X", entity_ids=[], confidence=0.5, occurrences=3)
-    assert an._store_suggestion(pat) is True  # still stored despite the logging blow-up
+def _ids(rows):
+    return [row["id"] for row in rows]
 
 
-# ── Phase 2: outcome capture ──────────────────────────────────────────────
+# ── The store ───────────────────────────────────────────────────────────────
 
-def test_set_outcome_by_ref_links_and_is_once(load, tmp_path):
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    rid = dr.record("suggestion", ref="suggestion:11", db_path=db)
-    assert dr.set_outcome_by_ref("suggestion:11", "unnecessary", "dismiss_suggestion", db_path=db) is True
-    assert dr.get(rid, db_path=db)["outcome"] == "unnecessary"
-    assert dr.get(rid, db_path=db)["outcome_source"] == "dismiss_suggestion"
-    assert dr.set_outcome_by_ref("suggestion:999", "wrong", db_path=db) is False   # unknown ref
-    assert dr.set_outcome_by_ref("suggestion:11", "good", db_path=db) is False      # already judged
+def test_each_part_reads_back_separately(store):
+    seen = {"event": "Gym", "mins_to": 20, "presence": "home"}
+    meant = {"predicted": "leaving soon", "pattern": "gym_mon"}
+    new_id = store.record("anticipation_departure", observation=seen,
+                          interpretation=meant, evidence={"travel_min": 12},
+                          decision="announce departure heads-up",
+                          reason="recurring event + travel time", confidence=0.72)
+    assert type(new_id) is int and new_id >= 1
 
-
-def test_set_outcome_recent_picks_recent_unjudged(load, tmp_path):
-    import time
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    old = dr.record("intrusion", ts=time.time() - 10000, db_path=db)
-    new = dr.record("intrusion", ts=time.time() - 60, db_path=db)
-    assert dr.set_outcome_recent("intrusion", "wrong", "dismiss_intrusion", max_age=3600, db_path=db) is True
-    assert dr.get(new, db_path=db)["outcome"] == "wrong"
-    assert dr.get(old, db_path=db)["outcome"] is None            # too old, untouched
-    assert dr.set_outcome_recent("intrusion", "wrong", max_age=3600, db_path=db) is False  # none left
-
-
-def _suggestions_db(tmp_path, sid, status="pending"):
-    import sqlite3
-    db = str(tmp_path / "p.db")
-    conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE suggestions (id INTEGER PRIMARY KEY, status TEXT, dismissed_at TEXT, approved_at TEXT)")
-    conn.execute("INSERT INTO suggestions (id, status) VALUES (?, ?)", (sid, status))
-    conn.commit()
-    conn.close()
-    return db
+    row = store.get(new_id)
+    # The facts and what Nova made of them stay two separate objects.
+    assert row["observation"] == seen
+    assert row["interpretation"] == meant
+    assert row["evidence"] == {"travel_min": 12}
+    assert row["decision"] == "announce departure heads-up"
+    assert row["reason"] == "recurring event + travel time"
+    assert row["confidence"] == pytest.approx(0.72, abs=1e-9)
+    # A rule-based decision carries no model metadata at all.
+    assert (row["model"], row["tokens"], row["latency_ms"]) == (None, None, None)
+    # Nothing has judged it yet.
+    assert (row["outcome"], row["outcome_source"], row["outcome_ts"]) == (None, None, None)
 
 
-def test_dismiss_suggestion_marks_unnecessary(load, monkeypatch, tmp_path):
-    pa = load("pattern_analyzer")
-    dr = load("decision_record")
-    an = pa.PatternAnalyzer()
-    an._db = _suggestions_db(tmp_path, 7)
-    calls = []
-    monkeypatch.setattr(dr, "set_outcome_by_ref",
-                        lambda ref, verdict, source="": calls.append((ref, verdict, source)) or True)
-    an.dismiss_suggestion(7)
-    assert ("suggestion:7", "unnecessary", "dismiss_suggestion") in calls
+def test_an_explicit_path_wins_over_the_default(store, tmp_path):
+    elsewhere = str(tmp_path / "elsewhere.db")
+    new_id = store.record("intrusion", decision="alert", db_path=elsewhere)
+    assert store.get(new_id, db_path=elsewhere)["decision"] == "alert"
+    assert store.stats()["total"] == 0
 
 
-def test_mark_installed_marks_good(load, monkeypatch, tmp_path):
-    pa = load("pattern_analyzer")
-    dr = load("decision_record")
-    an = pa.PatternAnalyzer()
-    an._db = _suggestions_db(tmp_path, 9)
-    calls = []
-    monkeypatch.setattr(dr, "set_outcome_by_ref",
-                        lambda ref, verdict, source="": calls.append((ref, verdict, source)) or True)
-    an.mark_installed(9, "automation.foo")
-    assert ("suggestion:9", "good", "installed") in calls
+@pytest.mark.parametrize("first, source, second", [
+    ("wrong", "dismiss_intrusion", "good"),
+    ("good", "installed", "wrong"),
+    ("unnecessary", "phone", "good"),
+])
+def test_the_first_verdict_is_final(store, first, source, second):
+    new_id = store.record("intrusion", decision="alert", reason="door open while away")
+    assert store.set_outcome(new_id, first, source=source, ts=NOW) is True
+    judged = store.get(new_id)
+    assert (judged["outcome"], judged["outcome_source"]) == (first, source)
+    assert judged["outcome_ts"] == NOW
+
+    # Trying again is refused and leaves every outcome column alone.
+    assert store.set_outcome(new_id, second, source="later", ts=NOW + 5) is False
+    again = store.get(new_id)
+    assert (again["outcome"], again["outcome_source"], again["outcome_ts"]) == (first, source, NOW)
 
 
-def test_mark_installed_creates_automation_trial_separately(load, monkeypatch, tmp_path):
-    """Phase 3: installing a suggestion creates an Automation Trial row too —
-    a materially different record from the suggestion-acceptance Decision
-    Record outcome above, tracking whether the automation actually runs
-    rather than whether it was accepted."""
-    pa = load("pattern_analyzer")
-    at = load("automation_trials")
+def test_verdict_constants_hold_their_stored_words(store):
+    assert (store.OUTCOME_GOOD, store.OUTCOME_UNNECESSARY, store.OUTCOME_WRONG) == (
+        "good", "unnecessary", "wrong")
+
+
+@pytest.mark.parametrize("missing", [99999, None])
+def test_judging_an_unknown_record_changes_nothing(store, missing):
+    kept = store.record("suggestion")
+    assert store.set_outcome(missing, store.OUTCOME_UNNECESSARY) is False
+    assert store.set_outcome(missing, store.OUTCOME_WRONG) is False
+    assert store.set_outcome_checked(missing, store.OUTCOME_GOOD) == "not_found"
+    assert store.get(kept)["outcome"] is None
+
+
+def test_recent_lists_newest_first_and_filters(store):
+    early = store.record("anticipation_departure", ts=100.0)
+    middle = store.record("intrusion", ts=200.0)
+    late = store.record("anticipation_departure", ts=300.0)
+    store.set_outcome(early, store.OUTCOME_GOOD)
+
+    assert _ids(store.recent()) == [late, middle, early]
+    assert store.recent()[0]["kind"] == "anticipation_departure"
+    by_kind = store.recent(kind="intrusion")
+    assert _ids(by_kind) == [middle]
+    assert {row["kind"] for row in by_kind} == {"intrusion"}
+    # The judged one drops out of the open list.
+    assert _ids(store.recent(only_unjudged=True)) == [late, middle]
+    assert _ids(store.recent(limit=1)) == [late]
+
+
+def test_stats_tally_every_verdict(store):
+    liked = store.record("suggestion")
+    ignored = store.record("suggestion")
+    store.record("intrusion")   # still open
+    store.set_outcome(liked, store.OUTCOME_GOOD)
+    store.set_outcome(ignored, store.OUTCOME_UNNECESSARY)
+    assert store.stats() == {"total": 3, "judged": 2, "good": 1,
+                             "unnecessary": 1, "wrong": 0}
+
+
+# Each entry point and the answer it must give when the database cannot open.
+_SOFT_FAILURES = [
+    ("record", lambda dr, db: dr.record("intrusion", db_path=db), None),
+    ("get", lambda dr, db: dr.get(1, db_path=db), None),
+    ("recent", lambda dr, db: dr.recent(db_path=db), []),
+    ("page", lambda dr, db: dr.page(db_path=db), {"items": [], "next_cursor": None}),
+    ("set_outcome", lambda dr, db: dr.set_outcome(1, "good", db_path=db), False),
+    ("checked", lambda dr, db: dr.set_outcome_checked(1, "good", db_path=db), "not_found"),
+    ("by_ref", lambda dr, db: dr.set_outcome_by_ref("suggestion:1", "good", db_path=db), False),
+    ("recent_kind", lambda dr, db: dr.set_outcome_recent("intrusion", "wrong", db_path=db), False),
+]
+
+
+@pytest.mark.parametrize("call, expected", [(c, e) for _, c, e in _SOFT_FAILURES],
+                         ids=[name for name, _, _ in _SOFT_FAILURES])
+def test_an_unopenable_database_gives_the_quiet_answer(store, tmp_path, call, expected):
+    # A plain file sits where the database folder should be.
+    blocker = tmp_path / "plain_file"
+    blocker.write_text("not a folder")
+    assert call(store, str(blocker / "records.db")) == expected
+
+
+# ── Cognition hands its decisions over ─────────────────────────────────────
+
+def test_cognition_passes_every_part_through(load, store, monkeypatch):
+    cognition = load("cognition")
+    spy = Spy(result=41)
+    monkeypatch.setattr(store, "record", spy)
+
+    returned = cognition._log_decision(
+        "anticipation_departure", {"event": "Gym", "minutes_until": 20},
+        {"predicted": "leave soon"}, "announce departure heads-up",
+        "recurring calendar event", confidence=0.7)
+
+    assert returned == 41
+    (args, kwargs), = spy.calls
+    assert args == ("anticipation_departure",)
+    assert kwargs["observation"] == {"event": "Gym", "minutes_until": 20}
+    assert kwargs["interpretation"] == {"predicted": "leave soon"}
+    assert kwargs["decision"] == "announce departure heads-up"
+    assert kwargs["reason"] == "recurring calendar event"
+    assert kwargs["confidence"] == pytest.approx(0.7, abs=1e-9)
+    assert kwargs["ref"] is None
+
+
+def test_cognition_shrugs_off_a_failing_store(load, store, monkeypatch):
+    cognition = load("cognition")
+    monkeypatch.setattr(store, "record", _explode)
+    # Recording can never break the decision itself.
+    assert cognition._log_decision("anticipation_overdue", {}, {}, "x", "y") is None
+
+
+# ── Suggestions ─────────────────────────────────────────────────────────────
+
+def test_a_new_suggestion_is_recorded_as_a_proposal(analyser, store, monkeypatch):
+    spy = Spy(result=1)
+    monkeypatch.setattr(store, "record", spy)
+
+    assert analyser._store_suggestion(_porch_pattern(analyser)) is True
+    (args, kwargs), = spy.calls
+    assert args == ("suggestion",)
+    assert kwargs["observation"] == {"pattern_type": "time_routine",
+                                     "entities": ["light.porch"], "occurrences": 6}
+    assert kwargs["interpretation"] == {"suggested": "Porch light at 18:00"}
+    assert kwargs["decision"] == "propose automation"
+    assert kwargs["reason"] == "recurring observed behavior"
+    assert kwargs["confidence"] == pytest.approx(0.82, abs=1e-9)
+    assert kwargs["ref"] == "suggestion:1"
+
+
+def test_a_failing_store_still_saves_the_suggestion(analyser, store, monkeypatch):
+    monkeypatch.setattr(store, "record", _explode)
+    pattern = _porch_pattern(analyser, description="X", entity_ids=[],
+                             confidence=0.5, occurrences=3)
+    # The record has its own guard, so the suggestion result stays True.
+    assert analyser._store_suggestion(pattern) is True
+    assert _status_of(analyser, 1) == "pending"
+
+
+def test_proposal_then_dismissal_against_the_real_store(analyser, store):
+    assert analyser._store_suggestion(_porch_pattern(analyser)) is True
+    # The same behaviour again is a refresh, not a second decision.
+    assert analyser._store_suggestion(_porch_pattern(analyser)) is False
+    (proposal,) = store.recent(kind="suggestion")
+    assert proposal["ref"] == "suggestion:1"
+
+    assert analyser.dismiss_suggestion(1) is True
+    judged = store.get(proposal["id"])
+    assert (judged["outcome"], judged["outcome_source"]) == ("unnecessary", "dismiss_suggestion")
+    assert _status_of(analyser, 1) == "dismissed"
+
+
+@pytest.mark.parametrize("act, sid, verdict, source, status", [
+    (lambda engine, sid: engine.dismiss_suggestion(sid), 7, "unnecessary",
+     "dismiss_suggestion", "dismissed"),
+    (lambda engine, sid: engine.mark_installed(sid, "automation.foo"), 9, "good",
+     "installed", "installed"),
+], ids=["dismissed", "installed"])
+def test_a_persons_choice_judges_the_suggestion(analyser, store, monkeypatch,
+                                                act, sid, verdict, source, status):
+    spy = Spy()
+    monkeypatch.setattr(store, "set_outcome_by_ref", spy)
+    _seed_suggestion(analyser, sid)
+    act(analyser, sid)
+    assert (("suggestion:%d" % sid, verdict, source), {}) in spy.calls
+    assert _status_of(analyser, sid) == status
+
+
+def test_installing_also_opens_an_automation_trial(load, analyser, monkeypatch, tmp_path):
+    """The trial is a separate record from the acceptance verdict: it tracks
+    whether the automation then runs, not whether it was accepted."""
+    trials = load("automation_trials")
     trials_db = str(tmp_path / "trials.db")
-    monkeypatch.setattr(at, "_DEFAULT_DB", trials_db)
+    monkeypatch.setattr(trials, "_DEFAULT_DB", trials_db)
+    _seed_suggestion(analyser, 12)
 
-    an = pa.PatternAnalyzer()
-    an._db = _suggestions_db(tmp_path, 12)
-    an.mark_installed(12, "nova_auto_porch_light")
+    analyser.mark_installed(12, "nova_auto_porch_light")
 
-    trials = at.list_trials(db_path=trials_db)
-    assert len(trials) == 1
-    assert trials[0]["suggestion_id"] == 12
-    assert trials[0]["automation_id"] == "nova_auto_porch_light"
-    # installation is acceptance, not proof of performance
-    assert trials[0]["run_count"] == 0
-    assert trials[0]["manual_outcome"] is None
+    (trial,) = trials.list_trials(db_path=trials_db)
+    assert (trial["suggestion_id"], trial["automation_id"]) == (12, "nova_auto_porch_light")
+    # Being installed is acceptance, not evidence that it performs.
+    assert trial["run_count"] == 0
+    assert trial["manual_outcome"] is None
 
 
-def test_mark_installed_survives_automation_trial_failure(load, monkeypatch, tmp_path):
-    """A logging failure in the new trial-tracking path must not stop the
-    existing suggestion-acceptance behavior (status update + Decision Record)."""
-    pa = load("pattern_analyzer")
-    at = load("automation_trials")
+def test_a_failing_trial_does_not_undo_the_install(load, analyser, store, monkeypatch):
+    trials = load("automation_trials")
+    monkeypatch.setattr(trials, "create", _explode)
+    spy = Spy()
+    monkeypatch.setattr(store, "set_outcome_by_ref", spy)
+    _seed_suggestion(analyser, 13)
 
-    def _boom(*a, **k):
-        raise RuntimeError("db down")
-    monkeypatch.setattr(at, "create", _boom)
+    analyser.mark_installed(13, "nova_auto_x")
 
-    an = pa.PatternAnalyzer()
-    db = _suggestions_db(tmp_path, 13)
-    an._db = db
-    an.mark_installed(13, "nova_auto_x")  # must not raise
-
-    import sqlite3
-    conn = sqlite3.connect(db)
-    status = conn.execute("SELECT status FROM suggestions WHERE id = 13").fetchone()[0]
-    conn.close()
-    assert status == "installed"
+    assert _status_of(analyser, 13) == "installed"
+    assert spy.calls == [(("suggestion:13", "good", "installed"), {})]
 
 
-def test_dismiss_intrusion_marks_wrong(load, monkeypatch):
-    intr = load("intrusion")
-    dr = load("decision_record")
-    calls = []
-    monkeypatch.setattr(dr, "set_outcome_recent",
-                        lambda kind, verdict, source="", max_age=3600.0: calls.append((kind, verdict, source)) or True)
-    try:
-        intr.dismiss_intrusion("that's me")
-        assert ("intrusion", "wrong", "dismiss_intrusion") in calls
-    finally:
-        # dismiss_intrusion sets a module-global call-off window; clearing it keeps this
-        # from leaking into other intrusion tests (shared jc.intrusion module).
-        intr.clear_calloff()
-        intr._called_off_until = 0.0
+# ── Linking outcomes back ──────────────────────────────────────────────────
+
+def test_by_ref_judges_once_and_only_known_refs(store):
+    new_id = store.record("suggestion", ref="suggestion:11")
+    assert store.set_outcome_by_ref("suggestion:11", "unnecessary", "dismiss_suggestion") is True
+    row = store.get(new_id)
+    assert (row["outcome"], row["outcome_source"]) == ("unnecessary", "dismiss_suggestion")
+
+    assert store.set_outcome_by_ref("suggestion:999", "wrong") is False   # never recorded
+    assert store.set_outcome_by_ref("suggestion:11", "good") is False     # already judged
+    for blank in ("", None):
+        assert store.set_outcome_by_ref(blank, "good") is False
+    assert store.get(new_id)["outcome"] == "unnecessary"
 
 
-# ── Phase 1: decision browser (cursor pagination + checked outcome) ───────
+def test_recent_kind_only_reaches_back_max_age(store, monkeypatch):
+    monkeypatch.setattr(store.time, "time", lambda: NOW)
+    stale = store.record("intrusion", ts=NOW - 10_000)
+    edge = store.record("intrusion", ts=NOW - 3_600)
+    fresh = store.record("intrusion", ts=NOW - 60)
+    other = store.record("hazard", ts=NOW - 30)
 
-def test_set_outcome_checked_distinguishes_all_three_cases(load, tmp_path):
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    rid = dr.record("intrusion", db_path=db)
-    assert dr.set_outcome_checked(rid, "wrong", "panel", db_path=db) == "ok"
-    assert dr.set_outcome_checked(rid, "good", "panel", db_path=db) == "already_judged"
-    assert dr.set_outcome_checked(99999, "good", "panel", db_path=db) == "not_found"
-    # the successful call actually persisted, same as set_outcome would
-    assert dr.get(rid, db_path=db)["outcome"] == "wrong"
+    def judge():
+        return store.set_outcome_recent("intrusion", "wrong", "dismiss_intrusion", max_age=3600)
 
-
-def test_page_orders_most_recent_first_and_paginates(load, tmp_path):
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    ids = [dr.record("intrusion", ts=float(100 + i), db_path=db) for i in range(5)]
-    first = dr.page(limit=2, db_path=db)
-    assert [r["id"] for r in first["items"]] == [ids[4], ids[3]]
-    assert first["next_cursor"] == {"ts": 103.0, "id": ids[3]}
-
-    second = dr.page(limit=2, db_path=db,
-                     cursor_ts=first["next_cursor"]["ts"], cursor_id=first["next_cursor"]["id"])
-    assert [r["id"] for r in second["items"]] == [ids[2], ids[1]]
-    assert second["next_cursor"] == {"ts": 101.0, "id": ids[1]}
-
-    third = dr.page(limit=2, db_path=db,
-                    cursor_ts=second["next_cursor"]["ts"], cursor_id=second["next_cursor"]["id"])
-    assert [r["id"] for r in third["items"]] == [ids[0]]
-    assert third["next_cursor"] is None  # last page — nothing left to fetch
+    assert judge() is True
+    assert store.get(fresh)["outcome"] == "wrong"
+    # A record exactly max_age old is still in reach.
+    assert judge() is True
+    assert store.get(edge)["outcome"] == "wrong"
+    # Nothing open is left inside the window.
+    assert judge() is False
+    assert store.get(stale)["outcome"] is None
+    assert store.get(other)["outcome"] is None
 
 
-def test_page_cursor_breaks_ties_on_identical_ts(load, tmp_path):
-    """Two records sharing the exact same ts must not be skipped or
-    duplicated across pages — id is the tie-breaker."""
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    a = dr.record("intrusion", ts=100.0, db_path=db)
-    b = dr.record("intrusion", ts=100.0, db_path=db)
-    c = dr.record("intrusion", ts=100.0, db_path=db)
-    assert sorted([a, b, c]) == [a, b, c]  # autoincrement — a < b < c
+def test_calling_off_an_intrusion_marks_it_wrong(load, store, monkeypatch):
+    intrusion = load("intrusion")
+    # Every global the call-off touches goes back afterwards.
+    monkeypatch.setattr(intrusion, "_called_off_until", 0.0)
+    monkeypatch.setattr(intrusion, "_acknowledged_ts", 0.0)
+    monkeypatch.setattr(intrusion, "_last_decision_id", None)
+    monkeypatch.setattr(intrusion, "_false_alarms", [])
+    spy = Spy()
+    monkeypatch.setattr(store, "set_outcome_recent", spy)
 
-    first = dr.page(limit=2, db_path=db)
-    assert [r["id"] for r in first["items"]] == [c, b]
-    second = dr.page(limit=2, db_path=db,
-                     cursor_ts=first["next_cursor"]["ts"], cursor_id=first["next_cursor"]["id"])
-    assert [r["id"] for r in second["items"]] == [a]
-    assert second["next_cursor"] is None
+    result = intrusion.dismiss_intrusion("that's me")
 
-
-def test_page_filters_by_kind_and_only_unjudged(load, tmp_path):
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    a = dr.record("suggestion", ts=100.0, db_path=db)
-    dr.record("intrusion", ts=200.0, db_path=db)
-    dr.set_outcome(a, dr.OUTCOME_GOOD, db_path=db)
-
-    only_suggestion = dr.page(kind="suggestion", db_path=db)
-    assert [r["id"] for r in only_suggestion["items"]] == [a]
-
-    only_unjudged = dr.page(only_unjudged=True, db_path=db)
-    assert a not in {r["id"] for r in only_unjudged["items"]}
+    assert spy.calls == [(("intrusion", "wrong", "dismiss_intrusion"), {"max_age": 7200.0})]
+    assert result["ok"] is True
+    assert result["recorded"]["reason"] == "that's me"
+    assert intrusion.is_called_off() is True
 
 
-def test_page_returns_summary_columns_only(load, tmp_path):
-    """No observation/interpretation/evidence blobs in the list view — those
-    are a separate get() call, per the WS contract."""
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    dr.record("intrusion", observation={"secret": "x"}, db_path=db)
-    row = dr.page(db_path=db)["items"][0]
-    assert "observation" not in row and "interpretation" not in row and "evidence" not in row
-    assert set(row.keys()) == {"id", "ts", "kind", "decision", "reason", "confidence",
-                               "model", "tokens", "latency_ms", "outcome"}
+# ── The decision browser ───────────────────────────────────────────────────
+
+def test_checked_setter_names_each_result(store):
+    new_id = store.record("intrusion")
+    assert [
+        store.set_outcome_checked(new_id, "wrong", "panel"),
+        store.set_outcome_checked(new_id, "good", "panel"),
+        store.set_outcome_checked(99999, "good", "panel"),
+    ] == ["ok", "already_judged", "not_found"]
+    # Only the first one landed.
+    assert store.get(new_id)["outcome"] == "wrong"
 
 
-def test_page_empty_db_returns_no_items_and_no_cursor(load, tmp_path):
-    dr = load("decision_record")
-    db = str(tmp_path / "d.db")
-    result = dr.page(db_path=db)
-    assert result == {"items": [], "next_cursor": None}
+def _walk(store, size, **filters):
+    """Every page in turn, following the cursor until it runs out."""
+    pages, cursor = [], {}
+    while True:
+        chunk = store.page(limit=size, **filters, **cursor)
+        pages.append(chunk)
+        if chunk["next_cursor"] is None:
+            return pages
+        cursor = {"cursor_ts": chunk["next_cursor"]["ts"],
+                  "cursor_id": chunk["next_cursor"]["id"]}
+
+
+def test_pages_run_newest_first_until_the_end(store):
+    made = [store.record("intrusion", ts=100.0 + n) for n in range(5)]
+    pages = _walk(store, 2)
+
+    assert [_ids(p["items"]) for p in pages] == [[made[4], made[3]], [made[2], made[1]], [made[0]]]
+    assert [p["next_cursor"] for p in pages] == [
+        {"ts": 103.0, "id": made[3]}, {"ts": 101.0, "id": made[1]}, None]
+
+
+def test_equal_times_are_split_by_id(store):
+    """Rows sharing a timestamp are neither dropped nor repeated across pages."""
+    first, second, third = (store.record("intrusion", ts=100.0) for _ in range(3))
+    assert first < second < third
+    pages = _walk(store, 2)
+    assert [_ids(p["items"]) for p in pages] == [[third, second], [first]]
+    assert pages[-1]["next_cursor"] is None
+
+
+def test_page_filters_by_kind_and_open(store):
+    liked = store.record("suggestion", ts=100.0)
+    alarm = store.record("intrusion", ts=200.0)
+    store.set_outcome(liked, store.OUTCOME_GOOD)
+
+    assert _ids(store.page(kind="suggestion")["items"]) == [liked]
+    assert _ids(store.page(only_unjudged=True)["items"]) == [alarm]
+
+
+def test_page_rows_are_summaries_without_the_parts(store):
+    """The list view leaves out the JSON parts; get() fetches those."""
+    store.record("intrusion", observation={"secret": "x"})
+    (row,) = store.page()["items"]
+    assert not {"observation", "interpretation", "evidence"} & set(row)
+    assert sorted(row) == sorted(["id", "ts", "kind", "decision", "reason", "confidence",
+                                  "model", "tokens", "latency_ms", "outcome"])
+
+
+def test_an_empty_store_has_one_empty_page(store):
+    assert store.page() == {"items": [], "next_cursor": None}

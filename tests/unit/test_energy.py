@@ -1,258 +1,290 @@
-"""Tests for whole-house energy management (v6.62.0). The safety-relevant parts
-get the most coverage: the agency ladder (advisory/opt_in/autonomous), the
-never-shed guarantee for critical loads, over-peak detection, how the proactive
-offer is shaped per agency level, and the opt-in mode bump."""
+"""Whole house energy (energy.py): agency, peak detection and the offer.
+
+The parts that matter most for safety are covered from several sides: how far
+the agency setting may climb, that critical loads are never put forward for
+holding, and that no offer ever claims to act (auto_act is False at every
+level, because Nova has no switch to act with). The live picture is built from
+fake_hass states; the settings come from a dict in place of nova_config.
+"""
+import sys
+import types
+
 import pytest
 
 
 @pytest.fixture
 def energy(load, monkeypatch):
-    m = load("energy")
-    # Each test starts outside an over peak spell (8.49.37).
-    monkeypatch.setattr(m, "_peak_spell_offered", False, raising=False)
-    return m
+    module = load("energy")
+    # Every test begins outside an over peak spell (8.49.37).
+    monkeypatch.setattr(module, "_peak_spell_offered", False, raising=False)
+    return module
 
 
 @pytest.fixture(autouse=True)
-def _clean_modes_stub():
-    """Ensure no jc.modes stub leaks into or out of a test — several tests
-    inject one, and energy._mode_agency_bonus does `from . import modes`, so a
-    stray stub would pollute neighbours in either direction."""
-    import sys
+def _no_modes_stub():
+    """_mode_agency_bonus imports the sibling ``modes`` lazily; a stub left in
+    sys.modules by one test would change the agency in the next, so none is
+    allowed in or out."""
     sys.modules.pop("jc.modes", None)
     yield
     sys.modules.pop("jc.modes", None)
 
 
-class _State:
-    def __init__(self, state, unit="W", **attrs):
-        self.state = state
-        self.attributes = {"unit_of_measurement": unit, **attrs}
+def _settings(energy, monkeypatch, **values):
+    monkeypatch.setattr(energy, "_cfg", lambda key, default=None: values.get(key, default))
 
 
-class _Hass:
-    def __init__(self, states=None, by_domain=None):
-        self._states = states or {}
-        self._by = by_domain or {}
-    @property
-    def states(self):
-        outer = self
-        class _States:
-            def get(self, eid):
-                return outer._states.get(eid)
-            def async_all(self, domain):
-                return outer._by.get(domain, [])
-        return _States()
+def _modes(monkeypatch, active):
+    stub = types.ModuleType("jc.modes")
+    stub.active_mode = active
+    monkeypatch.setitem(sys.modules, "jc.modes", stub)
+    return stub
 
 
-def _cfg_map(energy, mapping):
-    """Override energy._cfg to read from a dict."""
-    return lambda k, d=None: mapping.get(k, d)
+def _load(name, entity, watts):
+    return {"name": name, "entity": entity, "watts": watts, "shed_ok": True}
 
 
-# ── agency ladder ────────────────────────────────────────────────────────────
-
-def test_default_agency_advisory(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {}))
-    assert energy.effective_agency() == "advisory"
+DRYER = _load("Dryer", "switch.dryer", 4000)
+OVEN = _load("Oven", "switch.oven", 5000)
 
 
-def test_configured_agency_in_force(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_agency": "autonomous"}))
-    assert energy.effective_agency() == "autonomous"
-
-
-def test_bad_agency_falls_back_advisory(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_agency": "nonsense"}))
-    assert energy.effective_agency() == "advisory"
-
-
-def test_mode_bump_empty_by_default_no_change(energy, monkeypatch):
-    # advisory user, a mode wants a bump, but bump list empty → bonus is 0
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_agency": "advisory"}))
-    monkeypatch.setattr(energy, "_mode_agency_bonus", lambda: 0)
-    assert energy.effective_agency() == "advisory"      # no surprise bump
-
-
-def test_mode_bump_raises_one_step_when_opted_in(energy, monkeypatch):
-    # advisory ceiling + an active bump mode (bonus 1) → opt_in
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_agency": "advisory"}))
-    monkeypatch.setattr(energy, "_mode_agency_bonus", lambda: 1)
-    assert energy.effective_agency() == "opt_in"        # advisory + 1 step
-
-
-def test_mode_bump_capped_at_autonomous(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_agency": "autonomous"}))
-    monkeypatch.setattr(energy, "_mode_agency_bonus", lambda: 1)
-    assert energy.effective_agency() == "autonomous"    # can't exceed top
-
-
-def test_mode_bonus_reads_configured_bump_list(energy, monkeypatch):
-    # _mode_agency_bonus itself: returns 1 only when active mode is in the list
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_mode_bump": ["away"]}))
-    import sys, types
-    modes_stub = types.ModuleType("jc.modes")
-    modes_stub.active_mode = lambda: "away"
-    monkeypatch.setitem(sys.modules, "jc.modes", modes_stub)
-    assert energy._mode_agency_bonus() == 1
-    modes_stub.active_mode = lambda: "normal"
-    assert energy._mode_agency_bonus() == 0             # not in bump list
-
-
-# ── never-shed guarantee ─────────────────────────────────────────────────────
-
-def test_never_shed_critical_loads(energy):
-    assert energy._never_shed("switch.cpap_machine", "CPAP") is True
-    assert energy._never_shed("sensor.fridge_power", "Refrigerator") is True
-    assert energy._never_shed("switch.network_rack", "Server") is True
-    assert energy._never_shed("switch.sump_pump", "Sump Pump") is True
-
-
-def test_ordinary_loads_are_sheddable(energy):
-    assert energy._never_shed("switch.dryer", "Clothes Dryer") is False
-    assert energy._never_shed("switch.dishwasher", "Dishwasher") is False
-
-
-# ── peak threshold ───────────────────────────────────────────────────────────
-
-def test_peak_threshold_default(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {}))
-    assert energy._peak_threshold() == 8000.0
-
-
-def test_peak_threshold_configured(energy, monkeypatch):
-    monkeypatch.setattr(energy, "_cfg", _cfg_map(energy, {"energy_peak_watts": 5000}))
-    assert energy._peak_threshold() == 5000.0
-
-
-# ── proactive offer shaping per agency ───────────────────────────────────────
-
-def _over_peak_status(energy, monkeypatch, agency):
-    """Force a power_status that is over peak with two sheddable loads."""
+def _status(monkeypatch, energy, *, over, running=(), agency="advisory", watts=9000):
+    picture = {"watts": watts, "kw": None if watts is None else watts / 1000,
+               "over_peak": over, "agency": agency, "running": list(running)}
+    monkeypatch.setattr(energy, "power_status", lambda hass: dict(picture))
     monkeypatch.setattr(energy, "effective_agency", lambda: agency)
-    monkeypatch.setattr(energy, "power_status", lambda h: {
-        "watts": 9000, "kw": 9.0, "over_peak": True, "agency": agency,
-        "running": [
-            {"name": "Dryer", "entity": "switch.dryer", "watts": 4000, "shed_ok": True},
-            {"name": "Oven", "entity": "switch.oven", "watts": 5000, "shed_ok": True},
-        ],
-    })
 
 
-def test_advisory_only_informs(energy, monkeypatch):
-    _over_peak_status(energy, monkeypatch, "advisory")
-    offer = energy.evaluate_for_proactive(_Hass())
-    assert offer is not None
-    assert offer["type"] == "energy_advice"
-    assert offer["auto_act"] is False
+# ── how far Nova may go ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("configured, bonus, expected", [
+    (None, 0, "advisory"),            # unset: advisory by default
+    ("autonomous", 0, "autonomous"),
+    ("nonsense", 0, "advisory"),      # unknown words fall back to the lowest
+    ("OPT_IN", 0, "opt_in"),          # case does not matter
+    ("advisory", 0, "advisory"),      # an empty bump list changes nothing
+    ("advisory", 1, "opt_in"),        # a bump mode raises exactly one step
+    ("opt_in", 1, "autonomous"),
+    ("autonomous", 1, "autonomous"),  # never above the top
+])
+def test_effective_agency_ladder(energy, monkeypatch, configured, bonus, expected):
+    values = {} if configured is None else {"energy_agency": configured}
+    _settings(energy, monkeypatch, **values)
+    monkeypatch.setattr(energy, "_mode_agency_bonus", lambda: bonus)
+    assert energy.effective_agency() == expected
 
 
-def test_opt_in_proposes_action(energy, monkeypatch):
-    _over_peak_status(energy, monkeypatch, "opt_in")
-    offer = energy.evaluate_for_proactive(_Hass())
-    assert offer["type"] == "energy_shed_offer"
-    assert offer["auto_act"] is False
-    assert offer.get("entity_id")            # names a specific load to hold
+def test_bump_applies_only_while_a_listed_mode_is_active(energy, monkeypatch):
+    _settings(energy, monkeypatch, energy_mode_bump=["away"])
+    stub = _modes(monkeypatch, lambda: "away")
+    assert energy._mode_agency_bonus() == 1
+    stub.active_mode = lambda: "normal"
+    assert energy._mode_agency_bonus() == 0
 
 
-def test_autonomous_tier_does_not_actually_act(energy, monkeypatch):
-    """Renamed + fixed Sept 2026: this used to assert auto_act is True, which
-    matched the code at the time but was itself the bug — appliance profiles
-    only ever capture a power SENSOR per appliance, never a controllable
-    switch, so nothing has ever actually been shed here. Nova now says so
-    instead of claiming an action it can't perform."""
-    _over_peak_status(energy, monkeypatch, "autonomous")
-    offer = energy.evaluate_for_proactive(_Hass())
-    assert offer["type"] == "energy_shed"
-    assert offer["auto_act"] is False
+def test_bump_ignores_a_setting_that_is_not_a_list(energy, monkeypatch):
+    _settings(energy, monkeypatch, energy_mode_bump="away")
+    _modes(monkeypatch, lambda: "away")
+    assert energy._mode_agency_bonus() == 0
 
 
-def test_no_offer_when_under_peak(energy, monkeypatch):
-    monkeypatch.setattr(energy, "power_status", lambda h: {"over_peak": False, "running": []})
-    assert energy.evaluate_for_proactive(_Hass()) is None
+def test_bump_survives_the_modes_module_failing(energy, monkeypatch):
+    def _broken():
+        raise RuntimeError("modes not ready")
+    _settings(energy, monkeypatch, energy_mode_bump=["away"], energy_agency="advisory")
+    _modes(monkeypatch, _broken)
+    assert energy._mode_agency_bonus() == 0
+    assert energy.effective_agency() == "advisory"
 
 
-def test_no_offer_single_load(energy, monkeypatch):
-    # over peak but only ONE sheddable load — nothing to stagger
-    monkeypatch.setattr(energy, "power_status", lambda h: {
-        "over_peak": True, "agency": "autonomous",
-        "running": [{"name": "Oven", "entity": "switch.oven", "watts": 9000, "shed_ok": True}],
-    })
-    assert energy.evaluate_for_proactive(_Hass()) is None
+# ── loads that are never put forward ─────────────────────────────────────────
+
+@pytest.mark.parametrize("entity, name, protected", [
+    ("switch.cpap_machine", "CPAP", True),
+    ("sensor.fridge_power", "Refrigerator", True),
+    ("switch.network_rack", "Server", True),
+    ("switch.sump_pump", "Sump Pump", True),
+    ("switch.plug_4", "Boiler", True),              # the name alone is enough
+    ("switch.dryer", "Clothes Dryer", False),
+    ("switch.dishwasher", "Dishwasher", False),
+])
+def test_never_shed_list(energy, entity, name, protected):
+    assert energy._never_shed(entity, name) is protected
 
 
-def test_autonomous_never_sheds_critical(energy, monkeypatch):
-    # two loads over peak, but both are never-shed → no auto action
-    monkeypatch.setattr(energy, "effective_agency", lambda: "autonomous")
-    monkeypatch.setattr(energy, "power_status", lambda h: {
-        "over_peak": True, "agency": "autonomous",
-        "running": [
-            {"name": "Fridge", "entity": "sensor.fridge", "watts": 4000, "shed_ok": False},
-            {"name": "CPAP", "entity": "switch.cpap", "watts": 5000, "shed_ok": False},
-        ],
-    })
-    # no sheddable loads → no offer at all
-    assert energy.evaluate_for_proactive(_Hass()) is None
+# ── the peak and the reading ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("setting, expected", [
+    (None, 8000.0), (5000, 5000.0), ("6500", 6500.0), ("lots", 8000.0), (0, 8000.0),
+])
+def test_peak_threshold(energy, monkeypatch, setting, expected):
+    values = {} if setting is None else {"energy_peak_watts": setting}
+    _settings(energy, monkeypatch, **values)
+    assert energy._peak_threshold() == expected
 
 
-def test_peak_advice_is_offered_once_per_spell(energy, monkeypatch):
-    """8.49.37: a long over peak evening is mentioned once, not every tick.
-    The spell ends when a reading comes back under peak."""
-    _over_peak_status(energy, monkeypatch, "advisory")
-    assert energy.evaluate_for_proactive(_Hass()) is not None
-    assert energy.evaluate_for_proactive(_Hass()) is None
-    assert energy.evaluate_for_proactive(_Hass()) is None
-    monkeypatch.setattr(energy, "power_status", lambda h: {
-        "watts": 3000, "kw": 3.0, "over_peak": False, "running": []})
-    assert energy.evaluate_for_proactive(_Hass()) is None
-    _over_peak_status(energy, monkeypatch, "advisory")
-    assert energy.evaluate_for_proactive(_Hass()) is not None
+def test_kilowatt_readings_are_converted(energy, fake_hass):
+    reading = fake_hass.states.set("sensor.grid", "1.5", unit_of_measurement="kW")
+    assert energy._watts(reading) == 1500.0
+    reading = fake_hass.states.set("sensor.grid", "750", unit_of_measurement="W")
+    assert energy._watts(reading) == 750.0
 
 
-def test_offline_meter_is_not_called_missing(energy, monkeypatch):
-    """8.49.37: a meter that is found but not reporting gets its own line."""
+def test_running_appliances_sorted_and_filtered(energy, monkeypatch, fake_hass):
+    _settings(energy, monkeypatch, appliances=[
+        {"name": "Kettle", "entity": "sensor.kettle_power"},
+        {"name": "Freezer", "entity": "sensor.freezer_power"},
+        {"name": "Lamp", "entity": "sensor.lamp_power"},          # under 50 W
+        {"name": "Washer", "entity": "sensor.washer_power"},      # not a number
+        {"name": "Ghost", "entity": "sensor.not_there"},          # no state
+        "not a dict",
+    ])
+    fake_hass.states.set("sensor.kettle_power", "2.2", unit_of_measurement="kW")
+    fake_hass.states.set("sensor.freezer_power", "120", unit_of_measurement="W")
+    fake_hass.states.set("sensor.lamp_power", "12", unit_of_measurement="W")
+    fake_hass.states.set("sensor.washer_power", "unavailable", unit_of_measurement="W")
+    assert energy._running_appliances(fake_hass) == [
+        {"name": "Kettle", "entity": "sensor.kettle_power", "watts": 2200, "shed_ok": True},
+        {"name": "Freezer", "entity": "sensor.freezer_power", "watts": 120, "shed_ok": False},
+    ]
+
+
+def test_running_appliances_with_a_bad_setting_is_empty(energy, monkeypatch, fake_hass):
+    _settings(energy, monkeypatch, appliances={"name": "Kettle"})
+    assert energy._running_appliances(fake_hass) == []
+
+
+def test_power_status_over_peak_names_the_movable_loads(energy, monkeypatch, fake_hass):
+    _settings(energy, monkeypatch, energy_peak_watts=6000, appliances=[
+        {"name": "Dryer", "entity": "sensor.dryer_power"},
+        {"name": "Oven", "entity": "sensor.oven_power"},
+    ])
+    monkeypatch.setattr(energy, "_read_whole_home_watts", lambda h: (9000.0, "sensor.grid"))
+    fake_hass.states.set("sensor.dryer_power", "3000", unit_of_measurement="W")
+    fake_hass.states.set("sensor.oven_power", "4000", unit_of_measurement="W")
+    status = energy.power_status(fake_hass)
+    assert (status["watts"], status["kw"], status["meter"]) == (9000, 9.0, "sensor.grid")
+    assert status["peak_watts"] == 6000 and status["over_peak"] is True
+    assert status["agency"] == status["configured_agency"] == "advisory"
+    assert [item["name"] for item in status["running"]] == ["Oven", "Dryer"]
+    assert status["advice"] == ["Drawing 9.0 kW (over the 6.0 kW peak) — Oven + Dryer "
+                                "running at once. Staggering them would cut the peak."]
+
+
+@pytest.mark.parametrize("watts, meter, running, line", [
+    (None, "sensor.grid", [], "isn't reporting"),
+    (None, "", [], "No whole-home power meter found"),
+    (3000.0, "sensor.grid", [], "Drawing 3.0 kW — within the 8.0 kW comfort range."),
+    (9000.0, "sensor.grid", [DRYER], "Drawing 9.0 kW, above the 8.0 kW peak."),
+])
+def test_advice_line_for_each_situation(energy, watts, meter, running, line):
+    assert line in energy._advice_line(watts, meter, 8000.0, running)
+
+
+def test_meter_found_but_silent_is_not_called_missing(energy, monkeypatch, fake_hass):
+    """8.49.37: a meter that exists but gives no number gets its own line."""
     monkeypatch.setattr(energy, "_running_appliances", lambda h: [])
-    monkeypatch.setattr(energy, "_read_whole_home_watts",
-                        lambda h: (None, "sensor.home_power"))
-    advice = energy.power_status(_Hass())["advice"]
+    monkeypatch.setattr(energy, "_read_whole_home_watts", lambda h: (None, "sensor.grid"))
+    advice = energy.power_status(fake_hass)["advice"]
     assert len(advice) == 1
-    assert "No whole-home power meter found" not in advice[0]
     assert "isn't reporting" in advice[0]
+    assert "No whole-home power meter found" not in advice[0]
     monkeypatch.setattr(energy, "_read_whole_home_watts", lambda h: (None, ""))
-    assert "No whole-home power meter found" in energy.power_status(_Hass())["advice"][0]
+    assert "No whole-home power meter found" in energy.power_status(fake_hass)["advice"][0]
 
 
-# ── agent tool registration ──────────────────────────────────────────────────
+# ── the proactive offer ──────────────────────────────────────────────────────
 
-def test_energy_tool_registered(load):
+@pytest.mark.parametrize("agency, kind, names_a_load", [
+    ("advisory", "energy_advice", False),
+    ("opt_in", "energy_shed_offer", True),
+    # The autonomous wording used to report auto_act True, but appliance
+    # profiles only hold a power sensor, so nothing was ever switched. It now
+    # says so instead of claiming an action it cannot take.
+    ("autonomous", "energy_shed", True),
+])
+def test_offer_wording_per_agency_never_acts(energy, monkeypatch, fake_hass,
+                                             agency, kind, names_a_load):
+    _status(monkeypatch, energy, over=True, running=[DRYER, OVEN], agency=agency)
+    offer = energy.evaluate_for_proactive(fake_hass)
+    assert offer is not None
+    assert offer["type"] == kind
+    assert offer["auto_act"] is False
+    assert offer["urgency"] == "low" and offer["energy"] is True
+    assert "Dryer and Oven" in offer["message"] and "9.0 kW" in offer["message"]
+    if names_a_load:
+        assert offer["entity_id"] == "switch.dryer"   # the first movable load
+    else:
+        assert "entity_id" not in offer
+
+
+@pytest.mark.parametrize("running", [
+    [],                                                       # nothing running
+    [_load("Oven", "switch.oven", 9000)],                     # one load cannot stagger
+    [dict(DRYER, shed_ok=False), dict(OVEN, shed_ok=False)],  # both critical
+], ids=["no-loads", "single-load", "critical-only"])
+def test_no_offer_without_two_movable_loads(energy, monkeypatch, fake_hass, running):
+    _status(monkeypatch, energy, over=True, running=running, agency="autonomous")
+    assert energy.evaluate_for_proactive(fake_hass) is None
+
+
+def test_no_offer_under_peak(energy, monkeypatch, fake_hass):
+    _status(monkeypatch, energy, over=False, running=[DRYER, OVEN], watts=3000)
+    assert energy.evaluate_for_proactive(fake_hass) is None
+
+
+def test_no_offer_when_the_status_itself_fails(energy, monkeypatch, fake_hass):
+    def _broken(hass):
+        raise RuntimeError("recorder gone")
+    monkeypatch.setattr(energy, "power_status", _broken)
+    assert energy.evaluate_for_proactive(fake_hass) is None
+
+
+def test_one_offer_per_over_peak_spell(energy, monkeypatch, fake_hass):
+    """8.49.37: a long over peak evening is mentioned once; the spell ends
+    with the next reading under peak."""
+    _status(monkeypatch, energy, over=True, running=[DRYER, OVEN])
+    outcomes = [energy.evaluate_for_proactive(fake_hass) is not None for _ in range(3)]
+    assert outcomes == [True, False, False]
+    _status(monkeypatch, energy, over=False, watts=3000)
+    assert energy.evaluate_for_proactive(fake_hass) is None
+    _status(monkeypatch, energy, over=True, running=[DRYER, OVEN])
+    assert energy.evaluate_for_proactive(fake_hass) is not None
+
+
+def test_an_unknown_reading_does_not_end_the_spell(energy, monkeypatch, fake_hass):
+    _status(monkeypatch, energy, over=True, running=[DRYER, OVEN])
+    assert energy.evaluate_for_proactive(fake_hass) is not None
+    _status(monkeypatch, energy, over=False, watts=None)      # meter dropped out
+    assert energy.evaluate_for_proactive(fake_hass) is None
+    _status(monkeypatch, energy, over=True, running=[DRYER, OVEN])
+    assert energy.evaluate_for_proactive(fake_hass) is None
+
+
+# ── the agent can ask for it ────────────────────────────────────────────────
+
+def test_agent_exposes_energy_status(load):
     agent = load("agent")
-    names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert "energy_status" in names
+    assert "energy_status" in {tool["function"]["name"] for tool in agent.NOVA_TOOLS}
     assert "energy_status" in agent._TOOL_MAP
 
 
-# ── whole-home meter discovery (fallback path) ───────────────────────────────
+# ── finding a whole home meter by name ──────────────────────────────────────
 
-def test_fallback_meter_finds_powerocean_home_consumption(energy, fake_hass):
-    """Regression: EcoFlow PowerOcean names its whole-home sensor 'Home
-    Consumption' -- not previously in the recognised-phrase list, so a
-    correctly-tagged sensor (device_class=power, unit=W) was invisible to
-    Nova and power_status() reported 'no meter found' even with real data."""
-    fake_hass.states.set("sensor.solar_inverter_housepower", "512.3",
-                          unit_of_measurement="W", device_class="power",
-                          friendly_name="Home Consumption")
-    assert energy._fallback_meter(fake_hass) == "sensor.solar_inverter_housepower"
-
-
-def test_fallback_meter_still_finds_known_names(energy, fake_hass):
-    fake_hass.states.set("sensor.main_power_meter", "800",
-                          unit_of_measurement="W", device_class="power",
-                          friendly_name="Main Power")
-    assert energy._fallback_meter(fake_hass) == "sensor.main_power_meter"
-
-
-def test_fallback_meter_ignores_unrelated_power_sensors(energy, fake_hass):
-    fake_hass.states.set("sensor.washer_power", "1200",
-                          unit_of_measurement="W", device_class="power",
-                          friendly_name="Washer Power")
-    assert energy._fallback_meter(fake_hass) is None
+@pytest.mark.parametrize("entity, attrs, found", [
+    # EcoFlow PowerOcean calls its whole home sensor "Home Consumption"; it
+    # was once missing from the list, leaving a correctly tagged meter unseen.
+    ("sensor.inverter_house_power", {"device_class": "power", "unit_of_measurement": "W",
+                                     "friendly_name": "Home Consumption"}, True),
+    ("sensor.main_meter", {"device_class": "power", "unit_of_measurement": "W",
+                           "friendly_name": "Main Power"}, True),
+    ("sensor.mains", {"unit_of_measurement": "kW", "friendly_name": "Mains Power"}, True),
+    ("sensor.washer_power", {"device_class": "power", "unit_of_measurement": "W",
+                             "friendly_name": "Washer Power"}, False),
+    ("sensor.home_energy_total", {"device_class": "energy", "unit_of_measurement": "kWh",
+                                  "friendly_name": "Home Energy"}, False),
+])
+def test_fallback_meter_by_friendly_name(energy, fake_hass, entity, attrs, found):
+    fake_hass.states.set(entity, "512.3", **attrs)
+    assert energy._fallback_meter(fake_hass) == (entity if found else None)
