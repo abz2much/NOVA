@@ -1,49 +1,62 @@
-name: Bug report
-description: Something in Nova isn't working as expected
-labels: ["bug"]
+name: Report a bug
+description: Tell us about something in Nova that does not work as it should
+labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: |
-        Thanks for reporting. Please include logs where possible — Nova logs
-        its reasoning to the dashboard's log view, and the Home Assistant log
-        (Settings → System → Logs) often has the rest.
+      value: >-
+        Thank you for taking the time to report this. A few things help us
+        fix it quickly: the versions you run, what you saw, what you expected,
+        and the log lines from around the time it happened.
+
+
+        **This repository is public.** Before you paste anything, remove
+        names, addresses, entity IDs, device names, IP addresses and anything
+        else that identifies you or your home. Stand-ins such as
+        `camera.front_door` or `person.alex` are fine.
   - type: input
-    id: version
+    id: nova_version
     attributes:
-      label: Nova version
-      placeholder: "e.g. 6.3.2"
-    validations:
-      required: true
+      label: Version of Nova
+      description: Shown in HACS, and in Settings → Devices & services → Nova.
+      placeholder: "8.67.0"
+    validations: { required: true }
   - type: input
-    id: ha-version
+    id: home_assistant_version
     attributes:
-      label: Home Assistant version
-      placeholder: "e.g. 2026.6.0"
-    validations:
-      required: true
+      label: Version of Home Assistant
+      description: Settings → About.
+      placeholder: "2026.10.1"
+    validations: { required: true }
   - type: textarea
-    id: what-happened
+    id: actual
     attributes:
-      label: What happened?
-      description: What did you expect, and what happened instead?
-    validations:
-      required: true
+      label: What happened
+      description: What Nova did, said or showed.
+    validations: { required: true }
   - type: textarea
-    id: reproduce
+    id: expected
     attributes:
-      label: Steps to reproduce
-      placeholder: |
-        1. ...
-        2. ...
+      label: What you expected
+      description: What Nova should have done instead.
+    validations: { required: true }
   - type: textarea
-    id: logs
+    id: steps
     attributes:
-      label: Relevant logs
-      description: Dashboard log lines and/or home-assistant.log excerpts.
-      render: shell
+      label: How to make it happen again
+      description: The steps, if you know them. Leave it empty if it happens at random.
+      placeholder: "1. Open Nova's panel  2. ..."
   - type: textarea
-    id: setup
+    id: log_lines
     attributes:
-      label: Setup
-      description: LLM provider(s), cameras (Nest/Frigate), satellites, anything relevant.
+      label: Logs
+      description: "Lines that mention nova from Settings → System → Logs, and anything
+        relevant from the log page in Nova's panel. Remove personal details
+        first."
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your setup
+      description: "Which AI models or providers Nova uses, and whether cameras, voice
+        satellites or speakers are involved. No names or addresses, please."

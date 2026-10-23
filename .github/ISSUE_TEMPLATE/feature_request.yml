@@ -1,20 +1,32 @@
-name: Feature request
-description: Suggest a capability or improvement for Nova
-labels: ["enhancement"]
+name: Suggest a feature
+description: Suggest something new for Nova, or a better way to do something it already does
+labels: [enhancement]
 body:
-  - type: textarea
-    id: idea
+  - type: markdown
     attributes:
-      label: What would you like Nova to do?
-    validations:
-      required: true
+      value: >-
+        Thank you for the idea. Please check the open issues first in case
+        someone has already asked for it, and keep to one idea per request so
+        each can be discussed on its own.
+
+
+        **This repository is public**, so leave out names, addresses, entity
+        IDs and anything else that identifies you or your home.
   - type: textarea
-    id: why
+    id: proposal
     attributes:
-      label: Why is this useful?
-      description: The problem it solves or the experience it improves.
+      label: Your idea
+      description: What Nova should do, in a sentence or two.
+    validations: { required: true }
   - type: textarea
-    id: notes
+    id: problem
     attributes:
-      label: Implementation notes (optional)
-      description: Any thoughts on how it might work, relevant entities, or hardware.
+      label: The problem it solves
+      description: What is hard or missing today, and who it would help.
+    validations: { required: true }
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: "Devices or integrations it would use, how it might work, or
+        examples elsewhere. Optional."
