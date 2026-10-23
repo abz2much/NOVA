@@ -849,6 +849,35 @@ async def test_ensure_lockdown_registers_one_listener_and_adopts_an_armed_alarm_
     assert emitted == []                                                            # a reboot is not announced
 
 
+async def test_ensure_lockdown_reads_the_saved_state_in_the_executor_before_the_alarm_sync(
+        cc, fake_hass, emitted, monkeypatch, caplog):
+    cc._CORE.config = {"lockdown_auto_on_arm": True, "security_alarm_entity": ALARM}
+    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.bus.async_listen = lambda event, handler: (lambda: None)
+    in_executor, loads = [False], []
+    real_run = fake_hass.async_add_executor_job
+
+    async def run(func, *args):
+        in_executor[0] = True
+        try:
+            return await real_run(func, *args)
+        finally:
+            in_executor[0] = False
+    fake_hass.async_add_executor_job = run
+    real_load = cc.LockdownManager._load_state
+
+    def load(self):
+        loads.append(in_executor[0])
+        real_load(self)
+    monkeypatch.setattr(cc.LockdownManager, "_load_state", load)
+    caplog.set_level("DEBUG", logger="custom_components.nova")
+    await cc.ensure_lockdown(fake_hass, cc._CORE.config)
+    fake_hass.close_pending()
+    assert loads == [True]                                                          # off the event loop
+    assert cc.is_lockdown() is True
+    assert "created on demand" not in caplog.text                                   # the normal setup path
+
+
 async def test_request_lockdown_announces_and_a_manual_lift_while_armed_suppresses(
         cc, fake_hass, emitted):
     cc._CORE.config = {"security_alarm_entity": ALARM}
