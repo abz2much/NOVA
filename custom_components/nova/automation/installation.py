@@ -77,6 +77,11 @@ def automation_id_for(alias: str, config: dict[str, Any]) -> str:
     return f"{_ID_PREFIX}{slug}_{digest}"
 
 
+def _as_list(value):
+    """A lone dict becomes a one item list; anything else is left as given."""
+    return [value] if isinstance(value, dict) else value
+
+
 def _existing_with_id(items: list[dict[str, Any]], automation_id: str):
     for item in items:
         if str(item.get("id", "")) == automation_id:
@@ -285,30 +290,24 @@ async def create_automation(
     requested_by_name: Optional[str] = None,
     request_device_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """
-    Create and register a new HA automation programmatically.
+    """Build a Nova automation, write it to automations.yaml and confirm it loaded.
 
-    Args:
-        alias: Human-readable name for the automation
-        description: Optional description
-        trigger: Trigger configuration (HA automation trigger format)
-        condition: Optional condition(s)
-        action: Action(s) to perform
-        mode: Execution mode (single, restart, queued, parallel)
-        request_id: Action Audit Log ownership (v3 correction). This
-            function is called both directly (the `nova.create_automation`
-            HA service — a genuine top-level action) and as a supporting
-            step of suggestion installation (install_approved_suggestion). Pass the
-            caller's own request_id to fold this row into ITS request
-            instead of minting a second one for the same user intent; omit
-            it (default) when this call IS the top-level action.
+    The caller supplies the pieces in Home Assistant's own automation format:
+    ``alias`` (the name a person sees), an optional ``description``,
+    ``trigger`` and ``action`` (both required, one item or a list), an
+    optional ``condition`` and an execution ``mode`` (single, restart,
+    queued or parallel).
 
-    Returns:
-        {"success": True, "automation_id": "...", "alias": "..."}
-        or {"success": False, "error": "..."}
+    ``request_id`` decides who owns the Action Audit Log row. The
+    ``nova.create_automation`` service calls this directly, so it is the
+    top-level action and needs no id. Suggestion installation calls it as one
+    step of a larger request and passes its own id, so both steps log under
+    one request instead of two.
 
-    Cancellation after the write starts restores the exact original bytes,
-    reloads them, and then re-raises the cancellation.
+    The reply is ``{"success": True, "automation_id": ..., "alias": ...}`` or
+    ``{"success": False, "error": ...}``. If the caller is cancelled once the
+    write has begun, the original file bytes are put back, reloaded, and the
+    cancellation is raised again.
     """
     from .. import action_log
     if request_id is None:
@@ -330,22 +329,17 @@ async def create_automation(
         await _audit_failure("missing_trigger_or_action")
         return {"success": False, "error": "Both trigger and action are required"}
 
-    # Normalize to lists
-    if isinstance(trigger, dict):
-        trigger = [trigger]
-    if isinstance(action, dict):
-        action = [action]
-    if condition and isinstance(condition, dict):
-        condition = [condition]
-
-    # Build the automation config
-    auto_config: dict[str, Any] = {
-        "alias": f"Nova · {alias}",
-        "description": description or f"Created by Nova: {alias}",
-        "mode": mode,
-        "triggers": trigger,
-        "actions": action,
-    }
+    # One item or many: the config always holds lists.
+    if condition:
+        condition = _as_list(condition)
+    shown_alias = f"Nova · {alias}"
+    auto_config: dict[str, Any] = dict(
+        alias=shown_alias,
+        description=description or f"Created by Nova: {alias}",
+        mode=mode,
+        triggers=_as_list(trigger),
+        actions=_as_list(action),
+    )
     if condition:
         auto_config["conditions"] = condition
     automation_id = automation_id_for(alias, auto_config)
@@ -442,7 +436,7 @@ async def create_automation(
         return {
             "success": True,
             "automation_id": automation_id,
-            "alias": f"Nova · {alias}",
+            "alias": shown_alias,
         }
 
     except _AlreadyInstalled as exc:
@@ -469,6 +463,17 @@ def _named_alias(hass: HomeAssistant, alias: str, details: Any) -> str:
         return humanize_text(alias, names) if names else alias
     except Exception:
         return alias
+
+
+def _log_install(alias: str, suggestion_id: int) -> None:
+    """Add the install to the learn log. A logging problem is never an install
+    problem."""
+    try:
+        from ..websocket import nova_log
+        nova_log("LEARN", f"Installed learned automation '{alias}' "
+                          f"from suggestion #{suggestion_id}")
+    except Exception:
+        pass
 
 
 async def install_approved_suggestion(
@@ -562,19 +567,20 @@ async def install_approved_suggestion(
                         "suggestion_id": suggestion_id,
                         "automation_match": match}
 
-            result = await create_automation(
-                hass,
+            install_args = dict(
                 alias=norm["alias"],
                 description=sug.get("description", ""),
                 trigger=norm["trigger"],
                 condition=norm.get("condition"),
                 action=norm["action"],
                 mode=norm.get("mode", "single"),
-                request_id=request_id, source="suggestion",
+                request_id=request_id,
+                source="suggestion",
                 requested_by_user_id=requested_by_user_id,
                 requested_by_name=requested_by_name,
                 request_device_id=request_device_id,
             )
+            result = await create_automation(hass, **install_args)
             if not result.get("success"):
                 # Nothing was installed: the suggestion stays retryable.
                 return _refused(f"automation write failed: {result.get('error')}")
@@ -585,16 +591,11 @@ async def install_approved_suggestion(
                 analyzer.mark_installed, suggestion_id, result["automation_id"]))
             if cancelled:
                 raise asyncio.CancelledError
-        try:
-            from ..websocket import nova_log
-            nova_log("LEARN", f"Installed learned automation "
-                                f"'{result['alias']}' from suggestion "
-                                f"#{suggestion_id}")
-        except Exception:
-            pass
+        _log_install(result["alias"], suggestion_id)
         return {"ok": True, "installed": True,
                 "automation_id": result["automation_id"],
-                "alias": result["alias"], "suggestion_id": suggestion_id}
+                "alias": result["alias"],
+                "suggestion_id": suggestion_id}
     except Exception as exc:
         _LOGGER.exception("install_approved_suggestion failed: %s", exc)
         return {"ok": False, "error": _reply_text(exc)}

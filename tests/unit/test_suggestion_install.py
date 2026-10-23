@@ -1,7 +1,10 @@
-"""Tests for closing the pattern-engine loop (v6.52.0): a learned suggestion,
-once approved, actually becomes a Home Assistant automation instead of just
-flipping a DB flag. Covers the pure normalizer across every pattern shape the
-analyzer emits, and the async installer wiring end-to-end."""
+"""Approving a learned suggestion (v6.52.0) installs a real Home Assistant
+automation instead of only flipping a flag in the database.
+
+The first half covers the pure normaliser for each pattern shape the analyser
+produces and the service lookup. The second half covers the async installer
+and how it calls automation creation.
+"""
 import json
 import types
 
@@ -18,128 +21,130 @@ def ac(load):
     return load("automation_creator")
 
 
+def _stored(alias, trigger, action, **more):
+    return json.dumps({"alias": alias, "trigger": trigger, "action": action, **more})
+
+
+def _state_trigger(entity, to):
+    return {"platform": "state", "entity_id": entity, "to": to}
+
+
 # ── normalize_suggestion_automation (pure) ───────────────────────────────────
 
-def test_time_routine_normalizes_and_modernizes(pa):
-    stored = json.dumps({
-        "alias": "Nova Learned: light.porch on at 18:00",
-        "trigger": {"platform": "time", "at": "18:00:00"},
-        "action": {"service": "light.turn_on", "entity_id": "light.porch"},
-    })
-    out = pa.normalize_suggestion_automation(stored)
+def test_time_routine_is_installable_and_brought_up_to_date(pa):
+    out = pa.normalize_suggestion_automation(_stored(
+        "Nova Learned: light.porch on at 18:00",
+        {"platform": "time", "at": "18:00:00"},
+        {"service": "light.turn_on", "entity_id": "light.porch"}))
     assert out["installable"] is True
-    # platform → trigger, service → action (HA modernization)
+    # the old key names are replaced by the current ones
     assert out["trigger"][0]["trigger"] == "time"
     assert "platform" not in out["trigger"][0]
     assert out["action"][0]["action"] == "light.turn_on"
     assert "service" not in out["action"][0]
 
 
-def test_sequence_preserves_delay_action_item(pa):
-    stored = json.dumps({
-        "alias": "Nova Learned: light.hall after binary_sensor.door",
-        "trigger": {"platform": "state", "entity_id": "binary_sensor.door", "to": "on"},
-        "action": [
-            {"delay": "00:01:00"},
-            {"service": "light.turn_on", "entity_id": "light.hall"},
-        ],
-    })
-    out = pa.normalize_suggestion_automation(stored)
+def test_a_sequence_keeps_its_delay_step_as_it_was(pa):
+    out = pa.normalize_suggestion_automation(_stored(
+        "Nova Learned: light.hall after binary_sensor.door",
+        _state_trigger("binary_sensor.door", "on"),
+        [{"delay": "00:01:00"},
+         {"service": "light.turn_on", "entity_id": "light.hall"}]))
     assert out["installable"] is True
-    assert out["action"][0] == {"delay": "00:01:00"}          # delay untouched
-    assert out["action"][1]["action"] == "light.turn_on"      # service modernized
+    assert out["action"][0] == {"delay": "00:01:00"}
+    assert out["action"][1]["action"] == "light.turn_on"
 
 
-def test_presence_pattern_installable(pa):
-    stored = json.dumps({
-        "alias": "Nova Learned: light.entry when person.username home",
-        "trigger": {"platform": "state", "entity_id": "person.username", "to": "home"},
-        "action": {"service": "light.turn_on", "entity_id": "light.entry"},
-    })
-    out = pa.normalize_suggestion_automation(stored)
+def test_a_presence_pattern_is_installable(pa):
+    out = pa.normalize_suggestion_automation(_stored(
+        "Nova Learned: light.entry when person.username home",
+        _state_trigger("person.username", "home"),
+        {"service": "light.turn_on", "entity_id": "light.entry"}))
     assert out["installable"] is True
     assert out["alias"].startswith("Nova Learned")
 
 
-def test_manual_review_is_not_installable(pa):
-    stored = json.dumps({"note": "Consider automating: 'goodnight' at 23:00",
-                         "type": "manual_review"})
-    out = pa.normalize_suggestion_automation(stored)
+def test_a_manual_review_note_is_advice_only(pa):
+    out = pa.normalize_suggestion_automation(json.dumps(
+        {"note": "Consider automating: 'goodnight' at 23:00", "type": "manual_review"}))
     assert out["installable"] is False
     assert "advisory" in out["reason"]
 
 
-def test_bare_note_not_installable(pa):
+def test_a_bare_note_is_not_installable(pa):
     out = pa.normalize_suggestion_automation(json.dumps({"note": "some description"}))
     assert out["installable"] is False
 
 
-def test_malformed_payloads_rejected(pa):
-    assert pa.normalize_suggestion_automation("")["installable"] is False
-    assert pa.normalize_suggestion_automation("not json{")["installable"] is False
-    assert pa.normalize_suggestion_automation("[1,2,3]")["installable"] is False
-    assert pa.normalize_suggestion_automation(
-        json.dumps({"alias": "x"}))["installable"] is False   # missing trigger/action
+@pytest.mark.parametrize("payload", [
+    "", "not json{", "[1,2,3]", json.dumps({"alias": "x"})])
+def test_a_payload_that_is_not_an_automation_is_refused(pa, payload):
+    assert pa.normalize_suggestion_automation(payload)["installable"] is False
 
 
-# ── service_for: domain-aware service resolution (v6.52.1) ───────────────────
+# ── service_for: the right service for each domain (v6.52.1) ─────────────────
 
-def test_service_for_onoff_domains(pa):
-    assert pa.service_for("light.porch", "on") == {"service": "light.turn_on", "entity_id": "light.porch"}
-    assert pa.service_for("switch.pump", "off") == {"service": "switch.turn_off", "entity_id": "switch.pump"}
-    assert pa.service_for("fan.attic", "on")["service"] == "fan.turn_on"
-
-
-def test_service_for_lock_uses_lock_service_not_turn(pa):
-    """The flagship bug: a learned door-lock routine must NOT become
-    lock.turn_locked. It uses lock.lock / lock.unlock."""
-    assert pa.service_for("lock.front", "locked") == {"service": "lock.lock", "entity_id": "lock.front"}
-    assert pa.service_for("lock.front", "unlocked") == {"service": "lock.unlock", "entity_id": "lock.front"}
+@pytest.mark.parametrize("entity, state, service", [
+    ("light.porch", "on", "light.turn_on"),
+    ("switch.pump", "off", "switch.turn_off"),
+    ("fan.attic", "on", "fan.turn_on"),
+])
+def test_on_off_domains_use_turn_on_and_turn_off(pa, entity, state, service):
+    assert pa.service_for(entity, state) == {"service": service, "entity_id": entity}
 
 
-def test_service_for_cover_uses_open_close(pa):
-    assert pa.service_for("cover.garage", "open")["service"] == "cover.open_cover"
-    assert pa.service_for("cover.garage", "closed")["service"] == "cover.close_cover"
-    # transient states settle to the intended end state
-    assert pa.service_for("cover.garage", "opening")["service"] == "cover.open_cover"
+def test_a_lock_uses_lock_and_unlock_never_turn_locked(pa):
+    """The bug that started this: a learned door lock routine must not become
+    lock.turn_locked."""
+    assert pa.service_for("lock.front", "locked") == {
+        "service": "lock.lock", "entity_id": "lock.front"}
+    assert pa.service_for("lock.front", "unlocked") == {
+        "service": "lock.unlock", "entity_id": "lock.front"}
 
 
-def test_service_for_unmappable_returns_none(pa):
-    assert pa.service_for("climate.hall", "heat") is None      # needs params
-    assert pa.service_for("media_player.tv", "playing") is None
-    assert pa.service_for("light.x", "weird_state") is None     # not on/off
-    assert pa.service_for("notanentity", "on") is None
-    assert pa.service_for("", "on") is None
+@pytest.mark.parametrize("state, service", [
+    ("open", "cover.open_cover"),
+    ("closed", "cover.close_cover"),
+    ("opening", "cover.open_cover"),   # a state in motion means the end state
+])
+def test_a_cover_opens_and_closes(pa, state, service):
+    assert pa.service_for("cover.garage", state)["service"] == service
 
 
-def test_sequence_with_lock_installs_valid_service(pa):
-    """End-to-end: a lock sequence generates YAML that normalizes to a real
-    lock.lock action — the whole point of the fix."""
-    # simulate the generator output shape for a lock sequence
-    stored = json.dumps({
-        "alias": "Nova Learned: lock.front after cover.garage",
-        "trigger": {"platform": "state", "entity_id": "cover.garage", "to": "closed"},
-        "action": [{"delay": "00:01:00"},
-                   pa.service_for("lock.front", "locked")],
-    })
-    out = pa.normalize_suggestion_automation(stored)
+@pytest.mark.parametrize("entity, state", [
+    ("climate.hall", "heat"),         # needs parameters
+    ("media_player.tv", "playing"),
+    ("light.x", "weird_state"),
+    ("notanentity", "on"),
+    ("", "on"),
+])
+def test_a_state_with_no_plain_service_gives_nothing(pa, entity, state):
+    assert pa.service_for(entity, state) is None
+
+
+def test_a_lock_sequence_ends_up_calling_a_real_lock_service(pa):
+    """The generator's lock step must come out of the normaliser as lock.lock."""
+    out = pa.normalize_suggestion_automation(_stored(
+        "Nova Learned: lock.front after cover.garage",
+        _state_trigger("cover.garage", "closed"),
+        [{"delay": "00:01:00"}, pa.service_for("lock.front", "locked")]))
     assert out["installable"] is True
-    lock_action = out["action"][1]
-    assert lock_action["action"] == "lock.lock"      # service→action modernized
-    assert "turn_" not in lock_action["action"]      # the bug is gone
+    step = out["action"][1]
+    assert step["action"] == "lock.lock"
+    assert "turn_" not in step["action"]
 
 
 # ── install_approved_suggestion (async wiring) ───────────────────────────────
 
-class _StubAnalyzer:
+class _Analyzer:
     def __init__(self, suggestion):
-        self._sug = suggestion
+        self.suggestion = suggestion
         self.approved = None
         self.installed = None
         self.covered = None
 
     def get_suggestion(self, sid):
-        return self._sug
+        return self.suggestion
 
     def approve_suggestion(self, sid):
         self.approved = sid
@@ -152,119 +157,90 @@ class _StubAnalyzer:
         self.covered = sid
 
 
-async def test_installer_installs_concrete_suggestion(pa, ac, fake_hass, monkeypatch):
-    sug = {"id": 7, "description": "learned",
-           "automation_yaml": json.dumps({
-               "alias": "porch on at 18:00",
-               "trigger": {"platform": "time", "at": "18:00:00"},
-               "action": {"service": "light.turn_on", "entity_id": "light.porch"},
-           })}
-    stub = _StubAnalyzer(sug)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
+def _row(sid, description, automation_yaml):
+    return {"id": sid, "description": description, "automation_yaml": automation_yaml}
 
-    calls = {}
-    async def _fake_create(hass, **kw):
-        calls.update(kw)
-        return {"success": True, "automation_id": "nova_auto_porch",
-                "alias": "Nova · porch on at 18:00"}
-    monkeypatch.setattr(ac, "create_automation", _fake_create)
 
-    res = await pa.install_approved_suggestion(fake_hass, 7)
+def _porch_row(sid=3, description="d", alias="a", entity="light.p"):
+    return _row(sid, description, _stored(
+        alias, {"platform": "time", "at": "18:00:00"},
+        {"service": "light.turn_on", "entity_id": entity}))
+
+
+@pytest.fixture
+def wire(pa, ac, fake_hass, monkeypatch):
+    """Put a suggestion in front of the installer and record how it calls
+    automation creation."""
+    def _wire(suggestion, reply=None):
+        analyzer = _Analyzer(suggestion)
+        monkeypatch.setattr(pa, "get_analyzer", lambda: analyzer)
+        seen = {"calls": 0, "kwargs": {}}
+
+        async def create(hass, **kwargs):
+            seen["calls"] += 1
+            seen["kwargs"] = kwargs
+            return reply if reply is not None else {"success": True}
+
+        monkeypatch.setattr(ac, "create_automation", create)
+        return types.SimpleNamespace(analyzer=analyzer, seen=seen, hass=fake_hass)
+    return _wire
+
+
+async def test_a_concrete_suggestion_is_installed(pa, wire):
+    w = wire(_porch_row(7, "learned", "porch on at 18:00", "light.porch"),
+             {"success": True, "automation_id": "nova_auto_porch",
+              "alias": "Nova · porch on at 18:00"})
+    res = await pa.install_approved_suggestion(w.hass, 7)
     assert res["ok"] is True and res["installed"] is True
     assert res["automation_id"] == "nova_auto_porch"
-    # Phase 5 (D7): an installable suggestion goes straight from pending to
-    # installed once the automation is confirmed; it is never "approved" first.
-    assert stub.approved is None
-    assert stub.installed == (7, "nova_auto_porch")
-    assert calls["alias"] == "porch on at 18:00"    # normalized args passed through
+    # It goes from pending straight to installed once the automation is
+    # confirmed (Phase 5, D7); it is never marked approved first.
+    assert w.analyzer.approved is None
+    assert w.analyzer.installed == (7, "nova_auto_porch")
+    assert w.seen["kwargs"]["alias"] == "porch on at 18:00"
 
 
-async def test_installer_passes_restart_mode(pa, ac, fake_hass, monkeypatch):
-    sug = {"id": 8, "description": "presence release",
-           "automation_yaml": json.dumps({
-               "alias": "office presence release",
-               "trigger": {"platform": "state", "entity_id": "binary_sensor.door",
-                           "to": "on"},
-               "action": [
-                   {"service": "light.turn_on", "entity_id": "light.office"},
-                   {"service": "light.turn_off", "entity_id": "light.office"},
-               ],
-               "mode": "restart",
-           })}
-    stub = _StubAnalyzer(sug)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
-    calls = {}
-
-    async def _fake_create(hass, **kwargs):
-        calls.update(kwargs)
-        return {"success": True, "automation_id": "nova_auto_release",
-                "alias": "Nova · office presence release"}
-
-    monkeypatch.setattr(ac, "create_automation", _fake_create)
-    result = await pa.install_approved_suggestion(fake_hass, 8)
-
+async def test_the_restart_mode_is_passed_on(pa, wire):
+    row = _row(8, "presence release", _stored(
+        "office presence release", _state_trigger("binary_sensor.door", "on"),
+        [{"service": "light.turn_on", "entity_id": "light.office"},
+         {"service": "light.turn_off", "entity_id": "light.office"}],
+        mode="restart"))
+    w = wire(row, {"success": True, "automation_id": "nova_auto_release",
+                   "alias": "Nova · office presence release"})
+    result = await pa.install_approved_suggestion(w.hass, 8)
     assert result["installed"] is True
-    assert calls["mode"] == "restart"
+    assert w.seen["kwargs"]["mode"] == "restart"
 
 
-async def test_installer_advisory_approves_without_install(pa, ac, fake_hass, monkeypatch):
-    sug = {"id": 9, "description": "note",
-           "automation_yaml": json.dumps({"note": "x", "type": "manual_review"})}
-    stub = _StubAnalyzer(sug)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
-
-    called = {"n": 0}
-    async def _fake_create(hass, **kw):
-        called["n"] += 1
-        return {"success": True, "automation_id": "x", "alias": "x"}
-    monkeypatch.setattr(ac, "create_automation", _fake_create)
-
-    res = await pa.install_approved_suggestion(fake_hass, 9)
+async def test_an_advice_only_suggestion_is_acknowledged_but_nothing_is_written(pa, wire):
+    w = wire(_row(9, "note", json.dumps({"note": "x", "type": "manual_review"})))
+    res = await pa.install_approved_suggestion(w.hass, 9)
     assert res["ok"] is True and res["installed"] is False
     assert "advisory" in res["reason"]
-    assert stub.approved == 9        # still acknowledged
-    assert stub.installed is None    # nothing written
-    assert called["n"] == 0          # create_automation never called
+    assert w.analyzer.approved == 9
+    assert w.analyzer.installed is None
+    assert w.seen["calls"] == 0
 
 
-async def test_installer_missing_suggestion(pa, fake_hass, monkeypatch):
-    stub = _StubAnalyzer(None)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
-    res = await pa.install_approved_suggestion(fake_hass, 404)
+async def test_a_suggestion_that_does_not_exist_is_reported(pa, wire):
+    w = wire(None)
+    res = await pa.install_approved_suggestion(w.hass, 404)
     assert res["ok"] is False and "not found" in res["error"]
 
 
-async def test_installer_reports_write_failure(pa, ac, fake_hass, monkeypatch):
-    sug = {"id": 3, "description": "d",
-           "automation_yaml": json.dumps({
-               "alias": "a", "trigger": {"platform": "time", "at": "18:00:00"},
-               "action": {"service": "light.turn_on", "entity_id": "light.p"}})}
-    stub = _StubAnalyzer(sug)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
-
-    async def _fail_create(hass, **kw):
-        return {"success": False, "error": "disk full"}
-    monkeypatch.setattr(ac, "create_automation", _fail_create)
-
-    res = await pa.install_approved_suggestion(fake_hass, 3)
-    # Phase 5 (D7): a failed install is reported as a failure and leaves the
-    # suggestion pending so it can be retried.
+async def test_a_failed_write_is_reported_and_the_suggestion_stays_pending(pa, wire):
+    w = wire(_porch_row(), {"success": False, "error": "disk full"})
+    res = await pa.install_approved_suggestion(w.hass, 3)
     assert res["ok"] is False and res["installed"] is False
     assert "disk full" in res["reason"] and "disk full" in res["error"]
-    assert stub.approved is None
-    assert stub.installed is None
+    assert w.analyzer.approved is None
+    assert w.analyzer.installed is None
 
 
-async def test_installer_rechecks_and_blocks_new_duplicate(
-        pa, ac, fake_hass, monkeypatch, load):
-    sug = {"id": 14, "description": "porch",
-           "automation_yaml": json.dumps({
-               "alias": "porch on", "trigger": {"platform": "time", "at": "18:00:00"},
-               "action": {"service": "light.turn_on", "entity_id": "light.porch"}})}
-    stub = _StubAnalyzer(sug)
-    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
-
-    inventory_mod = load("automation_inventory")
+async def test_an_automation_added_since_is_caught_before_installing(
+        pa, wire, load, monkeypatch):
+    w = wire(_porch_row(14, "porch", "porch on", "light.porch"))
     existing = types.SimpleNamespace(
         entity_id="automation.porch", name="Existing porch",
         referenced_entities=("light.porch",),
@@ -273,19 +249,12 @@ async def test_installer_rechecks_and_blocks_new_duplicate(
             "conditions": [],
             "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}],
         })
-    monkeypatch.setattr(inventory_mod, "get_inventory", lambda hass:
-                        types.SimpleNamespace(records=lambda: [existing]))
-    calls = {"n": 0}
-
-    async def _create(*args, **kwargs):
-        calls["n"] += 1
-        return {"success": True}
-
-    monkeypatch.setattr(ac, "create_automation", _create)
-    result = await pa.install_approved_suggestion(fake_hass, 14)
-
+    monkeypatch.setattr(
+        load("automation_inventory"), "get_inventory",
+        lambda hass: types.SimpleNamespace(records=lambda: [existing]))
+    result = await pa.install_approved_suggestion(w.hass, 14)
     assert result["installed"] is False
     assert "already automated" in result["reason"]
-    assert stub.covered == 14
-    assert stub.approved is None
-    assert calls["n"] == 0
+    assert w.analyzer.covered == 14
+    assert w.analyzer.approved is None
+    assert w.seen["calls"] == 0
