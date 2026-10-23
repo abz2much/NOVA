@@ -1,12 +1,9 @@
-"""
-Nova — Prime directive injection helper.
+"""Builds the system prompt for every Nova LLM call.
 
-Used by every module that builds an LLM system prompt to ensure the
-unrelenting directive is prepended BEFORE the persona or task-specific
-instructions.
-
-This is the mechanism that makes the directive truly unrelenting: it runs
-at every LLM call, not just conversation turns.
+Any module that sends a system prompt builds it here, so the prime directive
+always comes ahead of the persona and of the task's own instructions. This
+runs on each LLM call, not only on conversation turns, which is what keeps the
+directive in force everywhere.
 """
 from __future__ import annotations
 
@@ -14,59 +11,58 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_DIRECTIVE,
-    CONF_DIRECTIVE_PRESET,
-    DEFAULT_DIRECTIVE_PRESET,
-    DOMAIN,
-    NOVA_PERSONA,
-    get_directive,
+    CONF_DIRECTIVE, CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET,
+    DOMAIN, NOVA_PERSONA, get_directive,
+)
+
+_SECTION_BREAK = "\n\n---\n\n"
+
+# The one persona line that tells Nova how to address someone. With nobody
+# specific at home it is swapped for the second text rather than blanked.
+_ADDRESS_LINE = "Address your owner as {honorific} — naturally, never robotically"
+_ADDRESS_LINE_NO_ONE = (
+    "Address the room in general — no honorific, since no one specific "
+    "is home to address right now"
 )
 
 
 def resolve_directive(
     entry: ConfigEntry | None, hass: HomeAssistant | None = None,
 ) -> str:
-    """Get the directive text based on this config entry.
+    """The directive text for this config entry.
 
-    With hass, the entry's live runtime_config (panel changes, no reload)
-    is read first, like every other nova_config.runtime_get caller. Without
-    hass, runtime_config is skipped: config.json → options → data."""
+    When hass is given, the entry's live runtime_config is read first, so
+    panel changes apply without a reload, as for every nova_config.runtime_get
+    caller. Without hass the order is config.json, then options, then data."""
     if entry is None:
         return get_directive(DEFAULT_DIRECTIVE_PRESET, "")
     from . import nova_config
     preset = nova_config.runtime_get(hass, entry, CONF_DIRECTIVE_PRESET,
                                        DEFAULT_DIRECTIVE_PRESET)
-    custom = nova_config.runtime_get(hass, entry, CONF_DIRECTIVE, "")
-    return get_directive(preset, custom)
+    custom_text = nova_config.runtime_get(hass, entry, CONF_DIRECTIVE, "")
+    return get_directive(preset, custom_text)
 
 
 def get_entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Best-effort lookup of the Nova config entry (singleton)."""
+    """The Nova config entry (there is only one), or None if it cannot be found."""
     try:
-        entries = hass.config_entries.async_entries(DOMAIN)
-        return entries[0] if entries else None
+        found = hass.config_entries.async_entries(DOMAIN)
+        return found[0] if found else None
     except Exception:
         return None
 
 
 def fill_honorific(text: str, honorific: str) -> str:
-    """Substitute every {honorific} placeholder in NOVA_PERSONA-derived text.
+    """Put the honorific into every {honorific} placeholder of persona text.
 
-    When honorific is "" (nobody specific home to address — see
-    honorific.py), a blind blank substitution would leave the persona
-    instructions reading "Address your owner as  — naturally" and
-    "Right away, ." — so the one NOVA_PERSONA line that directly instructs
-    on addressing gets an honorific-free rewrite, and every other
-    "{honorific}" instance (all of them trailing, ", {honorific}") is
-    dropped cleanly instead of left blank.
-    """
+    With an empty honorific (nobody specific is home, see honorific.py) a
+    plain blank would leave the persona saying "Address your owner as  —
+    naturally" and "Right away, .". So the one line that tells Nova how to
+    address people is rewritten without an honorific, and every other
+    placeholder, always the trailing ", {honorific}", is removed whole."""
     if honorific:
         return text.replace("{honorific}", honorific)
-    text = text.replace(
-        "Address your owner as {honorific} — naturally, never robotically",
-        "Address the room in general — no honorific, since no one specific "
-        "is home to address right now",
-    )
+    text = text.replace(_ADDRESS_LINE, _ADDRESS_LINE_NO_ONE)
     text = text.replace(", {honorific}", "")
     return text.replace("{honorific}", "")
 
@@ -76,23 +72,13 @@ def build_system_prompt(
     honorific: str,
     task_context: str = "",
 ) -> str:
-    """
-    Build a full system prompt for a task. Structure:
-      1. PRIME DIRECTIVE (always first, always present)
-      2. Nova persona (character + style)
-      3. Task-specific context/instructions
-
-    honorific is substituted into all {honorific} placeholders — see
-    fill_honorific().
-    task_context is the additional task-specific instruction (camera prompt,
-    briefing instructions, sentinel prompt, etc.).
-    """
+    """The full system prompt for one task, in this order: the PRIME DIRECTIVE
+    (always first, always there), the Nova persona, then the task's own
+    instructions (camera prompt, briefing instructions, sentinel prompt and so
+    on). The honorific goes into every {honorific} placeholder; see
+    fill_honorific()."""
     entry = get_entry(hass)
-    directive = resolve_directive(entry, hass)
-    persona = NOVA_PERSONA
-
-    combined = f"{directive}\n\n---\n\n{persona}"
+    parts = [resolve_directive(entry, hass), NOVA_PERSONA]
     if task_context:
-        combined = f"{combined}\n\n---\n\n{task_context.strip()}"
-
-    return fill_honorific(combined, honorific)
+        parts.append(task_context.strip())
+    return fill_honorific(_SECTION_BREAK.join(parts), honorific)
