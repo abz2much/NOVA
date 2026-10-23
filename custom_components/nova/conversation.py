@@ -16,36 +16,23 @@ import time
 import weakref
 from typing import Literal, Optional
 
-from homeassistant.components import conversation
-from homeassistant.components.conversation import ConversationEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import intent, llm
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import intent, llm
+from homeassistant.components import conversation
+from homeassistant.components.conversation import ConversationEntityFeature
 
 from . import paths
 from .audio_routing import reply_targets
 from .const import (
-    CONF_BROADCAST_SPEAKERS,
-    CONF_CAST_SPEAKERS,
-    CONF_DIRECTIVE,
-    CONF_DIRECTIVE_PRESET,
-    CONF_HONORIFIC,
-    CONF_MODEL,
-    CONF_REPLY_SPEAKERS,
-    CONF_ROOM_ROUTING,
-    CONF_TTS_ENGINE,
-    CONF_USE_HASS_API,
-    CONF_VOICE_SATELLITES,
-    DEFAULT_DIRECTIVE_PRESET,
-    DEFAULT_HONORIFIC,
-    DEFAULT_MODEL,
-    DEFAULT_ROOM_ROUTING,
-    DEFAULT_TTS_ENGINE,
-    DOMAIN,
-    NOVA_PERSONA,
-    get_directive,
+    CONF_BROADCAST_SPEAKERS, CONF_CAST_SPEAKERS, CONF_DIRECTIVE,
+    CONF_DIRECTIVE_PRESET, CONF_HONORIFIC, CONF_MODEL, CONF_REPLY_SPEAKERS,
+    CONF_ROOM_ROUTING, CONF_TTS_ENGINE, CONF_USE_HASS_API,
+    CONF_VOICE_SATELLITES, DEFAULT_DIRECTIVE_PRESET, DEFAULT_HONORIFIC,
+    DEFAULT_MODEL, DEFAULT_ROOM_ROUTING, DEFAULT_TTS_ENGINE, DOMAIN,
+    NOVA_PERSONA, get_directive,
 )
 from .database import save_message
 from .llm_provider import resolve_provider_credential, resolve_provider_endpoint
@@ -641,17 +628,16 @@ class NovaAgent(conversation.ConversationEntity):
             return _silent(user_input, getattr(user_input, "conversation_id", None) or "default",
                            "I ran into an internal error handling that request.")
 
-    async def _handle_message_impl(
-        self,
-        user_input: conversation.ConversationInput,
-        chat_log=None,
-    ) -> conversation.ConversationResult:
+    async def _handle_message_impl(self, user_input: conversation.ConversationInput,
+                                   chat_log=None) -> conversation.ConversationResult:
         from .websocket import nova_log
+        heard = user_input.text
         device_id = getattr(user_input, "device_id", None)
-        nova_log("CONV", f"ENTRY text='{user_input.text[:60]}' device={device_id}")
-        # Only the length goes to Home Assistant's log, never the words.
+        # The Nova Log shows the start of the request. Home Assistant's own
+        # log gets the length only, and never the words.
+        nova_log("CONV", f"ENTRY text='{heard[:60]}' device={device_id}")
         _LOGGER.debug("Nova async_process ENTRY: %d chars, device_id='%s'",
-                      len(user_input.text or ""), device_id)
+                      len(heard or ""), device_id)
         # An entry that lost its runtime fails here, before any engine, tool
         # or speaker is touched; the wrapper above answers the error.
         get_runtime(self.entry)

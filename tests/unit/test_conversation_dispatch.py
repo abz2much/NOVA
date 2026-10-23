@@ -1,61 +1,72 @@
-"""Guards for the conversation entity's HA dispatch contract.
+"""Source level guards on how the conversation entity meets Home Assistant.
 
-HA's ConversationEntity.async_process is @final and sets up the chat session/log
-before calling _async_handle_message. Nova must implement ONLY
-_async_handle_message and must not override async_process — a shim that did
-(v7.48.1) bypassed that setup on current HA and crashed voice turns with an
-opaque "Unexpected error during intent recognition". These are source-level
-guards because exercising the entity needs a live HA conversation stack.
+ConversationEntity.async_process is @final in Home Assistant. It prepares the
+chat session and chat log, then calls _async_handle_message. Nova therefore
+implements only _async_handle_message and never overrides async_process. A
+shim that did (v7.48.1) skipped that preparation on current Home Assistant and
+turned voice turns into an opaque "Unexpected error during intent
+recognition". The checks read the source because running the entity needs a
+live Home Assistant conversation stack.
 """
-import inspect
+import ast
 from pathlib import Path
+
+import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "conversation.py"
 
 
-def test_does_not_override_final_async_process():
-    src = SRC.read_text()
-    # No `async def async_process` method on the entity (it's @final in HA).
-    assert "async def async_process(" not in src
+@pytest.fixture(scope="module")
+def source():
+    return SRC.read_text()
 
 
-def test_handler_is_wrapped_against_crashes():
-    src = SRC.read_text()
-    # The public handler HA calls delegates to an impl inside try/except, so a
-    # crash surfaces with a trace instead of HA's opaque error.
-    assert "async def _async_handle_message(" in src
-    assert "async def _handle_message_impl(" in src
-    assert "conversation handler crashed" in src
-
-
-def test_handler_is_actually_a_method_of_nova_agent():
-    """The handler MUST be a method of the registered entity class NovaAgent.
-    A stray column-0 statement once closed the class early and orphaned the whole
-    handler as dead code, so HA hit its base _async_handle_message and raised
-    NotImplementedError. Text-presence isn't enough — check real class membership.
-    """
-    import ast
-    tree = ast.parse(SRC.read_text())
-    for node in ast.walk(tree):
+def _nova_agent(source):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ClassDef) and node.name == "NovaAgent":
-            methods = {
-                n.name for n in node.body
-                if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
-            }
-            assert "_async_handle_message" in methods, \
-                "_async_handle_message is not a method of NovaAgent (orphaned?)"
-            assert "_handle_message_impl" in methods
-            return
+            return node
     raise AssertionError("NovaAgent class not found")
 
 
-def test_context_includes_household_temperature_unit():
-    """Freeform LLM output must follow Home Assistant's unit system rather than
-    defaulting to Fahrenheit. The live-context builder reads the configured
-    temperature unit and instructs the model to express temperatures in it, so a
-    metric household hears Celsius even when Nova isn't quoting a sensor."""
-    src = SRC.read_text()
-    assert "config.units.temperature_unit" in src, \
+def _method_names(cls):
+    return {item.name for item in cls.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def test_async_process_is_left_to_home_assistant(source):
+    # It is @final upstream, so the entity must not define it.
+    assert "async def async_process(" not in source
+    assert "async_process" not in _method_names(_nova_agent(source))
+
+
+def test_a_crash_in_the_handler_is_caught_and_traced(source):
+    # The method Home Assistant calls hands over to an implementation inside a
+    # try block, so a crash leaves a trace instead of Home Assistant's opaque
+    # error.
+    assert "async def _async_handle_message(" in source
+    assert "async def _handle_message_impl(" in source
+    assert "conversation handler crashed" in source
+
+
+def test_the_handler_belongs_to_the_agent_class_not_to_the_module():
+    """The handler must be a method of NovaAgent, the class that gets
+    registered. A stray statement at column 0 once closed the class early and
+    left the whole handler as dead code, so Home Assistant fell back to its
+    own _async_handle_message and raised NotImplementedError. The words
+    appearing in the file would not catch that, so class membership is
+    checked."""
+    methods = _method_names(_nova_agent(SRC.read_text()))
+    assert "_async_handle_message" in methods, \
+        "_async_handle_message is not a method of NovaAgent (orphaned?)"
+    assert "_handle_message_impl" in methods
+
+
+def test_the_context_names_the_temperature_unit_the_home_uses(source):
+    """Free-form model output has to follow Home Assistant's unit system and
+    not drift to Fahrenheit. The live context reads the configured
+    temperature unit and tells the model to give temperatures in it, so a
+    metric household hears Celsius even when Nova is not quoting a sensor."""
+    assert "config.units.temperature_unit" in source, \
         "conversation context must read HA's configured temperature unit"
-    assert "temperatures in" in src, \
+    assert "temperatures in" in source, \
         "context must instruct the model which temperature unit to use"
