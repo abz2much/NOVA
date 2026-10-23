@@ -213,19 +213,14 @@ def model(load, camera_mod, monkeypatch):
     ('{"package": ', None),
     # Prose with no JSON at all is never a sighting.
     ("I think there might be a package", None),
-])
-async def test_a_garbled_reply_is_never_a_delivery(pm, model, fake_hass, reply, expected):
-    model["reply"] = reply
-    assert await pm.detect_on_camera(fake_hass, None, DOOR) == expected
-
-
-@pytest.mark.parametrize("reply, expected", [
+    # Readable replies, fenced or not, with a count that is not a number.
     ('{"package": True, "mail": False}', _seen(package=True)),
     ('```json\n{"package": true, "mail": true, "count": 3, "description": "three boxes"}\n```',
      _seen(True, True, 3, "three boxes")),
     ('{"package": true, "mail": false, "count": "several"}', _seen(package=True)),
 ])
-async def test_readable_replies_are_understood(pm, model, fake_hass, reply, expected):
+async def test_a_reply_is_read_as_what_it_says_and_garble_is_never_a_delivery(
+        pm, model, fake_hass, reply, expected):
     model["reply"] = reply
     assert await pm.detect_on_camera(fake_hass, None, DOOR) == expected
 

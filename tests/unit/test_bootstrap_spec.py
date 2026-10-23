@@ -120,11 +120,18 @@ def test_constants_and_addon_order(bs):
 
 def test_piper_dir_and_marker_override_defaults(load):
     import importlib.util
-    spec = importlib.util.find_spec("jc.bootstrap")
-    assert spec is not None
-    src = Path(spec.origin).read_text(encoding="utf-8")
-    assert 'PIPER_DIR = Path("/share/piper")' in src
-    assert "MARKER_PATH: Optional[Path] = None" in src
+    import sys
+    load("bootstrap")
+    origin = importlib.util.find_spec("jc.bootstrap").origin
+    spec = importlib.util.spec_from_file_location("jc._bootstrap_fresh", origin)
+    fresh = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = fresh
+    try:
+        spec.loader.exec_module(fresh)
+    finally:
+        sys.modules.pop(spec.name, None)
+    assert fresh.PIPER_DIR == Path("/share/piper")
+    assert fresh.MARKER_PATH is None
 
 
 def test_marker_defaults_under_nova_folder(bs, load, tmp_path, monkeypatch):
