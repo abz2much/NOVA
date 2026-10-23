@@ -75,7 +75,8 @@ def test_cognition_loose_trackers_never_prove_the_house_empty(cog, fake_hass):
 
 
 @pytest.mark.parametrize("state,armed", [
-    ("armed_home", True), ("armed_custom_bypass", True), ("armed_away", True),
+    ("armed_away", True), ("armed_vacation", True),
+    ("armed_home", False), ("armed_night", False), ("armed_custom_bypass", False),
     ("disarmed", False), ("arming", False), ("pending", False), ("triggered", False)])
 def test_cognition_armed_uses_the_household_table(cog, load, fake_hass, monkeypatch,
                                                   state, armed):

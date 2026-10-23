@@ -401,9 +401,10 @@ def _all_tracked_residents_away(hass) -> bool:
 
 
 def _conflicting_armed_alarm(hass) -> bool:
-    """An armed alarm: the house is meant to be secure whoever is home."""
+    """An alarm armed away or on vacation: nobody should be opening anything.
+    Armed home or night is left out, since residents open windows then."""
     from . import household
-    return household.snapshot(hass).armed
+    return household.snapshot(hass).posture == household.AWAY
 
 
 def _deviation(hass, eid: str, entry: _Entry, hour: int, now: float):
@@ -439,7 +440,8 @@ def predict(hass, now: float = None) -> list:
     is the secure one (closed, locked, armed) however unusual, nor when it is
     less secure with nothing to back it up; sample_occupancy keeps learning
     either way. The only backing that counts is everyone positively away, or
-    an armed alarm. Missing presence tracking does not, nor "usually" alone.
+    an alarm armed away or on vacation. Missing presence tracking does not,
+    nor "usually" alone, nor an alarm armed home or night.
     """
     now = now or time.time()
     hour = time.localtime(now).tm_hour
