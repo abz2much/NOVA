@@ -1,3 +1,8 @@
+## [8.65.1] Copied code removed from twelve more files
+
+### Changed
+- **Nothing you will notice.** Twelve more files were rewritten so Nova no longer carries code copied from the project it was forked from. Chat, voice, memory, automations and the AI tools work exactly as before.
+
 ## [8.65.0] Change Nova's banter by voice
 
 ### Added
