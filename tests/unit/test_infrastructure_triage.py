@@ -1,12 +1,12 @@
-"""Regression tests for the InfrastructureTriage health aggregator.
+"""InfrastructureTriage: the health audit over the sensors the user listed.
 
-Loaded standalone (stdlib-only) and driven by the harness FakeHass. Pins the
-thresholds, the offline-vs-unreadable distinction, multi-fault ordering, and the
-shape of the returned verdict.
+monitor.py imports only the standard library, so it is loaded here from its
+file on its own and fed states through the shared FakeHass. The cases pin
+the percent bands and their edges, offline versus unreadable, the ordering
+when several things are wrong, and the exact verdict and sentence returned.
 
-8.28.0: the audit watches only the sensors the user listed. It used to check
-one particular home's server, switch and freeze sensor ids, with a power
-monitor root cause for that switch; those ids and that root cause are gone.
+Since 8.28.0 only listed sensors are read. The audit once had one home's own
+server, switch and freezer sensor ids built in; those must stay unchecked.
 """
 import importlib.util
 import pathlib
@@ -14,157 +14,223 @@ import sys
 
 import pytest
 
-from fakes import FakeHass  # provided on sys.path by tests/conftest.py
+from fakes import FakeHass  # tests/conftest.py puts this on sys.path
 
-COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-
-
-def _load_standalone(name: str, relpath: str):
-    spec = importlib.util.spec_from_file_location(name, COMP / relpath)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+_MONITOR = (pathlib.Path(__file__).resolve().parents[2]
+            / "custom_components" / "nova" / "diagnostics" / "monitor.py")
 
 
-monitor = _load_standalone("nova_monitor", "diagnostics/monitor.py")
+def _standalone(path):
+    # dataclasses look the module up in sys.modules while the class body
+    # runs, so it is listed only for the load and removed again afterwards
+    name = "nova_triage_under_test"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
 
 
-DISK = "sensor.disk_use"
-MEMORY = "sensor.memory_use"
-SWITCH = "binary_sensor.network_switch"
-LINK = "binary_sensor.freezer_link"
-LISTED = [DISK, MEMORY, SWITCH, LINK]
+triage = _standalone(_MONITOR)
 
-_HEALTHY = {
-    DISK: ("55", {"unit_of_measurement": "%", "friendly_name": "Disk use"}),
-    MEMORY: ("60", {"unit_of_measurement": "%", "friendly_name": "Memory use"}),
-    SWITCH: ("on", {"device_class": "connectivity", "friendly_name": "Network switch"}),
-    LINK: ("on", {"device_class": "connectivity", "friendly_name": "Freezer link"}),
+QUIET = {"alert_required": False, "message": "", "critical": False, "tags": []}
+
+# name -> (entity id, healthy state, attributes)
+SENSORS = {
+    "disk": ("sensor.disk_use", "55", {"unit_of_measurement": "%",
+                                        "friendly_name": "Disk use"}),
+    "memory": ("sensor.memory_use", "60", {"unit_of_measurement": "%",
+                                            "friendly_name": "Memory use"}),
+    "switch": ("binary_sensor.network_switch", "on",
+               {"device_class": "connectivity", "friendly_name": "Network switch"}),
+    "link": ("binary_sensor.freezer_link", "on",
+             {"device_class": "connectivity", "friendly_name": "Freezer link"}),
 }
+ALL_IDS = [eid for eid, _s, _a in SENSORS.values()]
 
 
-def _verdict(states: dict, sensors=None) -> dict:
+def _home(**overrides):
+    """A FakeHass with every sensor healthy, except the named ones set to the
+    given state (None removes that sensor)."""
     hass = FakeHass()
-    for eid, (state, attrs) in states.items():
-        hass.states.set(eid, state, **attrs)
-    return monitor.InfrastructureTriage(
-        hass, honorific="sir", sensors=LISTED if sensors is None else sensors).evaluate()
-
-
-def _with(eid, state):
-    return {**_HEALTHY, eid: (state, _HEALTHY[eid][1])}
-
-
-# ── nothing listed: the audit does nothing ──────────────────────────────────
-
-def test_nothing_listed_does_nothing_even_with_faults():
-    faulty = {**_with(DISK, "99"), SWITCH: ("off", _HEALTHY[SWITCH][1])}
-    for sensors in ([], None):
-        hass = FakeHass()
-        for eid, (state, attrs) in faulty.items():
+    for key, (eid, state, attrs) in SENSORS.items():
+        state = overrides.get(key, state)
+        if state is not None:
             hass.states.set(eid, state, **attrs)
-        v = monitor.InfrastructureTriage(hass, honorific="sir", sensors=sensors).evaluate()
-        assert v == {"alert_required": False, "message": "", "critical": False, "tags": []}
+    return hass
+
+
+def _run(hass, sensors=ALL_IDS, honorific="sir"):
+    return triage.InfrastructureTriage(hass, honorific=honorific,
+                                       sensors=sensors).evaluate()
+
+
+def _one(eid, state, **attrs):
+    hass = FakeHass()
+    hass.states.set(eid, state, **attrs)
+    return _run(hass, sensors=[eid])
+
+
+# ── what gets checked ───────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("listed", [[], None, ["  ", ""]])
+def test_nothing_listed_means_silence_even_with_faults(listed):
+    assert _run(_home(disk="99", switch="off"), sensors=listed) == QUIET
 
 
 def test_the_old_built_in_ids_are_not_checked():
-    v = _verdict({"sensor.server_root_storage_usage": ("99", {"unit_of_measurement": "%"}),
-                  "binary_sensor.core_switch_status": ("off", {})}, sensors=[])
-    assert v["alert_required"] is False
+    hass = FakeHass()
+    hass.states.set("sensor.server_root_storage_usage", "99", unit_of_measurement="%")
+    hass.states.set("binary_sensor.core_switch_status", "off")
+    assert _run(hass, sensors=[]) == QUIET
 
 
-def test_only_listed_sensors_are_checked():
-    v = _verdict({**_with(DISK, "99"), "sensor.other_disk": ("99", {"unit_of_measurement": "%"})},
-                 sensors=[MEMORY])
-    assert v["alert_required"] is False
+def test_unlisted_sensors_are_ignored():
+    hass = _home(disk="99")
+    hass.states.set("sensor.other_disk", "99", unit_of_measurement="%")
+    assert _run(hass, sensors=["sensor.memory_use"])["alert_required"] is False
 
 
-# ── a listed set is checked ─────────────────────────────────────────────────
-
-def test_all_healthy_is_silent():
-    assert _verdict(_HEALTHY) == {
-        "alert_required": False, "message": "", "critical": False, "tags": [],
-    }
+def test_listed_ids_are_trimmed():
+    verdict = _run(_home(disk="99"), sensors=["  sensor.disk_use "])
+    assert verdict["critical"] is True
 
 
-def test_verdict_carries_finding_tags():
-    v = _verdict({**_with(DISK, "97"), LINK: ("off", _HEALTHY[LINK][1])})
-    assert "Disk use" in v["tags"] and "Freezer link" in v["tags"]
+def test_a_listed_sensor_missing_from_the_home_is_skipped():
+    assert _run(_home(disk=None, switch=None)) == QUIET
 
 
-def test_percent_warning_band():
-    v = _verdict(_with(DISK, "92"))
-    assert v["alert_required"] is True
-    assert v["critical"] is False   # 92 is > warn(90) but not > critical(96)
-    assert "disk use is elevated at 92 percent" in v["message"].lower()
+def test_a_sensor_listed_twice_is_reported_once():
+    verdict = _run(_home(disk="97"), sensors=["sensor.disk_use"] * 2)
+    assert verdict["message"].lower().count("disk use") == 1
+    assert verdict["tags"] == ["Disk use"]
 
 
-def test_percent_critical_band():
-    v = _verdict(_with(MEMORY, "97"))
-    assert v["critical"] is True
-    assert "critically" in v["message"].lower()
+# ── all well ────────────────────────────────────────────────────────────────
+
+def test_everything_healthy_is_quiet():
+    assert _run(_home()) == QUIET
 
 
-def test_binary_sensor_off_is_critical():
-    v = _verdict(_with(SWITCH, "off"))
-    assert v["critical"] is True
-    assert "network switch is reporting offline" in v["message"].lower()
+# ── percent sensors ─────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("reading, alert, critical", [
+    ("90", False, False),     # the warning line itself is still fine
+    ("90.4", True, False),    # only just over the line
+    ("92", True, False),      # above 90: elevated
+    ("96", True, False),      # the critical line itself is only elevated
+    ("97", True, True),       # above 96: critical
+])
+def test_percent_bands(reading, alert, critical):
+    verdict = _run(_home(memory=reading))
+    assert (verdict["alert_required"], verdict["critical"]) == (alert, critical)
 
 
-def test_a_problem_sensor_is_a_fault_when_on():
-    states = {"binary_sensor.ups": ("on", {"device_class": "problem", "friendly_name": "UPS"})}
-    v = _verdict(states, sensors=["binary_sensor.ups"])
-    assert v["critical"] is True and "ups is reporting a problem" in v["message"].lower()
-    states = {"binary_sensor.ups": ("off", {"device_class": "problem", "friendly_name": "UPS"})}
-    assert _verdict(states, sensors=["binary_sensor.ups"])["alert_required"] is False
+def test_elevated_sentence_is_exact():
+    assert _run(_home(disk="92"))["message"] == (
+        "Sir, a minor infrastructure note. Disk use is elevated at 92 percent.")
 
 
-def test_absent_sensor_is_skipped():
-    states = dict(_HEALTHY)
-    del states[DISK]
-    del states[SWITCH]
-    v = _verdict(states)
-    assert v["alert_required"] is False
-    assert v["message"] == ""
+def test_critical_sentence_is_exact():
+    assert _run(_home(memory="97"))["message"] == (
+        "Sir, infrastructure attention is required. "
+        "Memory use is critically high at 97 percent.")
 
 
-def test_unknown_percent_sensor_that_exists_is_a_warning():
-    v = _verdict(_with(DISK, "unknown"))
-    assert v["alert_required"] is True
-    assert v["critical"] is False
-    assert "can't read" in v["message"].lower()
+@pytest.mark.parametrize("reading, phrase", [
+    ("unknown", "can't read"),
+    ("unavailable", "can't read"),
+    ("n/a", "unreadable value"),
+    ("nan", "unreadable value"),
+    ("inf", "unreadable value"),
+])
+def test_unreadable_percent_is_a_warning(reading, phrase):
+    verdict = _run(_home(disk=reading))
+    assert verdict["alert_required"] is True
+    assert verdict["critical"] is False
+    assert phrase in verdict["message"].lower()
 
 
-def test_unavailable_binary_is_a_warning():
-    v = _verdict(_with(SWITCH, "unavailable"))
-    assert v["alert_required"] is True
-    assert v["critical"] is False   # offline-visibility, not a confirmed fault
+def test_a_plain_sensor_only_warns_when_it_goes_dark():
+    assert _one("sensor.uptime", "12", friendly_name="Uptime")["alert_required"] is False
+    verdict = _one("sensor.uptime", "unavailable", friendly_name="Uptime")
+    assert verdict["alert_required"] is True
+    assert verdict["critical"] is False
 
 
-def test_non_numeric_percent_is_handled():
-    v = _verdict(_with(DISK, "n/a"))
-    assert v["alert_required"] is True
-    assert v["critical"] is False
+# ── binary sensors ──────────────────────────────────────────────────────────
+
+def test_connectivity_off_is_critical():
+    verdict = _run(_home(switch="off"))
+    assert verdict["critical"] is True
+    assert verdict["message"] == ("Sir, infrastructure attention is required. "
+                                  "Network switch is reporting offline.")
 
 
-def test_a_listed_sensor_that_is_not_a_percentage_only_warns_when_unreadable():
-    states = {"sensor.uptime": ("12", {"friendly_name": "Uptime"})}
-    assert _verdict(states, sensors=["sensor.uptime"])["alert_required"] is False
-    states = {"sensor.uptime": ("unavailable", {"friendly_name": "Uptime"})}
-    v = _verdict(states, sensors=["sensor.uptime"])
-    assert v["alert_required"] is True and v["critical"] is False
+def test_unavailable_binary_is_a_warning_not_a_fault():
+    verdict = _run(_home(switch="unavailable"))
+    assert verdict["alert_required"] is True
+    assert verdict["critical"] is False
+    assert "dropped offline" in verdict["message"]
 
 
-def test_multiple_faults_lead_with_critical():
-    v = _verdict({**_with(DISK, "97"), LINK: ("off", _HEALTHY[LINK][1]),
-                  MEMORY: ("50", _HEALTHY[MEMORY][1])})
-    assert v["critical"] is True
-    assert "disk use" in v["message"].lower()
-    assert "freezer link" in v["message"].lower()
-    assert v["message"].count(".") >= 1
+@pytest.mark.parametrize("state, alert", [("on", True), ("off", False)])
+def test_problem_class_faults_when_on(state, alert):
+    verdict = _one("binary_sensor.ups", state, device_class="problem", friendly_name="UPS")
+    assert verdict["alert_required"] is alert
+    if alert:
+        assert verdict["critical"] is True
+        assert "ups is reporting a problem" in verdict["message"].lower()
 
 
-def test_a_sensor_listed_twice_is_checked_once():
-    v = _verdict(_with(DISK, "97"), sensors=[DISK, DISK])
-    assert v["message"].lower().count("disk use") == 1
+def test_unnamed_sensor_uses_its_entity_id():
+    verdict = _one("binary_sensor.rack_fan", "off")
+    assert "binary_sensor.rack_fan is reporting offline" in verdict["message"].lower()
+    assert verdict["tags"] == ["binary_sensor.rack_fan"]
+
+
+# ── several faults ──────────────────────────────────────────────────────────
+
+def test_worst_first_and_joined_into_one_sentence():
+    verdict = _run(_home(disk="92", link="off", memory="50"))
+    assert verdict["critical"] is True
+    # the critical link leads even though disk is checked first
+    assert verdict["message"] == (
+        "Sir, infrastructure attention is required. Freezer link is reporting "
+        "offline, and Disk use is elevated at 92 percent.")
+    assert verdict["tags"] == ["Freezer link", "Disk use"]
+
+
+def test_three_faults_use_commas_then_and():
+    verdict = _run(_home(disk="97", memory="93", switch="off"))
+    body = verdict["message"].split("required. ", 1)[1]
+    assert body.count(", ") == 2 and ", and " in body
+    assert set(verdict["tags"]) == {"Disk use", "Memory use", "Network switch"}
+
+
+def test_tags_name_every_finding():
+    verdict = _run(_home(disk="97", link="off"))
+    assert "Disk use" in verdict["tags"] and "Freezer link" in verdict["tags"]
+    assert "disk use" in verdict["message"].lower()
+    assert "freezer link" in verdict["message"].lower()
+
+
+# ── the lead-in ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("honorific, lead", [
+    ("", "A minor infrastructure note."),           # nobody in particular home
+    ("   ", "A minor infrastructure note."),
+    (None, "A minor infrastructure note."),
+    ("ma'am", "Ma'am, a minor infrastructure note."),
+    ("dear leader", "Dear Leader, a minor infrastructure note."),
+])
+def test_lead_in_follows_the_honorific(honorific, lead):
+    assert _run(_home(disk="92"), honorific=honorific)["message"].startswith(lead + " ")
+
+
+def test_lead_in_without_honorific_when_critical():
+    message = _run(_home(disk="99"), honorific="")["message"]
+    assert message.startswith("Infrastructure attention is required. Disk use")

@@ -1,56 +1,78 @@
-"""Tests for Nova-only camera renames (v6.48.0): display_name precedence
-and the blank-to-revert merge, mirrored by the panel and ws_rename_camera."""
+"""Renaming a camera inside Nova only (v6.48.0).
+
+display_name decides what a camera is called (Nova's own name, then the Home
+Assistant friendly name, then the entity id) and merge_camera_name builds the
+saved map, where a blank name means "go back to the Home Assistant name".
+The panel and ws_rename_camera both rely on these two.
+"""
+import sys
+import types
+
 import pytest
+
+EID = "camera.x"
+HA = "HA Name"
 
 
 @pytest.fixture
-def cam(load):
+def cam(load, monkeypatch):
+    # aiohttp is imported at the top of camera.py and may be missing here
+    if "aiohttp" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
     return load("camera")
 
 
-def test_display_name_custom_wins(cam):
-    assert cam.display_name("camera.x", "HA Name",
-                            {"camera.x": "Bedroom 2"}) == "Bedroom 2"
+# ── display_name ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("friendly, names, shown", [
+    (HA, {EID: "Bedroom 2"}, "Bedroom 2"),       # Nova's name wins
+    (HA, {EID: "  Porch  "}, "Porch"),           # and is trimmed
+    (HA, {EID: "   "}, HA),                       # blank falls back
+    (HA, {}, HA),
+    (HA, None, HA),
+    (HA, {EID: 42}, HA),                          # non-text entry ignored
+    (HA, {EID: None}, HA),
+    (HA, {"camera.other": "Garage"}, HA),         # another camera's entry
+    (None, {}, EID),                              # last resort: the id
+    ("", {}, EID),
+    (None, {EID: "Shed"}, "Shed"),
+])
+def test_display_name_table(cam, friendly, names, shown):
+    assert cam.display_name(EID, friendly, names) == shown
 
 
-def test_display_name_strips_whitespace(cam):
-    assert cam.display_name("camera.x", "HA Name",
-                            {"camera.x": "  Porch  "}) == "Porch"
+# ── merge_camera_name ───────────────────────────────────────────────────────
+
+def test_new_name_is_added_trimmed(cam):
+    assert cam.merge_camera_name({}, EID, "  Front Porch ") == {EID: "Front Porch"}
 
 
-def test_display_name_blank_custom_falls_back_to_friendly(cam):
-    assert cam.display_name("camera.x", "HA Name", {"camera.x": "   "}) == "HA Name"
-    assert cam.display_name("camera.x", "HA Name", {}) == "HA Name"
-    assert cam.display_name("camera.x", "HA Name", None) == "HA Name"
+def test_starting_from_no_map(cam):
+    assert cam.merge_camera_name(None, EID, "Hall") == {EID: "Hall"}
+    assert cam.merge_camera_name(None, EID, None) == {}
 
 
-def test_display_name_non_string_custom_ignored(cam):
-    assert cam.display_name("camera.x", "HA Name", {"camera.x": 42}) == "HA Name"
+@pytest.mark.parametrize("blank", ["", "   ", None, 7])
+def test_blank_name_reverts_only_that_camera(cam, blank):
+    before = {EID: "Front Porch", "camera.y": "Garage"}
+    assert cam.merge_camera_name(before, EID, blank) == {"camera.y": "Garage"}
+    assert before == {EID: "Front Porch", "camera.y": "Garage"}
 
 
-def test_display_name_last_resort_entity_id(cam):
-    assert cam.display_name("camera.x", None, {}) == "camera.x"
-    assert cam.display_name("camera.x", "", {}) == "camera.x"
+def test_rename_replaces_and_leaves_the_caller_map_alone(cam):
+    before = {EID: "Old"}
+    after = cam.merge_camera_name(before, EID, "New")
+    assert after == {EID: "New"}
+    assert before == {EID: "Old"}
+    assert after is not before
 
 
-def test_merge_sets_and_strips(cam):
-    out = cam.merge_camera_name({}, "camera.x", "  Front Porch ")
-    assert out == {"camera.x": "Front Porch"}
+def test_reverting_a_camera_with_no_entry_changes_nothing(cam):
+    assert cam.merge_camera_name({"camera.y": "G"}, EID, "") == {"camera.y": "G"}
 
 
-def test_merge_blank_reverts(cam):
-    start = {"camera.x": "Front Porch", "camera.y": "Garage"}
-    assert cam.merge_camera_name(start, "camera.x", "") == {"camera.y": "Garage"}
-    assert cam.merge_camera_name(start, "camera.x", "   ") == {"camera.y": "Garage"}
-    assert cam.merge_camera_name(start, "camera.x", None) == {"camera.y": "Garage"}
-
-
-def test_merge_does_not_mutate_input(cam):
-    start = {"camera.x": "Old"}
-    out = cam.merge_camera_name(start, "camera.x", "New")
-    assert start == {"camera.x": "Old"}
-    assert out == {"camera.x": "New"}
-
-
-def test_merge_revert_missing_key_is_noop(cam):
-    assert cam.merge_camera_name({"camera.y": "G"}, "camera.x", "") == {"camera.y": "G"}
+def test_merged_map_reads_back_through_display_name(cam):
+    names = cam.merge_camera_name({}, EID, " Workshop ")
+    assert cam.display_name(EID, HA, names) == "Workshop"
+    names = cam.merge_camera_name(names, EID, "")
+    assert cam.display_name(EID, HA, names) == HA
