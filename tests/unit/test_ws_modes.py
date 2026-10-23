@@ -1,4 +1,4 @@
-"""Pin what the panel's mode and intrusion commands do today (8.7.19, tests only).
+"""What the panel's mode and intrusion commands do.
 
 ws_modes.py holds nova/intrusion (call off, acknowledge, label, the event log)
 and nova/mode, plus nova/energy, nova/hazard, nova/solar, nova/energy_flow and

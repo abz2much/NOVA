@@ -1,5 +1,5 @@
-"""Pin what the agent's turn loop does when the model or the provider
-misbehaves (8.7.19, tests only).
+"""What the agent's turn loop does when the model or the provider
+misbehaves.
 
 agent_runtime/loop.py turns model output into tool calls. The grant,
 deferral and ambiguity paths are already pinned elsewhere

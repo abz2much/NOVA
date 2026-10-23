@@ -1,6 +1,6 @@
-"""Pin what the rest of websocket.py's panel commands do today (8.7.22, tests only).
+"""What the rest of websocket.py's panel commands do.
 
-nova/update_config has its own file (test_pin_ws_update_config.py). This one
+nova/update_config has its own file (test_websocket_update_config.py). This one
 covers nova/get_panel_data, nova/get_activity_log, nova/reload_appliances,
 nova/get_debug_log, nova/diagnostics, nova/get_setup_health,
 nova/get_provider_activity, nova/semantic_search, nova/documents and
@@ -15,7 +15,7 @@ import types
 
 import pytest
 
-from test_pin_ws_update_config import _Conn, _entry, _hass, _stub_ws_api
+from ws_kit import _Conn, _entry, _hass, _stub_ws_api
 
 
 @pytest.fixture

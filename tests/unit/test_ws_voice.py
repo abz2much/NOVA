@@ -1,4 +1,4 @@
-"""Pin what the voice and history commands in ws_voice.py do today (8.7.22, tests only).
+"""What the voice and history commands in ws_voice.py do.
 
 nova/voice_confirm_test, nova/say_hello, nova/get_spoken_history,
 nova/list_actions and nova/repeat_spoken. nova/repeat_spoken is the riskiest:
@@ -16,7 +16,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api
+from ws_kit import _Conn, _stub_ws_api
 
 
 class _CtxConn(_Conn):

@@ -1,4 +1,4 @@
-"""Pin what nova/update_config does today (8.7.22, tests only).
+"""What nova/update_config does.
 
 nova/update_config is the panel's one generic config write. It checks the key
 against PANEL_WRITABLE_KEYS, refuses credential keys, runs
@@ -6,7 +6,7 @@ safety_config.valid_panel_value, then writes runtime_config and config.json
 and applies a few keys live. The decorators are stubbed to pass through, so
 the handler body runs with a recording connection, a fake entry and a fake
 config store. Tests named test_current_behaviour_* pin behaviour that looks
-wrong; each says why. Nothing here changes production code.
+wrong; each says why.
 """
 from __future__ import annotations
 
@@ -18,32 +18,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-
-
-class _Conn:
-    """A websocket connection that records what the handler sends back."""
-
-    def __init__(self):
-        self.user = types.SimpleNamespace(id="admin-1", name="Abi")
-        self.results, self.errors = [], []
-
-    def send_result(self, msg_id, result=None):
-        self.results.append((msg_id, result))
-
-    def send_error(self, msg_id, code, message=""):
-        self.errors.append((msg_id, code, message))
-
-
-def _stub_ws_api(monkeypatch):
-    api = types.ModuleType("homeassistant.components.websocket_api")
-    api.websocket_command = lambda schema: (lambda fn: fn)
-    api.async_response = lambda fn: fn
-    api.require_admin = lambda fn: fn
-    api.ActiveConnection = _Conn
-    api.async_register_command = lambda *a, **k: None
-    monkeypatch.setitem(sys.modules, "homeassistant.components.websocket_api", api)
-    monkeypatch.setattr(sys.modules["homeassistant.components"], "websocket_api", api,
-                        raising=False)
+from ws_kit import _Conn, _entry, _hass, _stub_ws_api, _update, store  # noqa: F401
 
 
 @pytest.fixture
@@ -53,22 +28,6 @@ def ws(load, monkeypatch):
     mod = load("websocket")
     yield mod
     sys.modules.pop("jc.websocket", None)
-
-
-@pytest.fixture
-def store(load, monkeypatch):
-    """config.json, as a dict. `store.ok` is what nova_config.set returns."""
-    nc = load("nova_config")
-    data: dict = {}
-    state = types.SimpleNamespace(data=data, ok=True, calls=[])
-
-    def _set(key, value):
-        state.calls.append((key, value))
-        data[key] = value
-        return state.ok
-    monkeypatch.setattr(nc, "set", _set)
-    monkeypatch.setattr(nc, "get", lambda k, d=None: data.get(k, d))
-    return state
 
 
 @pytest.fixture
@@ -117,32 +76,6 @@ def audit(load, monkeypatch):
     for name in ("start", "start_many", "set_approval", "set_execution"):
         monkeypatch.setattr(al, name, lambda *a, _n=name, **k: rows.append((_n, a, k)))
     return rows
-
-
-def _entry(load, runtime_config=None, with_runtime=True):
-    rt_mod = load("runtime")
-    runtime = None
-    if with_runtime:
-        runtime = rt_mod.NovaRuntime(
-            client=None, llm_provider_name="groq", sentinel=None,
-            reminder_watcher=None, scheduler=None, resources=None,
-            automation_contexts=None,
-            runtime_config=dict(runtime_config or {}))
-    return types.SimpleNamespace(entry_id="e1", options={}, data={},
-                                 runtime_data=runtime, state=None)
-
-
-def _hass(entry):
-    hass = FakeHass()
-    hass.config_entries = types.SimpleNamespace(
-        async_entries=lambda domain: [entry] if entry is not None else [])
-    return hass
-
-
-async def _update(ws, hass, key, value, msg_id=1):
-    conn = _Conn()
-    await ws.ws_update_config(hass, conn, {"id": msg_id, "key": key, "value": value})
-    return conn
 
 
 # ── What is refused before anything is written ─────────────────────────────

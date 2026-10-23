@@ -1,4 +1,4 @@
-"""The Chat tab's commands in ws_chat.py (8.31.0): nova/chat and nova/chat_new.
+"""The Chat tab's commands in ws_chat.py: nova/chat and nova/chat_new.
 
 The decorators are stubbed to pass through, so the handler bodies run with a
 recording connection and a fake conversation seam. What matters: any signed in
@@ -16,7 +16,7 @@ import types
 import pytest
 
 from fakes import FakeHass
-from test_pin_ws_update_config import _Conn, _stub_ws_api
+from ws_kit import _Conn, _stub_ws_api
 
 
 class _UserConn(_Conn):

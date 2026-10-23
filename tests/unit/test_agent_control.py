@@ -1,4 +1,4 @@
-"""Pin what the agent's device control tools do today (8.7.19, tests only).
+"""What the agent's device control tools do.
 
 agent_runtime/capabilities/control.py is every actuation the conversational
 agent performs: control_device, bulk_control, execute_plan and
