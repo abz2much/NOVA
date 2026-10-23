@@ -184,29 +184,32 @@ async def _push_notification(hass, config, message, action_type, snapshot_url=No
     )
 
 
+def _instance_base_url(hass) -> str:
+    """The address the companion app can reach this instance on, with no
+    trailing slash, or "" when Home Assistant does not say."""
+    try:
+        return str(hass.config.external_url or hass.config.internal_url or "").rstrip("/")
+    except Exception:
+        return ""
+
+
 def _notification_image_data(hass, snapshot_url):
-    """Build the mobile_app notification `data` block that attaches an image.
-    iOS uses `attachment.url`; Android uses `image`. We set both so whichever
-    platform receives it renders the snapshot. Returns {} if no snapshot."""
+    """The `data` block of a mobile_app notification that attaches an image.
+    iOS reads `attachment.url` and Android reads `image`, so both are set and
+    either platform shows the snapshot. Returns {} when there is no snapshot."""
     if not snapshot_url:
         return {}
-    # Make the /local path absolute so the companion app can fetch it off-LAN.
-    url = snapshot_url
+    address = snapshot_url
     try:
-        if url.startswith("/"):
-            base = ""
-            try:
-                base = str(hass.config.external_url or hass.config.internal_url or "").rstrip("/")
-            except Exception:
-                base = ""
+        # A /local path is made absolute so the companion app can fetch it
+        # when it is away from the home network.
+        if address.startswith("/"):
+            base = _instance_base_url(hass)
             if base:
-                url = base + url
+                address = base + address
     except Exception:
         pass
-    return {
-        "image": url,                       # Android
-        "attachment": {"url": url},         # iOS
-    }
+    return {"image": address, "attachment": {"url": address}}
 
 
 async def _notify_all_devices(hass, config, message, action_type, snapshot_url=None,
@@ -294,33 +297,34 @@ async def _execute_action_data(
     request_id: Optional[str] = None, source: str = "proactive",
 ) -> bool:
     """
-    Execute a proactive action's service call.
+    Run the service call of a proactive action.
 
-    action_data shape:
+    action_data looks like
       {"domain": "light", "service": "turn_on",
        "entity_ids": ["light.x", ...], "service_data": {...optional...}}
 
-    request_id/source let the caller (an autonomous tick or an explicit
-    accept_pending_offer()) own the logged action; if the caller doesn't
-    pass one, this mints its own — either way it's the sole logger for this
-    one service call, never both."""
+    The caller (an autonomous tick, or an explicit accept_pending_offer())
+    may own the logged action by passing request_id and source. Without a
+    request_id one is minted here. Either way this is the only logger of this
+    service call, and never both it and the caller.
+    """
     if not action_data:
         return False
-    domain = action_data.get("domain")
-    service = action_data.get("service")
     entity_ids = action_data.get("entity_ids", [])
     extra = action_data.get("service_data", {}) or {}
-    if not domain or not service or not entity_ids:
+    service = action_data.get("service")
+    domain = action_data.get("domain")
+    if not (domain and service and entity_ids):
         return False
     from . import action_log
     if request_id is None:
         request_id = action_log.new_request_id()
-    entity_repr = (
-        ", ".join(entity_ids) if isinstance(entity_ids, list) else str(entity_ids))
+    shown_entities = (", ".join(entity_ids) if isinstance(entity_ids, list)
+                      else str(entity_ids))
     action_id = await hass.async_add_executor_job(
         lambda: action_log.start(
             request_id, "proactive_offer_execute", source,
-            domain=domain, service=service, entity_id=entity_repr,
+            domain=domain, service=service, entity_id=shown_entities,
         )
     )
     # The one authority check (8.24.0). An offer Nova runs on its own is
