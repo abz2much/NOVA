@@ -21,6 +21,7 @@ Nova modules are imported lazily, inside the functions that need them.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -36,16 +37,23 @@ SETTLE_CHECK_SECONDS = 30
 
 # ── appliance types ─────────────────────────────────────────────────────────
 
+def _cycle(label: str, *, run_w: int, idle_w: int, sustain_s: int,
+           settle_s: int) -> tuple[str, int, int, int, int]:
+    """One type's power cycle as its enum value: it starts once the draw
+    stays at run_w or more for sustain_s, and ends once it stays under
+    idle_w for settle_s."""
+    return (label, run_w, idle_w, sustain_s, settle_s)
+
+
 class ApplianceType(Enum):
     """Each kind of appliance and the thresholds its power cycle uses."""
 
-    #            label         run W  idle W  sustain s  settle s
-    WASHER = ("washer", 50, 10, 120, 60)
-    DRYER = ("dryer", 100, 15, 120, 90)
-    DISHWASHER = ("dishwasher", 30, 5, 120, 60)
-    OVEN = ("oven", 500, 20, 180, 120)
-    MICROWAVE = ("microwave", 200, 10, 30, 15)
-    GENERIC = ("appliance", 50, 10, 120, 60)
+    WASHER = _cycle("washer", run_w=50, idle_w=10, sustain_s=120, settle_s=60)
+    DRYER = _cycle("dryer", run_w=100, idle_w=15, sustain_s=120, settle_s=90)
+    DISHWASHER = _cycle("dishwasher", run_w=30, idle_w=5, sustain_s=120, settle_s=60)
+    OVEN = _cycle("oven", run_w=500, idle_w=20, sustain_s=180, settle_s=120)
+    MICROWAVE = _cycle("microwave", run_w=200, idle_w=10, sustain_s=30, settle_s=15)
+    GENERIC = _cycle("appliance", run_w=50, idle_w=10, sustain_s=120, settle_s=60)
 
     @property
     def label(self) -> str:
@@ -1022,25 +1030,21 @@ async def start(hass: HomeAssistant, config: dict, entry: Any = None) -> None:
 
 async def stop() -> None:
     """Stop watching. Safe before start and safe to call twice."""
-    if _MON.unsub is not None:
-        try:
-            _MON.unsub()
-        except Exception:  # noqa: BLE001
-            pass
-    if _MON.unsub_settle is not None:
-        try:
-            _MON.unsub_settle()
-        except Exception:  # noqa: BLE001
-            pass
-        _MON.unsub_settle = None
-    _MON.sensors = {}
-    _MON.natives = {}
-    _MON.delta = None
+    # Each handle is dropped as it is used, so a later stop never removes
+    # the same listener again (Home Assistant logs an error for that).
+    for handle in ("unsub", "unsub_settle"):
+        remove = getattr(_MON, handle)
+        setattr(_MON, handle, None)
+        if remove is not None:
+            with contextlib.suppress(Exception):
+                remove()
+    _MON.sensors, _MON.natives, _MON.delta = {}, {}, None
     _MON.running = False
     _MON.entry = None
 
 
 def is_running() -> bool:
+    """Whether the monitor is listening for readings."""
     return _MON.running
 
 

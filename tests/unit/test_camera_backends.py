@@ -351,3 +351,46 @@ async def test_nest_broken_hass_data(cb):
 async def test_placeholders_return_none(cb, fake_hass, cls):
     cache = {"camera.x": {"source": "frigate", "event_id": "e"}}
     assert await getattr(cb, cls)().fetch_best_image(fake_hass, "camera.x", cache) is None
+
+
+# ── characterisation (8.66): pinned before the rewrite of this module ───────
+
+async def test_frigate_read_failure_is_none(cb, env, fake_hass):
+    async def bad_read():
+        raise OSError("reset")
+
+    class _Ctx:
+        async def __aenter__(self):
+            return types.SimpleNamespace(status=200, read=bad_read)
+
+        async def __aexit__(self, *exc):
+            return False
+    env.session.get = lambda url, timeout=None: _Ctx()
+    cache = {"camera.porch": {"source": "frigate", "event_id": "ev"}}
+    assert await cb.FrigateBackend().fetch_best_image(fake_hass, "camera.porch", cache) is None
+
+
+async def test_frigate_looks_up_base_url_even_without_event(cb, env, fake_hass):
+    await cb.FrigateBackend().fetch_best_image(fake_hass, "camera.porch", {})
+    assert env.url_kwargs == {"allow_internal": True, "prefer_external": False}
+
+
+async def test_nest_device_without_media_manager_falls_back(cb, fake_hass, nest_devices):
+    nest_devices[NEST_NAME] = types.SimpleNamespace()
+    store = MediaStore()
+    fake_hass.data["nest"] = types.SimpleNamespace(subscribers=[types.SimpleNamespace(media_store=store)])
+    assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) == BIG
+    assert store.calls == [("dev-1", "ev-9")]
+
+
+async def test_nest_found_device_small_image_skips_old_path(cb, fake_hass, nest_devices):
+    nest_devices[NEST_NAME] = types.SimpleNamespace(event_media_manager=EventMedia(EDGE))
+    store = MediaStore()
+    fake_hass.data["nest"] = types.SimpleNamespace(subscribers=[types.SimpleNamespace(media_store=store)])
+    assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) is None
+    assert store.calls == []
+
+
+async def test_nest_subscribers_none_is_none(cb, fake_hass):
+    fake_hass.data["nest"] = types.SimpleNamespace(subscribers=None)
+    assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) is None

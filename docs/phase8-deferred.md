@@ -10,6 +10,11 @@ runs of 6 or more lines.
 A "run" is 6 or more lines in a row that also appear together in the fork
 source. The counts come from the copied run scan after 8.49.43.
 
+From 8.66.0 a file is rewritten only when its shared % is over 30%. Shared %
+is the share of a file's meaningful lines that also appear anywhere in the
+fork source. A file at 30% or less is left as it is, even if it still holds
+a short copied run.
+
 ## How to pick this up
 
 Use the same method as Phase 8: rewrite each file with its copied text
@@ -17,30 +22,25 @@ removed, keep every public name, message, key, command schema and stored
 value, keep behaviour identical unless a fix is agreed, then rescan. Start
 from the largest files in each table.
 
-## Integration code: 18 files, 134 lines in runs
+## Integration code: 11 files, 89 lines in runs
 
-Small files, 6 to 11 copied lines each.
+### Left by choice (30% or less shared)
 
-| File | Lines in runs | Longest run |
-|---|---|---|
-| `cognitive_core.py` | 11 | 11 |
-| `providers/errors.py` | 9 | 9 |
-| `automation/patterns.py` | 9 | 9 |
-| `automation/models.py` | 9 | 9 |
-| `output_language.py` | 8 | 8 |
-| `providers/base.py` | 8 | 8 |
-| `providers/ollama.py` | 8 | 8 |
-| `cognitive/provider.py` | 8 | 8 |
-| `camera_backends.py` | 7 | 7 |
-| `voice_recognition.py` | 7 | 7 |
-| `local_engine.py` | 7 | 7 |
-| `local_mind.py` | 7 | 7 |
-| `observer.py` | 6 | 6 |
-| `appliance_monitor.py` | 6 | 6 |
-| `bootstrap.py` | 6 | 6 |
-| `state_ledger.py` | 6 | 6 |
-| `host_health.py` | 6 | 6 |
-| `intent/__init__.py` | 6 | 6 |
+Small files, 6 to 11 copied lines each. Shared % is from the scan in 8.66.0.
+
+| File | Lines in runs | Longest run | Shared % |
+|---|---|---|---|
+| `cognitive_core.py` | 11 | 11 | 10.2 |
+| `providers/errors.py` | 9 | 9 | 10.7 |
+| `automation/patterns.py` | 9 | 9 | 23.5 |
+| `automation/models.py` | 9 | 9 | 14.0 |
+| `output_language.py` | 8 | 8 | 25.5 |
+| `providers/base.py` | 8 | 8 | 24.4 |
+| `providers/ollama.py` | 8 | 8 | 16.1 |
+| `cognitive/provider.py` | 8 | 8 | 21.0 |
+| `local_engine.py` | 7 | 7 | 20.8 |
+| `bootstrap.py` | 6 | 6 | 27.8 |
+| `host_health.py` | 6 | 6 | 15.7 |
 
 ## Tests: 115 files, 6989 lines in runs
 
