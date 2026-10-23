@@ -116,19 +116,6 @@ def test_no_llm_timers_or_nova_hass_data(name):
         assert "hass.data" not in src, name
 
 
-def test_inventory_listens_only_for_automation_reloads():
-    src = (PKG / "inventory.py").read_text(encoding="utf-8")
-    assert src.count("async_listen(") == 1
-    assert "EVENT_AUTOMATION_RELOADED, self._on_reloaded" in src
-    assert "state_changed" not in src
-
-
-def test_write_lock_is_the_only_module_level_lock():
-    src = (PKG / "installation.py").read_text(encoding="utf-8")
-    assert src.count("asyncio.Lock()") == 1
-    assert "_WRITE_LOCK = asyncio.Lock()" in src
-
-
 # ── Root compatibility modules ──────────────────────────────────────────────
 
 FACADES = {

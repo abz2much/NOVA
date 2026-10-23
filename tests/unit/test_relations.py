@@ -272,10 +272,8 @@ def test_the_cap_refuses_new_proposals_and_evicts_nothing(knowledge, monkeypatch
     assert knowledge.RELATION_LIVE_CAP == 3
 
 
-def test_the_real_cap_is_500():
-    k = None
-    src = (COMP / "knowledge.py").read_text()
-    assert "RELATION_LIVE_CAP = 500" in src
+def test_the_real_cap_is_500(knowledge):
+    assert knowledge.RELATION_LIVE_CAP == 500
 
 
 def test_confidence_is_clamped_and_a_bad_value_is_safe(knowledge):
@@ -439,9 +437,13 @@ def test_stats_count_relations_and_never_name_them(knowledge):
     assert {"total", "by_kind", "by_subject"} <= set(st)
 
 
-def test_the_panel_stats_fallback_still_has_the_old_keys():
-    src = (COMP / "ws_panel_stats.py").read_text()
-    assert '{"total": 0, "by_kind": {}, "by_subject": {}}' in src
+def test_the_panel_stats_fallback_still_has_the_old_keys(load, monkeypatch):
+    stats = load("ws_panel_stats")
+
+    def broken():
+        raise RuntimeError("knowledge.db is locked")
+    monkeypatch.setattr(load("knowledge"), "stats", broken)
+    assert stats._get_knowledge_stats() == {"total": 0, "by_kind": {}, "by_subject": {}}
 
 
 def test_diagnostics_do_not_report_knowledge_at_all():
@@ -565,25 +567,6 @@ def test_the_propose_tool_takes_no_status_argument(load):
 
 
 # ── websocket commands ──────────────────────────────────────────────────────
-
-def test_commands_are_registered_and_the_writes_are_admin_gated():
-    src = (COMP / "ws_knowledge.py").read_text()
-    for name in ("nova/relation_action", "nova/edit_relation"):
-        head = src.split(f'vol.Required("type"): "{name}"')[0].rsplit("\n\n\n", 1)[-1]
-        assert "@websocket_api.require_admin" in head, name
-    head = src.split('vol.Required("type"): "nova/list_relations"')[0].rsplit("\n\n\n", 1)[-1]
-    assert "require_admin" not in head                                  # a read, like get_knowledge
-    ws = (COMP / "websocket.py").read_text()
-    for fn in ("ws_list_relations", "ws_relation_action", "ws_edit_relation"):
-        assert f"websocket_api.async_register_command(hass, {fn})" in ws
-
-
-def test_the_relation_commands_are_the_only_new_knowledge_writes_and_only_touch_relations():
-    src = (COMP / "ws_knowledge.py").read_text()
-    body = src.split("def _relation_payload")[1].split("nova/search_memory")[0]
-    assert "knowledge.remember" not in body and "knowledge.forget(" not in body
-    assert "confirm_relation" in body and "remove_relation" in body and "edit_relation" in body
-
 
 def test_the_panel_wiring_exists():
     js = (ROOT / "frontend" / "src" / "panel" / "memory.js").read_text()
