@@ -3,9 +3,7 @@ wiring, kept deliberately small: behavioral proof (continuity, isolation,
 self-retrieval prevention) lives in
 tests/integration/test_person_scoped_memory_continuity.py (PHACC, real
 conversation stack). These few checks cover code-shape facts that are hard
-to observe behaviorally — same reasoning as
-test_conversation_relevance_gate_persistence.py, which this file sits
-alongside."""
+to observe behaviorally."""
 from pathlib import Path
 
 SRC_PATH = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "conversation.py"
