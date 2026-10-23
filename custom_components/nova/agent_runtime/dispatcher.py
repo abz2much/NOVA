@@ -20,64 +20,72 @@ from .models import ToolExecutionContext, ToolGrant, ToolResult
 from .registry import _TOOL_MAP, trust_of
 from ..safe_errors import safe_error_message
 
-# One logger for the whole agent, named as it always was (…nova.agent), so
-# log filters and levels set for the agent keep applying.
+# The agent logs under …nova.agent from every module, so filters and levels
+# set for it keep applying.
 _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 
-MAX_TOOL_RETRIES    = 2
+MAX_TOOL_RETRIES = 2
 
 
-async def _execute_tool(
-    hass: HomeAssistant,
-    tool_name: str,
-    tool_args: dict,
-    hass_api: Optional[Any] = None,
-    user_input: Optional[Any] = None,
-    *,
-    ctx: Optional[ToolExecutionContext] = None,
-) -> str:
-    """Execute a tool call — custom tools first, then HA LLM API fallback.
+def _requester_arguments(fn, ctx: ToolExecutionContext) -> dict:
+    """The request's real device, user and voice identity, for just the ones
+    the tool names as parameters. A request without one passes None. Nova never
+    invents one, and a tool that acts for nobody in particular gets none."""
+    import inspect
+    wanted: Any
+    try:
+        wanted = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        wanted = {}
+    offered = {"device_id": ctx.device_id, "user_id": ctx.user_id,
+               "identification": ctx.identification}
+    return {name: value for name, value in offered.items() if name in wanted}
 
-    Returns the tool's text. The turn loop never calls this directly: it goes
+
+def _assist_tool_input(tool_name: str, tool_args: dict, user_input: Optional[Any]):
+    """The Home Assistant ToolInput for one Assist tool call. Only the fields
+    this version of Home Assistant accepts are passed."""
+    from ..const import DOMAIN
+    turn = user_input
+    fields = {"tool_name": tool_name, "tool_args": tool_args, "platform": DOMAIN,
+              "assistant": "conversation",
+              "context": turn.context if turn else None,
+              "user_prompt": turn.text if turn else "",
+              "language": turn.language if turn else "en",
+              "device_id": turn.device_id if turn else None}
+    return llm.ToolInput(**_ha_kwargs(llm.ToolInput, **fields))
+
+
+async def _execute_tool(hass: HomeAssistant, tool_name: str, tool_args: dict,
+                        hass_api: Optional[Any] = None, user_input: Optional[Any] = None,
+                        *, ctx: Optional[ToolExecutionContext] = None) -> str:
+    """Run one tool call: Nova's own tools first, then Home Assistant's LLM
+    API.
+
+    Returns the tool's text. The turn loop never calls this directly. It goes
     through precheck() and execute(), which enforce the run's grant first.
-    ``ctx`` carries the request's real user and device; without it they are
-    read from ``user_input`` exactly as before (None when there is none)."""
+    ``ctx`` holds the request's real user and device. Without it they are read
+    from ``user_input`` as they always were (None when there is none)."""
     if ctx is None:
         ctx = ToolExecutionContext.for_turn(user_input=user_input, hass_api=hass_api,
                                             depth=0, headless=False)
-    # Custom Nova tools
+    # Nova's own tools
     if tool_name in _TOOL_MAP:
         try:
             fn = _TOOL_MAP[tool_name]
-            # Tools that act on someone's behalf accept the request's real
-            # device_id and/or Home Assistant user_id (None when there is
-            # none — Nova never invents one); every other tool gets neither.
-            import inspect
-            params: Any
-            try:
-                params = inspect.signature(fn).parameters
-            except (TypeError, ValueError):
-                params = {}
-            extra = {}
-            if "device_id" in params:
-                extra["device_id"] = ctx.device_id
-            if "user_id" in params:
-                extra["user_id"] = ctx.user_id
-            if "identification" in params:
-                extra["identification"] = ctx.identification
-            return await fn(hass, tool_args, **extra)
+            return await fn(hass, tool_args, **_requester_arguments(fn, ctx))
         except Exception as exc:
             return json.dumps({"error": safe_error_message(
                 exc, where=f"tool {tool_name}", log=True, keep_ha_text=True)})
 
-    # Fallback to HA's built-in LLM API tools
+    # Anything else goes to Home Assistant's own LLM API tools
     if hass_api:
-        from ..const import DOMAIN
-        # Nova's policy gate applies to Assist tools too (assist_policy.py):
-        # a mutating call is classified and confirmed before it reaches Home
-        # Assistant, and refused when it can't be classified safely. HA still
-        # runs the call itself below, with its own context and permissions.
+        # Nova's policy gate covers Assist tools as well (assist_policy.py): a
+        # call that changes something is classified and confirmed before it
+        # reaches Home Assistant, and refused if it cannot be classified
+        # safely. Home Assistant then runs it with its own context and
+        # permissions.
         from .. import assist_policy
         decision = await assist_policy.async_authorize(
             hass, hass_api, tool_name, tool_args,
@@ -86,27 +94,18 @@ async def _execute_tool(
         )
         if not decision.allowed:
             return json.dumps(decision.tool_result())
-        # Only a read is retried. A mutating call that raised may already have
-        # acted, so running it again could act twice: it gets one attempt.
-        attempts = 1 if decision.classification.mutating else MAX_TOOL_RETRIES + 1
-        for attempt in range(attempts):
+        # A read may be retried. A call that changes something and then raised
+        # might already have acted, so a second try could act twice. It gets
+        # a single attempt.
+        tries = 1 if decision.classification.mutating else MAX_TOOL_RETRIES + 1
+        for attempt in range(tries):
             try:
-                tool_input = llm.ToolInput(**_ha_kwargs(
-                    llm.ToolInput,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    platform=DOMAIN,
-                    context=user_input.context if user_input else None,
-                    user_prompt=user_input.text if user_input else "",
-                    language=user_input.language if user_input else "en",
-                    assistant="conversation",
-                    device_id=user_input.device_id if user_input else None,
-                ))
-                result = await hass_api.async_call_tool(tool_input)
+                outcome = await hass_api.async_call_tool(
+                    _assist_tool_input(tool_name, tool_args, user_input))
                 await assist_policy.async_record_execution(hass, decision, True)
-                return json.dumps(result) if isinstance(result, dict) else str(result)
+                return json.dumps(outcome) if isinstance(outcome, dict) else str(outcome)
             except Exception as exc:
-                if attempt >= attempts - 1:
+                if attempt >= tries - 1:
                     await assist_policy.async_record_execution(hass, decision, False)
                     return json.dumps({"error": f"{tool_name} failed: " + safe_error_message(
                         exc, where=f"tool {tool_name}", log=True, keep_ha_text=True)})
