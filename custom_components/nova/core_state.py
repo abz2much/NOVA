@@ -26,34 +26,44 @@ from .core_safety import SafetyManager
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
 
-# ── Core State ──────────────────────────────────────────────────────────────
+# ── The state object ────────────────────────────────────────────────────────
 
 class _CoreState:
     def __init__(self):
+        # What the core runs on.
         self.hass: Optional[HomeAssistant] = None
         self.config: dict = {}
+        # The config entry that started the core. Its NovaRuntime owns the live
+        # panel settings that are read when an action is announced.
+        self.entry = None
+        self.automation_contexts = None
+
+        # The tick loop and the listeners the core registered.
         self.running: bool = False
         self.task: Optional[asyncio.Task] = None
         self.unsub: Optional[object] = None
-        self.alarm_unsub: Optional[object] = None  # alarm_control_panel → lockdown sync listener
+        # alarm_control_panel listener that keeps lockdown in step.
+        self.alarm_unsub: Optional[object] = None
+
+        # One manager for each area of work.
         self.ignore_mgr: Optional[IgnoreManager] = None
         self.safety_mgr: Optional[SafetyManager] = None
         self.lockdown_mgr: Optional["LockdownManager"] = None
         self.proactive_mgr: Optional[ProactiveManager] = None
         self.autonomy_mgr: Optional[AutonomyManager] = None
         self.state_logger: Optional[StateLogger] = None
-        self.automation_contexts = None
-        # The config entry that started the core; its NovaRuntime owns the
-        # live panel settings read when an action is announced.
-        self.entry = None
+
+        # Running totals and timestamps.
         self.tick_count: int = 0
-        self.actions_taken: int = 0
-        self.offers_made: int = 0
-        self.autonomous_actions: int = 0
         self.last_tick: float = 0.0
         self.startup_time: float = 0.0
-        # Pending offer awaiting a yes/no from the user (set when an offer is
-        # spoken, consumed by the conversation layer on "yes"/"no").
+        self.autonomous_actions: int = 0
+        self.actions_taken: int = 0
+        self.offers_made: int = 0
+
+        # An offer that has been spoken and waits for the user's yes or no. The
+        # conversation layer takes it when the answer comes.
         self.pending_offer: Optional[dict] = None
+
 
 _CORE = _CoreState()
