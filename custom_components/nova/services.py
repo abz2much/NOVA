@@ -1,7 +1,7 @@
 """The nova.* Home Assistant services.
 
 async_setup() in __init__.py calls async_setup_services() once per Home
-Assistant run, so all 27 services exist from the first setup until Home
+Assistant run, so all 29 services exist from the first setup until Home
 Assistant stops. Setting up, unloading, reloading or failing a config entry
 never adds or removes one.
 
@@ -420,7 +420,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def _briefing(call: ServiceCall) -> None:
         entry, runtime = async_resolve_loaded(hass)
         honorific, tts, speakers = _voice(hass, entry, "briefing")
-        await async_briefing(hass, call, runtime.client, honorific, tts, speakers)
+        result = await async_briefing(hass, call, runtime.client, honorific, tts, speakers)
+        from . import nova_state
+        await nova_state.async_record_briefing(hass, (result or {}).get("briefing", ""))
 
     async def _add_reminder(call: ServiceCall) -> None:
         entry, runtime = async_resolve_loaded(hass)
@@ -534,14 +536,17 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def _shush(call: ServiceCall) -> None:
         """Mute announcements for an entity, a category, or (all=true)
-        everything that isn't a critical safety alert. Mutes are saved and
-        survive a restart."""
+        everything that isn't a critical safety alert, until unshush or for
+        the given minutes. Mutes and their end times are saved and survive a
+        restart."""
         entry, runtime = async_resolve_loaded(hass)
         from . import output_gate
         result = output_gate.shush(entity_id=call.data.get("entity_id"),
                                    category=call.data.get("category"),
-                                   all=bool(call.data.get("all", False)))
+                                   all=bool(call.data.get("all", False)),
+                                   minutes=call.data.get("minutes"))
         await output_gate.async_save_mutes(hass)
+        output_gate.reschedule_expiry()
         hass.bus.async_fire("nova_observer_shushed", result)
         _LOGGER.info("Nova shushed: %s", result)
 
@@ -552,6 +557,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         result = output_gate.unshush(entity_id=call.data.get("entity_id"),
                                      category=call.data.get("category"))
         await output_gate.async_save_mutes(hass)
+        output_gate.reschedule_expiry()
         hass.bus.async_fire("nova_observer_unshushed", result)
 
     async def _observer_start(call: ServiceCall) -> None:
@@ -606,6 +612,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             vol.Optional("entity_id"): cv.string,
             vol.Optional("category"): cv.string,
             vol.Optional("all"): cv.boolean,
+            vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
         }),
     )
     _register(
@@ -720,6 +727,34 @@ def async_setup_services(hass: HomeAssistant) -> None:
         }),
     )
     _register("create_automation", _create_automation)
+
+    # ── Automation suggestions (admin only) ─────────────────────────────────
+
+    async def _suggestion(call: ServiceCall, action: str) -> None:
+        from . import nova_state
+        from .ws_automation import async_suggestion_action
+        await nova_state.async_check_admin(hass, call)
+        user_id = _caller_id(call)
+        user = await hass.auth.async_get_user(user_id) if user_id else None
+        await async_suggestion_action(
+            hass, int(call.data["suggestion_id"]), action,
+            requested_by_user_id=user_id,
+            requested_by_name=getattr(user, "name", None))
+
+    async def _suggestion_accept(call: ServiceCall) -> None:
+        """Accept a suggestion: installs its automation, as the panel does."""
+        entry, runtime = async_resolve_loaded(hass)
+        await _suggestion(call, "approve")
+
+    async def _suggestion_dismiss(call: ServiceCall) -> None:
+        """Dismiss a suggestion, as the panel does."""
+        entry, runtime = async_resolve_loaded(hass)
+        await _suggestion(call, "dismiss")
+
+    _register("suggestion_accept", _suggestion_accept,
+              vol.Schema({vol.Required("suggestion_id"): vol.Coerce(int)}))
+    _register("suggestion_dismiss", _suggestion_dismiss,
+              vol.Schema({vol.Required("suggestion_id"): vol.Coerce(int)}))
 
     # ── Tests and diagnostics ───────────────────────────────────────────────
 

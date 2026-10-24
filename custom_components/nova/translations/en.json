@@ -464,7 +464,7 @@
     },
     "shush": {
       "name": "Silence an entity or category",
-      "description": "Stops Nova announcing a given entity or category from now on. With nothing filled in, it silences whatever Nova has just said.",
+      "description": "Stops Nova announcing a given entity or category from now on. With nothing filled in, it silences whatever Nova has just said. Give minutes to lift it by itself later.",
       "fields": {
         "entity_id": {
           "name": "Entity",
@@ -477,6 +477,10 @@
         "all": {
           "name": "Everything",
           "description": "Silence every announcement that is not critical until nova.unshush is used. Kept across restarts; critical safety alerts always get through."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Lift this shush by itself after this many minutes (1 to 1440). Leave empty to keep it until nova.unshush."
         }
       }
     },
@@ -563,6 +567,111 @@
         "archive": {
           "name": "Archive",
           "description": "Optional. A file name in /config/nova_backups, or a full path. Defaults to the newest backup."
+        }
+      }
+    },
+    "suggestion_accept": {
+      "name": "Accept a suggestion",
+      "description": "Accepts one of Nova's automation suggestions and installs the automation, as the panel does. Admin users only.",
+      "fields": {
+        "suggestion_id": {
+          "name": "Suggestion",
+          "description": "The suggestion's id, from the Nova Suggestions sensor."
+        }
+      }
+    },
+    "suggestion_dismiss": {
+      "name": "Dismiss a suggestion",
+      "description": "Dismisses one of Nova's automation suggestions, as the panel does. Admin users only.",
+      "fields": {
+        "suggestion_id": {
+          "name": "Suggestion",
+          "description": "The suggestion's id, from the Nova Suggestions sensor."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "quiet": {
+        "name": "Quiet",
+        "state_attributes": {
+          "mute_all": {
+            "name": "Everything muted"
+          },
+          "muted_categories": {
+            "name": "Muted categories"
+          },
+          "muted_entities": {
+            "name": "Muted entities"
+          },
+          "until": {
+            "name": "Until"
+          }
+        }
+      },
+      "lockdown": {
+        "name": "Lockdown"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "ready": "Ready",
+          "quiet": "Quiet",
+          "napping": "Napping",
+          "lockdown": "Lockdown",
+          "observer_off": "Observer off"
+        }
+      },
+      "nap_ends": {
+        "name": "Nap ends"
+      },
+      "last_announcement": {
+        "name": "Last announcement",
+        "state_attributes": {
+          "message": {
+            "name": "Message"
+          }
+        }
+      },
+      "next_reminder": {
+        "name": "Next reminder",
+        "state_attributes": {
+          "reminders": {
+            "name": "Reminders"
+          }
+        }
+      },
+      "briefing": {
+        "name": "Briefing",
+        "state_attributes": {
+          "text": {
+            "name": "Text"
+          }
+        }
+      },
+      "camera_summary": {
+        "name": "Camera summary",
+        "state_attributes": {
+          "summary": {
+            "name": "Summary"
+          },
+          "recent": {
+            "name": "Recent"
+          }
+        }
+      },
+      "energy_note": {
+        "name": "Energy note"
+      },
+      "suggestions": {
+        "name": "Suggestions",
+        "state_attributes": {
+          "suggestions": {
+            "name": "Suggestions"
+          }
         }
       }
     }

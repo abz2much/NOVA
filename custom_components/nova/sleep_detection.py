@@ -63,6 +63,7 @@ def set_nap(duration_minutes: int = 30) -> None:
     until = dt_util.utcnow() + timedelta(minutes=duration_minutes)
     _NAP_UNTIL = until
     _LOGGER.info("Nova: manual nap for %d min until %s", duration_minutes, until)
+    _state_changed()
 
 
 def clear_nap() -> None:
@@ -70,6 +71,19 @@ def clear_nap() -> None:
     global _NAP_UNTIL
     _NAP_UNTIL = None
     _LOGGER.info("Nova: manual nap cleared")
+    _state_changed()
+
+
+def nap_until() -> Optional[datetime]:
+    """When the current nap ends (UTC), or None when Nova is not napping."""
+    if _NAP_UNTIL is None or _NAP_UNTIL <= dt_util.utcnow():
+        return None
+    return _NAP_UNTIL
+
+
+def _state_changed() -> None:
+    from . import nova_state
+    nova_state.notify()
 
 
 def _next_quiet_end(quiet_end: str) -> datetime:

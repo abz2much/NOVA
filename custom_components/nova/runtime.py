@@ -118,6 +118,8 @@ def set_observer_running(entry: ConfigEntry, running: bool) -> None:
 
     Raises NovaRuntimeUnavailable when the entry has no runtime."""
     get_runtime(entry).observer_running = bool(running)
+    from . import nova_state
+    nova_state.notify()
 
 
 def current_runtime(entry: ConfigEntry) -> NovaRuntime | None:

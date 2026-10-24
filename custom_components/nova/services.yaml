@@ -270,6 +270,14 @@ shush:
       required: false
       selector:
         boolean:
+    minutes:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+          mode: box
 
 unshush:
   fields:
@@ -348,3 +356,21 @@ restore:
       example: "nova-state-20260818-120000.tar.gz"
       selector:
         text:
+
+suggestion_accept:
+  fields:
+    suggestion_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+
+suggestion_dismiss:
+  fields:
+    suggestion_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box

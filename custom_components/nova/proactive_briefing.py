@@ -64,6 +64,8 @@ def record_snapshot(camera_name: str, camera_entity: str, analysis: str,
     _SNAPSHOTS.append(snap)
     _LOGGER.debug("Proactive: recorded snapshot from %s (%s, %s)",
                   camera_name, detection_type, urgency)
+    from . import nova_state
+    nova_state.notify()
 
 
 def get_recent_snapshots(hours: float = 12) -> list[CameraSnapshot]:

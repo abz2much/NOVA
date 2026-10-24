@@ -4,8 +4,9 @@ Two families are checked:
 
 * translations/*.json hold the config flow, options, Repairs notices and
   so on. Every language must have exactly the keys en.json has, so Home
-  Assistant never shows a raw key. Service text is English only for now and
-  is left out of the comparison; Home Assistant falls back to en.json there.
+  Assistant never shows a raw key. Service and entity text is English only
+  for now and is left out of the comparison; Home Assistant falls back to
+  en.json there.
 * frontend/i18n/*.json map the panel's English strings to a translation.
 
 Paths are built from this file's location, so the checks behave the same
@@ -22,7 +23,7 @@ import pytest
 COMPONENT = pathlib.Path(__file__).resolve().parents[1] / "custom_components" / "nova"
 FLOW_DIR = COMPONENT / "translations"
 PANEL_DIR = COMPONENT / "frontend" / "i18n"
-ENGLISH_ONLY_SECTIONS = ("services",)
+ENGLISH_ONLY_SECTIONS = ("services", "entity")
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 FLOW_FILES = sorted(FLOW_DIR.glob("*.json"))

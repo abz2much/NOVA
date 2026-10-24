@@ -303,6 +303,8 @@ async def run_analysis_now(hass: HomeAssistant) -> dict:
         patterns = await analyzer.analyze(hass)
     else:
         patterns = await analyzer.analyze(hass, reviewer=reviewer)
+    from . import nova_state
+    nova_state.notify()   # suggestions may have been added or retired
 
     result = dict(analyzer._last_result)
     result["ran"] = True

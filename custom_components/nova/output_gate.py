@@ -13,8 +13,9 @@ holds back a message when:
 
 Critical urgency skips every one of these, so no shush can silence a safety
 alert. Mutes are saved to output_mutes.json in Nova's data folder and loaded
-once at setup; the history used for the cap, repeats and status lives in
-memory only. Each announcement is also written to the activity log.
+once at setup, with the end time of any timed mute, so a timed shush still
+ends after a restart. The history used for the cap, repeats and status lives
+in memory only. Each announcement is also written to the activity log.
 """
 from __future__ import annotations
 
@@ -53,6 +54,8 @@ class GateState:
     muted_categories: set[str] = field(default_factory=set)
     recent_messages: deque = field(default_factory=lambda: deque(maxlen=20))
     mute_all: bool = False
+    # When a timed mute ends (epoch seconds), keyed by mute_key().
+    until: dict[str, float] = field(default_factory=dict)
 
 
 _STATE = GateState()
@@ -195,6 +198,8 @@ def record_announcement(
         _STATE.recent_messages.append(
             {"timestamp": _now(), "message": message, "key": dedup_key or ""})
         _count_habit_day(entity_id, category, urgency, habit_key)
+        from . import nova_state
+        nova_state.notify()
     try:
         from .database import save_activity
         save_activity(entity_id=entity_id, category=category, urgency=urgency,
@@ -216,14 +221,29 @@ def _count_habit_day(entity_id: str, category: str, urgency: str,
         _LOGGER.debug("habituation record failed: %s", exc)
 
 
+def mute_key(kind: str, name: str = "") -> str:
+    """The key a timed mute's end is kept under: "all", "entity:<id>" or
+    "category:<name>"."""
+    return "all" if kind == "all" else f"{kind}:{name}"
+
+
+def _set_until(key: str, minutes: Optional[int]) -> None:
+    """Give a mute its end time, or (no minutes) make it last until unshush."""
+    if minutes:
+        _STATE.until[key] = _now() + int(minutes) * 60
+    else:
+        _STATE.until.pop(key, None)
+
+
 def shush(entity_id: Optional[str] = None, category: Optional[str] = None,
-          all: bool = False) -> dict:
+          all: bool = False, minutes: Optional[int] = None) -> dict:
     """Mute an entity, a category, or (``all``) every non critical
-    announcement until unshush. With no arguments, mutes the entity of the
-    last spoken announcement."""
+    announcement until unshush, or for ``minutes`` when given. With no
+    arguments, mutes the entity of the last spoken announcement."""
     result: dict = {"muted_entities": [], "muted_categories": [], "all": False}
     if all:
         _STATE.mute_all = True
+        _set_until(mute_key("all"), minutes)
         result["all"] = True
         _LOGGER.warning("Nova blanket shush on: non critical announcements are held "
                         "until nova.unshush (kept over a restart); critical ones pass")
@@ -233,10 +253,12 @@ def shush(entity_id: Optional[str] = None, category: Optional[str] = None,
         if last is not None:
             entity_id = last.entity_id
             _LOGGER.info("Shushing the last announcement: %s (%s)", entity_id, last.category)
-    for name, muted, listed in ((entity_id, _STATE.muted_entities, "muted_entities"),
-                                (category, _STATE.muted_categories, "muted_categories")):
+    for name, muted, listed, kind in (
+            (entity_id, _STATE.muted_entities, "muted_entities", "entity"),
+            (category, _STATE.muted_categories, "muted_categories", "category")):
         if name:
             muted.add(name)
+            _set_until(mute_key(kind, name), minutes)
             result[listed].append(name)
     return result
 
@@ -252,15 +274,107 @@ def unshush(entity_id: Optional[str] = None, category: Optional[str] = None) -> 
         _STATE.muted_entities.clear()
         _STATE.muted_categories.clear()
         _STATE.mute_all = False
+        _STATE.until.clear()
         return summary
     result: dict = {"cleared_entities": [], "cleared_categories": []}
     if entity_id in _STATE.muted_entities:
         _STATE.muted_entities.remove(entity_id)
+        _STATE.until.pop(mute_key("entity", entity_id), None)
         result["cleared_entities"].append(entity_id)
     if category in _STATE.muted_categories:
         _STATE.muted_categories.remove(category)
+        _STATE.until.pop(mute_key("category", category), None)
         result["cleared_categories"].append(category)
     return result
+
+
+# ─── Timed mutes ─────────────────────────────────────────────────────────────
+
+def expire_due() -> dict:
+    """Lift every timed mute whose end has passed, as unshush would.
+    Returns what was cleared (empty lists and False when nothing was)."""
+    now = _now()
+    cleared: dict = {"cleared_entities": [], "cleared_categories": [],
+                     "blanket_cleared": False}
+    for key, end in list(_STATE.until.items()):
+        if end > now:
+            continue
+        _STATE.until.pop(key, None)
+        kind, _, name = key.partition(":")
+        if kind == "all":
+            cleared["blanket_cleared"] = _STATE.mute_all
+            _STATE.mute_all = False
+        elif kind == "entity" and name in _STATE.muted_entities:
+            _STATE.muted_entities.discard(name)
+            cleared["cleared_entities"].append(name)
+        elif kind == "category" and name in _STATE.muted_categories:
+            _STATE.muted_categories.discard(name)
+            cleared["cleared_categories"].append(name)
+    return cleared
+
+
+def next_expiry() -> Optional[float]:
+    """When the soonest timed mute ends (epoch seconds), or None."""
+    return min(_STATE.until.values()) if _STATE.until else None
+
+
+def quiet_until() -> Optional[float]:
+    """When every current mute will have ended (epoch seconds): None when
+    nothing is muted or any mute lasts until unshush."""
+    keys = ([mute_key("all")] if _STATE.mute_all else []) + \
+        [mute_key("entity", e) for e in _STATE.muted_entities] + \
+        [mute_key("category", c) for c in _STATE.muted_categories]
+    if not keys or any(k not in _STATE.until for k in keys):
+        return None
+    return max(_STATE.until[k] for k in keys)
+
+
+def async_watch_expiry(hass):
+    """Keep lifting timed mutes as they end, starting with any that ended
+    while Home Assistant was down. Returns a function that stops it."""
+    from homeassistant.helpers.event import async_call_later
+    handle: dict = {"cancel": None}
+
+    def _cancel() -> None:
+        if handle["cancel"] is not None:
+            handle["cancel"]()
+            handle["cancel"] = None
+
+    async def _tick(_now_dt=None) -> None:
+        handle["cancel"] = None
+        cleared = expire_due()
+        if cleared["cleared_entities"] or cleared["cleared_categories"] \
+                or cleared["blanket_cleared"]:
+            await async_save_mutes(hass)
+            hass.bus.async_fire("nova_observer_unshushed", cleared)
+            _LOGGER.info("Nova timed shush ended: %s", cleared)
+        _schedule()
+
+    def _schedule() -> None:
+        _cancel()
+        end = next_expiry()
+        if end is not None:
+            handle["cancel"] = async_call_later(hass, max(0.0, end - _now()), _tick)
+
+    _WATCH["reschedule"] = _schedule
+    hass.async_create_task(_tick())
+
+    def _stop() -> None:
+        _cancel()
+        if _WATCH.get("reschedule") is _schedule:
+            _WATCH["reschedule"] = None
+    return _stop
+
+
+# Set while async_watch_expiry runs, so a new timed shush is picked up.
+_WATCH: dict = {"reschedule": None}
+
+
+def reschedule_expiry() -> None:
+    """Pick up a changed timed mute. Does nothing when nothing is watching."""
+    schedule = _WATCH.get("reschedule")
+    if schedule is not None:
+        schedule()
 
 
 # ─── Saved mutes ─────────────────────────────────────────────────────────────
@@ -271,9 +385,12 @@ def _mutes_path() -> str:
 
 
 def _mutes_snapshot() -> dict:
-    return {"entities": sorted(_STATE.muted_entities),
-            "categories": sorted(_STATE.muted_categories),
-            "all": bool(_STATE.mute_all)}
+    snapshot = {"entities": sorted(_STATE.muted_entities),
+                "categories": sorted(_STATE.muted_categories),
+                "all": bool(_STATE.mute_all)}
+    if _STATE.until:
+        snapshot["until"] = dict(_STATE.until)
+    return snapshot
 
 
 def _names(value) -> set[str]:
@@ -300,6 +417,10 @@ def load_mutes() -> None:
         _STATE.muted_entities = _names(saved.get("entities"))
         _STATE.muted_categories = _names(saved.get("categories"))
         _STATE.mute_all = saved.get("all") is True
+        until = saved.get("until")
+        _STATE.until = {k: float(v) for k, v in until.items()
+                        if isinstance(k, str) and isinstance(v, (int, float))} \
+            if isinstance(until, dict) else {}
         _LOGGER.debug("output gate: %d entity and %d category mutes loaded, blanket %s",
                       len(_STATE.muted_entities), len(_STATE.muted_categories),
                       _STATE.mute_all)
@@ -343,6 +464,11 @@ def status() -> dict:
             "seconds_ago": int(_now() - latest.timestamp),
         },
     }
+
+
+def last_spoken() -> Optional[Announcement]:
+    """The latest announcement that was spoken, or None."""
+    return next((ann for ann in reversed(_STATE.history) if ann.was_spoken), None)
 
 
 def recent_announcements(n: int = 5) -> list[str]:
