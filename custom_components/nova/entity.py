@@ -26,10 +26,13 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_attach(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Point nova_state's change signal at this Home Assistant and load the
-    saved briefing. Called by each platform; repeating it is harmless."""
+    saved briefing and camera snapshots. Called by each platform; repeating
+    it is harmless."""
+    from . import proactive_briefing
     nova_state.attach(hass)
     entry.async_on_unload(lambda: nova_state.detach(hass))
     await hass.async_add_executor_job(nova_state.load_briefing)
+    await hass.async_add_executor_job(proactive_briefing.load_snapshots)
 
 
 class NovaStateEntity(Entity):

@@ -7,16 +7,18 @@ Three things start one:
 * several doors, windows or locks open while the house is empty;
 * the scheduled briefing, which arrives here with reason "scheduled".
 
-Camera analyses are kept in a small in-memory ring so a briefing can say
-what the cameras saw without looking at any image again.
+Camera analyses are kept in a small ring so a briefing can say what the
+cameras saw without looking at any image again. The ring is saved to
+camera_snapshots.json in Nova's data folder, so it survives a restart.
 """
 from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -53,17 +55,104 @@ class CameraSnapshot:
     urgency: str = "low"   # low, medium or high
 
 
-_SNAPSHOTS: deque[CameraSnapshot] = deque(maxlen=50)
+MAX_SNAPSHOTS = 20
+SNAPSHOTS_FILE = "camera_snapshots.json"
+_SNAPSHOTS: deque[CameraSnapshot] = deque(maxlen=MAX_SNAPSHOTS)
+
+# Writes run in the executor and may finish out of order: a write older
+# than the last one saved is skipped.
+_WRITE_LOCK = threading.Lock()
+_WRITES = {"queued": 0, "saved": 0}
+
+
+def _snapshots_path() -> str:
+    from . import paths
+    return paths.nova_path(SNAPSHOTS_FILE)
+
+
+def _write_snapshots(seq: int, data: list[dict]) -> None:
+    from .persistence.files import write_json_atomic
+    with _WRITE_LOCK:
+        if seq < _WRITES["saved"]:
+            return
+        write_json_atomic(_snapshots_path(), data, indent=2)
+        _WRITES["saved"] = seq
+
+
+def _save_snapshots() -> None:
+    """Save the ring in the executor. Does nothing when Nova's entities
+    are not set up yet."""
+    from . import nova_state
+    hass = nova_state._HASS["hass"]
+    if hass is None:
+        return
+    _WRITES["queued"] += 1
+    data = [asdict(snap) for snap in _SNAPSHOTS]
+    try:
+        task = hass.async_add_executor_job(_write_snapshots, _WRITES["queued"], data)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Proactive: could not save camera snapshots: %s", exc)
+        return
+
+    def _done(fut) -> None:
+        if not fut.cancelled() and fut.exception() is not None:
+            _LOGGER.warning("Proactive: could not save camera snapshots: %s",
+                            fut.exception())
+
+    try:
+        task.add_done_callback(_done)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _snapshot_from(item) -> Optional[CameraSnapshot]:
+    """One saved entry, or None when a field is missing or the wrong type."""
+    if not isinstance(item, dict):
+        return None
+    stamp = item.get("timestamp")
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
+        return None
+    texts = ("camera_name", "camera_entity", "analysis", "detection_type", "urgency")
+    if not all(isinstance(item.get(key), str) for key in texts):
+        return None
+    return CameraSnapshot(float(stamp), *(item[key] for key in texts))
+
+
+def load_snapshots() -> None:
+    """Load the saved camera snapshots, merged with any recorded since
+    start, newest MAX_SNAPSHOTS kept. A missing or broken file is ignored.
+    Blocking: run in the executor."""
+    try:
+        from .persistence.files import OK, read_json
+        read = read_json(_snapshots_path())
+        if read.status != OK or not isinstance(read.value, list):
+            return
+        saved = [snap for snap in map(_snapshot_from, read.value) if snap]
+        if not saved:
+            return
+        seen = {(s.timestamp, s.camera_entity, s.analysis) for s in _SNAPSHOTS}
+        merged = [s for s in saved
+                  if (s.timestamp, s.camera_entity, s.analysis) not in seen]
+        merged += list(_SNAPSHOTS)
+        merged.sort(key=lambda s: s.timestamp)
+        _SNAPSHOTS.clear()
+        _SNAPSHOTS.extend(merged[-MAX_SNAPSHOTS:])
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Proactive: saved camera snapshots not loaded: %s", exc)
+        return
+    from . import nova_state
+    nova_state.notify()
 
 
 def record_snapshot(camera_name: str, camera_entity: str, analysis: str,
                     detection_type: str = "motion", urgency: str = "low") -> None:
-    """Keep one analysis from camera.py for the next briefing."""
+    """Keep one analysis from camera.py for the next briefing, and save it."""
     snap = CameraSnapshot(time.time(), camera_name, camera_entity, analysis,
                           detection_type, urgency)
     _SNAPSHOTS.append(snap)
     _LOGGER.debug("Proactive: recorded snapshot from %s (%s, %s)",
                   camera_name, detection_type, urgency)
+    _save_snapshots()
     from . import nova_state
     nova_state.notify()
 
