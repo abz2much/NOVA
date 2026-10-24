@@ -1,3 +1,8 @@
+## [8.70.1] Camera summaries kept through a restart
+
+### Fixed
+- **Camera summaries survive a restart.** Nova saves the newest 20 and loads them back at start, so the Camera summary entity and the briefing are no longer blank after Home Assistant restarts.
+
 ## [8.70.0] Nova on your dashboards
 
 ### Added
