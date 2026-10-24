@@ -27,6 +27,9 @@ HA_COMPONENTS = "homeassistant.components"
 ALWAYS_AVAILABLE = frozenset({
     "persistent_notification",   # set up automatically
     "websocket_api",             # core API, never needs declaring
+    # Entity platforms (hassfest allows every homeassistant.const.Platform).
+    "binary_sensor",
+    "sensor",
 })
 
 # A dotted mention anywhere in the text, which also catches

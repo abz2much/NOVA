@@ -36,6 +36,39 @@ def _who(connection) -> dict:
 
 # ── suggestions ─────────────────────────────────────────────────────────────
 
+async def async_suggestion_action(hass: HomeAssistant, sid: int, action: str, *,
+                                  requested_by_user_id: Any = None,
+                                  requested_by_name: Any = None) -> dict:
+    """Approve (and install), dismiss or restore one suggestion; shared by
+    the panel command and the suggestion services. Returns the install
+    result for approve, else {"ok": bool}. Raises on failure."""
+    from . import nova_state
+    from .automation.installation import install_approved_suggestion
+    from .automation.patterns import get_analyzer
+    analyzer = get_analyzer()
+    if action == "approve":
+        # Approving installs the automation in Home Assistant.
+        done = await install_approved_suggestion(
+            hass, sid, requested_by_user_id=requested_by_user_id,
+            requested_by_name=requested_by_name)
+        if done.get("installed"):
+            nova_log("LEARN", f"Suggestion #{sid} approved & installed as "
+                              f"'{done.get('alias')}'")
+        elif done.get("ok"):
+            nova_log("LEARN", f"Suggestion #{sid} approved (advisory — "
+                              f"{done.get('reason')})")
+        nova_state.notify()
+        return done
+    if action == "restore":
+        ok = await hass.async_add_executor_job(analyzer.restore_suggestion, sid)
+        nova_log("LEARN", f"Suggestion #{sid} restored after AI review (ok={ok})")
+    else:
+        ok = await hass.async_add_executor_job(analyzer.dismiss_suggestion, sid)
+        nova_log("LEARN", f"Suggestion #{sid} dismissed (ok={ok})")
+    nova_state.notify()
+    return {"ok": bool(ok)}
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/suggestion_action",
@@ -49,31 +82,15 @@ async def ws_suggestion_action(hass: HomeAssistant,
     """Approve (and install), dismiss, or restore a suggestion the AI review
     turned down."""
     try:
-        from .automation.installation import install_approved_suggestion
-        from .automation.patterns import get_analyzer
-        analyzer = get_analyzer()
         sid, action = int(msg["suggestion_id"]), msg["action"]
+        done = await async_suggestion_action(hass, sid, action, **_who(connection))
         if action == "approve":
-            # Approving installs the automation in Home Assistant.
-            done = await install_approved_suggestion(hass, sid, **_who(connection))
-            if done.get("installed"):
-                nova_log("LEARN", f"Suggestion #{sid} approved & installed as "
-                                  f"'{done.get('alias')}'")
-            elif done.get("ok"):
-                nova_log("LEARN", f"Suggestion #{sid} approved (advisory — "
-                                  f"{done.get('reason')})")
             connection.send_result(msg["id"], {
                 "ok": bool(done.get("ok")), "installed": bool(done.get("installed")),
                 "reason": done.get("reason"), "alias": done.get("alias"),
             })
             return
-        if action == "restore":
-            ok = await hass.async_add_executor_job(analyzer.restore_suggestion, sid)
-            nova_log("LEARN", f"Suggestion #{sid} restored after AI review (ok={ok})")
-        else:
-            ok = await hass.async_add_executor_job(analyzer.dismiss_suggestion, sid)
-            nova_log("LEARN", f"Suggestion #{sid} dismissed (ok={ok})")
-        connection.send_result(msg["id"], {"ok": bool(ok)})
+        connection.send_result(msg["id"], {"ok": bool(done.get("ok"))})
     except Exception as exc:
         connection.send_error(msg["id"], "suggestion_action_failed",
                               _failure("ws_suggestion_action", exc))

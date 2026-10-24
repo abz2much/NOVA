@@ -208,7 +208,8 @@ def _install(monkeypatch, load, world: World):
             _get_tts=lambda hass, entry, context=None: f"tts.{context}",
             _get_speakers=lambda hass, entry: ["media_player.one"],
             _live_honorific=lambda hass: "boss"),
-        "output_gate": _mod("output_gate", load_mutes=sync("output_gate.load_mutes")),
+        "output_gate": _mod("output_gate", load_mutes=sync("output_gate.load_mutes"),
+                            async_watch_expiry=lambda hass: (lambda: None)),
         "face_roster": _mod("face_roster", load=sync("face_roster.load")),
         "nova_config": _mod(
             "nova_config", configure=sync("nova_config.configure"),
@@ -440,7 +441,7 @@ def _tick(world, name):
 # ── Module surface ──────────────────────────────────────────────────────────
 
 def test_module_constants(env):
-    assert env.nova.PLATFORMS == ["conversation", "stt"]
+    assert env.nova.PLATFORMS == ["binary_sensor", "conversation", "sensor", "stt"]
     assert env.nova.CONFIG_SCHEMA == ("entry_only", "nova")
 
 
@@ -553,7 +554,7 @@ async def test_setup_builds_the_runtime_and_wires_everything(env, caplog):
     assert "bootstrap-handle" in w.resources.closeables
     assert rt.automation_inventory is not None
     assert rt.automation_contexts.inventory is rt.automation_inventory
-    assert w.calls("forward") == [((["conversation", "stt"],), {})]
+    assert w.calls("forward") == [((["binary_sensor", "conversation", "sensor", "stt"],), {})]
     assert env.entry.update_listener is env.nova._async_update_listener
     assert env.entry.on_unload == ["update-unsub"]
     assert set(env.hass.listeners) == {"nest_event", "frigate_event", "automation_triggered"}

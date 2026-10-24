@@ -1,6 +1,6 @@
 """Phase 4: Nova's services live for the process lifetime (PHACC).
 
-async_setup registers all 27 nova.* services once, at integration scope.
+async_setup registers all 29 nova.* services once, at integration scope.
 Config-entry setup, unload, reload and setup failure never add or remove
 them. Every call resolves the loaded entry and its NovaRuntime at call
 time, so this file drives the real lifecycle to prove:
@@ -46,7 +46,7 @@ import shutil
 from pathlib import Path
 import voluptuous as vol
 
-SERVICE_COUNT = 27
+SERVICE_COUNT = 29
 
 # Minimal valid data for every service, so a rejection is the lifecycle
 # check's and never schema validation's.
@@ -73,6 +73,8 @@ VALID_DATA = {
     "sentinel_start": {},
     "sentinel_stop": {},
     "shush": {},
+    "suggestion_accept": {"suggestion_id": 1},
+    "suggestion_dismiss": {"suggestion_id": 1},
     "test_notify": {},
     "test_routing": {},
     "test_tts": {},

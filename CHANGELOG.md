@@ -1,3 +1,13 @@
+## [8.70.0] Nova on your dashboards
+
+### Added
+- **Nova entities.** The Nova device now has Status, Quiet, Nap ends, Lockdown, Last announcement, Next reminder, Briefing, Camera summary, Energy note and Suggestions, so any dashboard can show what Nova is doing. They update when something changes; only Energy note refreshes on a timer, every 30 minutes.
+- **Timed shush.** `nova.shush` takes `minutes` (1 to 1440) and lifts itself when the time is up, even across a restart.
+- **Suggestion services.** `nova.suggestion_accept` and `nova.suggestion_dismiss` act on a suggestion by its id, the same as the panel. Admin users only.
+
+### Changed
+- **The latest briefing is kept**, so the Briefing entity can show its text.
+
 ## [8.69.1] Open windows while armed home or night
 
 ### Fixed

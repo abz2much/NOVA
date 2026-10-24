@@ -307,6 +307,30 @@
         "entity_id": {
           "required": false,
           "selector": "text"
+        },
+        "minutes": {
+          "max": 1440,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        }
+      }
+    },
+    "suggestion_accept": {
+      "fields": {
+        "suggestion_id": {
+          "min": 1,
+          "required": true,
+          "selector": "number"
+        }
+      }
+    },
+    "suggestion_dismiss": {
+      "fields": {
+        "suggestion_id": {
+          "min": 1,
+          "required": true,
+          "selector": "number"
         }
       }
     },
@@ -417,7 +441,14 @@
     "shush": {
       "all": "optional",
       "category": "optional",
-      "entity_id": "optional"
+      "entity_id": "optional",
+      "minutes": "optional"
+    },
+    "suggestion_accept": {
+      "suggestion_id": "required"
+    },
+    "suggestion_dismiss": {
+      "suggestion_id": "required"
     },
     "test_notify": null,
     "test_routing": null,

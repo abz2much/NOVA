@@ -256,6 +256,8 @@ async def _analyse_patterns(hass, config) -> None:
         patterns = await analyzer.analyze(hass)
     else:
         patterns = await analyzer.analyze(hass, reviewer=reviewer)
+    from . import nova_state
+    nova_state.notify()   # suggestions may have been added or retired
     if not patterns:
         return
     _nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")

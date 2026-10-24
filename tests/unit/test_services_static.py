@@ -1,6 +1,6 @@
 """Phase 4 process-lifetime service registration — the static half.
 
-services.py registers Nova's 27 services once, from async_setup at
+services.py registers Nova's 29 services once, from async_setup at
 integration scope. Registration survives reload, unload and setup failure,
 so every handler must resolve the loaded entry and its NovaRuntime per call.
 The PHACC half (tests/integration/test_services_lifecycle.py) drives the
@@ -8,7 +8,7 @@ real lifecycle; this file proves from source that:
 
 * every registration lives in services.py, and nothing removes a service,
 * __init__.py defines async_setup, which calls async_setup_services,
-* the 27 names and schemas are the pinned contract, and lockdown, remember,
+* the 29 names and schemas are the pinned contract, and lockdown, remember,
   forget and create_automation stay schema-less,
 * registration captures no entry, client, sentinel or runtime config, and
   every ordinary handler calls the loaded-entry resolver first,
@@ -106,7 +106,7 @@ def test_all_service_registrations_are_in_services_py():
 
 def test_every_service_is_registered_exactly_once():
     names = [name for name, _ in ce.service_registrations()]
-    assert len(names) == 27 and len(set(names)) == 27
+    assert len(names) == 29 and len(set(names)) == 29
 
 
 # ── 2. async_setup ──────────────────────────────────────────────────────────
@@ -156,7 +156,8 @@ def test_proactive_audio_neither_registers_nor_removes_services():
 # registrations (__init__.py and proactive_audio.py at f4d1091). Any
 # change to a field, default, validator or range fails here. 8.49.35 gave
 # lockdown, remember and forget the schemas services.yaml documents, and
-# capped train_doorbell_backlog's limit at 1 to 500 (agreed fixes).
+# capped train_doorbell_backlog's limit at 1 to 500 (agreed fixes). 8.70.0
+# gave shush its optional minutes and added the two suggestion services.
 PINNED_SCHEMAS = {
     'add_reminder': "vol.Schema({vol.Required('label'): cv.string, vol.Required('trigger_at'): cv.string, vol.Optional('repeat'): vol.In(['daily', 'weekly', 'hourly']), vol.Optional('require_home', default=True): cv.boolean, vol.Optional('respect_quiet', default=True): cv.boolean})",
     'analyze_camera': "vol.Schema({vol.Required('entity_id'): cv.entity_id, vol.Optional('prompt'): cv.string, vol.Optional('announce', default=True): cv.boolean, vol.Optional('frames'): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)), vol.Optional('interval'): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5))})",
@@ -179,7 +180,9 @@ PINNED_SCHEMAS = {
     'restore': "vol.Schema({vol.Optional('archive'): str})",
     'sentinel_start': None,
     'sentinel_stop': None,
-    'shush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string, vol.Optional('all'): cv.boolean})",
+    'shush': "vol.Schema({vol.Optional('entity_id'): cv.string, vol.Optional('category'): cv.string, vol.Optional('all'): cv.boolean, vol.Optional('minutes'): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440))})",
+    'suggestion_accept': "vol.Schema({vol.Required('suggestion_id'): vol.Coerce(int)})",
+    'suggestion_dismiss': "vol.Schema({vol.Required('suggestion_id'): vol.Coerce(int)})",
     'test_notify': None,
     'test_routing': None,
     'test_tts': None,
@@ -393,9 +396,10 @@ def test_translations_mirror_en_json_top_level_sections():
     strings = json.loads((COMP / "translations" / "en.json").read_text(encoding="utf-8"))
     for path in _translation_files():
         data = json.loads(path.read_text(encoding="utf-8"))
-        # Service text is English only for now (see test_service_text).
-        assert [k for k in data if k != "services"] == \
-            [k for k in strings if k != "services"], path.name
+        # Service and entity text is English only for now (see test_service_text).
+        english_only = ("services", "entity")
+        assert [k for k in data if k not in english_only] == \
+            [k for k in strings if k not in english_only], path.name
 
 
 def test_non_english_service_errors_are_localized():

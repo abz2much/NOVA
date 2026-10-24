@@ -1002,6 +1002,19 @@ async def _compute(hass, now: datetime, tz) -> dict:
                          today.get("home_kwh"), currency)
 
 
+def source_kinds(grids: list, batteries: list, solar_ids: list) -> dict[str, list[str]]:
+    """The statistic ids behind each kind in LOAD_KINDS, from the Energy
+    dashboard's grid and battery sensors (_grid_sensors) and solar ids."""
+    return {
+        "solar": list(solar_ids),
+        "import": [e for g in grids for e in g["imports"]],
+        "export": [e for g in grids for e in g["exports"]],
+        # A battery's stat_energy_from is discharge, stat_energy_to charge.
+        "discharge": [e for b in batteries for e in b["imports"]],
+        "charge": [e for b in batteries for e in b["exports"]],
+    }
+
+
 async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: list,
                    solar_ids: list, fc_entities: list) -> dict:
     """The tariff, export tariff, usual usage profile and forecast factor,
@@ -1021,14 +1034,7 @@ async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: 
         if (export_tariff or {}).get("status") not in ("ok", "flat"):
             export_tariff = flat_tariff(_resolve_price(hass, exp_entity, exp_number))
 
-    kinds = {
-        "solar": solar_ids,
-        "import": [e for g in grids for e in g["imports"]],
-        "export": [e for g in grids for e in g["exports"]],
-        # A battery's stat_energy_from is discharge, stat_energy_to charge.
-        "discharge": [e for b in batteries for e in b["imports"]],
-        "charge": [e for b in batteries for e in b["exports"]],
-    }
+    kinds = source_kinds(grids, batteries, solar_ids)
     hour_now = now.replace(minute=0, second=0, microsecond=0)
     changes = await _hourly_changes(
         hass, sorted({e for ids in kinds.values() for e in ids}),

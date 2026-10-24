@@ -97,6 +97,25 @@ Nova also shows its reasoning. The Logs tab lists every decision it made, why, a
 </table>
 </div>
 
+## Nova on your dashboards
+
+Nova adds entities to its Nova device, so any dashboard can show what it is doing.
+
+| Entity | Shows |
+|---|---|
+| Status | ready, quiet, napping, lockdown or observer off |
+| Quiet | on while anything is shushed, with what is muted and until when |
+| Nap ends | when the current nap ends |
+| Lockdown | on while lockdown is active |
+| Last announcement | when Nova last spoke, and what it said |
+| Next reminder | how many reminders are due in the next 24 hours, and the first five |
+| Briefing | when the latest briefing ran, and its text |
+| Camera summary | the latest camera summary and the last five |
+| Energy note | one sentence on today's energy use against the same time yesterday |
+| Suggestions | how many automation suggestions are waiting, and the first ten |
+
+Services for dashboard buttons: `nova.shush` takes `minutes` to lift itself later, and `nova.suggestion_accept` and `nova.suggestion_dismiss` act on a suggestion by its id (admin users only).
+
 ## Choosing an AI
 
 You can use a cloud AI, a local one, or both. Each of Nova's jobs (conversation, reasoning, camera analysis and so on) can use a different one.

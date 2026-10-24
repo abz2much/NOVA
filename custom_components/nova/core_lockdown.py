@@ -513,6 +513,7 @@ class LockdownManager:
         if not self._automatic_operation_current(generation):
             return None
         self.active, self.since, self.reason, self.auto = True, time.time(), reason, auto
+        _state_changed()
         self._secured_by_us, self._alerted, self._silent = set(), set(), set()
         self._last_breach_alert = 0.0
         honorific = _m_common._live_honorific(self.hass)
@@ -579,6 +580,7 @@ class LockdownManager:
         if manual and self._alarm_armed():
             self._auto_suppressed = True
         self.active, self.reason, self.auto = False, "", False
+        _state_changed()
         self.exempt_windows = set()
         self._secured_by_us, self._alerted, self._silent = set(), set(), set()
         honorific = _persona().capitalise(_m_common._live_honorific(self.hass))
@@ -769,3 +771,9 @@ class LockdownManager:
         if action:
             actions.append(action)
         return actions
+
+
+def _state_changed() -> None:
+    """Tell Nova's entities that lockdown went on or off."""
+    from . import nova_state
+    nova_state.notify()

@@ -93,7 +93,7 @@ def _prewarm_persisted_state() -> None:
         scene_memory.prune()
 
 
-PLATFORMS = ["conversation", "stt"]
+PLATFORMS = ["binary_sensor", "conversation", "sensor", "stt"]
 # Nova is set up through its config entry only; a `nova:` block in YAML
 # gets Home Assistant's standard warning.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -950,6 +950,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     resources.add_unsubs(unsubs)
     resources.add_unsubs(recognition_unsubs)
     resources.add_closeable(sched)
+    # Timed shushes end on time, and one that ended while Home Assistant was
+    # down ends now.
+    from . import output_gate
+    resources.add_unsub(output_gate.async_watch_expiry(hass))
 
     # Built only now that every field exists, so it is never seen half made.
     # It is the one place the entry keeps state.

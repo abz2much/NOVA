@@ -80,10 +80,17 @@ def add_reminder(label: str, trigger_at: datetime, repeat: Optional[str] = None,
                 created, label, trigger_at.isoformat(), repeat,
                 1 if require_home else 0, 1 if respect_quiet else 0,
             ))
-            return int(cur.lastrowid or 0)
+            rid = int(cur.lastrowid or 0)
     except Exception as err:
         _LOGGER.warning("Could not store reminder %r: %s", label, err)
         return -1
+    _state_changed()
+    return rid
+
+
+def _state_changed() -> None:
+    from . import nova_state
+    nova_state.notify()
 
 
 def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
@@ -99,16 +106,18 @@ def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
 
 
 _SELECT_PENDING = (
-    "SELECT label, trigger_at FROM reminders "
+    "SELECT label, trigger_at, repeat FROM reminders "
     "WHERE acknowledged = 0 AND (last_fired IS NULL OR last_fired < trigger_at) "
     "ORDER BY trigger_at LIMIT 50"
 )
 
 
-def pending_reminders(now: Optional[datetime] = None, hours: int = 24, limit: int = 5) -> list[dict]:
+def pending_reminders(now: Optional[datetime] = None, hours: int = 24, limit: int = 5,
+                      with_repeat: bool = False) -> list[dict]:
     """What is still to come, for the panel's reminder card: every reminder
     not yet fired or acknowledged that is due now or within ``hours``, soonest
-    first. Each is just its label, its time (ISO) and whether it is due."""
+    first. Each is just its label, its time (ISO) and whether it is due, plus
+    its repeat (or None) when ``with_repeat`` is set."""
     if now is None:
         now = _now_local()
     try:
@@ -127,7 +136,10 @@ def pending_reminders(now: Optional[datetime] = None, hours: int = 24, limit: in
         ref = now if at.tzinfo is None else dt_util.utcnow()
         if at > ref + timedelta(hours=hours):
             continue
-        out.append({"label": str(row["label"]), "at": row["trigger_at"], "due": at <= ref})
+        item = {"label": str(row["label"]), "at": row["trigger_at"], "due": at <= ref}
+        if with_repeat:
+            item["repeat"] = row["repeat"]
+        out.append(item)
         if len(out) >= limit:
             break
     return out
@@ -140,6 +152,7 @@ def mark_fired(reminder_id: int) -> None:
                          (_now_local().isoformat(), reminder_id))
     except Exception as err:
         _LOGGER.debug("Could not mark reminder %s fired: %s", reminder_id, err)
+    _state_changed()
 
 
 def _advance_repeating(reminder: dict) -> None:
@@ -164,6 +177,8 @@ def _advance_repeating(reminder: dict) -> None:
                 (following.isoformat(), reminder["id"]))
     except Exception as err:
         _LOGGER.debug("Could not advance reminder %s: %s", reminder.get("id"), err)
+        return
+    _state_changed()
 
 
 # ── watcher ──────────────────────────────────────────────────────────────────

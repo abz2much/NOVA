@@ -25,7 +25,7 @@ def test_placeholders_match_in_every_section_and_language():
     for f in sorted((COMP / "translations").glob("*.json")):
         other = dict(_walk(json.loads(f.read_text())))
         for path, names in base.items():
-            if path[0] == "services" and path not in other:
+            if path[0] in ("services", "entity") and path not in other:
                 continue     # English only for now; Home Assistant falls back to en
             assert other.get(path) == names, f"{f.name} {'.'.join(path)}"
 
