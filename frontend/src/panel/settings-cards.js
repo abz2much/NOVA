@@ -105,6 +105,12 @@
         </select>
       </div>
       <div class="cfg-row">
+        <label>Theme</label>
+        <select id="uiTheme" class="cfg-field" data-cfg-key="ui_theme">
+          ${this._optSelect(Object.entries(NovaPanel.THEMES).map(([key, t]) => [key, t.label]), this._themeKey())}
+        </select>
+      </div>
+      <div class="cfg-row">
         <label>Sleep state</label>
         <select class="cfg-field" data-cfg-key="sleep_override">
           ${this._optSelect([["auto", "Auto (occupancy + quiet hours)"], ["awake", "Awake"], ["asleep", "Asleep"]], cfg.sleep_override || "auto")}

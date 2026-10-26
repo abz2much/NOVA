@@ -144,7 +144,7 @@
       }
       case "lock": {
         const locked = s === "locked";
-        return { color: locked ? dim : "#ff5a5a", name, val: locked ? "LOCK" : "OPEN" };
+        return { color: locked ? dim : "var(--bad-strong)", name, val: locked ? "LOCK" : "OPEN" };
       }
       case "cover": {
         const open = s === "open" || s === "opening";

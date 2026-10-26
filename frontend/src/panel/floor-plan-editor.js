@@ -246,8 +246,8 @@
     // should reach the rooms in it instead.
     let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" tabindex="-1" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
     svg += '<defs>'
-      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(244,184,96,0.05)" stroke-width="0.2"/></pattern>'
-      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(244,184,96,0.12)" stroke-width="0.3"/></pattern>'
+      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="var(--gold)" stroke-opacity="0.05" stroke-width="0.2"/></pattern>'
+      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="var(--gold)" stroke-opacity="0.12" stroke-width="0.3"/></pattern>'
       + '</defs>';
     const sel = floor === this._editorFloor && this._fpSelItem() ? this._fpSel : null;
     const picked = (kind, i) => sel && sel.kind === kind && sel.i === i ? " fpn-sel" : "";
@@ -267,7 +267,7 @@
     let prop = [];
     try { prop = this._propertyPts() || []; } catch (_) { prop = []; }
     if (prop.length >= 2) {
-      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="rgba(244,184,96,0.03)" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
+      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="var(--gold)" fill-opacity="0.03" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
       for (let vi = 0; vi < prop.length; vi++) {
         const a = prop[vi], b = prop[(vi + 1) % prop.length];
         svg += `<circle class="fpn-prop-mid" data-prop-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2.2" fill="none" stroke="var(--gold)" stroke-width="0.7" opacity="0.5" style="cursor:copy"/>`;
@@ -279,7 +279,7 @@
 
     for (let i = 0; i < (floorData.rooms || []).length; i++) {
       const rm = floorData.rooms[i];
-      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "#8fdba8" };
+      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "var(--good-ink)" };
       const c = colors[rm.type] || "var(--gold)";
       const out = rm.type === "outdoor";
       const fs = rm.w > 80 ? 7 : (rm.w > 50 ? 5.5 : (rm.w > 25 ? 4 : 3));
@@ -294,7 +294,7 @@
         svg += "</g>";
       } else {
         svg += `<g class="fpn-drag-room${picked("room", i)}" data-idx="${i}"${stop(rm.name || "")} style="cursor:move">`;
-        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
+        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "var(--good-ink)" : "var(--gold)"}" fill-opacity="${out ? 0.06 : 0.08}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
         svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
         if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
         svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
@@ -313,7 +313,7 @@
       els.forEach((e, i) => {
         if (e.type === "dormer") {
           const dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === "rear" ? mxy : mny;
-          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="#b06aff" opacity="0.9" rx="1.5" pointer-events="none"/>`;
+          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="var(--fp-dormer)" opacity="0.9" rx="1.5" pointer-events="none"/>`;
           return;
         }
         const w = e.w || 20, p = e.pos != null ? e.pos : 0.5, horiz = (e.wall === "front" || e.wall === "back");
@@ -327,7 +327,7 @@
         else if (e.wall === "back") { cx = bx0 + p * (bx1 - bx0); cy = by1; }
         else if (e.wall === "left") { cx = bx0; cy = by0 + p * (by1 - by0); }
         else { cx = bx1; cy = by0 + p * (by1 - by0); }
-        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "#5a7a8a" : (e.kind === "cellar" ? "#c98a2a" : (e.kind === "cased" ? "#78b9d7" : "var(--warn)")));
+        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "var(--fp-interior)" : (e.kind === "cellar" ? "var(--fp-cellar)" : (e.kind === "cased" ? "var(--fp-cased)" : "var(--warn)")));
         const ex = horiz ? cx - w / 2 : cx - 2, ey = horiz ? cy - 2 : cy - w / 2, ew = horiz ? w : 4, eh = horiz ? 4 : w;
         svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${ex}" y="${ey}" width="${ew}" height="${eh}" fill="${col}" opacity="0.9" rx="1" pointer-events="none"/>`;
       });
@@ -339,7 +339,7 @@
     for (let ci = 0; ci < cams.length; ci++) {
       const cam = cams[ci], out = cam.indoor === false;
       svg += `<g class="fpn-cam${picked("cam", ci)}" data-cam-idx="${ci}"${stop(this._t("CAM {number}", { number: ci + 1 }))}>`
-        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "rgba(232,178,61,0.10)" : "rgba(226,84,47,0.10)"}" stroke="${out ? "rgba(232,178,61,0.6)" : "rgba(226,84,47,0.6)"}" stroke-width="0.7" pointer-events="none"/>`
+        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "var(--warn)" : "var(--ember)"}" fill-opacity="0.1" stroke="${out ? "var(--warn)" : "var(--ember)"}" stroke-opacity="0.6" stroke-width="0.7" pointer-events="none"/>`
         + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
         + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
         + "</g>";

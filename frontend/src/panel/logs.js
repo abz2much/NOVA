@@ -15,26 +15,26 @@
   static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
     "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE", "VOICE"];
   static LOG_CATEGORIES = {
-    CONV: { color: "#5fd0e0", icon: "💬" },
-    REPLY: { color: "#4fb8ff", icon: "💭" },
-    LOCAL: { color: "#5fbf7a", icon: "⚡" },
-    LEARN: { color: "#8fd15c", icon: "🧠" },
+    CONV: { color: "var(--log-conv)", icon: "💬" },
+    REPLY: { color: "var(--log-reply)", icon: "💭" },
+    LOCAL: { color: "var(--log-local)", icon: "⚡" },
+    LEARN: { color: "var(--log-learn)", icon: "🧠" },
     AGENT: { color: "var(--gold)", icon: "🤖" },
-    AUTO: { color: "#ffb454", icon: "🔁" },
-    MODE: { color: "#c9a0ff", icon: "🎚️" },
-    CONFIG: { color: "#9d8cff", icon: "⚙️" },
-    CLASSIFY: { color: "#9d8cff", icon: "🏷️" },
-    CAMERA: { color: "#5fbf7a", icon: "📷" },
-    ENERGY: { color: "#ffcf6a", icon: "🔌" },
-    BIO: { color: "#ff8fc7", icon: "💓" },
-    OFFER: { color: "#ffd27a", icon: "🙋" },
-    SAFETY: { color: "#ff8a8a", icon: "🛡️" },
-    ERROR: { color: "#ff6b81", icon: "❌" },
+    AUTO: { color: "var(--log-auto)", icon: "🔁" },
+    MODE: { color: "var(--log-mode)", icon: "🎚️" },
+    CONFIG: { color: "var(--log-config)", icon: "⚙️" },
+    CLASSIFY: { color: "var(--log-classify)", icon: "🏷️" },
+    CAMERA: { color: "var(--log-camera)", icon: "📷" },
+    ENERGY: { color: "var(--log-energy)", icon: "🔌" },
+    BIO: { color: "var(--log-bio)", icon: "💓" },
+    OFFER: { color: "var(--log-offer)", icon: "🙋" },
+    SAFETY: { color: "var(--log-safety)", icon: "🛡️" },
+    ERROR: { color: "var(--log-error)", icon: "❌" },
     WARNING: { color: "var(--warn)", icon: "⚠️" },
     GATE: { color: "var(--ink-faint)", icon: "🚧" },
     DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
     OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
-    VOICE: { color: "#7fe0c4", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
+    VOICE: { color: "var(--log-voice)", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
   };
 
   _htmlLogs() {

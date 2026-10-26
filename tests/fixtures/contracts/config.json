@@ -224,6 +224,7 @@
     "suggestion_review_provider",
     "tts_use_ha_voice",
     "ui_language",
+    "ui_theme",
     "vision_model",
     "vision_provider",
     "visitor_learning",

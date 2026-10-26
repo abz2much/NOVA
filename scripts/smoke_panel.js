@@ -2711,7 +2711,8 @@ if (require.main === module) setTimeout(async () => {
       (() => {
         const w = sRoot.querySelector('#hazardWarnings .hazard-warning[data-level="orange"]');
         const t = w?.textContent || "";
-        return !!w && /border-left:4px solid #f08c00/.test(w.getAttribute("style") || "")
+        return !!w && /border-left:4px solid var\(--hazard-orange\)/.test(w.getAttribute("style") || "")
+          && elNew.constructor.THEME_SHARED["hazard-orange"] === "#f08c00"
           && /ORANGE/.test(t) && t.includes(irishWarning.headline_text)
           && /Wed 9 Sep 12:00 to Thu 10 Sep 12:00/.test(t)
           && w.querySelector(".hazard-description")?.textContent === irishWarning.description_text
@@ -4600,8 +4601,8 @@ if (require.main === module) setTimeout(async () => {
     const crypto = require("crypto");
     const PINS = {
       geometry: "a836aa626ac3def0",
-      floorHelpers: "b94425681aba57c7",
-      editorMarkup: "91af5699933631f5",   // 8.73.1: selection bar, Rooms list, plan items are named tab stops
+      floorHelpers: "bafb91527e2df228",   // 8.74.0: an open lock pin takes the theme's red
+      editorMarkup: "75477a9b0c3c351e",   // 8.74.0: plan colours come from the theme
       memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
       intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
       editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
@@ -5861,6 +5862,71 @@ if (require.main === module) setTimeout(async () => {
 
     SVGp.createSVGPoint = real.pt; SVGp.getScreenCTM = real.ctm; Ep.getBoundingClientRect = real.box; Ep.setPointerCapture = real.cap;
     P.remove();
+  }
+
+  // Themes (8.74.0): every colour comes from the theme table in themes.js.
+  {
+    const NP = window.customElements.get("nova-panel");
+    const THEMES = NP.THEMES || {}, SHARED = NP.THEME_SHARED || {};
+    const keys = Object.keys(THEMES);
+    checks.push([`themes: the short list, with Deep Teal first and the default (${keys.join(", ")})`,
+      keys.join() === "deep_teal,twilight_denim,pine_mist,smoked_lilac,classic" && NP.THEME_DEFAULT === "deep_teal"]);
+
+    // Classic is today's look: the same values the stylesheet had before themes.
+    const before = { bg: "#15110d", surface: "#1e1712", "surface-2": "#2a2119", "line-soft": "#33291f", ink: "#f3ece1", "ink-dim": "#b6a897",
+      "ink-faint": "#988a78", ember: "#e2542f", gold: "#f4b860", "gold-pale": "#ffe3ad", warn: "#e8b23d" };
+    const classic = (THEMES.classic || {}).tokens || {};
+    const classicHead = (THEMES.classic || {}).head || {};
+    checks.push(["themes: Classic keeps today's colours, the head included",
+      Object.entries(before).every(([k, v]) => classic[k] === v)
+      && JSON.stringify(classicHead.ramp) === "[[126,36,18],[226,84,47],[244,184,96],[255,231,189]]"
+      && JSON.stringify(classicHead.main) === "[0.957,0.722,0.376]"]);
+
+    // Every theme's text and status colours reach 4.5:1 where they are drawn.
+    const lum = h => { const c = h.replace("#", "").match(/../g).map(x => parseInt(x, 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => m - n); return (y + 0.05) / (x + 0.05); };
+    const low = [];
+    for (const [name, th] of Object.entries(THEMES)) {
+      const t = th.tokens || {};
+      const pairs = [["ink", "surface-2"], ["ink-dim", "surface-2"], ["ink-faint", "surface-2"], ["gold", "surface"], ["warn", "surface"],
+        ["good", "surface"], ["good-ink", "surface"], ["bad", "surface"], ["bad-ink", "surface"], ["info", "surface"],
+        ["on-accent", "ember"], ["alarm-ink", "alarm-bg"]];
+      for (const [fg, bg] of pairs) if (!t[fg] || !t[bg] || ratio(t[fg], t[bg]) < 4.5) low.push(`${name} ${fg}`);
+      for (const [k, v] of Object.entries(SHARED)) if (k.startsWith("log-") && ratio(v, t.surface || "#000000") < 4.5) low.push(`${name} ${k}`);
+    }
+    checks.push([`themes: text and status colours reach 4.5:1 in every theme (${low.slice(0, 6).join(", ") || "all"})`, keys.length === 5 && low.length === 0]);
+
+    // No colour is written anywhere else in the panel.
+    const srcDir = path.resolve(__dirname, "..", "frontend", "src", "panel");
+    const literal = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8}|[0-9a-fA-F]{3})(?![\w-])|rgba?\(\s*\d|hsla?\(\s*\d/;
+    const stray = [];
+    for (const file of fs.readdirSync(srcDir).filter(f => f.endsWith(".js") && f !== "themes.js")) {
+      fs.readFileSync(path.join(srcDir, file), "utf8").split("\n").forEach((line, i) => {
+        if (literal.test(line) && !/\/\/ colour-ok:/.test(line)) stray.push(`${file}:${i + 1}`);
+      });
+    }
+    checks.push([`themes: no colour is written outside themes.js (${stray.length}: ${stray.slice(0, 5).join(", ")})`, stray.length === 0]);
+
+    // Picking a theme in Settings saves it and recolours the panel and the head.
+    const sent = [];
+    const T = document.createElement("nova-panel");
+    T._currentTab = "settings";
+    document.body.appendChild(T);
+    T.hass = { ...hass, callWS: async (m) => { sent.push(m); if (m.type === "nova/update_config" && m.key === "ui_theme") T._liveData.config.ui_theme = m.value; return hass.callWS(m); } };
+    await new Promise(r => setTimeout(r, 150));
+    const styleText = () => T.shadowRoot.querySelector("style")?.textContent || "";
+    const startsTeal = styleText().includes(`--bg:${THEMES.deep_teal?.tokens?.bg}`);
+    const pick = T.shadowRoot.getElementById("uiTheme");
+    const options = Array.from(pick?.options || []).map(o => o.value).join();
+    if (pick) { pick.value = "classic"; pick.dispatchEvent(new window.Event("change", { bubbles: true })); }
+    await new Promise(r => setTimeout(r, 80));
+    checks.push([`themes: Settings has a theme picker that saves and recolours at once (${options})`,
+      startsTeal && options === "deep_teal,twilight_denim,pine_mist,smoked_lilac,classic"
+      && sent.some(m => m.key === "ui_theme" && m.value === "classic")
+      && styleText().includes("--bg:#15110d") && T._theme().head.main.join() === "0.957,0.722,0.376"
+      && pick.closest(".cfg-row")?.querySelector("label")?.textContent.trim() === "Theme"]);
+    T.remove();
   }
 
   let ok = true;

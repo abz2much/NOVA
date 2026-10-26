@@ -467,7 +467,7 @@
     h.scanY -= dt * cur.scan * 0.9; if (h.scanY < -2.4) h.scanY = 1.2;
     const breathY = reduce ? 0 : Math.sin(h.clock * 2 * Math.PI / (key === "asleep" ? 7 : 5)) * 0.018 * cur.breath;
     const lay = this._holoLayout(h), t = reduce ? 0 : h.clock;
-    const gold = [0.957, 0.722, 0.376], deep = [0.62, 0.27, 0.12], pale = [1.0, 0.89, 0.68], ember = [0.886, 0.33, 0.18];
+    const hd = this._theme().head, gold = hd.main, deep = hd.deep, pale = hd.pale, ember = hd.warm;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, h.fbo.scene.fb); gl.viewport(0, 0, h.fbo.scene.w, h.fbo.scene.h);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);

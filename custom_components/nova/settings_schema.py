@@ -77,6 +77,7 @@ def _j(key: str, default: Any, payload: str = "plain") -> Setting:
 _ALL = (
     # Language and voice
     _t("ui_language", "auto"),
+    _t("ui_theme", "deep_teal"),
     _t("output_language", ""),
     _b("tts_use_ha_voice", False),
     _n("banter_level", 1),
