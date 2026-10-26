@@ -957,7 +957,8 @@ if (require.main === module) setTimeout(async () => {
       elNew._liveData.config = Object.assign({}, elNew._liveData.config, { hero_card_cycle: true });
       elNew._liveData.status.sleep = { state: "AWAKE" };
       await openDashboard();
-      await tick(200);
+      // Wait for the card itself, not a fixed time: a slow machine needs longer.
+      for (let i = 0; i < 40 && !(shown() && /11\.2/.test(card().textContent)); i++) await tick(50);
       const t2 = card().textContent;
       checks.push(["ambient: with the setting on, the card comes round by itself with the Energy tab's figures",
         shown() && elNew._coreStateKey === "presenting" && t2.includes("11.2") && t2.includes("80%")
