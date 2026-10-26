@@ -4,7 +4,7 @@
 
 A home butler for Home Assistant. You talk to it, it watches over your home, and it learns how you live.
 
-<img src="docs/media/hero-stellar-core.svg" alt="The Nova Command Center dashboard, with an animated glowing core in the middle" width="100%">
+<img src="docs/media/command-center.webp" alt="The Nova Command Center: a glowing hologram head in the middle with turning arcs, five live cards round it for security, who is home, energy, indoor and weather, and a bar of five buttons at the bottom" width="100%">
 
 [![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant&logoColor=white)](https://github.com/abz2much/NOVA)
 [![Release](https://img.shields.io/github/v/release/abz2much/NOVA?color=00d9ff)](https://github.com/abz2much/NOVA/releases)
@@ -91,12 +91,12 @@ Nova also shows its reasoning. The Logs tab lists every decision it made, why, a
 <div align="center">
 <table border="0">
 <tr>
-<td width="50%"><img src="docs/media/areas-card.svg" alt="The Areas card, with an icon for each capability, temperature and humidity trends, and a light switch" width="100%"></td>
-<td width="50%"><img src="docs/media/settings-card.svg" alt="The Settings tab, showing what Nova calls each person" width="100%"></td>
+<td width="50%"><img src="docs/media/nova-panel.webp" alt="The Nova panel open over the Command Center, listing what Nova did in plain sentences, with a box to ask Nova a question and its answer" width="100%"></td>
+<td width="50%"><img src="docs/media/themes.webp" alt="The Command Center in the five colour themes: Deep Teal, Twilight Denim, Pine Mist, Smoked Lilac and Classic" width="100%"></td>
 </tr>
 <tr>
-<td align="center"><em>Every room, with live icons, trends and a light switch.</em></td>
-<td align="center"><em>Settings are grouped by what you want to do.</em></td>
+<td align="center"><em>What Nova did, in plain words, and a box to ask it.</em></td>
+<td align="center"><em>Five colour themes, picked in Settings.</em></td>
 </tr>
 </table>
 </div>

@@ -6218,6 +6218,12 @@ if (require.main === module) setTimeout(async () => {
       && /\.dock-btn\{[^}]*min-height:48px/.test(css)
       && /\.dock-sheet\{[^}]*transform:translateY\(/.test(css)
       && /@media \(prefers-reduced-motion: ?reduce\)\{[^@]*\.dock-sheet\{transition:none/.test(css)]);
+    // 8.77.1: the panels scroll with a dark scrollbar, not the browser's
+    // bright default (seen in Chrome on the Nova panel).
+    checks.push(["dock: a panel's scrollbar is drawn in the theme's colours",
+      /\.dock-sheet\{[^}]*scrollbar-color:var\(--line-soft\) transparent/.test(css)
+      && /\.dock-sheet::-webkit-scrollbar-thumb\{background:var\(--line-soft\)/.test(css)
+      && !/\.feed\{/.test(css)]);
     } catch (err) { checks.push([`dock: the dock checks ran to the end (${err.message})`, false]); }
     D.remove();
   }

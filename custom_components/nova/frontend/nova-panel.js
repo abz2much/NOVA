@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.77.0
+ * v8.77.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.77.0 ",
+      console.log("%c Nova Panel %c v8.77.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -11093,6 +11093,10 @@ ${this._dockHtml()}`;
         padding:12px 16px 16px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);
         box-shadow:0 -12px 40px color-mix(in srgb,var(--bg) 80%,transparent);
         opacity:0;transform:translateY(24px);transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+      .dock-sheet{scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+      .dock-sheet::-webkit-scrollbar{width:6px}
+      .dock-sheet::-webkit-scrollbar-track{background:transparent}
+      .dock-sheet::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:var(--r-ctl)}
       .dock-sheet.dock-open{opacity:1;transform:none}
       .dock-sheet:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
       .dock-sheet-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
@@ -11241,10 +11245,6 @@ ${this._dockHtml()}`;
       .goal-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.goal-copy b{font-size:var(--t-sm)}.goal-copy span{font-size:var(--t-sm);color:var(--ink-dim);overflow-wrap:anywhere}
       .goal-copy small{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint)}
       .goal-create{display:flex;gap:8px;margin-top:10px}.goal-create .cfg-field{flex:1;min-width:0}.empty-state{font-size:var(--t-sm);color:var(--ink-faint);padding:12px 0}
-      .feed{max-height:420px;overflow-y:auto}
-      .feed::-webkit-scrollbar{width:3px}
-      .feed::-webkit-scrollbar-track{background:var(--surface-2)}
-      .feed::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:var(--r-ctl)}
       .feed-row{padding:9px 0;border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:10px}
       .feed-row:last-child{border-bottom:none}
       .feed-text{font-size:var(--t-sm);line-height:1.4}
