@@ -412,5 +412,10 @@
   "Something went wrong.": "Ceva nu a mers bine.",
   "That didn't work: {error}": "Nu a funcționat: {error}",
   "That file is over 25 MB.": "Fișierul depășește 25 MB.",
-  "{entity} is not in the list.": "{entity} nu este în listă."
+  "{entity} is not in the list.": "{entity} nu este în listă.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Trage pentru a muta · mânerul din dreapta jos redimensionează · clic dreapta pentru a șterge · clic pe cercul mic de pe o margine pentru a adăuga un colț · derulează sau folosește + și − pentru zoom · trage un spațiu gol pentru a muta vederea",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Trage un element cu un deget pentru a-l muta · atinge cercul mic de pe o margine pentru a adăuga un colț · ciupește cu două degete pentru zoom · mișcă două degete pentru a muta vederea",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Revii la planul implicit? Camerele tale vor fi șterse.",
+  "Zoom in": "Mărește",
+  "Zoom out": "Micșorează"
 }

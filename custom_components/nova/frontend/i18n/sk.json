@@ -412,5 +412,10 @@
   "Something went wrong.": "Niečo sa pokazilo.",
   "That didn't work: {error}": "Nepodarilo sa: {error}",
   "That file is over 25 MB.": "Súbor je väčší ako 25 MB.",
-  "{entity} is not in the list.": "{entity} nie je v zozname."
+  "{entity} is not in the list.": "{entity} nie je v zozname.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Ťahaním presuniete · úchytom vpravo dole zmeníte veľkosť · pravým kliknutím odstránite · kliknutím na malý krúžok na hrane pridáte roh · kolieskom alebo tlačidlami + a − priblížite · ťahaním prázdneho miesta posuniete pohľad",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Položku presuniete ťahaním jedným prstom · ťuknutím na malý krúžok na hrane pridáte roh · roztiahnutím dvoch prstov priblížite · posunom dvoch prstov posuniete pohľad",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Vrátiť predvolený pôdorys? Vaše vlastné miestnosti budú odstránené.",
+  "Zoom in": "Priblížiť",
+  "Zoom out": "Oddialiť"
 }

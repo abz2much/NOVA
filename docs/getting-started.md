@@ -146,8 +146,17 @@ rooms, outdoor zones, the property line,
 windows, doors and dormers, camera positions, and a background image whose
 opacity you can change. You can export the plan as JSON to back it up or move
 it to another install, and import it again. The editor can also estimate how
-much each camera covers. **Doorbell Training** is a card in the Cameras group
-of Settings.
+much each camera covers.
+
+It works with a mouse, a pen or a finger. With a mouse, drag to move, scroll
+or use **+** and **−** to zoom, drag empty space to pan, and right-click to
+delete. On a phone or tablet, drag an item with one finger, pinch with two
+fingers to zoom and move two fingers to pan; one finger on empty space still
+scrolls the page. Changes are kept only once you press **Save Layout**: until
+then the editor says "Unsaved changes." **Reset Default** asks before it
+replaces your plan.
+
+**Doorbell Training** is a card in the Cameras group of Settings.
 
 ## What it will never do on its own
 

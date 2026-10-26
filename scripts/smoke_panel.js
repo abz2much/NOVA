@@ -4591,10 +4591,10 @@ if (require.main === module) setTimeout(async () => {
     const PINS = {
       geometry: "a836aa626ac3def0",
       floorHelpers: "b94425681aba57c7",
-      editorMarkup: "751159320d6b97e6",   // 8.72.0: Reset Default marked as destructive
+      editorMarkup: "65937d66bfe915c6",   // 8.73.0: zoom buttons, mouse and touch hints, unsaved note
       memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
       intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
-      editorDrag: "1394062ae0bd2b40",
+      editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
     };
     // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
     // drawing order, so the number is left out of the fingerprint.
@@ -4852,13 +4852,13 @@ if (require.main === module) setTimeout(async () => {
     elNew.addEventListener("hass-more-info", onMore);
     const svg = () => elNew.shadowRoot.getElementById("fpnSvg");
     const q = sel => elNew.shadowRoot.querySelector(sel);
-    const mouse = (el, type, x, y, button = 0) => el.dispatchEvent(new W.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button }));
+    const mouse = (el, type, x, y, button = 0) => el.dispatchEvent(new W.PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button, pointerId: 1, pointerType: "mouse", isPrimary: true }));
     const drag = async (sel, from, to) => {
       const el = q(sel);
       if (!el) return "missing " + sel;
-      mouse(el, "mousedown", from[0], from[1]);
-      mouse(svg(), "mousemove", to[0], to[1]);
-      mouse(svg(), "mouseup", to[0], to[1]);
+      mouse(el, "pointerdown", from[0], from[1]);
+      mouse(svg(), "pointermove", to[0], to[1]);
+      mouse(svg(), "pointerup", to[0], to[1]);
       await new Promise(r => setTimeout(r, 30));
       return "ok";
     };
@@ -4868,35 +4868,35 @@ if (require.main === module) setTimeout(async () => {
     d.steps.push(await drag('.fpn-resize-handle[data-idx="1"]', [0, 0], [12.6, -40]), snap());
     d.steps.push(await drag('.fpn-zone-vtx[data-zone-idx="6"][data-vtx="1"]', [0, 0], [5.4, 3.6]), snap());
     d.steps.push(await drag('.fpn-zone-path[data-zone-idx="6"]', [0, 0], [10, -4]), snap());
-    mouse(q('.fpn-zone-mid[data-zone-idx="6"][data-edge="0"]'), "mousedown", 0, 0);
+    mouse(q('.fpn-zone-mid[data-zone-idx="6"][data-edge="0"]'), "pointerdown", 0, 0);
     q('.fpn-zone-vtx[data-zone-idx="6"][data-vtx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     d.steps.push(snap());
     d.steps.push(await drag('.fpn-prop-vtx[data-prop-vtx="2"]', [0, 0], [-20.4, 7]), snap());
-    mouse(q('.fpn-prop-mid[data-prop-edge="3"]'), "mousedown", 0, 0);
+    mouse(q('.fpn-prop-mid[data-prop-edge="3"]'), "pointerdown", 0, 0);
     q('.fpn-prop-vtx[data-prop-vtx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     d.steps.push(snap());
     const camEl = q('.fpn-cam[data-cam-idx="0"] .fpn-cam-dot');
-    mouse(camEl, "mousedown", 0, 0);
-    mouse(svg(), "mousemove", 7.7, 8.2);
+    mouse(camEl, "pointerdown", 0, 0);
+    mouse(svg(), "pointermove", 7.7, 8.2);
     d.steps.push(q('.fpn-cam[data-cam-idx="0"] .fpn-cam-cone').getAttribute("d"), q('.fpn-cam[data-cam-idx="0"] text').getAttribute("y"));
-    mouse(svg(), "mouseup", 7.7, 8.2);
+    mouse(svg(), "pointerup", 7.7, 8.2);
     await new Promise(r => setTimeout(r, 30));
     d.steps.push(snap());
     d.steps.push(await drag('.fpn-ent[data-ent-idx="0"]', [0, 0], [0.5, 0.5]), snap(), moreInfo.slice());
     const entEl = q('.fpn-ent[data-ent-idx="1"]');
-    mouse(entEl, "mousedown", 0, 0);
-    mouse(svg(), "mousemove", 9, -3);
+    mouse(entEl, "pointerdown", 0, 0);
+    mouse(svg(), "pointermove", 9, -3);
     d.steps.push(q('.fpn-ent[data-ent-idx="1"] .fpn-ent-nm').getAttribute("y"), q('.fpn-ent[data-ent-idx="1"] .fpn-ent-val').getAttribute("y"));
-    mouse(svg(), "mouseleave", 9, -3);
+    mouse(svg(), "pointerup", 9, -3);
     await new Promise(r => setTimeout(r, 30));
     d.steps.push(snap(), moreInfo.slice());
-    mouse(svg(), "mousedown", 100, 100);
-    mouse(svg(), "mousemove", 152, 60);
+    mouse(svg(), "pointerdown", 100, 100);
+    mouse(svg(), "pointermove", 152, 60);
     d.steps.push(svg().getAttribute("viewBox"), q(".fpn-grid-rect").getAttribute("width"));
-    mouse(svg(), "mouseup", 152, 60);
-    mouse(svg(), "mousedown", 0, 0, 1);
-    mouse(svg(), "mousemove", -26, 13);
-    mouse(svg(), "mouseup", 0, 0);
+    mouse(svg(), "pointerup", 152, 60);
+    mouse(svg(), "pointerdown", 0, 0, 1);
+    mouse(svg(), "pointermove", -26, 13);
+    mouse(svg(), "pointerup", 0, 0);
     svg().dispatchEvent(new W.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 80, clientY: 60, deltaY: -100 }));
     svg().dispatchEvent(new W.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 10, clientY: 20, deltaY: 100 }));
     d.steps.push(snap(), svg().getAttribute("viewBox"));
@@ -4908,9 +4908,9 @@ if (require.main === module) setTimeout(async () => {
     await new Promise(r => setTimeout(r, 30));
     q('.fpn-ent[data-ent-idx="0"]').dispatchEvent(new W.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     await new Promise(r => setTimeout(r, 30));
-    mouse(q('.fpn-drag-room[data-idx="0"] .fpn-drag-rect'), "mousedown", 0, 0, 2);
-    mouse(svg(), "mousemove", 50, 50);
-    mouse(svg(), "mouseup", 50, 50);
+    mouse(q('.fpn-drag-room[data-idx="0"] .fpn-drag-rect'), "pointerdown", 0, 0, 2);
+    mouse(svg(), "pointermove", 50, 50);
+    mouse(svg(), "pointerup", 50, 50);
     await new Promise(r => setTimeout(r, 30));
     d.steps.push(snap());
     // The editor's own fields: aim, wall, position, room, camera entity, indoor.
@@ -5550,6 +5550,198 @@ if (require.main === module) setTimeout(async () => {
     }
     checks.push([`labels: no field is named only by its in-box hint (${hintOnly.length}: ${hintOnly.join(", ")})`,
       hintOnly.length === 0]);
+    P.remove();
+  }
+
+  // The floor plan editor by finger and pen (8.73.0). Stand-ins for the SVG
+  // screen maths jsdom lacks: the plan fills a 520 by 400 pixel box and
+  // follows the current view, so a zoom or pan changes what is under a finger.
+  {
+    const SVGp = window.SVGSVGElement.prototype, Ep = window.Element.prototype;
+    const real = { pt: SVGp.createSVGPoint, ctm: SVGp.getScreenCTM, box: Ep.getBoundingClientRect, cap: Ep.setPointerCapture };
+    const held = [];
+    SVGp.createSVGPoint = function () {
+      const el = this;
+      return { x: 0, y: 0, matrixTransform() {
+        const [vx, vy, vw, vh] = el.getAttribute("viewBox").split(" ").map(Number);
+        return { x: vx + this.x * vw / 520, y: vy + this.y * vh / 400 };
+      } };
+    };
+    SVGp.getScreenCTM = function () { return { a: 520 / this.getAttribute("viewBox").split(" ").map(Number)[2], inverse() { return {}; } }; };
+    Ep.getBoundingClientRect = function () { return { left: 0, top: 0, width: 520, height: 400, right: 520, bottom: 400 }; };
+    Ep.setPointerCapture = function (id) { held.push(id); };
+    const sent = [];
+    const P = document.createElement("nova-panel");
+    P._currentTab = "settings";
+    document.body.appendChild(P);
+    P.hass = { ...hass, callWS: async (m) => { sent.push(m); return hass.callWS(m); } };
+    await new Promise(r => setTimeout(r, 150));
+    const fresh = () => {
+      P._liveData.config = { floor_plan_units: "imperial" };
+      P._editingPlan = { tf: { label: "Test Floor", viewBox: "0 0 260 200", rooms: [{ name: "Den", x: 20, y: 20, w: 60, h: 40, type: "room" }] } };
+      P._editingCameras = { tf: [{ x: 150, y: 40, angle: 0, fov: 90, range: 80 }] };
+      P._editingEntities = { tf: [{ e: "light.kitchen", x: 40, y: 120 }] };
+      P._editingElements = { tf: [] };
+      P._editingProperty = [];
+      P._fpDirty = false;
+      P._editorFloor = "tf"; P._editVB = null;
+      P._rerenderFloorPlanCard();
+    };
+    fresh();
+    const R = P.shadowRoot;
+    const q = sel => R.querySelector(sel);
+    const svg = () => R.getElementById("fpnSvg");
+    const ptr = (el, type, x, y, id = 1, kind = "touch", button = 0) => {
+      const ev = new window.PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button, pointerId: id, pointerType: kind, isPrimary: id === 1 });
+      el.dispatchEvent(ev);
+      return ev;
+    };
+    const touchmove = touches => {
+      const ev = new window.Event("touchmove", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "touches", { value: Array.from({ length: touches }) });
+      svg().dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    const wait = (ms = 30) => new Promise(r => setTimeout(r, ms));
+    const cam = () => P._editingCameras.tf[0];
+
+    ptr(svg(), "pointerdown", 100, 100);
+    ptr(svg(), "pointermove", 150, 60);
+    const freeScroll = !touchmove(1);
+    ptr(svg(), "pointerup", 150, 60);
+    checks.push(["floor plan: a finger on empty space leaves the plan alone, so the page still scrolls",
+      P._editVB === null && freeScroll]);
+
+    held.length = 0;
+    ptr(q(".fpn-cam-dot"), "pointerdown", 0, 0);
+    ptr(svg(), "pointermove", 20, 10);
+    const noScroll = touchmove(1);
+    ptr(svg(), "pointerup", 20, 10);
+    await wait();
+    checks.push(["floor plan: a finger drags a camera, holds on past the edge, and the page does not scroll meanwhile",
+      cam().x === 160 && cam().y === 45 && held.includes(1) && noScroll]);
+
+    fresh();
+    ptr(q(".fpn-cam-dot"), "pointerdown", 0, 0, 1);
+    ptr(svg(), "pointermove", 10, 0, 1);
+    ptr(svg(), "pointerdown", 200, 0, 2);
+    ptr(svg(), "pointermove", 60, 0, 1);
+    ptr(svg(), "pointerup", 60, 0, 1); ptr(svg(), "pointerup", 200, 0, 2);
+    await wait();
+    checks.push(["floor plan: a second finger stops a drag instead of flinging the item", cam().x === 155]);
+
+    fresh();
+    ptr(svg(), "pointerdown", 100, 100, 1);
+    ptr(svg(), "pointerdown", 200, 100, 2);
+    ptr(svg(), "pointermove", 300, 100, 2);
+    const zoomed = P._editVB && { ...P._editVB };
+    const pinchBlocks = touchmove(2);
+    ptr(svg(), "pointermove", 140, 100, 1);
+    ptr(svg(), "pointermove", 340, 100, 2);
+    const panned = P._editVB && { ...P._editVB };
+    ptr(svg(), "pointerup", 140, 100, 1); ptr(svg(), "pointerup", 340, 100, 2);
+    // The plan point first under the fingers' middle, (75, 50), stays under it.
+    const r3 = v => v && [v.x, v.y, v.w, v.h].map(n => Math.round(n * 1000) / 1000).join(" ");
+    checks.push([`floor plan: two fingers pinch to zoom and move to pan (${r3(zoomed)} → ${r3(panned)})`,
+      r3(zoomed) === "25 25 130 100" && pinchBlocks && r3(panned) === "15 25 130 100"
+      && svg().getAttribute("viewBox") === `${panned.x} ${panned.y} ${panned.w} ${panned.h}`]);
+
+    fresh();
+    const moreInfo = [];
+    const onMore = ev => moreInfo.push(ev.detail.entityId);
+    P.addEventListener("hass-more-info", onMore);
+    const svgBefore = svg();
+    ptr(q(".fpn-drag-room .fpn-drag-rect"), "pointerdown", 0, 0, 1, "mouse");
+    ptr(svg(), "pointermove", 2, 1, 1, "mouse");
+    ptr(svg(), "pointerup", 2, 1, 1, "mouse");
+    ptr(q(".fpn-ent"), "pointerdown", 0, 0);
+    ptr(svg(), "pointermove", 5, -4);
+    ptr(svg(), "pointerup", 5, -4);
+    await wait();
+    const den = P._editingPlan.tf.rooms[0], pinNow = P._editingEntities.tf[0];
+    P.removeEventListener("hass-more-info", onMore);
+    checks.push(["floor plan: a press that barely moves is a tap: nothing shifts, nothing redraws, and a pin opens its controls",
+      den.x === 20 && den.y === 20 && svg() === svgBefore && pinNow.x === 40 && pinNow.y === 120
+      && moreInfo.join() === "light.kitchen" && !P._fpDirty]);
+
+    fresh();
+    const zin = q("#fpnZoomIn"), zout = q("#fpnZoomOut");
+    const hitAtFit = svg().style.getPropertyValue("--fpn-hit");
+    zin?.click();
+    const inView = P._editVB && { ...P._editVB };
+    const hitZoomed = svg().style.getPropertyValue("--fpn-hit");
+    q("#fpnZoomOut")?.click();
+    const outView = P._editVB && { ...P._editVB };
+    checks.push([`floor plan: + and − buttons zoom about the middle (${JSON.stringify(inView)}, ${JSON.stringify(outView)})`,
+      !!zin && !!zout && zin.getAttribute("aria-label") === "Zoom in" && zout.getAttribute("aria-label") === "Zoom out"
+      && !!inView && inView.w === 195 && inView.x + inView.w / 2 === 130 && inView.y + inView.h / 2 === 100
+      && !!outView && Math.round(outView.w) === 260 && Math.round(outView.x) === 0]);
+    // 44 screen pixels in plan units: 22 at 2 px per unit, 16.5 once zoomed in.
+    for (let i = 0; i < 12; i++) q("#fpnZoomIn").click();
+    const deep = { ...P._editVB };
+    for (let i = 0; i < 40; i++) q("#fpnZoomOut").click();
+    const far = { ...P._editVB };
+    const shape = v => Math.round(v.w / v.h * 1000) / 1000;
+    checks.push([`floor plan: zoom stops at its limits without squashing the plan (${shape(deep)}, ${shape(far)})`,
+      shape(deep) === 1.3 && shape(far) === 1.3 && Math.round(deep.w) === 60 && Math.round(far.w) === 8000]);
+    checks.push([`floor plan: the grab area stays 44 screen pixels at any zoom (${hitAtFit} → ${hitZoomed})`,
+      hitAtFit === "22px" && hitZoomed === "16.5px"]);
+
+    fresh();
+    const savedConfirm = window.confirm;
+    const asked = [];
+    window.confirm = (m) => { asked.push(m); return false; };
+    sent.length = 0;
+    q("#fpnReset").click();
+    await wait();
+    const resetRefused = !sent.some(m => m.key === "floor_plan_rooms");
+    window.confirm = () => true;
+    q("#fpnReset").click();
+    await wait();
+    window.confirm = savedConfirm;
+    checks.push(["floor plan: Reset Default asks first, and No keeps the saved plan",
+      asked.length === 1 && /default/i.test(asked[0]) && resetRefused && sent.some(m => m.key === "floor_plan_rooms" && m.value === "")]);
+
+    fresh();
+    const unsaved = () => { const n = q("#fpnUnsaved"); return !!n && !n.hidden; };
+    const cleanAtStart = !!q("#fpnUnsaved") && !unsaved();
+    ptr(q(".fpn-cam-dot"), "pointerdown", 0, 0, 1, "mouse");
+    ptr(svg(), "pointermove", 30, 0, 1, "mouse");
+    ptr(svg(), "pointerup", 30, 0, 1, "mouse");
+    await wait();
+    const afterDrag = unsaved();
+    q("#fpnSave").click();
+    await wait();
+    const note = R.getElementById("novaNotice");
+    const afterSave = !unsaved() && !!note && !note.hidden && note.textContent.trim() === "Saved.";
+    q("#fpnCamAdd").click();
+    checks.push(["floor plan: an edit shows Unsaved changes until Save, and Save says Saved.",
+      cleanAtStart && afterDrag && afterSave && unsaved()]);
+
+    const hint = q(".fpn-hint-mouse")?.textContent || "", touchHint = q(".fpn-hint-touch")?.textContent || "";
+    checks.push(["floor plan: the hints match what the editor does, for a mouse and for a finger",
+      !/double-click/.test(hint) && /edge to add a corner/.test(hint) && /\+ and −/.test(hint)
+      && /pinch/i.test(touchHint) && /two fingers/i.test(touchHint)]);
+
+    const css = P._css();
+    const coarse = [];
+    for (let at = css.indexOf("@media (pointer:coarse){"); at >= 0; at = css.indexOf("@media (pointer:coarse){", at + 1)) {
+      let depth = 0;
+      for (let i = css.indexOf("{", at); i < css.length; i++) {
+        if (css[i] === "{") depth++;
+        else if (css[i] === "}" && --depth === 0) { coarse.push(css.slice(at, i)); break; }
+      }
+    }
+    const coarseCss = coarse.join("\n");
+    const rule = (text, sel) => (text.match(new RegExp(`(?:^|[}\\s,])${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^{]*\\{([^}]*)\\}`)) || [])[1] || "";
+    const handles = [".fpn-zone-vtx", ".fpn-prop-vtx", ".fpn-zone-mid", ".fpn-prop-mid", ".fpn-cam-dot", ".fpn-ent-dot", ".fpn-resize-handle"];
+    // Not vector-effect:non-scaling-stroke: Chrome then only catches the outer ring.
+    const small = handles.filter(h => !/stroke-width:var\(--fpn-hit/.test(rule(coarseCss, h)) || /vector-effect/.test(rule(coarseCss, h)));
+    checks.push([`floor plan: on a touch screen every handle has a wide see-through grab area (${small.join(", ") || "all"})`,
+      small.length === 0 && /touch-action:pan-x pan-y/.test(rule(css, ".fpn-svg"))
+      && /display:none/.test(rule(coarseCss, ".fpn-hint-mouse")) && /display:none/.test(rule(css, ".fpn-hint-touch"))]);
+
+    SVGp.createSVGPoint = real.pt; SVGp.getScreenCTM = real.ctm; Ep.getBoundingClientRect = real.box; Ep.setPointerCapture = real.cap;
     P.remove();
   }
 

@@ -412,5 +412,10 @@
   "Something went wrong.": "Noget gik galt.",
   "That didn't work: {error}": "Det lykkedes ikke: {error}",
   "That file is over 25 MB.": "Filen er over 25 MB.",
-  "{entity} is not in the list.": "{entity} er ikke på listen."
+  "{entity} is not in the list.": "{entity} er ikke på listen.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Træk for at flytte · håndtaget nederst til højre ændrer størrelsen · højreklik for at slette · klik på den lille cirkel på en kant for at tilføje et hjørne · rul eller brug + og − for at zoome · træk i et tomt område for at panorere",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Træk et element med én finger for at flytte det · tryk på den lille cirkel på en kant for at tilføje et hjørne · knib med to fingre for at zoome · bevæg to fingre for at panorere",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Gå tilbage til standardplantegningen? Dine egne rum bliver slettet.",
+  "Zoom in": "Zoom ind",
+  "Zoom out": "Zoom ud"
 }

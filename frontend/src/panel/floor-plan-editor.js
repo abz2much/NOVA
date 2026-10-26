@@ -32,16 +32,22 @@
           <button class="mode-chip" id="fpnAddZone">+ Outdoor Zone</button>
           ${this._fpnAddPropertyButton()}
           <button class="mode-chip" id="fpnUnits">${this._fpUnits() === "metric" ? "Units: Metric" : "Units: Imperial"}</button>
-          <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
+          <span class="fpn-zoom">
+            <button class="mode-chip" id="fpnZoomIn" aria-label="${this._esc(this._tx("Zoom in"))}">+</button>
+            <button class="mode-chip" id="fpnZoomOut" aria-label="${this._esc(this._tx("Zoom out"))}">−</button>
+            <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
+          </span>
         </div>
       </div>
-      <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan</div>
+      <div class="fpn-hint fpn-hint-mouse">Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan</div>
+      <div class="fpn-hint fpn-hint-touch">Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan</div>
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
       ${this._renderOpeningsNew(floor)}
       ${this._renderCamerasNew(floor)}
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
+        <span class="toggle-desc fpn-unsaved" id="fpnUnsaved"${this._fpDirty ? "" : " hidden"}>Unsaved changes.</span>
         <button class="mode-chip danger" id="fpnReset">Reset Default</button>
         <button class="mode-chip" id="fpnExport">⬇ Export</button>
         <button class="mode-chip" id="fpnImport">⬆ Import</button>
@@ -300,12 +306,52 @@
     if (this._liveData?.config) this._liveData.config[key] = live;
   }
 
+  // An edit not saved yet: the note beside Save says so until Save.
+  _fpMarkDirty() {
+    this._fpDirty = true;
+    const note = this.shadowRoot?.getElementById("fpnUnsaved");
+    if (note) note.hidden = false;
+  }
+
+  _fpViewOf(svgEl) {
+    const [x, y, w, h] = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
+    return { x, y, w, h };
+  }
+  _fpShowView(svgEl) {
+    const v = this._editVB;
+    if (!v) return;
+    svgEl.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+    svgEl.querySelectorAll(".fpn-grid-rect").forEach(r => {
+      r.setAttribute("x", v.x); r.setAttribute("y", v.y); r.setAttribute("width", v.w); r.setAttribute("height", v.h);
+    });
+    this._fpHitSize(svgEl);
+  }
+  // A finger's 44 screen pixels in plan units, for the see-through grab area
+  // round each handle on a touch screen (styles.js). Redone after each zoom.
+  _fpHitSize(svgEl) {
+    const ctm = svgEl.getScreenCTM && svgEl.getScreenCTM();
+    if (ctm && ctm.a > 0) svgEl.style.setProperty("--fpn-hit", `${Math.round(4400 / ctm.a) / 100}px`);
+  }
+  // Zooms by f about a plan point (the middle when none is given), within
+  // fixed limits, without redrawing the plan. The limit caps f itself, so
+  // width and height always change together and the plan keeps its shape.
+  _fpZoom(f, at) {
+    const svgEl = this.shadowRoot?.getElementById("fpnSvg");
+    if (!svgEl) return;
+    const v = this._editVB || this._fpViewOf(svgEl), c = at || { x: v.x + v.w / 2, y: v.y + v.h / 2 };
+    f = Math.min(Math.max(f, 60 / v.w, 42 / v.h), 8000 / v.w, 8000 / v.h);
+    const w = v.w * f, h = v.h * f;
+    this._editVB = { x: c.x - (c.x - v.x) * (w / v.w), y: c.y - (c.y - v.y) * (h / v.h), w, h };
+    this._fpShowView(svgEl);
+  }
+
   _wireFloorPlanEditor() {
     const root = this.shadowRoot;
     if (!root || !root.getElementById("fpnCanvas")) return;   // the card is not on screen
     const on = (id, type, fn) => { const el = root.getElementById(id); if (el) el.addEventListener(type, fn); return el; };
     const each = (sel, type, fn) => root.querySelectorAll(sel).forEach(el => el.addEventListener(type, () => fn(el)));
     const redraw = () => this._rerenderFloorPlanCard();
+    const changed = () => { this._fpDirty = true; redraw(); };
     const floorRooms = () => ((this._getEditingPlan()[this._editorFloor] || {}).rooms) || [];
     const idx = (el, attr) => parseInt(el.getAttribute(attr));
     const stamp = () => Date.now().toString(36);
@@ -324,6 +370,8 @@
       redraw();
     });
     on("fpnZoomFit", "click", () => { this._editVB = null; redraw(); });
+    on("fpnZoomIn", "click", () => this._fpZoom(0.75));
+    on("fpnZoomOut", "click", () => this._fpZoom(1 / 0.75));
     on("fpnUnits", "click", async () => {
       try { await this._fpSaveKey("floor_plan_units", this._fpUnits() === "metric" ? "imperial" : "metric"); }
       catch (err) { this._fail(err, "floor plan units save"); }
@@ -338,7 +386,7 @@
       if (!name) return;
       const type = window.prompt(this._tx("Type (room, bath, stairs, door):"), "room") || "room";
       (level.rooms = level.rooms || []).push({ name, x: 50, y: 50, w: 60, h: 40, type });
-      redraw();
+      changed();
     });
     on("fpnAddZone", "click", () => {
       const level = this._getEditingPlan()[this._editorFloor];
@@ -355,11 +403,11 @@
       }
       const h = 70;
       level.rooms.push({ name, x, y, w, h, type: "outdoor", points: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
-      redraw();
+      changed();
     });
     on("fpnAddProperty", "click", () => {
       if (this._propertyPts().length >= 3) {
-        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); redraw(); }
+        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); changed(); }
         return;
       }
       // A rectangle around the floor with a generous margin; a floor with
@@ -370,11 +418,11 @@
       const m = Math.max(150, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.7);
       const [l, t, r, btm] = [b.x0 - m, b.y0 - m, b.x1 + m, b.y1 + m].map(Math.round);
       this._setProperty([[l, t], [r, t], [r, btm], [l, btm]]);
-      redraw();
+      changed();
     });
 
     // Windows, doors and dormers.
-    const addOpening = item => { this._elemsFor(this._editorFloor).push(item); redraw(); };
+    const addOpening = item => { this._elemsFor(this._editorFloor).push(item); changed(); };
     [["opAddWindow", "window", null], ["opAddExtdoor", "door", "exterior"], ["opAddCellar", "door", "cellar"],
       ["opAddIntdoor", "door", "interior"], ["opAddCased", "door", "cased"]].forEach(([id, type, kind]) => on(id, "click",
       () => addOpening({ id: "e" + stamp(), type, kind, wall: "front", pos: 0.5, w: 20, entity: "" })));
@@ -386,9 +434,9 @@
       const key = f.getAttribute("data-op");
       if (key === "w") item.w = this._fpFromReal(parseFloat(f.value) || 4);
       else item[key] = key === "pos" ? parseFloat(f.value) : f.value;
-      redraw();
+      changed();
     });
-    each(".op-del-new", "click", b => { this._elemsFor(this._editorFloor).splice(idx(b, "data-i"), 1); redraw(); });
+    each(".op-del-new", "click", b => { this._elemsFor(this._editorFloor).splice(idx(b, "data-i"), 1); changed(); });
     // Pointing at an opening's row lights up its marker on the plan.
     root.querySelectorAll(".op-row-new").forEach(row => {
       const marker = () => root.querySelector(`.fpn-op-marker[data-op-marker="${row.getAttribute("data-i")}"]`);
@@ -403,7 +451,7 @@
     on("fpnCamAdd", "click", () => {
       const [x, y] = middle();
       this._camsFor(this._editorFloor).push({ id: "c" + stamp(), x, y, angle: 270, fov: 90, range: 55, entity: "", indoor: true });
-      redraw();
+      changed();
     });
     const camOf = el => this._camsFor(this._editorFloor)[idx(el, "data-ci")];
     const applyCamField = f => {
@@ -422,10 +470,10 @@
         const cone = root.querySelector(`.fpn-cam[data-cam-idx="${f.getAttribute("data-ci")}"] .fpn-cam-cone`);
         if (cone) cone.setAttribute("d", this._clippedCone(cam, this._planGeometry(this._editorFloor)));
       });
-      f.addEventListener("change", () => { applyCamField(f); redraw(); });
+      f.addEventListener("change", () => { applyCamField(f); changed(); });
     });
-    each(".cam-io-new", "click", b => { const cam = camOf(b); if (!cam) return; cam.indoor = cam.indoor === false; redraw(); });
-    each(".cam-del-new", "click", b => { this._camsFor(this._editorFloor).splice(idx(b, "data-ci"), 1); redraw(); });
+    each(".cam-io-new", "click", b => { const cam = camOf(b); if (!cam) return; cam.indoor = cam.indoor === false; changed(); });
+    each(".cam-del-new", "click", b => { this._camsFor(this._editorFloor).splice(idx(b, "data-ci"), 1); changed(); });
     const compute = on("fpnCamCompute", "click", async () => {
       const floor = this._editorFloor, cams = this._camsFor(floor);
       if (!cams.length) return;
@@ -437,7 +485,7 @@
           range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates, openings };
         try { cam.coverage = await this._hass.callWS({ type: "nova/compute_camera_coverage", camera }); } catch (_) { /* the next camera still runs */ }
       }
-      redraw();
+      changed();
     });
 
     // Save, reset, export and import.
@@ -452,9 +500,14 @@
         for (const [key, v] of writes) await this._hass.callWS({ type: "nova/update_config", key, value: JSON.stringify(v) });
         if (this._liveData?.config) writes.forEach(([key, v]) => { this._liveData.config[key] = v; });
         this._editingPlan = this._editingEntities = this._editingCameras = this._editingElements = this._editingProperty = null;
+        this._fpDirty = false;
+        const note = root.getElementById("fpnUnsaved");
+        if (note) note.hidden = true;
+        this._notice(this._tx("Saved."));
       } catch (err) { this._fail(err, "floor plan save"); }
     });
     on("fpnReset", "click", async () => {
+      if (!window.confirm(this._tx("Go back to the default floor plan? Your own rooms will be deleted."))) return;
       try { await this._fpSaveKey("floor_plan_rooms", "", {}); }
       catch (err) { this._fail(err, "floor plan reset"); }
       this._editingPlan = null;
@@ -485,7 +538,7 @@
             if (!this._fpLayoutUsable(layout)) throw new Error("no usable floors");
             this._editingPlan = layout;
             if (!layout[this._editorFloor]) this._editorFloor = Object.keys(layout)[0];
-            redraw();
+            changed();
           } catch (err) { this._fail(err, "floor plan import — invalid layout file"); }
         };
         reader.readAsText(file);
@@ -502,10 +555,10 @@
       if (pins.some(p => p.e === eid)) return;
       const [x, y] = middle();
       pins.push({ e: eid, x, y });
-      redraw();
+      changed();
     });
     // Camera and opening rows share this button style; only pin chips carry data-ei.
-    each(".fpn-ent-del[data-ei]", "click", b => { this._entsFor(this._editorFloor).splice(idx(b, "data-ei"), 1); redraw(); });
+    each(".fpn-ent-del[data-ei]", "click", b => { this._entsFor(this._editorFloor).splice(idx(b, "data-ei"), 1); changed(); });
     const bgFile = root.getElementById("fpnBgFile");
     if (bgFile && root.getElementById("fpnBgUpload")) {
       on("fpnBgUpload", "click", () => bgFile.click());
@@ -557,25 +610,18 @@
     const floor = this._editorFloor, level = this._getEditingPlan()[floor];
     if (!level) return;
     const rooms = level.rooms || [];   // an imported floor may have none yet
-    let drag = null, pan = null;
+    this._fpHitSize(svgEl);
+    // Fingers on the plan, by pointer id: two of them pinch and pan.
+    const touches = new Map();
+    let drag = null, pan = null, pinch = null, settleAfterPinch = false;
 
     const toPlan = e => {
       const pt = svgEl.createSVGPoint();
       pt.x = e.clientX; pt.y = e.clientY;
       return pt.matrixTransform(svgEl.getScreenCTM().inverse());
     };
-    const viewOf = () => {
-      const [x, y, w, h] = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
-      return { x, y, w, h };
-    };
-    const showView = () => {
-      const v = this._editVB;
-      if (!v) return;
-      svgEl.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
-      svgEl.querySelectorAll(".fpn-grid-rect").forEach(r => {
-        r.setAttribute("x", v.x); r.setAttribute("y", v.y); r.setAttribute("width", v.w); r.setAttribute("height", v.h);
-      });
-    };
+    const viewOf = () => this._fpViewOf(svgEl);
+    const showView = () => this._fpShowView(svgEl);
     // Quick redraw of the plan alone; the card is redrawn where lists change.
     const redrawPlan = () => {
       const canvas = this.shadowRoot.getElementById("fpnCanvas");
@@ -592,7 +638,12 @@
       pts.splice(edge + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
       return true;
     };
-    const begin = (e, state) => { const pt = toPlan(e); drag = Object.assign({ startX: pt.x, startY: pt.y }, state); };
+    // A drag only starts once the pointer has moved a few pixels (more for a
+    // finger, which never holds quite still), so a tap is still a tap.
+    const begin = (e, state) => {
+      const pt = toPlan(e);
+      drag = Object.assign({ startX: pt.x, startY: pt.y, sx: e.clientX, sy: e.clientY, slop: e.pointerType === "mouse" ? 4 : 10, live: false }, state);
+    };
 
     // Pressing the left button on an item starts its drag. Return true when
     // the press was used and must go no further than the plan.
@@ -622,7 +673,7 @@
       }
       if (t.classList.contains("fpn-zone-mid")) {
         const rm = rooms[num(t, "data-zone-idx")];
-        if (rm && midpoint(this._ensureZonePoints(rm), num(t, "data-edge"))) this._rerenderFloorPlanCard();
+        if (rm && midpoint(this._ensureZonePoints(rm), num(t, "data-edge"))) { this._fpDirty = true; this._rerenderFloorPlanCard(); }
         return true;
       }
       if (t.classList.contains("fpn-prop-vtx")) {
@@ -631,7 +682,7 @@
         return true;
       }
       if (t.classList.contains("fpn-prop-mid")) {
-        if (midpoint(this._propertyPts(), num(t, "data-prop-edge"))) this._rerenderFloorPlanCard();
+        if (midpoint(this._propertyPts(), num(t, "data-prop-edge"))) { this._fpDirty = true; this._rerenderFloorPlanCard(); }
         return true;
       }
       if (t.classList.contains("fpn-cam-dot") && t.closest(".fpn-cam")) {
@@ -648,30 +699,52 @@
       return false;
     };
     const ITEMS = ".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-cam, .fpn-ent";
-    svgEl.addEventListener("mousedown", e => {
+    // Pointer events cover a mouse, a pen and a finger in one path. Holding
+    // on to the pointer keeps a drag going past the edge of the plan.
+    const hold = e => { try { svgEl.setPointerCapture(e.pointerId); } catch (_) { /* not every browser has it */ } };
+    const twoFingers = () => {
+      const [a, b] = Array.from(touches.values());
+      return { mid: { clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+    };
+    svgEl.addEventListener("pointerdown", e => {
       const t = e.target;
+      if (e.pointerType === "touch") {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size > 1) {
+          // A second finger turns whatever the first was doing into a pinch.
+          if (drag && drag.live) { finish(false); settleAfterPinch = true; }
+          drag = null; pan = null;
+          if (touches.size === 2) pinch = twoFingers();
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.button === 0 && t !== svgEl && t.closest && svgEl.contains(t)) {
         const before = drag;
         const stop = press(e, t);
         if (stop || drag !== before) {
           e.preventDefault();
+          if (drag) hold(e);
           if (stop) e.stopPropagation();
           return;
         }
       }
       if (drag) return;
       // The middle button anywhere, or the left button on empty space, pans.
-      const empty = e.button === 0 && !t.closest(ITEMS);
+      // One finger on empty space is left to the page, so it still scrolls.
+      const empty = e.button === 0 && !t.closest(ITEMS) && e.pointerType !== "touch";
       if (e.button !== 1 && !empty) return;
       e.preventDefault();
       const v = this._editVB || viewOf();
       this._editVB = { x: v.x, y: v.y, w: v.w, h: v.h };
       pan = { sx: e.clientX, sy: e.clientY, vbX: v.x, vbY: v.y, w: v.w, h: v.h };
+      hold(e);
     });
 
     // Right-click removes rooms, corners, cameras and pins.
     svgEl.addEventListener("contextmenu", e => {
       const t = e.target;
+      drag = null; pan = null;   // a long press on a touch screen lands here mid-press
       const room = t.closest(".fpn-drag-room"), cam = t.closest(".fpn-cam"), pin = t.closest(".fpn-ent");
       if (t.classList.contains("fpn-zone-vtx")) {
         e.preventDefault();
@@ -679,24 +752,24 @@
         if (!rm) return;
         const pts = this._ensureZonePoints(rm);
         if (pts.length <= 3) return;
-        pts.splice(num(t, "data-vtx"), 1); this._syncRoomBBox(rm); this._rerenderFloorPlanCard();
+        pts.splice(num(t, "data-vtx"), 1); this._syncRoomBBox(rm); this._fpDirty = true; this._rerenderFloorPlanCard();
       } else if (t.classList.contains("fpn-prop-vtx")) {
         e.preventDefault();
         const pts = this._propertyPts();
         if (pts.length <= 3) return;
-        pts.splice(num(t, "data-prop-vtx"), 1); this._rerenderFloorPlanCard();
+        pts.splice(num(t, "data-prop-vtx"), 1); this._fpDirty = true; this._rerenderFloorPlanCard();
       } else if (room) {
         e.preventDefault();
         const i = num(room, "data-idx"), rm = rooms[i];
-        if (rm && window.confirm(this._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(i, 1); redrawPlan(); }
+        if (rm && window.confirm(this._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(i, 1); this._fpMarkDirty(); redrawPlan(); }
       } else if (cam) {
         e.preventDefault();
         const list = this._camsFor(floor), ci = num(cam, "data-cam-idx");
-        if (list[ci] && window.confirm(this._tx("Delete this camera?"))) { list.splice(ci, 1); redrawPlan(); }
+        if (list[ci] && window.confirm(this._tx("Delete this camera?"))) { list.splice(ci, 1); this._fpMarkDirty(); redrawPlan(); }
       } else if (pin) {
         e.preventDefault();
         const list = this._entsFor(floor), ei = num(pin, "data-ent-idx");
-        if (list[ei] && window.confirm(this._tx("Remove this device from the plan?"))) { list.splice(ei, 1); redrawPlan(); }
+        if (list[ei] && window.confirm(this._tx("Remove this device from the plan?"))) { list.splice(ei, 1); this._fpMarkDirty(); redrawPlan(); }
       }
     });
 
@@ -759,38 +832,69 @@
         }
       }
     };
-    svgEl.addEventListener("mousemove", e => {
+    svgEl.addEventListener("pointermove", e => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && touches.size >= 2) {
+        // Pan by how far the middle moved, then zoom about the new middle.
+        const now = twoFingers(), v = this._editVB || viewOf(), from = toPlan(pinch.mid), to = toPlan(now.mid);
+        this._editVB = { x: v.x + from.x - to.x, y: v.y + from.y - to.y, w: v.w, h: v.h };
+        showView();
+        this._fpZoom(pinch.dist / now.dist, toPlan(now.mid));
+        pinch = now;
+        return;
+      }
       if (pan) {
         const box = svgEl.getBoundingClientRect();
         this._editVB = { x: pan.vbX - (e.clientX - pan.sx) * (pan.w / box.width), y: pan.vbY - (e.clientY - pan.sy) * (pan.h / box.height), w: pan.w, h: pan.h };
         showView();
       } else if (drag) {
+        if (!drag.live && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < drag.slop) return;
+        drag.live = true;
         follow(toPlan(e));
       }
     });
 
-    const finish = () => {
+    // Ends a drag. `redraw` is false when a pinch takes over, as the plan
+    // must stay the same element while both fingers are on it.
+    const finish = (redraw = true) => {
       if (pan) { pan = null; return; }
       if (!drag) return;
       const d = drag, zone = rooms[d.zi];
+      drag = null;
+      if (!d.live) {
+        // A tap: a pin opens its Home Assistant controls; nothing moved.
+        if (d.entity && d.entId) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: d.entId }, bubbles: true, composed: true }));
+        const rect = svgEl.querySelector(`.fpn-drag-room[data-idx="${d.idx}"] .fpn-drag-rect`);
+        if (rect && !d.resize) rect.setAttribute("stroke-width", "1");
+        return;
+      }
       if (d.zoneBody && zone && zone.points && (d.ddx || d.ddy)) zone.points.forEach(p => { p[0] += d.ddx; p[1] += d.ddy; });
       if ((d.zoneVtx || d.zoneBody) && zone) this._syncRoomBBox(zone);
-      // A pin pressed without moving opens its Home Assistant controls.
+      // A pin that moved less than a plan unit was still only tapped.
       if (d.entity && !d.moved && d.entId) {
         this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: d.entId }, bubbles: true, composed: true }));
       }
-      drag = null;
+      this._fpMarkDirty();
+      if (!redraw) return;
       if (d.camera || d.property || d.zoneVtx || d.zoneBody) this._rerenderFloorPlanCard(); else redrawPlan();
     };
-    svgEl.addEventListener("mouseup", finish);
-    svgEl.addEventListener("mouseleave", finish);
+    const lift = e => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      if (!touches.size && settleAfterPinch) { settleAfterPinch = false; this._rerenderFloorPlanCard(); return; }
+      finish();
+    };
+    svgEl.addEventListener("pointerup", lift);
+    svgEl.addEventListener("pointercancel", lift);
+    // While a finger drags or pinches, the page must not scroll or zoom
+    // under it. One finger on empty space is left alone.
+    svgEl.addEventListener("touchmove", e => {
+      if (drag || pinch || (e.touches && e.touches.length > 1)) e.preventDefault();
+    }, { passive: false });
 
     // The wheel zooms about the pointer, within fixed limits.
     svgEl.addEventListener("wheel", e => {
       e.preventDefault();
-      const v = this._editVB || viewOf(), at = toPlan(e), f = e.deltaY < 0 ? 0.85 : 1.18;
-      const w = Math.max(60, Math.min(8000, v.w * f)), h = Math.max(42, Math.min(8000, v.h * f));
-      this._editVB = { x: at.x - (at.x - v.x) * (w / v.w), y: at.y - (at.y - v.y) * (h / v.h), w, h };
-      showView();
+      this._fpZoom(e.deltaY < 0 ? 0.85 : 1.18, toPlan(e));
     }, { passive: false });
   }

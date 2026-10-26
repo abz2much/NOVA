@@ -412,5 +412,10 @@
   "Something went wrong.": "Bir şeyler ters gitti.",
   "That didn't work: {error}": "Olmadı: {error}",
   "That file is over 25 MB.": "Dosya 25 MB'tan büyük.",
-  "{entity} is not in the list.": "{entity} listede yok."
+  "{entity} is not in the list.": "{entity} listede yok.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Taşımak için sürükleyin · boyutlandırmak için sağ alttaki tutamaç · silmek için sağ tıklayın · köşe eklemek için kenardaki küçük daireye tıklayın · yakınlaştırmak için kaydırın veya + ve − kullanın · görünümü kaydırmak için boş alanı sürükleyin",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Bir öğeyi taşımak için tek parmakla sürükleyin · köşe eklemek için kenardaki küçük daireye dokunun · yakınlaştırmak için iki parmakla sıkıştırın · görünümü kaydırmak için iki parmağı hareket ettirin",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Varsayılan kat planına dönülsün mü? Kendi odalarınız silinecek.",
+  "Zoom in": "Yakınlaştır",
+  "Zoom out": "Uzaklaştır"
 }

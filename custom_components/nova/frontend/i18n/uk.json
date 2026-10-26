@@ -412,5 +412,10 @@
   "Something went wrong.": "Щось пішло не так.",
   "That didn't work: {error}": "Не вдалося: {error}",
   "That file is over 25 MB.": "Файл більший за 25 МБ.",
-  "{entity} is not in the list.": "{entity} немає у списку."
+  "{entity} is not in the list.": "{entity} немає у списку.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Перетягніть, щоб перемістити · кут праворуч унизу змінює розмір · правий клік видаляє · клік по маленькому кружечку на краю додає кут · прокрутка або + і − масштабують · перетягування порожнього місця зсуває вигляд",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Перетягніть елемент одним пальцем, щоб перемістити його · торкніться маленького кружечка на краю, щоб додати кут · зведіть або розведіть два пальці для масштабу · рухайте двома пальцями, щоб зсунути вигляд",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Повернути план поверху за замовчуванням? Ваші власні кімнати буде видалено.",
+  "Zoom in": "Збільшити",
+  "Zoom out": "Зменшити"
 }
