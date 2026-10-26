@@ -23,7 +23,8 @@
           </div>
           <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "; change it under Settings → Security alarm." : " (the default); change it under Settings → Security alarm."}</div>
           <div class="cfg-row">
-            <input class="cfg-field" id="facesAddName" maxlength="60" placeholder="Resident name">
+            <label class="field" for="facesAddName"><span>Resident name</span>
+              <input class="cfg-field" id="facesAddName" maxlength="60"></label>
             <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
           </div>
           <div class="toggle-desc" id="facesMsg"></div>

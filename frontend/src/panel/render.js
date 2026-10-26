@@ -25,6 +25,12 @@
     if (this._currentTab === "dashboard") this._presentStart();
     this._a11y(root);
     this._drawNotice();
+    // On a phone the tabs scroll sideways: centre the open one. The row's own
+    // scroll is set, so the page itself never moves.
+    const nav = root.querySelector(".top-nav"), open = root.querySelector(".nav-tab.active");
+    if (nav && open && nav.scrollWidth > nav.clientWidth) {
+      nav.scrollLeft = Math.max(0, open.offsetLeft - nav.offsetLeft - (nav.clientWidth - open.offsetWidth) / 2);
+    }
     this._focusRestore(root, focus);
   }
 
@@ -196,6 +202,7 @@
               <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "energy" ? "Energy" : tab === "chat" ? "Chat" : "Command Center"}</div>
             </div>
           </div>
+          <button class="lockdown-control" id="lockdownControl" hidden></button>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
             <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
@@ -208,7 +215,6 @@
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
             <button class="nav-tab${tab === "energy" ? " active" : ""}" data-tab="energy">Energy</button>
           </nav>
-          <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : tab === "chat" ? this._htmlChat() : this._htmlDashboard()}
@@ -222,7 +228,6 @@
   _htmlDashboard() {
     return `
         <div id="shushMount"></div>
-        <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
             <canvas class="core" id="core" aria-hidden="true"></canvas>
@@ -235,6 +240,7 @@
           </div>
           <div class="chips" id="chips"></div>
         </div>
+        <div id="onboardingMount"></div>
 
         <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
           <div class="panel-head">
@@ -321,7 +327,8 @@ ${this._htmlDashboardBody()}`;
             </div>
             <div class="goal-list" id="goalList"></div>
             <div class="goal-create">
-              <input class="cfg-field" id="goalOutcome" maxlength="500" placeholder="Outcome Nova should work toward">
+              <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
+                <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
               <button class="mode-chip" id="goalCreate">ADD GOAL</button>
             </div>
             <div class="toggle-desc" id="goalResult"></div>

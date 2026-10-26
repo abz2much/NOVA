@@ -12,8 +12,10 @@
           </div>
           <div class="stub-body">Durable facts &amp; preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.</div>
           <div class="cfg-row cfg-row-wrap">
-            <input id="newMemKey" class="cfg-field" style="flex:1" placeholder="what (e.g. trash day)" autocomplete="off">
-            <input id="newMemVal" class="cfg-field" style="flex:1" placeholder="is (e.g. Tuesday)" autocomplete="off">
+            <label class="field" for="newMemKey"><span>what (e.g. trash day)</span>
+              <input id="newMemKey" class="cfg-field" autocomplete="off"></label>
+            <label class="field" for="newMemVal"><span>is (e.g. Tuesday)</span>
+              <input id="newMemVal" class="cfg-field" autocomplete="off"></label>
             <select id="newMemSubject" class="cfg-field">
               <option value="household">Household</option>
               <option value="primary">About me</option>

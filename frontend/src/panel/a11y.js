@@ -54,7 +54,20 @@
         });
       });
 
-      // A field with no label of its own is named by its hint text.
+      // A field in a row with no label of its own sits under a section
+      // heading ("Exclude whole domains", "Try a sentence"): the heading,
+      // which anyone can see, names it.
+      scope.querySelectorAll(".cfg-row").forEach(row => {
+        const fields = Array.from(row.querySelectorAll("input, textarea, select"))
+          .filter(f => f.closest(ROWS) === row && !this._a11yNamed(f) && f.type !== "hidden" && f.type !== "file");
+        if (!fields.length) return;
+        let prev = row.previousElementSibling;
+        while (prev && (prev.classList.contains("stub-body") || prev.classList.contains("toggle-desc"))) prev = prev.previousElementSibling;
+        if (!prev || !prev.classList.contains("mode-bind-head") || !prev.textContent.trim()) return;
+        fields.forEach(f => f.setAttribute("aria-labelledby", this._a11yId(prev)));
+      });
+
+      // A field with no label at all is named by its hint text.
       scope.querySelectorAll("input[placeholder], textarea[placeholder]").forEach(field => {
         if (!this._a11yNamed(field)) field.setAttribute("aria-label", field.getAttribute("placeholder"));   // i18n-ok: the placeholder, translated before this runs
       });

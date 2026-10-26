@@ -1270,7 +1270,9 @@ if (require.main === module) setTimeout(async () => {
   const footEl = newRoot.querySelector(".footnote");
   checks.push(
     ["command center: Operational Mode sits directly under the hello banner",
-      !!modePanel && !!heroEl && heroEl.nextElementSibling === modePanel
+      // 8.72.1: the welcome card, when shown, sits between them.
+      !!modePanel && !!heroEl && (heroEl.nextElementSibling === modePanel
+        || (heroEl.nextElementSibling?.id === "onboardingMount" && heroEl.nextElementSibling.nextElementSibling === modePanel))
       && /Operational Mode/.test(modePanel.querySelector(".panel-title")?.textContent || "")],
     ["command center: Activity is the very last panel",
       !!footEl && !!footEl.previousElementSibling?.querySelector("#feed")
@@ -4590,11 +4592,13 @@ if (require.main === module) setTimeout(async () => {
       geometry: "a836aa626ac3def0",
       floorHelpers: "b94425681aba57c7",
       editorMarkup: "751159320d6b97e6",   // 8.72.0: Reset Default marked as destructive
-      memoryMarkup: "a5e53569f70d8ede",   // 8.72.0: destructive buttons marked
-      intrusionMarkup: "3ff368fc2c262d7f",   // 8.72.0: Call Off marked as destructive
+      memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
+      intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
       editorDrag: "1394062ae0bd2b40",
     };
-    const flat = s => String(s).replace(/\s+/g, " ").trim();
+    // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
+    // drawing order, so the number is left out of the fingerprint.
+    const flat = s => String(s).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
     const pin = (name, value) => {
       const got = crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
       checks.push([`pinned results: ${name} are unchanged` + (got === PINS[name] ? "" : ` (got ${got})`), got === PINS[name]]);
@@ -5489,6 +5493,64 @@ if (require.main === module) setTimeout(async () => {
     }
     checks.push([`feedback: no failure is only written to the console (${silent.length}: ${silent.slice(0, 4).join(", ")})`,
       silent.length === 0]);
+  }
+
+  // Phone layout and visible labels (8.72.1).
+  {
+    const css = elNew._css();
+    // The rule body for a selector inside any @media block of that kind, and
+    // where it sits: a phone rule only wins when it comes after the main rule.
+    const mediaRuleAt = (media, sel) => {
+      const re = new RegExp(`(?:^|[}\\s])${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\{([^}]*)\\}`);
+      for (let start = css.indexOf(`@media ${media}{`); start >= 0; start = css.indexOf(`@media ${media}{`, start + 1)) {
+        let depth = 0, end = start;
+        for (let i = css.indexOf("{", start); i < css.length; i++) {
+          if (css[i] === "{") depth++;
+          else if (css[i] === "}" && --depth === 0) { end = i; break; }
+        }
+        const m = css.slice(start, end).match(re);
+        if (m) return { body: m[1], at: start + m.index };
+      }
+      return { body: "", at: -1 };
+    };
+    const mediaRule = (media, sel) => mediaRuleAt(media, sel).body;
+    const nav = mediaRule("(max-width:640px)", ".top-nav");
+    checks.push(["phone: the tabs are one row that scrolls sideways, not three rows",
+      /flex-wrap:nowrap/.test(nav) && /overflow-x:auto/.test(nav)]);
+
+    const P = document.createElement("nova-panel");
+    document.body.appendChild(P);
+    P.hass = { ...hass };
+    await new Promise(r => setTimeout(r, 120));
+    const R = P.shadowRoot;
+    const bar = Array.from(R.querySelector(".topbar").children).map(c => c.classList.contains("brand") ? "brand"
+      : c.id === "lockdownControl" ? "lockdown" : c.classList.contains("top-nav") ? "nav" : c.className);
+    checks.push([`layout: Lockdown sits in the top bar beside the name, before the tabs (${bar.join(", ")})`,
+      bar.join(",") === "brand,lockdown,nav" && /flex-basis:100%/.test((css.match(/\.top-nav\{([^}]*)\}/) || [])[1] || "")]);
+    const hero = R.querySelector(".hero"), welcome = R.getElementById("onboardingMount");
+    checks.push(["layout: the head comes before the welcome card, so a phone shows it first",
+      !!hero && !!welcome && !!(hero.compareDocumentPosition(welcome) & window.Node.DOCUMENT_POSITION_FOLLOWING)]);
+    const phoneRows = mediaRuleAt("(max-width:640px)", ".new-appliance-row");
+    const baseRows = css.search(/\n\s*\.new-appliance-row\{display:grid/);
+    checks.push(["phone: appliance rows stack instead of five squeezed columns",
+      /grid-template-columns:1fr 1fr/.test(phoneRows.body) && baseRows >= 0 && phoneRows.at > baseRows]);
+
+    // Every field outside search and chat has a label you can see, not only a
+    // hint that disappears when you type.
+    const exempt = new Set(["settingsSearch", "chatInput", "newLogSearch", "newDoclibSearch"]);
+    const hintOnly = [];
+    for (const tab of ["dashboard", "settings", "memory", "energy", "faces", "logs"]) {
+      P._currentTab = tab; P._render();
+      await new Promise(r => setTimeout(r, 40));
+      R.querySelectorAll("input:not([type=hidden]):not([type=file]), textarea").forEach(el => {
+        if (exempt.has(el.id) || el.hidden || el.style.display === "none") return;
+        const ph = el.getAttribute("placeholder");
+        if (ph && el.getAttribute("aria-label") === ph) hintOnly.push(`${tab}:${el.id || el.className}`);
+      });
+    }
+    checks.push([`labels: no field is named only by its in-box hint (${hintOnly.length}: ${hintOnly.join(", ")})`,
+      hintOnly.length === 0]);
+    P.remove();
   }
 
   let ok = true;
