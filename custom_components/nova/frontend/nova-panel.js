@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.70.1
+ * v8.70.2
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.70.1 ",
+      console.log("%c Nova Panel %c v8.70.2 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -259,8 +259,11 @@ class NovaPanel extends HTMLElement {
     const request = ++this._uiLangRequest;
     this._uiLangLoaded = full;
     if (base === "en") {
+      // English is what the DOM already shows, so redraw only when leaving
+      // a translation, never on the first load.
+      const hadStrings = !!this._uiStrings;
       this._uiStrings = null;
-      if (this._renderedOnce) this._render();
+      if (hadStrings && this._renderedOnce) this._render();
       return;
     }
     const grab = async (lang) => {
@@ -1725,8 +1728,9 @@ ${this._htmlDashboardBody()}`;
 
   _wireIntrusion() {
     this._fetchIntrusion();
+    this._fetchIntrusionLog();
     const refresh = this.shadowRoot.getElementById("newIlogRefresh");
-    if (!refresh) { this._fetchIntrusionLog(); return; }
+    if (!refresh) return;
     refresh.addEventListener("click", async () => {
       const label = refresh.textContent;
       refresh.disabled = true;
@@ -3289,8 +3293,8 @@ ${this._htmlDashboardBody()}`;
         <select class="cfg-field" data-cfg-key="garage_mode">
           ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.garage_mode || "auto")}
         </select>
-        <span class="toggle-desc">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</span>
       </div>
+      <div class="toggle-desc cfg-help">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</div>
       ${cfg.has_garage ? `<div class="cfg-row">
         <label>Garage bays</label>
         <select class="cfg-field" data-cfg-key="garage_bays">
@@ -3302,8 +3306,8 @@ ${this._htmlDashboardBody()}`;
         <select class="cfg-field" data-cfg-key="basement_mode">
           ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.basement_mode || "auto")}
         </select>
-        <span class="toggle-desc">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</span>
       </div>
+      <div class="toggle-desc cfg-help">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</div>
       <div class="mode-bind-head">Doors <span class="toggle-desc">map to your entities — blank = auto-detect by name</span></div>
       ${this._renderDoorMappingNew(d)}
       ${this._renderExitDoors(d)}`;
@@ -4226,8 +4230,8 @@ ${this._htmlDashboardBody()}`;
             ["vi", "Vietnamese"],
           ].concat(this._outputLanguageExtra(cfg.output_language)), this._outputLanguageChoice(cfg.output_language))}
         </select>
-        <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
       </div>
+      <div class="toggle-desc cfg-help">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</div>
       <div class="toggle-list">
         ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside the head while the house is awake")}
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
@@ -5216,12 +5220,12 @@ ${this._htmlDashboardBody()}`;
 
   // Hazard status is fetched once per element lifetime (same on-demand
   // pattern as Diagnostics). A source, location or level change re-fetches it.
-  async _fetchHazardStatus() {
+  async _fetchHazardStatus({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._hazard = await this._hass.callWS({ type: "nova/hazard", action: "status" });
     } catch (_) { this._hazard = null; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _hazardMonitorCardBody() {
@@ -5926,12 +5930,12 @@ ${this._htmlDashboardBody()}`;
 
   // Wellbeing status is fetched once per element lifetime (same on-demand
   // pattern as Diagnostics/Hazard/Energy).
-  async _fetchBio() {
+  async _fetchBio({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._bio = await this._hass.callWS({ type: "nova/biometrics", action: "status" });
     } catch (_) { this._bio = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _wellbeingContextCardBody() {
@@ -5988,20 +5992,20 @@ ${this._htmlDashboardBody()}`;
 
   // Document Library (RAG) — fetched once per element lifetime, like the
   // other on-demand cards (Diagnostics/Hazard/Energy/Wellbeing).
-  async _fetchDocLibrary() {
+  async _fetchDocLibrary({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._docLib = await this._hass.callWS({ type: "nova/documents", action: "status" });
     } catch (_) { this._docLib = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
-  async _fetchVectorBackend() {
+  async _fetchVectorBackend({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._vecbk = await this._hass.callWS({ type: "nova/semantic_search", action: "status" });
     } catch (_) { this._vecbk = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _renderDocLibraryList() {
@@ -7173,18 +7177,23 @@ ${this._htmlDashboardBody()}`;
       });
     }
 
+    // The first visit reads four card statuses. They redraw the tab once,
+    // together, not once each: every redraw wipes what is being typed.
+    const firstReads = [];
     if (!this._hazFetchedOnce) {
       this._hazFetchedOnce = true;
-      this._fetchHazardStatus();
+      firstReads.push(this._fetchHazardStatus({ render: false }));
     }
     if (!this._bioFetchedOnce) {
       this._bioFetchedOnce = true;
-      this._fetchBio();
+      firstReads.push(this._fetchBio({ render: false }));
     }
     if (!this._docLibFetchedOnce) {
       this._docLibFetchedOnce = true;
-      this._fetchDocLibrary();
-      this._fetchVectorBackend();
+      firstReads.push(this._fetchDocLibrary({ render: false }), this._fetchVectorBackend({ render: false }));
+    }
+    if (firstReads.length) {
+      Promise.all(firstReads).then(() => { if (this._currentTab === "settings") this._render(); });
     }
     this._wireDocLibrary();
     const bioToggle = root.getElementById("newBioToggle");
@@ -9982,7 +9991,7 @@ ${this._htmlDashboardBody()}`;
       .onboarding-step{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;color:var(--ink-dim)}
       .onboarding-step.done{opacity:.62}.onboarding-step b{display:block;font-size:11px}.onboarding-step small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
       .welcome-checks,.welcome-hello{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;margin-bottom:10px;color:var(--ink-dim)}
-      .welcome-checks b{display:block;font-size:11px}.welcome-checks small,.welcome-hello small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
+      .welcome-checks > b{display:block;font-size:11px}.welcome-checks small,.welcome-hello small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
       .welcome-hello{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.welcome-hello .welcome-reply{color:var(--ink-dim);font-size:11px}.welcome-hello .welcome-error{color:#d95b65}
       .dashboard-pair{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
       @media (max-width:760px){.dashboard-pair{grid-template-columns:1fr}}
@@ -10309,7 +10318,7 @@ ${this._htmlDashboardBody()}`;
       .chat-error .chat-text{color:var(--warn)}
       .chat-compose{display:flex;gap:8px}.chat-compose .cfg-field{flex:1;min-width:0}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
-        margin-bottom:10px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .cfg-help{margin:-4px 0 10px}
     `;
   }
 }

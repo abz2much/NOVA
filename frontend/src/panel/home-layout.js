@@ -25,8 +25,8 @@
         <select class="cfg-field" data-cfg-key="garage_mode">
           ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.garage_mode || "auto")}
         </select>
-        <span class="toggle-desc">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</span>
       </div>
+      <div class="toggle-desc cfg-help">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</div>
       ${cfg.has_garage ? `<div class="cfg-row">
         <label>Garage bays</label>
         <select class="cfg-field" data-cfg-key="garage_bays">
@@ -38,8 +38,8 @@
         <select class="cfg-field" data-cfg-key="basement_mode">
           ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.basement_mode || "auto")}
         </select>
-        <span class="toggle-desc">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</span>
       </div>
+      <div class="toggle-desc cfg-help">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</div>
       <div class="mode-bind-head">Doors <span class="toggle-desc">map to your entities — blank = auto-detect by name</span></div>
       ${this._renderDoorMappingNew(d)}
       ${this._renderExitDoors(d)}`;
