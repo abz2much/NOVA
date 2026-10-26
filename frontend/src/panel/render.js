@@ -287,17 +287,17 @@ ${this._htmlDashboardBody()}`;
       <div class="onboarding-card" id="onboardingCard">
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
-          <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
+          <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">Dismiss</button></div>
         <div class="onboarding-progress"><span>${this._tHtml("{done}/{total} DONE", { done: this._esc(onboarding.done_count || 0), total: this._esc(onboarding.total || 0) })}</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
         <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(this._tx(step.label))}</b><small>${this._esc(this._tx(step.hint))}</small></div>
-          ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
+          ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">View</button>` : ""}</div>`).join("")}</div>
         <div class="welcome-hello" id="welcomeHello">
-          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>SAY HELLO</button>
+          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>Say hello</button>
           <div>${helloOut || `<small>Sends "Hello" to Nova and shows the reply, to check it can answer.</small>`}</div>
         </div>
-        <button class="mode-chip onboarding-settings">OPEN SETTINGS</button>
+        <button class="mode-chip onboarding-settings">Open settings</button>
       </div>`;
   }
 
@@ -329,7 +329,7 @@ ${this._htmlDashboardBody()}`;
             <div class="goal-create">
               <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
                 <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
-              <button class="mode-chip" id="goalCreate">ADD GOAL</button>
+              <button class="mode-chip" id="goalCreate">Add goal</button>
             </div>
             <div class="toggle-desc" id="goalResult"></div>
           </div>
@@ -365,7 +365,7 @@ ${this._htmlDashboardBody()}`;
               <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
               <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
             </div>
-            <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
+            <button class="camera-toggle" id="camToggle">Show cameras ▾</button>
           </div>
           <div class="camera-strip" id="camStrip"></div>
         </div>

@@ -26,7 +26,7 @@
       </div>
       <div class="cfg-row">
         <label>Only when someone's home</label>
-        ${onOff("briefing_require_home", "YES", "NO", true)}
+        ${onOff("briefing_require_home", "Yes", "No", true)}
       </div>
       <div class="mode-bind-head">Include</div>
       <div class="mode-grid">
@@ -42,7 +42,7 @@
         <label>Front door</label>
         <select class="cfg-field" data-cfg-key="arrival_front_door_entity">${this._optSelect(this._frontDoorOptions(cfg.arrival_front_door_entity || ""), cfg.arrival_front_door_entity || "")}</select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ BRIEF ME NOW</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ Brief me now</button></div>`;
   }
 
   _voiceConfirmationCardBody() {
@@ -60,7 +60,7 @@
           ${this._optSelect([["auto", "Auto (try native, fall back)"], ["native", "Native (satellite audio)"], ["gated", "Gated (room speaker)"]], cfg.voice_confirm_mode || "auto")}
         </select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ TEST SATELLITE AUDIO</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ Test satellite audio</button></div>
       <div class="stub-body" id="newVcTestResult"></div>`;
   }
 
@@ -286,7 +286,7 @@
           </div>
         </div>
       </details>
-      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ Scan now</button></div>
       <div id="newHazBody" class="stub-body"></div>`;
   }
 
@@ -733,8 +733,8 @@
           </div>
           <div class="mode-grid">
             ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}
-            ${chip("indoor", "⌂ INDOOR")}
-            ${chip("outdoor", "▲ OUTDOOR")}
+            ${chip("indoor", "⌂ Indoor")}
+            ${chip("outdoor", "▲ Outdoor")}
           </div>
         </div>`;
     }).join("");
@@ -935,7 +935,7 @@
       <div class="stub-body">Lets Nova read a connected wearable (heart rate, sleep, steps) so it can be quieter when you're resting. Context only — not medical. Off by default; health data stays private.</div>
       <div class="cfg-row">
         <label>Status</label>
-        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ DISABLE" : "◉ ENABLE"}</button></div>
+        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ Disable" : "◉ Enable"}</button></div>
       </div>
       ${body}`;
   }
@@ -1017,31 +1017,31 @@
         <div class="cfg-row"><label>Search</label><span class="diag-ok">◉ SEMANTIC (Ollama)</span></div>
         <div class="stub-body">Meaning-based matching via Ollama ${this._esc(v.model || "nomic-embed-text")}${v.vector_count ? ` · ${v.vector_count} vectors` : " · re-ingest to embed your documents"}.</div>
         <div class="stub-body">Saved facts are matched by meaning too. Their text goes to the same Ollama server.</div>
-        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ DISABLE SEMANTIC SEARCH</button></div>`;
+        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ Disable semantic search</button></div>`;
     }
     if (!v.ollama_configured) {
       return `
-        <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+        <div class="cfg-row"><label>Search</label><span class="diag-off">Keyword (FTS)</span></div>
         <div class="stub-body">Works everywhere with no setup. Semantic search needs an Ollama host — set the LLM base URL to your Ollama server and pull an embed model (ollama pull nomic-embed-text).</div>`;
     }
     return `
-      <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+      <div class="cfg-row"><label>Search</label><span class="diag-off">Keyword (FTS)</span></div>
       <div class="stub-body">${this._tHtml("Enable semantic search to match on meaning, using your Ollama server ({model}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.", { model: this._esc(v.model || "nomic-embed-text") })}</div>
-      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ Enable semantic search</button></div>`;
   }
 
   _documentLibraryCardBody() {
     const d = this._docLib || {};
-    const backend = d.fts ? "KEYWORD" : "NONE";
+    const backend = d.fts ? "Keyword" : "None";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
       <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>
       ${this._renderVectorBackendBody()}
       <div class="mode-bind-head">Library</div>
       <div class="cfg-row">
-        <button class="mode-chip" id="newDoclibUpload">⬆ UPLOAD FILE</button>
+        <button class="mode-chip" id="newDoclibUpload">⬆ Upload file</button>
         <input type="file" id="newDoclibFile" accept=".pdf,.txt,.md" style="display:none">
-        <button class="mode-chip" id="newDoclibIngest">⟳ INGEST FOLDER</button>
+        <button class="mode-chip" id="newDoclibIngest">⟳ Ingest folder</button>
       </div>
       <div class="cfg-row">
         <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
@@ -1050,7 +1050,7 @@
       <div class="mode-bind-head" id="docWatchHead">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
       <div class="cfg-row">
         <input id="newDoclibWatch" aria-labelledby="docWatchHead" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
-        <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
+        <button class="mode-chip" id="newDoclibScan">⟳ Scan watch</button>
       </div>`;
   }
 

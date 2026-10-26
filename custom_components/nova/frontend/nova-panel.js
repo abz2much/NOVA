@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.75.0
+ * v8.75.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.75.0 ",
+      console.log("%c Nova Panel %c v8.75.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -507,17 +507,17 @@ ${this._htmlDashboardBody()}`;
       <div class="onboarding-card" id="onboardingCard">
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
-          <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
+          <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">Dismiss</button></div>
         <div class="onboarding-progress"><span>${this._tHtml("{done}/{total} DONE", { done: this._esc(onboarding.done_count || 0), total: this._esc(onboarding.total || 0) })}</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
         <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(this._tx(step.label))}</b><small>${this._esc(this._tx(step.hint))}</small></div>
-          ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
+          ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">View</button>` : ""}</div>`).join("")}</div>
         <div class="welcome-hello" id="welcomeHello">
-          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>SAY HELLO</button>
+          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>Say hello</button>
           <div>${helloOut || `<small>Sends "Hello" to Nova and shows the reply, to check it can answer.</small>`}</div>
         </div>
-        <button class="mode-chip onboarding-settings">OPEN SETTINGS</button>
+        <button class="mode-chip onboarding-settings">Open settings</button>
       </div>`;
   }
 
@@ -549,7 +549,7 @@ ${this._htmlDashboardBody()}`;
             <div class="goal-create">
               <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
                 <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
-              <button class="mode-chip" id="goalCreate">ADD GOAL</button>
+              <button class="mode-chip" id="goalCreate">Add goal</button>
             </div>
             <div class="toggle-desc" id="goalResult"></div>
           </div>
@@ -585,7 +585,7 @@ ${this._htmlDashboardBody()}`;
               <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
               <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
             </div>
-            <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
+            <button class="camera-toggle" id="camToggle">Show cameras ▾</button>
           </div>
           <div class="camera-strip" id="camStrip"></div>
         </div>
@@ -778,11 +778,11 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-meta">Nova internal</div>
           </div>
           <div class="mode-grid">
-            <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">SYSTEM LOG</button>
-            <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
-            <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">SPOKEN HISTORY</button>
-            <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">ACTIONS</button>
-            <button class="mode-chip new-logview${view === "shadow" ? " mode-chip-on" : ""}" data-view="shadow">SHADOW</button>
+            <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">System log</button>
+            <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">Decisions</button>
+            <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">Spoken history</button>
+            <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">Actions</button>
+            <button class="mode-chip new-logview${view === "shadow" ? " mode-chip-on" : ""}" data-view="shadow">Shadow</button>
           </div>
           ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView()
             : view === "actions" ? this._htmlActionsView() : view === "shadow" ? this._htmlShadowView() : `
@@ -862,7 +862,7 @@ ${this._htmlDashboardBody()}`;
         <div class="stub-body" style="margin:-6px 0 4px">${this._esc(e.text)}</div>
         <div class="cfg-row">
           <span class="toggle-desc">${this._esc(speakerNames)}</span>
-          <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">REPEAT</button>
+          <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">Repeat</button>
         </div>`;
     }).join(""));
     container.querySelectorAll(".new-spoken-repeat").forEach(btn => {
@@ -912,7 +912,7 @@ ${this._htmlDashboardBody()}`;
         <div class="stub-body">Loading…</div>
       </div>
       <div class="cfg-row" id="actionLoadMoreRow" hidden>
-        <button class="mode-chip" id="newActionLoadMore">LOAD MORE</button>
+        <button class="mode-chip" id="newActionLoadMore">Load more</button>
       </div>
     `;
   }
@@ -1042,15 +1042,15 @@ ${this._htmlDashboardBody()}`;
       <div class="panel" style="margin:8px 0">
         <div class="toggle-desc">${this._tHtml("You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.")}</div>
         <div class="cfg-row"><label>${this._esc(this._shadowKind(p.kind))}</label><span>${this._esc(p.example || p.pattern_key)}</span></div>
-        <div class="mode-grid">${btn(p.pattern_key, "stop", "STOP IT")}${btn(p.pattern_key, "keep", "KEEP IT")}</div>
+        <div class="mode-grid">${btn(p.pattern_key, "stop", "Stop it")}${btn(p.pattern_key, "keep", "Keep it")}</div>
       </div>`).join(""));
     const pEl = root?.getElementById("shadowPatterns");
     if (pEl) this._setHtml(pEl, patterns.length ? patterns.map(p => {
       const state = p.stopped ? "STOPPED BY YOU" : p.active ? "NEW PATH DECIDES" : p.ready ? "READY TO SWITCH" : "SHADOW";
       const actions = [
-        p.stopped ? btn(p.pattern_key, "restart", "RESTART") : "",
-        p.active ? btn(p.pattern_key, "deactivate", "BACK TO CURRENT")
-          : (p.ready && !p.stopped ? btn(p.pattern_key, "activate", "SWITCH TO NEW") : ""),
+        p.stopped ? btn(p.pattern_key, "restart", "Restart") : "",
+        p.active ? btn(p.pattern_key, "deactivate", "Back to current")
+          : (p.ready && !p.stopped ? btn(p.pattern_key, "activate", "Switch to new") : ""),
       ].join("");
       return `<div class="new-log-entry">
           <span class="new-log-cat">${this._esc(this._shadowKind(p.kind))}</span>
@@ -1069,7 +1069,7 @@ ${this._htmlDashboardBody()}`;
           <span class="new-log-msg">${this._esc(r.message)}<br>
             <small>${this._tHtml("Current: {v} ({why})", { v: this._esc(r.actual), why: this._esc(r.actual_reason) })}</small><br>
             <small>${this._tHtml("New: {v} ({why})", { v: this._esc(r.shadow), why: this._esc(r.shadow_reason) })}</small></span>
-          <span class="${same ? "diag-ok" : "diag-warn"}">${same ? "AGREE" : "DIFFER"}</span>
+          <span class="${same ? "diag-ok" : "diag-warn"}">${same ? "Agree" : "Differ"}</span>
         </div>`;
     }).join("") : `<div class="stub-body">Nothing yet.</div>`);
     root?.querySelectorAll(".new-shadow-choice").forEach(b => b.addEventListener("click", async () => {
@@ -1093,14 +1093,14 @@ ${this._htmlDashboardBody()}`;
   _htmlDecisionsView() {
     return `
       <div class="cfg-row">
-        <button class="mode-chip${this._decisionsUnjudgedOnly ? " mode-chip-on" : ""}" id="newDecUnjudged">UNJUDGED ONLY</button>
+        <button class="mode-chip${this._decisionsUnjudgedOnly ? " mode-chip-on" : ""}" id="newDecUnjudged">Unjudged only</button>
       </div>
       <div class="toggle-desc" id="newDecCount" style="margin:8px 0"></div>
       <div id="decisionEntries" class="new-log-entries">
         <div class="stub-body">Loading…</div>
       </div>
       <div class="cfg-row" id="decisionLoadMoreRow" hidden>
-        <button class="mode-chip" id="newDecLoadMore">LOAD MORE</button>
+        <button class="mode-chip" id="newDecLoadMore">Load more</button>
       </div>
       <div id="decisionDrawer" class="new-decision-drawer" hidden></div>
     `;
@@ -1175,7 +1175,7 @@ ${this._htmlDashboardBody()}`;
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       this._setHtml(drawer, `
         <div class="panel-head"><div class="panel-title" tabindex="-1">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
-          <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
+          <button class="mode-chip" id="newDecCloseDrawer">Close</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
         ${row("Reason", d.reason)}
@@ -1189,9 +1189,9 @@ ${this._htmlDashboardBody()}`;
         ${this._decisionBlockHtml("Evidence", d.evidence)}
         <div class="mode-bind-head">Feedback</div>
         <div class="mode-grid">
-          <button class="mode-chip new-dec-fb" data-verdict="good" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>HELPFUL</button>
-          <button class="mode-chip new-dec-fb" data-verdict="unnecessary" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>UNNECESSARY</button>
-          <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>WRONG</button>
+          <button class="mode-chip new-dec-fb" data-verdict="good" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Helpful</button>
+          <button class="mode-chip new-dec-fb" data-verdict="unnecessary" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Unnecessary</button>
+          <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Wrong</button>
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
       `);
@@ -1404,7 +1404,7 @@ ${this._htmlDashboardBody()}`;
               <option value="household">Household</option>
               <option value="primary">About me</option>
             </select>
-            <button class="mode-chip" id="newMemAdd">TEACH</button>
+            <button class="mode-chip" id="newMemAdd">Teach</button>
           </div>
           <div id="newMemList" class="mem-body"><div class="stub-body">Loading…</div></div>
         </div>
@@ -1777,7 +1777,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-meta" id="newIlogLearn">—</div>
           </div>
           <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
-          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ Refresh</button></div>
           <div id="newIlogBody"><div class="stub-body">Loading…</div></div>
         </div>
     `;
@@ -1841,8 +1841,8 @@ ${this._htmlDashboardBody()}`;
         <button class="toggle-btn ${vision ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${vision ? "false" : "true"}">${vision ? "ON" : "OFF"}</button>
       </div>
       <div class="mode-grid">
-        <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
-        <button class="mode-chip danger new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+        <button class="mode-chip new-intr-ack">✓ I'm looking (hold)</button>
+        <button class="mode-chip danger new-intr-dismiss">✕ Call off (false alarm)</button>
       </div>`);
     this._setHtml(body, parts.join(""));
 
@@ -1907,9 +1907,9 @@ ${this._htmlDashboardBody()}`;
         <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
         ${e.image_b64 ? `<img class="intr-img" src="data:image/jpeg;base64,${e.image_b64}" alt="snapshot">` : ""}
         <div class="mode-grid">
-          <button class="mode-chip new-ilog-btn${on("real")}" data-label="real">REAL</button>
-          <button class="mode-chip new-ilog-btn${on("false")}" data-label="false">FALSE ALARM</button>
-          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">CLEAR</button>` : ""}
+          <button class="mode-chip new-ilog-btn${on("real")}" data-label="real">Real</button>
+          <button class="mode-chip new-ilog-btn${on("false")}" data-label="false">False alarm</button>
+          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">Clear</button>` : ""}
         </div>
       </div>`;
     };
@@ -1956,12 +1956,12 @@ ${this._htmlDashboardBody()}`;
         <div class="panel">
           <div class="panel-head">
             <div class="panel-title">Chat</div>
-            <div class="panel-meta"><button class="mode-chip" id="chatNew">NEW CHAT</button></div>
+            <div class="panel-meta"><button class="mode-chip" id="chatNew">New chat</button></div>
           </div>
           <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
           <div class="chat-compose">
             <input class="cfg-field" id="chatInput" maxlength="1000" placeholder="Ask Nova something">
-            <button class="mode-chip" id="chatSend">SEND</button>
+            <button class="mode-chip" id="chatSend">Send</button>
           </div>
           <div class="toggle-desc" id="chatMsg"></div>
         </div>
@@ -2050,7 +2050,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-meta" id="facesMeta">—</div>
           </div>
           <div class="stub-body">Nova does not run its own face engine. It reads names from Frigate or Double Take. No images are shown or stored here. The residents below are the people Nova treats as members of the household.</div>
-          <div class="cfg-row"><button class="mode-chip" id="facesRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="facesRefresh">⟳ Refresh</button></div>
           <div id="facesBody"><div class="stub-body">Loading…</div></div>
         </div>
 
@@ -2063,7 +2063,7 @@ ${this._htmlDashboardBody()}`;
           <div class="cfg-row">
             <label class="field" for="facesAddName"><span>Resident name</span>
               <input class="cfg-field" id="facesAddName" maxlength="60"></label>
-            <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
+            <button class="mode-chip" id="facesAdd">Add resident</button>
           </div>
           <div class="toggle-desc" id="facesMsg"></div>
           <div id="facesResidents"></div>
@@ -2122,14 +2122,14 @@ ${this._htmlDashboardBody()}`;
             <span class="dim">· ${this._esc(r.camera)} · ${Math.round(r.confidence)}% · ${this._esc(this._facesAgeText(r.age_seconds))}</span>
           </span>
           ${r.known ? (r.resident
-            ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">REMOVE RESIDENT</button>`
-            : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">ADD RESIDENT</button>`) : ""}
+            ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">Remove resident</button>`
+            : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">Add resident</button>`) : ""}
         </div>`).join(""));
     }
     this._setHtml(resBox, residents.length ? residents.map(n => `
         <div class="feed-row resident-row">
           <span class="feed-text"><b>${this._esc(n)}</b></span>
-          <button class="mode-chip" data-face-remove="${this._esc(n)}">REMOVE</button>
+          <button class="mode-chip" data-face-remove="${this._esc(n)}">Remove</button>
         </div>`).join("")
       : `<div class="stub-body">No residents yet. Add the people who live here.</div>`);
     root.querySelectorAll("[data-face-add]").forEach(b => {
@@ -2293,7 +2293,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-title">Energy Management</div>
           </div>
           <div class="stub-body">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
-          <div class="cfg-row"><button class="mode-chip" id="energyRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="energyRefresh">⟳ Refresh</button></div>
           <div id="energyStatusBody"><div class="stub-body">Loading…</div></div>
           <div class="cfg-row">
             <label>Peak threshold (kW)</label>
@@ -3278,8 +3278,8 @@ ${this._htmlDashboardBody()}`;
           <span class="toggle-desc">${this._tHtml("ran {count}× · last {when}", { count: t.run_count || 0, when: this._esc(when) })}</span>
         </div>
         <div class="mode-grid" data-trial-id="${t.id}">
-          <button class="mode-chip new-trial-fb" data-verdict="working">WORKING</button>
-          <button class="mode-chip new-trial-fb" data-verdict="needs_adjustment">NEEDS ADJUSTMENT</button>
+          <button class="mode-chip new-trial-fb" data-verdict="working">Working</button>
+          <button class="mode-chip new-trial-fb" data-verdict="needs_adjustment">Needs adjustment</button>
         </div>
         <div class="cfg-row">${outcome}</div>`;
     }).join("");
@@ -4712,13 +4712,13 @@ ${this._htmlDashboardBody()}`;
     const svcTest = (svc, label) => `
       <div class="cfg-row">
         <label>${this._esc(label)}</label>
-        <button class="mode-chip" data-svc="${this._esc(svc)}">RUN</button>
+        <button class="mode-chip" data-svc="${this._esc(svc)}">Run</button>
       </div>`;
     const camOpts = (cfg.cameras || []).filter(c => c.enabled !== false).map(c => [c.entity_id, c.name]);
     return `
       <div class="cfg-row"><label>Core services</label>${overall}</div>
       ${rows}
-      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ Run check</button></div>
       <div class="cfg-row"><label>HOMER — diagnostic sub-agent</label><span class="diag-ok">AVAILABLE</span></div>
       <div class="stub-body" style="margin:-6px 0 8px">Read-only. Nova can delegate a "why is this broken/slow" question to HOMER to investigate before answering — it can only read state, telemetry, and history, never control anything or change a setting. Always on; nothing to configure.</div>
       <div class="mode-bind-head"></div>
@@ -4738,7 +4738,7 @@ ${this._htmlDashboardBody()}`;
         <label>Camera — analyze now</label>
         <select class="cfg-field" id="newDiagCameraSelect">${camOpts.length ? this._optSelect(camOpts, camOpts[0][0]) : '<option value="">— no cameras —</option>'}</select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">RUN</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">Run</button></div>`;
   }
 
   // ── AI Models — ported near-verbatim from Classic (see nova-panel.js's
@@ -4791,29 +4791,29 @@ ${this._htmlDashboardBody()}`;
         <span class="model-label">${this._esc(p)}</span>
         <span class="cred-status" data-cred-status="${p}">…</span>
         <input class="cred-input" type="password" data-cred-provider="${p}" placeholder="enter to set or replace" autocomplete="off">
-        <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
-        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">CLEAR</button>
+        <button class="mode-chip cred-save" data-cred-provider="${p}">Save</button>
+        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">Clear</button>
       </div>`).join("");
     return `
       <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
       <div class="cfg-row" data-ai-profiles>
         <label>Profile</label>
-        <button class="mode-chip" data-ai-profile="hybrid">HYBRID</button>
-        <button class="mode-chip" data-ai-profile="local">LOCAL TEXT</button>
-        <button class="mode-chip" data-ai-profile="manual">MANUAL</button>
+        <button class="mode-chip" data-ai-profile="hybrid">Hybrid</button>
+        <button class="mode-chip" data-ai-profile="local">Local text</button>
+        <button class="mode-chip" data-ai-profile="manual">Manual</button>
       </div>
       <div class="stub-body">Hybrid keeps the Main Agent and Vision choices, and moves background text work to Ollama. Local Text also moves the Main Agent. Vision only moves when Ollama reports a vision-capable model.</div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
       <div class="cfg-row" data-endpoint-row="ollama">
         <label>Ollama</label>
         <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" data-current="${this._esc(cfg.ollama_base_url || "")}" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
-        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">Test</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
       <div class="cfg-row" data-endpoint-row="custom">
         <label>OpenAI-compatible</label>
         <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" data-current="${this._esc(cfg.custom_base_url || "")}" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
-        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">Test</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>
       <div class="cfg-row">
@@ -4826,7 +4826,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="new-model-list">${rows}</div>
       <div class="cfg-row" style="margin-top:14px">
-        <button class="mode-chip" id="aiApply">APPLY</button>
+        <button class="mode-chip" id="aiApply">Apply</button>
         <span class="stub-body" id="aiApplyStatus">No unsaved changes.</span>
       </div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Provider Credentials</div></div>
@@ -5263,7 +5263,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="cfg-row">
         <label>Only when someone's home</label>
-        ${onOff("briefing_require_home", "YES", "NO", true)}
+        ${onOff("briefing_require_home", "Yes", "No", true)}
       </div>
       <div class="mode-bind-head">Include</div>
       <div class="mode-grid">
@@ -5279,7 +5279,7 @@ ${this._htmlDashboardBody()}`;
         <label>Front door</label>
         <select class="cfg-field" data-cfg-key="arrival_front_door_entity">${this._optSelect(this._frontDoorOptions(cfg.arrival_front_door_entity || ""), cfg.arrival_front_door_entity || "")}</select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ BRIEF ME NOW</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ Brief me now</button></div>`;
   }
 
   _voiceConfirmationCardBody() {
@@ -5297,7 +5297,7 @@ ${this._htmlDashboardBody()}`;
           ${this._optSelect([["auto", "Auto (try native, fall back)"], ["native", "Native (satellite audio)"], ["gated", "Gated (room speaker)"]], cfg.voice_confirm_mode || "auto")}
         </select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ TEST SATELLITE AUDIO</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ Test satellite audio</button></div>
       <div class="stub-body" id="newVcTestResult"></div>`;
   }
 
@@ -5523,7 +5523,7 @@ ${this._htmlDashboardBody()}`;
           </div>
         </div>
       </details>
-      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ Scan now</button></div>
       <div id="newHazBody" class="stub-body"></div>`;
   }
 
@@ -5970,8 +5970,8 @@ ${this._htmlDashboardBody()}`;
           </div>
           <div class="mode-grid">
             ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}
-            ${chip("indoor", "⌂ INDOOR")}
-            ${chip("outdoor", "▲ OUTDOOR")}
+            ${chip("indoor", "⌂ Indoor")}
+            ${chip("outdoor", "▲ Outdoor")}
           </div>
         </div>`;
     }).join("");
@@ -6172,7 +6172,7 @@ ${this._htmlDashboardBody()}`;
       <div class="stub-body">Lets Nova read a connected wearable (heart rate, sleep, steps) so it can be quieter when you're resting. Context only — not medical. Off by default; health data stays private.</div>
       <div class="cfg-row">
         <label>Status</label>
-        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ DISABLE" : "◉ ENABLE"}</button></div>
+        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ Disable" : "◉ Enable"}</button></div>
       </div>
       ${body}`;
   }
@@ -6254,31 +6254,31 @@ ${this._htmlDashboardBody()}`;
         <div class="cfg-row"><label>Search</label><span class="diag-ok">◉ SEMANTIC (Ollama)</span></div>
         <div class="stub-body">Meaning-based matching via Ollama ${this._esc(v.model || "nomic-embed-text")}${v.vector_count ? ` · ${v.vector_count} vectors` : " · re-ingest to embed your documents"}.</div>
         <div class="stub-body">Saved facts are matched by meaning too. Their text goes to the same Ollama server.</div>
-        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ DISABLE SEMANTIC SEARCH</button></div>`;
+        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ Disable semantic search</button></div>`;
     }
     if (!v.ollama_configured) {
       return `
-        <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+        <div class="cfg-row"><label>Search</label><span class="diag-off">Keyword (FTS)</span></div>
         <div class="stub-body">Works everywhere with no setup. Semantic search needs an Ollama host — set the LLM base URL to your Ollama server and pull an embed model (ollama pull nomic-embed-text).</div>`;
     }
     return `
-      <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+      <div class="cfg-row"><label>Search</label><span class="diag-off">Keyword (FTS)</span></div>
       <div class="stub-body">${this._tHtml("Enable semantic search to match on meaning, using your Ollama server ({model}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.", { model: this._esc(v.model || "nomic-embed-text") })}</div>
-      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ Enable semantic search</button></div>`;
   }
 
   _documentLibraryCardBody() {
     const d = this._docLib || {};
-    const backend = d.fts ? "KEYWORD" : "NONE";
+    const backend = d.fts ? "Keyword" : "None";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
       <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>
       ${this._renderVectorBackendBody()}
       <div class="mode-bind-head">Library</div>
       <div class="cfg-row">
-        <button class="mode-chip" id="newDoclibUpload">⬆ UPLOAD FILE</button>
+        <button class="mode-chip" id="newDoclibUpload">⬆ Upload file</button>
         <input type="file" id="newDoclibFile" accept=".pdf,.txt,.md" style="display:none">
-        <button class="mode-chip" id="newDoclibIngest">⟳ INGEST FOLDER</button>
+        <button class="mode-chip" id="newDoclibIngest">⟳ Ingest folder</button>
       </div>
       <div class="cfg-row">
         <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
@@ -6287,7 +6287,7 @@ ${this._htmlDashboardBody()}`;
       <div class="mode-bind-head" id="docWatchHead">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
       <div class="cfg-row">
         <input id="newDoclibWatch" aria-labelledby="docWatchHead" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
-        <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
+        <button class="mode-chip" id="newDoclibScan">⟳ Scan watch</button>
       </div>`;
   }
 
@@ -6520,7 +6520,7 @@ ${this._htmlDashboardBody()}`;
     if (lockdownBtn) {
       lockdownBtn.hidden = false;
       lockdownBtn.classList.toggle("active", !!lockdown.active);
-      this._setText(lockdownBtn, lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF");
+      this._setText(lockdownBtn, lockdown.active ? "Lockdown active" : "Lockdown off");
       lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
@@ -6595,7 +6595,7 @@ ${this._htmlDashboardBody()}`;
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
-          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "CANCEL" : "DELETE"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "CANCEL" : "DELETE"}</button>
+          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "Cancel" : "Delete"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "Cancel" : "Delete"}</button>
         </div>`;
       }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
@@ -6608,7 +6608,7 @@ ${this._htmlDashboardBody()}`;
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) this._setText(camToggle, this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length }));
+      if (camToggle) this._setText(camToggle, this._camOpen ? "Hide cameras ▴" : this._t(cams.length === 1 ? "Show {count} camera ▾" : "Show {count} cameras ▾", { count: cams.length }));
       camStrip.classList.toggle("open", this._camOpen);
       this._setHtml(camStrip, cams.map(c => {
         const eid = c.entity_id;
@@ -6619,9 +6619,9 @@ ${this._htmlDashboardBody()}`;
           : `<div class="camera-empty">${this._cameraLoading[eid] ? "LOADING…" : "NO SNAPSHOT"}</div>`;
         return `<div class="camera-slot" data-camera="${this._esc(eid)}">
           ${body}<div class="camera-caption"><b>${this._esc(c.name || eid)}</b><span>${this._esc(eid)}</span></div>
-          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("REFRESH"))} ${this._esc(c.name || eid)}">REFRESH</button>
-            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("ANALYZE"))} ${this._esc(c.name || eid)}">ANALYZE</button>
-            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("DIAGNOSE"))} ${this._esc(c.name || eid)}">DIAGNOSE</button></div>
+          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Refresh"))} ${this._esc(c.name || eid)}">Refresh</button>
+            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Analyze"))} ${this._esc(c.name || eid)}">Analyze</button>
+            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Diagnose"))} ${this._esc(c.name || eid)}">Diagnose</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
       }).join(""));

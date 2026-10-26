@@ -1,3 +1,13 @@
+## [8.75.1] Buttons in normal case
+
+### Changed
+- **About 60 buttons and view switches are no longer written in capitals:** Dismiss, Say hello, Open settings, Add goal, Cancel, Delete, Refresh, Send, Save, Brief me now, the Logs views and the rest. Short status badges (RUNNING, ARMED, KNOWN), ON and OFF, and the log codes in the filter row stay in capitals.
+- **The welcome card's step buttons say "View"** instead of OPEN, since "Open" is also how a door's state is shown.
+- Every new label is translated in all 20 languages. "Clear" now means clearing something, not a clear sky; several languages had the weather word.
+
+### Fixed
+- **A panel test for adding a resident was passing for the wrong reason.** It found the word RESIDENT in the button's own label, not in the updated row. It now checks that the row offers "Remove resident".
+
 ## [8.75.0] One font, bigger text
 
 ### Changed

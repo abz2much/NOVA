@@ -195,8 +195,8 @@
           <span class="toggle-desc">${this._tHtml("ran {count}× · last {when}", { count: t.run_count || 0, when: this._esc(when) })}</span>
         </div>
         <div class="mode-grid" data-trial-id="${t.id}">
-          <button class="mode-chip new-trial-fb" data-verdict="working">WORKING</button>
-          <button class="mode-chip new-trial-fb" data-verdict="needs_adjustment">NEEDS ADJUSTMENT</button>
+          <button class="mode-chip new-trial-fb" data-verdict="working">Working</button>
+          <button class="mode-chip new-trial-fb" data-verdict="needs_adjustment">Needs adjustment</button>
         </div>
         <div class="cfg-row">${outcome}</div>`;
     }).join("");

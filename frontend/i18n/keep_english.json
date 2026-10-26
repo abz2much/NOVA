@@ -51,8 +51,8 @@
    "Slovenčina",
    "Suomi",
    "Svenska",
-   "TEST",
    "TTS",
+   "Test",
    "Türkçe",
    "VOICE",
    "Voice ID",
@@ -74,11 +74,12 @@
    "2 min",
    "3 min",
    "5 min",
-   "HYBRID"
+   "Hybrid"
   ],
   "da": [
-   "SEND",
+   "Hybrid",
    "Script",
+   "Send",
    "Status",
    "Zone {number}"
   ],
@@ -87,9 +88,9 @@
    "BROADCAST",
    "Briefing",
    "Briefings",
-   "DIAGNOSE",
+   "Diagnose",
    "Garage",
-   "HYBRID",
+   "Hybrid",
    "Live",
    "Name",
    "Name (optional)",
@@ -113,12 +114,11 @@
    "5 min",
    "Error: {error}",
    "General",
-   "MANUAL",
    "Manual",
    "No",
    "OFF",
    "ON",
-   "REAL",
+   "Real",
    "Script",
    "Solar",
    "normal",
@@ -131,7 +131,6 @@
    "2 min",
    "3 min",
    "5 min",
-   "ACTIONS",
    "Actions",
    "BRIEFINGS",
    "Briefing",
@@ -175,7 +174,8 @@
    "Script"
   ],
   "nb": [
-   "SEND",
+   "Hybrid",
+   "Send",
    "Status"
   ],
   "nl": [
@@ -190,7 +190,7 @@
    "CAM {number}",
    "CAMERA",
    "Camera",
-   "DIAGNOSE",
+   "Diagnose",
    "Feedback",
    "Garage",
    "Live",
@@ -215,13 +215,12 @@
    "3 min",
    "5 min",
    "Alert",
-   "REAL",
    "ROUTING"
   ],
   "pt": [
    "OFF",
    "ON",
-   "REAL",
+   "Real",
    "Script"
   ],
   "pt-br": [
@@ -232,11 +231,10 @@
    "5 min",
    "Briefing",
    "Briefings",
-   "MANUAL",
    "Manual",
    "OFF",
    "ON",
-   "REAL",
+   "Real",
    "Script",
    "Solar",
    "briefings",
@@ -249,7 +247,7 @@
    "CALENDAR",
    "General",
    "Include",
-   "REAL",
+   "Real",
    "Script"
   ],
   "sv": [
@@ -259,7 +257,7 @@
    "3 min",
    "5 min",
    "Garage",
-   "HYBRID",
+   "Hybrid",
    "Live",
    "Lockdown",
    "Orange",

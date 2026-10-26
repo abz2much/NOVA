@@ -20,7 +20,7 @@
             <div class="panel-meta" id="newIlogLearn">—</div>
           </div>
           <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
-          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ Refresh</button></div>
           <div id="newIlogBody"><div class="stub-body">Loading…</div></div>
         </div>
     `;
@@ -84,8 +84,8 @@
         <button class="toggle-btn ${vision ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${vision ? "false" : "true"}">${vision ? "ON" : "OFF"}</button>
       </div>
       <div class="mode-grid">
-        <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
-        <button class="mode-chip danger new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+        <button class="mode-chip new-intr-ack">✓ I'm looking (hold)</button>
+        <button class="mode-chip danger new-intr-dismiss">✕ Call off (false alarm)</button>
       </div>`);
     this._setHtml(body, parts.join(""));
 
@@ -150,9 +150,9 @@
         <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
         ${e.image_b64 ? `<img class="intr-img" src="data:image/jpeg;base64,${e.image_b64}" alt="snapshot">` : ""}
         <div class="mode-grid">
-          <button class="mode-chip new-ilog-btn${on("real")}" data-label="real">REAL</button>
-          <button class="mode-chip new-ilog-btn${on("false")}" data-label="false">FALSE ALARM</button>
-          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">CLEAR</button>` : ""}
+          <button class="mode-chip new-ilog-btn${on("real")}" data-label="real">Real</button>
+          <button class="mode-chip new-ilog-btn${on("false")}" data-label="false">False alarm</button>
+          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">Clear</button>` : ""}
         </div>
       </div>`;
     };

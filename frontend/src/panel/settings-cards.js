@@ -425,13 +425,13 @@
     const svcTest = (svc, label) => `
       <div class="cfg-row">
         <label>${this._esc(label)}</label>
-        <button class="mode-chip" data-svc="${this._esc(svc)}">RUN</button>
+        <button class="mode-chip" data-svc="${this._esc(svc)}">Run</button>
       </div>`;
     const camOpts = (cfg.cameras || []).filter(c => c.enabled !== false).map(c => [c.entity_id, c.name]);
     return `
       <div class="cfg-row"><label>Core services</label>${overall}</div>
       ${rows}
-      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ Run check</button></div>
       <div class="cfg-row"><label>HOMER — diagnostic sub-agent</label><span class="diag-ok">AVAILABLE</span></div>
       <div class="stub-body" style="margin:-6px 0 8px">Read-only. Nova can delegate a "why is this broken/slow" question to HOMER to investigate before answering — it can only read state, telemetry, and history, never control anything or change a setting. Always on; nothing to configure.</div>
       <div class="mode-bind-head"></div>
@@ -451,7 +451,7 @@
         <label>Camera — analyze now</label>
         <select class="cfg-field" id="newDiagCameraSelect">${camOpts.length ? this._optSelect(camOpts, camOpts[0][0]) : '<option value="">— no cameras —</option>'}</select>
       </div>
-      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">RUN</button></div>`;
+      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">Run</button></div>`;
   }
 
   // ── AI Models — ported near-verbatim from Classic (see nova-panel.js's
@@ -504,29 +504,29 @@
         <span class="model-label">${this._esc(p)}</span>
         <span class="cred-status" data-cred-status="${p}">…</span>
         <input class="cred-input" type="password" data-cred-provider="${p}" placeholder="enter to set or replace" autocomplete="off">
-        <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
-        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">CLEAR</button>
+        <button class="mode-chip cred-save" data-cred-provider="${p}">Save</button>
+        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">Clear</button>
       </div>`).join("");
     return `
       <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
       <div class="cfg-row" data-ai-profiles>
         <label>Profile</label>
-        <button class="mode-chip" data-ai-profile="hybrid">HYBRID</button>
-        <button class="mode-chip" data-ai-profile="local">LOCAL TEXT</button>
-        <button class="mode-chip" data-ai-profile="manual">MANUAL</button>
+        <button class="mode-chip" data-ai-profile="hybrid">Hybrid</button>
+        <button class="mode-chip" data-ai-profile="local">Local text</button>
+        <button class="mode-chip" data-ai-profile="manual">Manual</button>
       </div>
       <div class="stub-body">Hybrid keeps the Main Agent and Vision choices, and moves background text work to Ollama. Local Text also moves the Main Agent. Vision only moves when Ollama reports a vision-capable model.</div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
       <div class="cfg-row" data-endpoint-row="ollama">
         <label>Ollama</label>
         <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" data-current="${this._esc(cfg.ollama_base_url || "")}" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
-        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">Test</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
       <div class="cfg-row" data-endpoint-row="custom">
         <label>OpenAI-compatible</label>
         <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" data-current="${this._esc(cfg.custom_base_url || "")}" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
-        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">Test</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>
       <div class="cfg-row">
@@ -539,7 +539,7 @@
       </div>
       <div class="new-model-list">${rows}</div>
       <div class="cfg-row" style="margin-top:14px">
-        <button class="mode-chip" id="aiApply">APPLY</button>
+        <button class="mode-chip" id="aiApply">Apply</button>
         <span class="stub-body" id="aiApplyStatus">No unsaved changes.</span>
       </div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Provider Credentials</div></div>
