@@ -1,3 +1,8 @@
+## [8.70.3] Keyboard focus kept
+
+### Fixed
+- **Keyboard focus stays where you were.** Saving a setting, switching tabs, or the dashboard's 20 second refresh used to drop focus to the top of the page. Focus now goes back to the same control, and the search box keeps your caret where it was.
+
 ## [8.70.2] Panel fixes
 
 ### Fixed

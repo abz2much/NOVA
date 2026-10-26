@@ -15,6 +15,7 @@
     this._canvas = null;
 
     const root = this.shadowRoot;
+    const focus = this._focusMark(root);
     root.innerHTML = this._html();   // i18n-ok: the first render, translated just below
     this._localizeDOM(root);
     this._renderedOnce = true;
@@ -22,6 +23,49 @@
     this._initCore();
     this._renderData();
     if (this._currentTab === "dashboard") this._presentStart();
+    this._focusRestore(root, focus);
+  }
+
+  // ─── Keeping keyboard focus through a redraw ───────────────────────────
+  // A redraw replaces every control, so the one with focus is gone and
+  // focus drops to the page. _focusMark notes which control it was, by
+  // its id or data attributes, and _focusRestore focuses its replacement.
+  // Attributes that change with the control's state are left out, so an
+  // ON button is found again as OFF. Nothing happens when focus was not
+  // inside `scope`.
+  static FOCUS_STATE_ATTRS = new Set(["data-cfg-val", "data-current", "data-saved"]);
+  static FOCUS_STATE_CLASSES = new Set(["on", "off", "active", "mode-chip-on", "cred-configured"]);
+
+  _focusKey(el) {
+    if (el.id) return `#${el.id}`;
+    const data = Array.from(el.attributes)
+      .filter(a => a.name.startsWith("data-") && !NovaPanel.FOCUS_STATE_ATTRS.has(a.name))
+      .map(a => `${a.name}=${a.value}`).sort();
+    const classes = Array.from(el.classList).filter(c => !NovaPanel.FOCUS_STATE_CLASSES.has(c)).sort();
+    return `${el.tagName}|${data.join("&")}|${classes.join(".")}`;
+  }
+
+  _focusMark(scope) {
+    const active = this.shadowRoot?.activeElement;
+    if (!scope || !active || active === scope || !scope.contains(active)) return null;
+    const key = this._focusKey(active);
+    const same = Array.from(scope.querySelectorAll(active.tagName)).filter(el => this._focusKey(el) === key);
+    let selection = null;
+    try {
+      if (typeof active.selectionStart === "number") selection = [active.selectionStart, active.selectionEnd];
+    } catch (_) { /* this input type has no text selection */ }
+    return { key, tag: active.tagName, nth: Math.max(0, same.indexOf(active)), selection };
+  }
+
+  _focusRestore(scope, mark) {
+    if (!mark || !scope) return;
+    const same = Array.from(scope.querySelectorAll(mark.tag)).filter(el => this._focusKey(el) === mark.key);
+    const el = same[mark.nth] || same[0];
+    if (!el || typeof el.focus !== "function") return;
+    el.focus({ preventScroll: true });
+    if (mark.selection) {
+      try { el.setSelectionRange(mark.selection[0], mark.selection[1]); } catch (_) { /* not a text field */ }
+    }
   }
 
   // Panel translations are keyed by exact English source strings. Dynamic
@@ -105,8 +149,10 @@
   // tests/unit/test_panel_late_text.py fails on any other way of setting text.
   _setHtml(el, html) {
     if (!el) return;
+    const focus = this._focusMark(el);
     el.innerHTML = html;   // i18n-ok: the helper itself
     this._localizeDOM(el);
+    this._focusRestore(el, focus);
   }
 
   _setText(el, text) {

@@ -5106,6 +5106,75 @@ if (require.main === module) setTimeout(async () => {
       display(probe.querySelector(".welcome-problem b")) !== "block" && display(probe.firstElementChild) === "block"]);
   }
 
+  // Keyboard focus survives a redraw (8.70.3). A save, a tab switch and the
+  // 20 second poll all rebuild the DOM; the control that had focus keeps it.
+  {
+    const panel = document.createElement("nova-panel");
+    panel._currentTab = "settings";
+    document.body.appendChild(panel);
+    panel.hass = { ...hass };
+    await new Promise(r => setTimeout(r, 120));
+    const R = panel.shadowRoot;
+    const focusedKey = () => R.activeElement?.getAttribute("data-cfg-key") || null;
+
+    const toggle = R.querySelector('.toggle-btn[data-cfg-key="sentinel_enabled"]');
+    toggle.focus();
+    toggle.click();
+    await new Promise(r => setTimeout(r, 60));
+    checks.push(["focus: a settings toggle keeps focus after it saves",
+      focusedKey() === "sentinel_enabled" && R.activeElement !== toggle]);
+
+    const sel = R.querySelector('select[data-cfg-key="sleep_override"]');
+    sel.focus();
+    sel.value = "awake";
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    checks.push(["focus: a settings menu keeps focus after it saves", focusedKey() === "sleep_override"]);
+
+    // A tab switch redraws everything; focus stays on the tab you chose.
+    const tabBtn = R.querySelector('.nav-tab[data-tab="logs"]');
+    tabBtn.focus();
+    tabBtn.click();
+    await new Promise(r => setTimeout(r, 60));
+    checks.push(["focus: switching tab keeps focus on the tab you chose",
+      R.activeElement?.getAttribute("data-tab") === "logs"]);
+
+    // Typing in the search box when a redraw lands: same box, same caret.
+    panel._currentTab = "settings";
+    panel._render();
+    const search = R.getElementById("settingsSearch");
+    search.focus();
+    search.value = "camera";
+    search.dispatchEvent(new window.Event("input", { bubbles: true }));
+    search.setSelectionRange(3, 3);
+    panel._render();
+    checks.push(["focus: a redraw keeps the caret where it was in the settings search",
+      R.activeElement?.id === "settingsSearch" && R.activeElement !== search
+      && R.activeElement.value === "camera" && R.activeElement.selectionStart === 3]);
+
+    // Nothing in the panel focused: a redraw must not pull focus into it.
+    R.activeElement?.blur();
+    panel._render();
+    checks.push(["focus: a redraw never takes focus when nothing in the panel had it", !R.activeElement]);
+    panel.remove();
+
+    // The dashboard poll rewrites the room tiles; a focused light button
+    // stays focused, on the same room.
+    const dashP = document.createElement("nova-panel");
+    document.body.appendChild(dashP);
+    dashP.hass = { ...hass };
+    await new Promise(r => setTimeout(r, 120));
+    const D = dashP.shadowRoot;
+    const lights = Array.from(D.querySelectorAll(".area-light-toggle[data-light-area]"));
+    const target = lights[lights.length - 1];
+    const area = target?.getAttribute("data-light-area");
+    target?.focus();
+    dashP._renderData();
+    checks.push(["focus: the 20 second poll keeps focus on the same room's light button",
+      !!area && D.activeElement?.getAttribute("data-light-area") === area && D.activeElement !== target]);
+    dashP.remove();
+  }
+
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
   console.log(ok ? "\nSMOKE TEST CLEAN" : "\nSMOKE TEST FAILED");
