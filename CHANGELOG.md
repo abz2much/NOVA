@@ -1,3 +1,12 @@
+## [8.77.1] New icon and README pictures
+
+### Changed
+- **A new icon** in the new look: a teal ball with two broken arcs, like the arcs round the head, on a dark round badge. Home Assistant and HACS show it in place of the orange ball.
+- **The README shows the panel as it is now:** real screenshots of the Command Center, the Nova panel and the five colour themes, taken from a made-up test home. The three old drawings are gone.
+
+### Fixed
+- **The dock's panels scroll with a dark scrollbar** in the theme's colours, instead of the browser's bright default one.
+
 ## [8.77.0] The dock and Nova's feed
 
 ### Added

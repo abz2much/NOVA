@@ -113,6 +113,10 @@
         padding:12px 16px 16px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);
         box-shadow:0 -12px 40px color-mix(in srgb,var(--bg) 80%,transparent);
         opacity:0;transform:translateY(24px);transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+      .dock-sheet{scrollbar-width:thin;scrollbar-color:var(--line-soft) transparent}
+      .dock-sheet::-webkit-scrollbar{width:6px}
+      .dock-sheet::-webkit-scrollbar-track{background:transparent}
+      .dock-sheet::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:var(--r-ctl)}
       .dock-sheet.dock-open{opacity:1;transform:none}
       .dock-sheet:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
       .dock-sheet-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
@@ -261,10 +265,6 @@
       .goal-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.goal-copy b{font-size:var(--t-sm)}.goal-copy span{font-size:var(--t-sm);color:var(--ink-dim);overflow-wrap:anywhere}
       .goal-copy small{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint)}
       .goal-create{display:flex;gap:8px;margin-top:10px}.goal-create .cfg-field{flex:1;min-width:0}.empty-state{font-size:var(--t-sm);color:var(--ink-faint);padding:12px 0}
-      .feed{max-height:420px;overflow-y:auto}
-      .feed::-webkit-scrollbar{width:3px}
-      .feed::-webkit-scrollbar-track{background:var(--surface-2)}
-      .feed::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:var(--r-ctl)}
       .feed-row{padding:9px 0;border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:10px}
       .feed-row:last-child{border-bottom:none}
       .feed-text{font-size:var(--t-sm);line-height:1.4}
