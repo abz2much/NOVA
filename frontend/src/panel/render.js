@@ -42,7 +42,7 @@
   // ON button is found again as OFF. Nothing happens when focus was not
   // inside `scope`.
   static FOCUS_STATE_ATTRS = new Set(["data-cfg-val", "data-current", "data-saved"]);
-  static FOCUS_STATE_CLASSES = new Set(["on", "off", "active", "mode-chip-on", "cred-configured"]);
+  static FOCUS_STATE_CLASSES = new Set(["on", "off", "active", "mode-chip-on", "cred-configured", "fpn-sel"]);
 
   _focusKey(el) {
     if (el.id) return `#${el.id}`;

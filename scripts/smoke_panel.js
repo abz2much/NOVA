@@ -27,10 +27,20 @@ window.confirm = () => true;
 // code — a vm/jsdom quirk, not something a test should have to rediscover.
 // Define the real stub once, here, before any component script loads, and
 // let individual tests drive its answers through this mutable queue instead
-// of reassigning window.prompt themselves (Floor Plan Editor's Add Room
-// asks for a name, then a type).
+// of reassigning window.prompt themselves.
 global.__promptQueue = [];
 window.prompt = () => (global.__promptQueue.length ? global.__promptQueue.shift() : null);
+// Add Room and Outdoor Zone focus the new row's name in the Rooms list:
+// type over it there, and pick a type.
+const nameNewRoom = (root, name, type) => {
+  const f = root.activeElement;
+  if (!f || !f.classList.contains("fpn-room-name")) return;
+  const ri = f.getAttribute("data-ri");
+  f.value = name;
+  f.dispatchEvent(new window.Event("change", { bubbles: true }));
+  const t = type && root.querySelector(`.fpn-room-type[data-ri="${ri}"]`);
+  if (t) { t.value = type; t.dispatchEvent(new window.Event("change", { bubbles: true })); }
+};
 const _translationFetches = [];
 const I18N_DIR = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "i18n");
 const translationFetch = async (url) => {
@@ -1433,8 +1443,8 @@ if (require.main === module) setTimeout(async () => {
     && /MASTER BEDROOM/.test(fpeCardNow.textContent)
     && !/DOWNSTAIRS HALLWAY/.test(fpeCardNow.textContent)]);
 
-  global.__promptQueue = ["Sun Room", "room"];
   sRoot.getElementById("fpnAddRoom").click();
+  nameNewRoom(sRoot, "Sun Room");
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: Add Room appends a room to the working copy and redraws it",
     /SUN ROOM/.test(fpeCardNow.textContent)
@@ -1526,9 +1536,9 @@ if (require.main === module) setTimeout(async () => {
 
   // Outdoor zone + property line (Phase 3a): added as a polygon room / a
   // separate property config, rendered as draggable-vertex canvas elements.
-  global.__promptQueue = ["Side Yard"];
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   fpeCardNow.querySelector("#fpnAddZone").click();
+  nameNewRoom(sRoot, "Side Yard");
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: Add Outdoor Zone places a draggable-vertex polygon",
     fpeCardNow.querySelectorAll(".fpn-zone").length === 1
@@ -4591,7 +4601,7 @@ if (require.main === module) setTimeout(async () => {
     const PINS = {
       geometry: "a836aa626ac3def0",
       floorHelpers: "b94425681aba57c7",
-      editorMarkup: "65937d66bfe915c6",   // 8.73.0: zoom buttons, mouse and touch hints, unsaved note
+      editorMarkup: "91af5699933631f5",   // 8.73.1: selection bar, Rooms list, plan items are named tab stops
       memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
       intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
       editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
@@ -4932,10 +4942,10 @@ if (require.main === module) setTimeout(async () => {
     d.steps.push(!!q('.fpn-op-marker[data-op-marker="0"]').classList.contains("op-glow"));
     q("#opAddCased").click(); q("#opAddFdormer") && q("#opAddFdormer").click();
     q("#fpnCamAdd").click();
-    global.__promptQueue = ["Porch", "door"];
     q("#fpnAddRoom").click();
-    global.__promptQueue = ["Drive"];
+    nameNewRoom(elNew.shadowRoot, "Porch", "door");
     q("#fpnAddZone").click();
+    nameNewRoom(elNew.shadowRoot, "Drive");
     d.after = JSON.parse(JSON.stringify({ cams: elNew._editingCameras.tf, els: elNew._editingElements.tf.map(x => Object.assign({}, x, { id: x.id ? "id" : x.id })), rooms: elNew._editingPlan.tf.rooms }));
     d.after.cams.forEach(c => { if (c.id) c.id = "id"; });
     elNew.removeEventListener("hass-more-info", onMore);
@@ -5578,12 +5588,13 @@ if (require.main === module) setTimeout(async () => {
     await new Promise(r => setTimeout(r, 150));
     const fresh = () => {
       P._liveData.config = { floor_plan_units: "imperial" };
-      P._editingPlan = { tf: { label: "Test Floor", viewBox: "0 0 260 200", rooms: [{ name: "Den", x: 20, y: 20, w: 60, h: 40, type: "room" }] } };
+      P._editingPlan = { tf: { label: "Test Floor", viewBox: "0 0 260 200", rooms: [{ name: "Den", x: 20, y: 20, w: 60, h: 40, type: "room" },
+        { name: "Yard", x: 100, y: 140, w: 60, h: 40, type: "outdoor", points: [[100, 140], [160, 140], [160, 180], [100, 180]] }] } };
       P._editingCameras = { tf: [{ x: 150, y: 40, angle: 0, fov: 90, range: 80 }] };
       P._editingEntities = { tf: [{ e: "light.kitchen", x: 40, y: 120 }] };
-      P._editingElements = { tf: [] };
+      P._editingElements = { tf: [{ id: "e1", type: "door", kind: "interior", room: "Den", wall: "left", pos: 0.5, w: 16, entity: "" }] };
       P._editingProperty = [];
-      P._fpDirty = false;
+      P._fpDirty = false; P._fpSel = null;
       P._editorFloor = "tf"; P._editVB = null;
       P._rerenderFloorPlanCard();
     };
@@ -5660,8 +5671,8 @@ if (require.main === module) setTimeout(async () => {
     await wait();
     const den = P._editingPlan.tf.rooms[0], pinNow = P._editingEntities.tf[0];
     P.removeEventListener("hass-more-info", onMore);
-    checks.push(["floor plan: a press that barely moves is a tap: nothing shifts, nothing redraws, and a pin opens its controls",
-      den.x === 20 && den.y === 20 && svg() === svgBefore && pinNow.x === 40 && pinNow.y === 120
+    checks.push(["floor plan: a press that barely moves is a tap: nothing shifts, and a pin opens its controls",
+      den.x === 20 && den.y === 20 && !!svgBefore && pinNow.x === 40 && pinNow.y === 120
       && moreInfo.join() === "light.kitchen" && !P._fpDirty]);
 
     fresh();
@@ -5740,6 +5751,113 @@ if (require.main === module) setTimeout(async () => {
     checks.push([`floor plan: on a touch screen every handle has a wide see-through grab area (${small.join(", ") || "all"})`,
       small.length === 0 && /touch-action:pan-x pan-y/.test(rule(css, ".fpn-svg"))
       && /display:none/.test(rule(coarseCss, ".fpn-hint-mouse")) && /display:none/.test(rule(css, ".fpn-hint-touch"))]);
+
+    // Without dragging, and by keyboard (8.73.1).
+    const tap = (el, kind = "mouse") => { ptr(el, "pointerdown", 0, 0, 1, kind); ptr(svg(), "pointerup", 0, 0, 1, kind); };
+    const bar = () => R.getElementById("fpnSelBar");
+    const barBtn = sel => bar()?.querySelector(sel);
+    const rooms = () => P._editingPlan.tf.rooms;
+    const key = (el, k, mods = {}) => el?.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods }));
+
+    fresh();
+    const idleText = bar()?.textContent || "";
+    tap(q(".fpn-drag-room .fpn-drag-rect"));
+    await wait();
+    const moves = ["left", "right", "up", "down"].map(d => barBtn(`[data-fpn-move="${d}"]`)?.getAttribute("aria-label"));
+    checks.push([`floor plan: a tap selects an item, and a bar names it with ways to move, resize and delete it (${moves.join(", ")})`,
+      /without dragging/.test(idleText) && P._fpSel?.kind === "room" && P._fpSel.i === 0
+      && /Den/.test(bar().textContent) && moves.join() === "Move left,Move right,Move up,Move down"
+      && ["wider", "narrower", "taller", "shorter"].every(d => !!barBtn(`[data-fpn-size="${d}"]`))
+      && !!barBtn("#fpnSelDelete")?.classList.contains("danger") && !!q(".fpn-sel-ring")
+      && q('.fpn-drag-room[data-idx="0"]').getAttribute("aria-pressed") === "true"]);
+
+    barBtn('[data-fpn-move="right"]')?.click(); barBtn('[data-fpn-move="down"]')?.click();
+    barBtn('[data-fpn-size="wider"]')?.click(); barBtn('[data-fpn-size="taller"]')?.click();
+    barBtn('[data-fpn-size="taller"]')?.click(); barBtn('[data-fpn-size="shorter"]')?.click();
+    const d0 = rooms()[0];
+    checks.push([`floor plan: the bar moves and resizes a room in one-foot steps (${d0.x},${d0.y} ${d0.w}×${d0.h})`,
+      d0.x === 25 && d0.y === 25 && d0.w === 65 && d0.h === 45 && !R.getElementById("fpnUnsaved").hidden]);
+
+    fresh();
+    tap(q(".fpn-cam-dot")); await wait(); barBtn('[data-fpn-move="left"]')?.click();
+    tap(q(".fpn-ent"), "touch"); await wait(); barBtn('[data-fpn-move="up"]')?.click();
+    tap(q(".fpn-zone-path")); await wait(); barBtn('[data-fpn-move="right"]')?.click();
+    tap(q('.fpn-zone-vtx[data-vtx="0"]')); await wait(); barBtn('[data-fpn-move="down"]')?.click();
+    const yard = rooms()[1];
+    checks.push([`floor plan: the bar moves a camera, a pin, a zone and one corner (${JSON.stringify(yard.points)})`,
+      cam().x === 145 && P._editingEntities.tf[0].y === 115
+      && JSON.stringify(yard.points) === "[[105,145],[165,140],[165,180],[105,180]]" && yard.x === 105]);
+
+    fresh();
+    const savedConfirm2 = window.confirm;
+    window.confirm = () => false;
+    tap(q(".fpn-cam-dot")); await wait(); barBtn("#fpnSelDelete")?.click();
+    const keptOnNo = P._editingCameras.tf.length === 1;
+    window.confirm = () => true;
+    barBtn("#fpnSelDelete")?.click(); await wait();
+    const camGone = P._editingCameras.tf.length === 0 && P._fpSel === null && /without dragging/.test(bar().textContent);
+    tap(q('.fpn-zone-vtx[data-vtx="1"]')); await wait(); barBtn("#fpnSelDelete")?.click(); await wait();
+    tap(q('.fpn-zone-vtx[data-vtx="0"]')); await wait();
+    const lastThree = rooms()[1].points.length === 3 && !!barBtn("#fpnSelDelete")?.disabled;
+    window.confirm = savedConfirm2;
+    checks.push(["floor plan: Delete in the bar asks first, and a shape keeps at least three corners",
+      keptOnNo && camGone && lastThree]);
+
+    fresh();
+    const denG = () => q('.fpn-drag-room[data-idx="0"]');
+    const tabStops = [denG(), q('.fpn-zone[data-zone-idx="1"]'), q(".fpn-cam"), q(".fpn-ent")];
+    const named = tabStops.map(g => g && g.getAttribute("tabindex") === "0" && g.getAttribute("role") === "button" && g.getAttribute("aria-label"));
+    denG().focus();
+    await wait();
+    const focusSelects = P._fpSel?.kind === "room" && P._fpSel.i === 0;
+    key(denG(), "ArrowRight"); key(R.activeElement, "ArrowDown", { shiftKey: true }); key(R.activeElement, "ArrowRight", { altKey: true });
+    await wait();
+    const kept = R.activeElement === denG();
+    const kd = rooms()[0];
+    const moreInfo2 = [];
+    const onMore2 = ev => moreInfo2.push(ev.detail.entityId);
+    P.addEventListener("hass-more-info", onMore2);
+    q(".fpn-ent").focus?.(); key(q(".fpn-ent"), "Enter");
+    P.removeEventListener("hass-more-info", onMore2);
+    window.confirm = () => true;
+    q(".fpn-cam")?.focus?.(); key(q(".fpn-cam"), "Delete"); await wait();
+    window.confirm = savedConfirm2;
+    key(denG(), "Escape"); await wait();
+    // The plan itself is not a tab stop (Chrome would make it one, as it can
+    // scroll), so Tab goes straight to the first room.
+    checks.push([`floor plan: by keyboard, items are named tab stops; arrows move, Shift moves further, Alt resizes, Enter opens a pin, Delete removes (${named.join(", ")}; ${kd.x},${kd.y} ${kd.w})`,
+      named.join() === "Den,Yard,CAM 1,kitchen" && svg().getAttribute("tabindex") === "-1" && focusSelects && kd.x === 25 && kd.y === 45 && kd.w === 65 && kept
+      && moreInfo2.join() === "light.kitchen" && P._editingCameras.tf.length === 0 && P._fpSel === null]);
+
+    fresh();
+    const nameOf = i => q(`.fpn-room-name[data-ri="${i}"]`);
+    const label = nameOf(0)?.closest("label.field")?.querySelector("span")?.textContent;
+    const types = Array.from(q('.fpn-room-type[data-ri="0"]')?.options || []).map(o => o.value).join();
+    const setField = (el, v) => { el.value = v; el.dispatchEvent(new window.Event("change", { bubbles: true })); };
+    if (nameOf(0)) setField(nameOf(0), "Study");
+    if (q('.fpn-room-type[data-ri="0"]')) setField(q('.fpn-room-type[data-ri="0"]'), "bath");
+    if (nameOf(0)) setField(nameOf(0), "  ");
+    const zoneRow = q('.fpn-room-row[data-ri="1"]');
+    window.confirm = () => true;
+    q('.fpn-room-del[data-ri="1"]')?.click();
+    window.confirm = savedConfirm2;
+    checks.push([`floor plan: a Rooms list renames, retypes and removes rooms, and a door on a renamed room follows it (${types})`,
+      label === "Name" && types === "room,bath,stairs,door" && rooms()[0].name === "Study" && rooms()[0].type === "bath"
+      && P._editingElements.tf[0].room === "Study" && !!zoneRow && !zoneRow.querySelector(".fpn-room-type")
+      && /Outdoor zone/.test(zoneRow.textContent) && rooms().length === 1
+      && q('.fpn-room-del[data-ri="0"]')?.getAttribute("aria-label") === "Delete Study"]);
+
+    fresh();
+    const savedPrompt = window.prompt;
+    let prompted = 0;
+    window.prompt = () => { prompted++; return "Asked"; };
+    q("#fpnAddRoom").click();
+    const added = rooms()[2], focusedName = R.activeElement;
+    q("#fpnAddZone").click();
+    window.prompt = savedPrompt;
+    checks.push([`floor plan: Add Room and Outdoor Zone ask no pop-up questions, and the new name is ready to type over (${added?.name}, ${rooms()[3]?.name})`,
+      prompted === 0 && added?.name === "Room 2" && added.type === "room" && rooms()[3]?.name === "Zone 2" && rooms()[3].type === "outdoor"
+      && !!focusedName && focusedName.classList.contains("fpn-room-name")]);
 
     SVGp.createSVGPoint = real.pt; SVGp.getScreenCTM = real.ctm; Ep.getBoundingClientRect = real.box; Ep.setPointerCapture = real.cap;
     P.remove();

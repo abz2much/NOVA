@@ -1,4 +1,15 @@
-## [8.73.0] Floor plan editor works by touch
+## [8.73.1] Floor plan editor without dragging
+
+### Added
+- **Pick an item to change it without dragging.** Tap or click a room, zone, corner, camera or device pin. A bar above the plan shows its name, arrows that move it a foot at a time, Wider, Narrower, Taller and Shorter for a room, Delete, and Open controls for a device. This is the way to delete on an iPhone, which has no right-click.
+- **The plan works with the keyboard.** Tab reaches each room, zone, camera and pin, and a screen reader says its name. The arrow keys move it, Shift and an arrow move it five feet, Alt and an arrow resize a room, Delete removes it, Enter opens a device's controls and Escape lets go.
+- **A Rooms list** under the plan renames a room, changes its type from a menu, or removes it. An interior door or doorway on a renamed room follows the new name.
+
+### Changed
+- **+ Add Room and + Outdoor Zone no longer ask questions in pop-ups.** They add "Room 2", "Zone 2" and so on, and put you in the new name in the Rooms list, ready to type over. The type is picked from a menu there instead of typed in.
+- **Deleting a corner asks first**, and a shape always keeps three corners.
+- **Five labels screen readers say are now translated**: the battery picture, Forget, and the three fields of a Memory link. Before, the string check missed labels written straight into the markup.
+
 
 ### Added
 - **The floor plan editor works with a finger or a pen.** Drag a room, corner, camera or device pin with one finger. Pinch with two fingers to zoom, and move two fingers to pan. One finger on empty space still scrolls the page, so the plan never traps you. Before, touching the plan scrolled the page and nothing could be moved.

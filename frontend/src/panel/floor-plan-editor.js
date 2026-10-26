@@ -41,7 +41,9 @@
       </div>
       <div class="fpn-hint fpn-hint-mouse">Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan</div>
       <div class="fpn-hint fpn-hint-touch">Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan</div>
+      ${this._fpSelBarHtml()}
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      ${this._renderRoomsListNew(floor)}
       ${this._renderOpeningsNew(floor)}
       ${this._renderCamerasNew(floor)}
       ${this._renderPlanEntitiesNew(floor)}
@@ -60,6 +62,82 @@
     const has = pp.length >= 3;
     return `<button class="mode-chip" id="fpnAddProperty">${has ? "Clear Property" : "+ Property Line"}</button>`
       + (has ? `<span class="toggle-desc">${this._tHtml("Lot: {area}", { area: this._propertyArea(pp) })}</span>` : "");
+  }
+
+  // The item picked by a tap, a click or the keyboard: { kind, i, v }. A
+  // kind is room, cam, pin, corner (corner v of shaped room i) or lot (lot
+  // corner v). Gives the item itself, or null (and drops the pick) when it
+  // is gone.
+  _fpSelItem() {
+    const s = this._fpSel, floor = this._editorFloor;
+    if (!s) return null;
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    let item = null;
+    if (s.kind === "room") item = rooms[s.i];
+    else if (s.kind === "cam") item = this._camsFor(floor)[s.i];
+    else if (s.kind === "pin") item = this._entsFor(floor)[s.i];
+    else if (s.kind === "corner") item = this._fpHasOutline(rooms[s.i]) ? rooms[s.i].points[s.v] : null;
+    else if (s.kind === "lot") item = (this._propertyPts() || [])[s.v];
+    if (!item) this._fpSel = null;
+    return item || null;
+  }
+
+  // The bar above the plan: what is picked, and buttons that move, resize
+  // and delete it, so nothing needs a drag or a right-click.
+  _fpSelBarHtml() {
+    const item = this._fpSelItem(), s = this._fpSel;
+    if (!item) return `<div class="fpn-selbar" id="fpnSelBar"><span class="toggle-desc">Tap or click an item to move, resize or delete it without dragging.</span></div>`;
+    const rooms = ((this._getEditingPlan()[this._editorFloor] || {}).rooms) || [];
+    let name = "", corners = 0;
+    if (s.kind === "room") name = item.name || "";
+    else if (s.kind === "cam") name = this._t("CAM {number}", { number: s.i + 1 });
+    else if (s.kind === "pin") name = this._entMarkerStyle(item.e).name;
+    else if (s.kind === "corner") { name = `${rooms[s.i].name || ""} · ${this._t("Corner {number}", { number: s.v + 1 })}`; corners = rooms[s.i].points.length; }
+    else { name = this._t("Lot corner {number}", { number: s.v + 1 }); corners = this._propertyPts().length; }
+    const box = s.kind === "room" && !this._fpHasOutline(item);
+    return `
+      <div class="fpn-selbar" id="fpnSelBar">
+        <span class="fpn-sel-name">${this._esc(name)}</span>
+        <span class="fpn-sel-tools">
+          <button class="mode-chip" data-fpn-move="left" aria-label="${this._esc(this._tx("Move left"))}">←</button>
+          <button class="mode-chip" data-fpn-move="up" aria-label="${this._esc(this._tx("Move up"))}">↑</button>
+          <button class="mode-chip" data-fpn-move="down" aria-label="${this._esc(this._tx("Move down"))}">↓</button>
+          <button class="mode-chip" data-fpn-move="right" aria-label="${this._esc(this._tx("Move right"))}">→</button>
+        </span>
+        ${box ? `<span class="fpn-sel-tools">
+          <button class="mode-chip" data-fpn-size="wider">Wider</button>
+          <button class="mode-chip" data-fpn-size="narrower">Narrower</button>
+          <button class="mode-chip" data-fpn-size="taller">Taller</button>
+          <button class="mode-chip" data-fpn-size="shorter">Shorter</button>
+        </span>` : ""}
+        <span class="fpn-sel-tools">
+          ${s.kind === "pin" ? `<button class="mode-chip" id="fpnSelOpen">Open controls</button>` : ""}
+          <button class="mode-chip danger" id="fpnSelDelete"${corners && corners <= 3 ? " disabled" : ""}>Delete</button>
+          <button class="mode-chip" id="fpnSelDone">Done</button>
+        </span>
+        <span class="toggle-desc fpn-keys">Arrow keys move it · Shift moves further · Alt and arrows resize a room · Delete removes it</span>
+      </div>`;
+  }
+
+  _renderRoomsListNew(floor) {
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    const types = [["room", "Room"], ["bath", "Bath"], ["stairs", "Stairs"], ["door", "Door"]];
+    const rows = rooms.map((r, i) => {
+      // A type from an older or imported plan is kept as it is.
+      const own = types.some(t => t[0] === r.type) ? "" : `<option value="${this._esc(r.type || "")}" selected>${this._esc(r.type || "")}</option>`;
+      const type = r.type === "outdoor"
+        ? `<span class="new-pl-chip">Outdoor zone</span>`
+        : `<label class="field"><span>Type</span><select class="cfg-field fpn-room-type" data-ri="${i}">${own}${types.map(([v, label]) => `<option value="${v}"${r.type === v ? " selected" : ""}>${label}</option>`).join("")}</select></label>`;
+      return `
+        <div class="cfg-row cfg-row-wrap fpn-room-row" data-ri="${i}">
+          <label class="field"><span>Name</span><input class="cfg-field fpn-room-name" data-ri="${i}" value="${this._esc(r.name || "")}"></label>
+          ${type}
+          <button class="mode-chip danger fpn-room-del" data-ri="${i}" aria-label="${this._esc(this._t("Delete {name}", { name: r.name || "" }))}">Delete</button>
+        </div>`;
+    }).join("");
+    return `
+      <div class="mode-bind-head">Rooms <span class="toggle-desc">rename a room, change its type or remove it</span></div>
+      ${rows || `<div class="toggle-desc">No rooms on this floor yet — add one above.</div>`}`;
   }
 
   _renderPlanEntitiesNew(floor) {
@@ -164,11 +242,16 @@
     const vb = this._editVB
       ? `${this._editVB.x} ${this._editVB.y} ${this._editVB.w} ${this._editVB.h}`
       : (floorData.viewBox || "0 0 320 150");
-    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
+    // tabindex -1: Chrome would make the plan a tab stop of its own; Tab
+    // should reach the rooms in it instead.
+    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" tabindex="-1" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
     svg += '<defs>'
       + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(244,184,96,0.05)" stroke-width="0.2"/></pattern>'
       + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(244,184,96,0.12)" stroke-width="0.3"/></pattern>'
       + '</defs>';
+    const sel = floor === this._editorFloor && this._fpSelItem() ? this._fpSel : null;
+    const picked = (kind, i) => sel && sel.kind === kind && sel.i === i ? " fpn-sel" : "";
+    const stop = name => ` tabindex="0" role="button" aria-label="${this._esc(name)}"`;
     const vbp = vb.split(" ").map(Number);
     const gx = vbp[0], gy = vbp[1], gw = vbp[2], gh = vbp[3];
     svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-sm)"/>`;
@@ -203,14 +286,14 @@
       if (out || (rm.points && rm.points.length >= 3)) {
         const zpts = this._zonePoints(rm);
         let zcx = 0, zcy = 0; zpts.forEach(p => { zcx += p[0]; zcy += p[1]; }); zcx /= zpts.length; zcy /= zpts.length;
-        svg += `<g class="fpn-zone" data-zone-idx="${i}">`;
+        svg += `<g class="fpn-zone${picked("room", i)}" data-zone-idx="${i}"${stop(rm.name || "")}>`;
         svg += `<path class="fpn-zone-path" data-zone-idx="${i}" d="${this._propPathD(zpts)}" fill="${c}" fill-opacity="0.06" stroke="${c}" stroke-width="1"${out ? ' stroke-dasharray="4 3"' : ""} style="cursor:move"/>`;
         svg += `<text x="${zcx.toFixed(1)}" y="${zcy.toFixed(1)}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
         for (let vi = 0; vi < zpts.length; vi++) { const a = zpts[vi], b = zpts[(vi + 1) % zpts.length]; svg += `<circle class="fpn-zone-mid" data-zone-idx="${i}" data-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2" fill="none" stroke="${c}" stroke-width="0.6" opacity="0.5" style="cursor:copy"/>`; }
         for (let vi = 0; vi < zpts.length; vi++) { svg += `<circle class="fpn-zone-vtx" data-zone-idx="${i}" data-vtx="${vi}" cx="${zpts[vi][0]}" cy="${zpts[vi][1]}" r="2.8" fill="${c}" stroke="var(--bg)" stroke-width="0.6" style="cursor:grab"/>`; }
         svg += "</g>";
       } else {
-        svg += `<g class="fpn-drag-room" data-idx="${i}" style="cursor:move">`;
+        svg += `<g class="fpn-drag-room${picked("room", i)}" data-idx="${i}"${stop(rm.name || "")} style="cursor:move">`;
         svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
         svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
         if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
@@ -255,7 +338,7 @@
     const camGeo = cams.length ? this._planGeometry(floor) : null;
     for (let ci = 0; ci < cams.length; ci++) {
       const cam = cams[ci], out = cam.indoor === false;
-      svg += `<g class="fpn-cam" data-cam-idx="${ci}">`
+      svg += `<g class="fpn-cam${picked("cam", ci)}" data-cam-idx="${ci}"${stop(this._t("CAM {number}", { number: ci + 1 }))}>`
         + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "rgba(232,178,61,0.10)" : "rgba(226,84,47,0.10)"}" stroke="${out ? "rgba(232,178,61,0.6)" : "rgba(226,84,47,0.6)"}" stroke-width="0.7" pointer-events="none"/>`
         + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
         + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
@@ -268,13 +351,22 @@
       if (!ent || !ent.e) continue;
       const ms = this._entMarkerStyle(ent.e);
       const nm = ms.name.length > 16 ? (ms.name.slice(0, 15) + "…") : ms.name;
-      svg += `<g class="fpn-ent" data-ent-idx="${ei}" data-ent-id="${this._esc(ent.e)}" style="cursor:pointer">`
+      svg += `<g class="fpn-ent${picked("pin", ei)}" data-ent-idx="${ei}" data-ent-id="${this._esc(ent.e)}"${stop(ms.name)} style="cursor:pointer">`
         + `<circle class="fpn-ent-dot" cx="${ent.x}" cy="${ent.y}" r="3" fill="${ms.color}" stroke="var(--bg)" stroke-width="0.7"/>`
         + `<text class="fpn-ent-nm" x="${ent.x}" y="${ent.y - 4}" text-anchor="middle" fill="${ms.color}" font-size="3.4" font-family="var(--font-mono)" pointer-events="none">${this._esc(nm)}</text>`
         + `<text class="fpn-ent-val" x="${ent.x}" y="${ent.y + 6.5}" text-anchor="middle" fill="var(--ink-dim)" font-size="3" font-family="var(--font-mono)" pointer-events="none">${this._esc(ms.val)}</text>`
         + "</g>";
     }
 
+    // A dashed ring round the picked item; it takes no pointer events.
+    const item = sel && this._fpSelItem();
+    if (item) {
+      const ring = 'class="fpn-sel-ring" fill="none" stroke="var(--ink)" stroke-width="0.8" stroke-dasharray="3 2" pointer-events="none"';
+      if (sel.kind === "room" && this._fpHasOutline(item)) svg += `<path ${ring} d="${this._propPathD(item.points)}"/>`;
+      else if (sel.kind === "room") svg += `<rect ${ring} x="${item.x - 2}" y="${item.y - 2}" width="${item.w + 4}" height="${item.h + 4}" rx="3"/>`;
+      else if (sel.kind === "cam" || sel.kind === "pin") svg += `<circle ${ring} cx="${item.x}" cy="${item.y}" r="6"/>`;
+      else svg += `<circle ${ring} cx="${item[0]}" cy="${item[1]}" r="5"/>`;
+    }
     svg += "</svg>";
     return svg;
   }
@@ -345,6 +437,61 @@
     this._fpShowView(svgEl);
   }
 
+  // Picks an item (or none) and redraws the card when that changes.
+  _fpSelect(sel) {
+    const same = JSON.stringify(sel) === JSON.stringify(this._fpSel);
+    this._fpSel = sel;
+    if (!same) this._rerenderFloorPlanCard();
+  }
+  _fpOpenPin(entityId) {
+    this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
+  }
+  // Moves the picked item by dx, dy plan units.
+  _fpNudge(dx, dy) {
+    const item = this._fpSelItem(), s = this._fpSel;
+    if (!item) return;
+    const shift = p => { p[0] += dx; p[1] += dy; };
+    if (s.kind === "room" && this._fpHasOutline(item)) { item.points.forEach(shift); this._syncRoomBBox(item); }
+    else if (s.kind === "corner") { shift(item); this._syncRoomBBox(this._getEditingPlan()[this._editorFloor].rooms[s.i]); }
+    else if (s.kind === "lot") shift(item);
+    else { item.x += dx; item.y += dy; }
+    this._fpDirty = true;
+    this._rerenderFloorPlanCard();
+  }
+  // Resizes the picked room, when it is a plain box, keeping a least size.
+  _fpResize(dw, dh) {
+    const item = this._fpSelItem();
+    if (!item || this._fpSel.kind !== "room" || this._fpHasOutline(item)) return;
+    item.w = Math.max(15, item.w + dw); item.h = Math.max(10, item.h + dh);
+    this._fpDirty = true;
+    this._rerenderFloorPlanCard();
+  }
+  // Deletes the picked item after asking. A shape keeps three corners.
+  _fpDeleteSel() {
+    const item = this._fpSelItem(), s = this._fpSel, floor = this._editorFloor;
+    if (!item) return;
+    const rooms = this._getEditingPlan()[floor].rooms;
+    let list, at;
+    if (s.kind === "room") {
+      if (!window.confirm(this._t("Delete '{name}' from floor plan?", { name: item.name }))) return;
+      list = rooms; at = s.i;
+    } else if (s.kind === "cam") {
+      if (!window.confirm(this._tx("Delete this camera?"))) return;
+      list = this._camsFor(floor); at = s.i;
+    } else if (s.kind === "pin") {
+      if (!window.confirm(this._tx("Remove this device from the plan?"))) return;
+      list = this._entsFor(floor); at = s.i;
+    } else {
+      list = s.kind === "lot" ? this._propertyPts() : rooms[s.i].points; at = s.v;
+      if (list.length <= 3 || !window.confirm(this._tx("Delete this corner?"))) return;
+    }
+    list.splice(at, 1);
+    if (s.kind === "corner") this._syncRoomBBox(rooms[s.i]);
+    this._fpSel = null;
+    this._fpDirty = true;
+    this._rerenderFloorPlanCard();
+  }
+
   _wireFloorPlanEditor() {
     const root = this.shadowRoot;
     if (!root || !root.getElementById("fpnCanvas")) return;   // the card is not on screen
@@ -367,6 +514,7 @@
     each(".fpn-floor-tab", "click", btn => {
       this._editorFloor = btn.getAttribute("data-fpn-floor");
       this._editVB = null;
+      this._fpSel = null;
       redraw();
     });
     on("fpnZoomFit", "click", () => { this._editVB = null; redraw(); });
@@ -379,20 +527,30 @@
     });
 
     // Rooms, outdoor zones and the lot.
+    // A new room or zone gets a numbered name, ready to type over in the
+    // Rooms list.
+    const nextName = (named, outdoor) => {
+      const rooms = floorRooms(), taken = new Set(rooms.map(r => r.name));
+      let n = rooms.filter(r => (r.type === "outdoor") === outdoor).length + 1;
+      while (taken.has(named(n))) n++;
+      return named(n);
+    };
+    const editName = i => {
+      const f = root.querySelector(`.fpn-room-name[data-ri="${i}"]`);
+      if (f) { f.focus(); f.select(); }
+    };
     on("fpnAddRoom", "click", () => {
       const level = this._getEditingPlan()[this._editorFloor];
       if (!level) return;
-      const name = window.prompt(this._tx("Room name:"));
-      if (!name) return;
-      const type = window.prompt(this._tx("Type (room, bath, stairs, door):"), "room") || "room";
-      (level.rooms = level.rooms || []).push({ name, x: 50, y: 50, w: 60, h: 40, type });
+      const name = nextName(n => this._t("Room {number}", { number: n }), false);
+      (level.rooms = level.rooms || []).push({ name, x: 50, y: 50, w: 60, h: 40, type: "room" });
       changed();
+      editName(level.rooms.length - 1);
     });
     on("fpnAddZone", "click", () => {
       const level = this._getEditingPlan()[this._editorFloor];
       if (!level) return;
-      const name = window.prompt(this._tx("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):"));
-      if (!name) return;
+      const name = nextName(n => this._t("Zone {number}", { number: n }), true);
       level.rooms = level.rooms || [];
       // A new zone sits just below the house, at least 90 units wide.
       const house = level.rooms.filter(r => r.type !== "outdoor");
@@ -404,7 +562,37 @@
       const h = 70;
       level.rooms.push({ name, x, y, w, h, type: "outdoor", points: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
       changed();
+      editName(level.rooms.length - 1);
     });
+
+    // The Rooms list: rename, retype or remove.
+    const roomOf = el => floorRooms()[idx(el, "data-ri")];
+    each(".fpn-room-name", "change", f => {
+      const rm = roomOf(f), name = f.value.trim();
+      if (!rm) return;
+      if (!name || name === rm.name) { redraw(); return; }
+      // Interior doors and cased openings name the room they belong to.
+      this._elemsFor(this._editorFloor).forEach(e => { if (e.room === rm.name) e.room = name; });
+      rm.name = name;
+      changed();
+    });
+    each(".fpn-room-type", "change", f => { const rm = roomOf(f); if (!rm) return; rm.type = f.value; changed(); });
+    each(".fpn-room-del", "click", b => {
+      const rm = roomOf(b);
+      if (!rm || !window.confirm(this._t("Delete '{name}' from floor plan?", { name: rm.name }))) return;
+      floorRooms().splice(idx(b, "data-ri"), 1);
+      this._fpSel = null;
+      changed();
+    });
+
+    // The selection bar: move, resize and delete without dragging.
+    const STEPS = { left: [-5, 0], right: [5, 0], up: [0, -5], down: [0, 5] };
+    each("[data-fpn-move]", "click", b => { const [dx, dy] = STEPS[b.getAttribute("data-fpn-move")] || [0, 0]; this._fpNudge(dx, dy); });
+    const SIZES = { wider: [5, 0], narrower: [-5, 0], taller: [0, 5], shorter: [0, -5] };
+    each("[data-fpn-size]", "click", b => { const [dw, dh] = SIZES[b.getAttribute("data-fpn-size")] || [0, 0]; this._fpResize(dw, dh); });
+    on("fpnSelDelete", "click", () => this._fpDeleteSel());
+    on("fpnSelDone", "click", () => this._fpSelect(null));
+    on("fpnSelOpen", "click", () => { const pin = this._fpSel?.kind === "pin" && this._fpSelItem(); if (pin) this._fpOpenPin(pin.e); });
     on("fpnAddProperty", "click", () => {
       if (this._propertyPts().length >= 3) {
         if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); changed(); }
@@ -512,6 +700,7 @@
       catch (err) { this._fail(err, "floor plan reset"); }
       this._editingPlan = null;
       this._editorFloor = null;
+      this._fpSel = null;
       redraw();
     });
     // A layout file is a manual backup, or a way to move a plan to another install.
@@ -537,6 +726,7 @@
             const layout = this._fpCleanImport(JSON.parse(ev.target.result));
             if (!this._fpLayoutUsable(layout)) throw new Error("no usable floors");
             this._editingPlan = layout;
+            this._fpSel = null;
             if (!layout[this._editorFloor]) this._editorFloor = Object.keys(layout)[0];
             changed();
           } catch (err) { this._fail(err, "floor plan import — invalid layout file"); }
@@ -745,6 +935,7 @@
     svgEl.addEventListener("contextmenu", e => {
       const t = e.target;
       drag = null; pan = null;   // a long press on a touch screen lands here mid-press
+      if (t.closest(".fpn-drag-room, .fpn-cam, .fpn-ent") || t.classList.contains("fpn-zone-vtx") || t.classList.contains("fpn-prop-vtx")) this._fpSel = null;
       const room = t.closest(".fpn-drag-room"), cam = t.closest(".fpn-cam"), pin = t.closest(".fpn-ent");
       if (t.classList.contains("fpn-zone-vtx")) {
         e.preventDefault();
@@ -862,18 +1053,19 @@
       const d = drag, zone = rooms[d.zi];
       drag = null;
       if (!d.live) {
-        // A tap: a pin opens its Home Assistant controls; nothing moved.
-        if (d.entity && d.entId) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: d.entId }, bubbles: true, composed: true }));
+        // A tap picks the item; a pin also opens its Home Assistant controls.
+        if (d.entity && d.entId) this._fpOpenPin(d.entId);
         const rect = svgEl.querySelector(`.fpn-drag-room[data-idx="${d.idx}"] .fpn-drag-rect`);
         if (rect && !d.resize) rect.setAttribute("stroke-width", "1");
+        this._fpSelect(d.entity ? { kind: "pin", i: d.entIdx } : d.camera ? { kind: "cam", i: d.camIdx }
+          : d.zoneVtx ? { kind: "corner", i: d.zi, v: d.vi } : d.property ? { kind: "lot", v: d.propVtx }
+          : { kind: "room", i: d.zoneBody ? d.zi : d.idx });
         return;
       }
       if (d.zoneBody && zone && zone.points && (d.ddx || d.ddy)) zone.points.forEach(p => { p[0] += d.ddx; p[1] += d.ddy; });
       if ((d.zoneVtx || d.zoneBody) && zone) this._syncRoomBBox(zone);
       // A pin that moved less than a plan unit was still only tapped.
-      if (d.entity && !d.moved && d.entId) {
-        this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: d.entId }, bubbles: true, composed: true }));
-      }
+      if (d.entity && !d.moved && d.entId) this._fpOpenPin(d.entId);
       this._fpMarkDirty();
       if (!redraw) return;
       if (d.camera || d.property || d.zoneVtx || d.zoneBody) this._rerenderFloorPlanCard(); else redrawPlan();
@@ -891,6 +1083,41 @@
     svgEl.addEventListener("touchmove", e => {
       if (drag || pinch || (e.touches && e.touches.length > 1)) e.preventDefault();
     }, { passive: false });
+
+    // Keyboard: Tab reaches each room, zone, camera and pin, and focusing
+    // one picks it. Arrows move it (Shift: five times as far), Alt and
+    // arrows resize a room, Delete removes it, Enter opens a pin, Escape
+    // lets go.
+    const STOPS = ".fpn-drag-room, .fpn-zone, .fpn-cam, .fpn-ent";
+    const pickOf = g => g.classList.contains("fpn-cam") ? { kind: "cam", i: num(g, "data-cam-idx") }
+      : g.classList.contains("fpn-ent") ? { kind: "pin", i: num(g, "data-ent-idx") }
+      : { kind: "room", i: num(g, g.classList.contains("fpn-zone") ? "data-zone-idx" : "data-idx") };
+    const stopOf = e => e.target && e.target.closest ? e.target.closest(STOPS) : null;
+    svgEl.addEventListener("focusin", e => {
+      const g = stopOf(e);
+      if (g && !drag && !pinch) this._fpSelect(pickOf(g));
+    });
+    const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    svgEl.addEventListener("keydown", e => {
+      const g = stopOf(e);
+      if (!g) return;
+      const pick = pickOf(g);
+      if (ARROWS[e.key]) {
+        e.preventDefault();
+        this._fpSel = pick;
+        const step = e.shiftKey ? 25 : 5, [dx, dy] = ARROWS[e.key];
+        if (e.altKey) this._fpResize(dx * step, dy * step); else this._fpNudge(dx * step, dy * step);
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        this._fpSel = pick;
+        this._fpDeleteSel();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (pick.kind === "pin") this._fpOpenPin(g.getAttribute("data-ent-id")); else this._fpSelect(pick);
+      } else if (e.key === "Escape") {
+        this._fpSelect(null);
+      }
+    });
 
     // The wheel zooms about the pointer, within fixed limits.
     svgEl.addEventListener("wheel", e => {

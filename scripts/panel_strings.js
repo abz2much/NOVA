@@ -3,7 +3,7 @@
  *
  * Two sources, merged:
  *   1. A render. Every tab is drawn under jsdom with the smoke test's data, and
- *      each text node and title/placeholder attribute is read exactly as
+ *      each text node and title/placeholder/aria-label attribute is read exactly as
  *      _localizeDOM sees it (trimmed). Only text that is written literally in
  *      frontend/src counts, so live data (area names, entity ids) is left out.
  *   2. A scan of frontend/src for text the render cannot reach: dialogs, errors,
@@ -95,7 +95,7 @@ function scanSource(decode) {
       if (/[`{};]|=>|&&|\|\||'\s*\+|\+\s*'/.test(seg)) continue;   // code, not text
       add(seg);
     }
-    for (const m of src.matchAll(/\b(?:title|placeholder)="([^"$]*)"/g)) add(m[1]);
+    for (const m of src.matchAll(/\b(?:title|placeholder|aria-label)="([^"$]*)"/g)) add(m[1]);
     // Labels kept in tables: option pairs ["key", "Label"] and maps { key: "Label" }.
     const addText = s => { if (looksLikeText(s)) found.add(s); };
     for (const m of src.matchAll(/\[\s*"[^"\n]*"\s*,\s*"([^"\\$\n]+)"/g)) addText(m[1]);
@@ -127,7 +127,7 @@ async function renderStrings(window, hass, isLiteral) {
       const k = (n.nodeValue || "").trim();
       if (wanted(k) && isLiteral(k)) found.add(k);
     }
-    root.querySelectorAll("[title],[placeholder]").forEach(e => ["title", "placeholder"].forEach(a => {
+    root.querySelectorAll("[title],[placeholder],[aria-label]").forEach(e => ["title", "placeholder", "aria-label"].forEach(a => {
       const k = (e.getAttribute(a) || "").trim();
       if (wanted(k) && isLiteral(k)) found.add(k);
     }));

@@ -419,12 +419,17 @@
       .fpn-svg{touch-action:pan-x pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
       .fpn-drag-room,.fpn-zone,.fpn-prop-vtx,.fpn-prop-mid,.fpn-cam,.fpn-ent{touch-action:none}
       .fpn-zoom{display:inline-flex;gap:6px}
+      .fpn-selbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px;min-height:32px}
+      .fpn-sel-name{font-family:var(--font-display);color:var(--gold);margin-right:4px}
+      .fpn-sel-tools{display:inline-flex;flex-wrap:wrap;gap:6px}
+      .fpn-keys{flex-basis:100%}
       .fpn-hint-touch{display:none}
       .fpn-unsaved{color:var(--warn);align-self:center}
       .fpn-unsaved[hidden]{display:none}
       @media (pointer:coarse){
         .fpn-hint-mouse{display:none}
         .fpn-hint-touch{display:block}
+        .fpn-keys{display:none}
         .fpn-zone-vtx,.fpn-prop-vtx,.fpn-zone-mid,.fpn-prop-mid,.fpn-cam-dot,.fpn-ent-dot,.fpn-resize-handle{stroke:transparent;stroke-width:var(--fpn-hit,44px)}
         .fpn-zone-mid,.fpn-prop-mid{fill:var(--gold);fill-opacity:0.45}
       }
