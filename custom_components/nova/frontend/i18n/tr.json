@@ -503,5 +503,18 @@
   "Needs adjustment": "Ayar gerekiyor",
   "Security": "Güvenlik",
   "Who's home": "Evde kim var",
-  "Indoor": "İç mekân"
+  "Indoor": "İç mekân",
+  "Ask Nova": "Nova'ya sor",
+  "Back to the list": "Listeye dön",
+  "I followed up on “{what}”: {answer}": "“{what}” konusunu takip ettim: {answer}",
+  "I kept quiet about: {msg}": "Şu konuda bir şey söylemedim: {msg}",
+  "I looked into {change}.": "{change} değişikliğini inceledim.",
+  "I noticed 1 small change and let it pass.": "1 küçük değişiklik fark ettim ve geçmesine izin verdim.",
+  "I noticed {count} small changes and let them pass.": "{count} küçük değişiklik fark ettim ve geçmelerine izin verdim.",
+  "I sent to your phone: {msg}": "Telefonuna gönderdim: {msg}",
+  "I told you: {msg}": "Sana söyledim: {msg}",
+  "I worked on your goal “{title}”: {result}": "“{title}” hedefin üzerinde çalıştım: {result}",
+  "More": "Daha fazla",
+  "Open chat": "Sohbeti aç",
+  "See everything": "Tümünü gör"
 }

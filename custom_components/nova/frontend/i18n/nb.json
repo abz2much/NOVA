@@ -503,5 +503,18 @@
   "Needs adjustment": "Må justeres",
   "Security": "Sikkerhet",
   "Who's home": "Hvem er hjemme",
-  "Indoor": "Innendørs"
+  "Indoor": "Innendørs",
+  "Ask Nova": "Spør Nova",
+  "Back to the list": "Tilbake til listen",
+  "I followed up on “{what}”: {answer}": "Jeg fulgte opp «{what}»: {answer}",
+  "I kept quiet about: {msg}": "Jeg sa ikke noe om: {msg}",
+  "I looked into {change}.": "Jeg undersøkte {change}.",
+  "I noticed 1 small change and let it pass.": "Jeg la merke til 1 liten endring og lot den passere.",
+  "I noticed {count} small changes and let them pass.": "Jeg la merke til {count} små endringer og lot dem passere.",
+  "I sent to your phone: {msg}": "Jeg sendte til telefonen din: {msg}",
+  "I told you: {msg}": "Jeg sa til deg: {msg}",
+  "I worked on your goal “{title}”: {result}": "Jeg jobbet med målet ditt «{title}»: {result}",
+  "More": "Mer",
+  "Open chat": "Åpne chat",
+  "See everything": "Se alt"
 }

@@ -1276,19 +1276,19 @@ if (require.main === module) setTimeout(async () => {
     && /\.new-decision-row \.new-log-cat\{white-space:normal/.test(elNew._css())]);
 
   // ── 8.0.0: Operational Mode sits right under the hello, Activity is last ──
+  // 8.77.0: the boxes under the hero moved into the dock's panels, so the
+  // dock comes straight after the hello (and the welcome card), Operational
+  // Mode is in More, and the Activity list is now the Nova panel.
   const modePanel = newRoot.getElementById("operationalModePanel");
   const heroEl = newRoot.querySelector(".hero");
-  const footEl = newRoot.querySelector(".footnote");
   checks.push(
-    ["command center: Operational Mode sits directly under the hello banner",
-      // 8.72.1: the welcome card, when shown, sits between them.
-      !!modePanel && !!heroEl && (heroEl.nextElementSibling === modePanel
-        || (heroEl.nextElementSibling?.id === "onboardingMount" && heroEl.nextElementSibling.nextElementSibling === modePanel))
+    ["command center: the dock comes straight after the hello, and Operational Mode is in More",
+      !!modePanel && !!heroEl && heroEl.nextElementSibling?.id === "onboardingMount"
+      && heroEl.nextElementSibling.nextElementSibling?.classList.contains("dock-wrap")
+      && !!modePanel.closest('[data-sheet="more"]')
       && /Operational Mode/.test(modePanel.querySelector(".panel-title")?.textContent || "")],
-    ["command center: Activity is the very last panel",
-      !!footEl && !!footEl.previousElementSibling?.querySelector("#feed")
-      && newRoot.getElementById("feedMeta")?.closest(".grid") === footEl.previousElementSibling
-      && newRoot.getElementById("cameraPanel").compareDocumentPosition(newRoot.getElementById("feed")) & 4],
+    ["command center: the old Activity list is gone; Nova's feed is in the Nova panel",
+      !newRoot.getElementById("feed") && !!newRoot.getElementById("novaFeed")?.closest('[data-sheet="nova"]')],
     ["command center: Operational Mode shows the modes, the active one and Auto",
       (() => {
         const body = newRoot.getElementById("operationalModeBody");
@@ -6071,6 +6071,142 @@ if (require.main === module) setTimeout(async () => {
     O._arcsStop?.(); O._arcsStart?.();
     checks.push(["orbit: with less motion the arcs are drawn once and do not keep moving", typeof O._arcsStart === "function" && !O._arcsRaf]);
     O.remove();
+  }
+
+
+  // The dock (8.77.0): five buttons at the bottom of the Command Center. Each
+  // opens a panel that slides up over the lower part of the hero; the boxes
+  // that were stacked under the hero live in them. Nova's panel says what
+  // Nova did in plain sentences, written here from each row's kind.
+  {
+    const chatSent = [];
+    const D = document.createElement("nova-panel");
+    D._currentTab = "dashboard";
+    D._presentFirstMs = 60000;
+    document.body.appendChild(D);
+    D.hass = { ...hass, callWS: async (m) => {
+      if (m.type === "nova/chat") { chatSent.push(m.text); return { ok: true, reply: "Yes, the garage is shut." }; }
+      return hass.callWS(m);
+    } };
+    await new Promise(r => setTimeout(r, 200));
+    const R = D.shadowRoot;
+    try {
+    const dockBtn = k => R.querySelector(`.dock-btn[data-dock="${k}"]`);
+    const sheet = k => R.querySelector(`.dock-sheet[data-sheet="${k}"]`);
+    const btns = Array.from(R.querySelectorAll(".dock .dock-btn"));
+    checks.push([`dock: five buttons with an icon and a label (${btns.map(b => b.textContent.trim()).join(", ")})`,
+      R.querySelector(".dock")?.tagName === "NAV" && !!R.querySelector(".dock").getAttribute("aria-label")
+      && btns.map(b => b.dataset.dock).join() === "home,nova,areas,goals,more"
+      && btns.map(b => b.textContent.trim()).join() === "Home,Nova,Areas,Goals,More"
+      && btns.every(b => b.querySelector("svg")?.getAttribute("aria-hidden") === "true")
+      && btns.slice(1).every(b => b.getAttribute("aria-expanded") === "false" && b.getAttribute("aria-controls"))]);
+
+    checks.push(["dock: Areas, Goals and the rest live in the panels, all closed at first",
+      !!R.getElementById("areasGrid")?.closest('[data-sheet="areas"]')
+      && !!R.getElementById("goalList")?.closest('[data-sheet="goals"]')
+      && ["operationalModePanel", "qaRunAnalysis", "cognitiveMetrics", "cameraPanel", "mutesPanel"]
+        .every(id => !!R.getElementById(id)?.closest('[data-sheet="more"]'))
+      && Array.from(R.querySelectorAll(".dock-sheet")).every(s => s.hidden)
+      && !R.querySelector(".dashboard-pair")]);
+
+    dockBtn("nova").click();
+    checks.push(["dock: tapping Nova opens its panel and moves focus into it",
+      !sheet("nova").hidden && sheet("nova").classList.contains("dock-open")
+      && dockBtn("nova").getAttribute("aria-expanded") === "true"
+      && sheet("nova").contains(R.activeElement)]);
+    sheet("nova").dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    checks.push(["dock: Esc closes the panel and focus goes back to its button",
+      sheet("nova").hidden && dockBtn("nova").getAttribute("aria-expanded") === "false"
+      && R.activeElement === dockBtn("nova")]);
+    dockBtn("areas").click(); dockBtn("goals").click();
+    checks.push(["dock: one panel at a time", sheet("areas").hidden && !sheet("goals").hidden]);
+    dockBtn("home").click();
+    await new Promise(r => setTimeout(r, 400));
+    checks.push(["dock: Home closes the open panel", Array.from(R.querySelectorAll(".dock-sheet")).every(s => s.hidden)]);
+
+    D._activityData = [
+      { ts: "22:10", kind: "spoken", msg: "The back door is open." },
+      { ts: "22:05", kind: "pushed", msg: "The garage has been open for 20 minutes." },
+      { ts: "22:00", kind: "verify", msg: "Kitchen light needed a second attempt to turn on — succeeded on retry." },
+      { ts: "21:50", kind: "goal", msg: "Goal #3 'Lower the heating bill' engaged (run 2): heating set back 1°" },
+      { ts: "21:45", kind: "followup", msg: "Follow-up #4 ran: check the bins → they are out" },
+      { ts: "21:40", kind: "checked", msg: "Hall motion: off → on — flagged for reasoning" },
+      { ts: "21:35", kind: "held", msg: "The dryer has finished." },
+      { ts: "21:30", kind: "passed", msg: "Hall light: off → on — not worth considering" },
+      { ts: "21:29", kind: "passed", msg: "Desk lamp: on → off — not worth considering" },
+      { ts: "21:28", kind: "passed", msg: "Back door: closed → open — household present, not announced" },
+      { ts: "21:20", kind: "note", msg: "Something else happened." },
+    ];
+    D._renderData();
+    const rows = Array.from(R.querySelectorAll("#novaFeed .nova-row")).map(r => r.querySelector(".nova-text")?.textContent.trim());
+    checks.push([`nova feed: plain sentences from each row's kind (${rows.join(" | ")})`,
+      rows.length === 9
+      && rows[0] === "I told you: The back door is open."
+      && rows[1] === "I sent to your phone: The garage has been open for 20 minutes."
+      && rows[2] === "Kitchen light needed a second attempt to turn on — succeeded on retry."
+      && rows[3] === "I worked on your goal “Lower the heating bill”: heating set back 1°"
+      && rows[4] === "I followed up on “check the bins”: they are out"
+      && rows[5] === "I looked into Hall motion: off → on."
+      && rows[6] === "I kept quiet about: The dryer has finished."
+      && rows[7] === "I noticed 3 small changes and let them pass."
+      && rows[8] === "Something else happened."
+      && !!R.querySelectorAll("#novaFeed .nova-row")[7].classList.contains("nova-quiet")]);
+    checks.push([`nova feed: the line under the greeting is the newest sentence (${R.getElementById("heroLatest")?.textContent.trim()})`,
+      /22:10/.test(R.getElementById("heroLatest")?.textContent || "")
+      && /I told you: The back door is open\./.test(R.getElementById("heroLatest")?.textContent || "")]);
+
+    checks.push([`dock: Nova's badge counts what Nova did since the panel was opened (${dockBtn("nova").querySelector(".dock-badge")?.textContent})`,
+      dockBtn("nova").querySelector(".dock-badge")?.textContent === "6"]);
+    dockBtn("nova").click(); dockBtn("nova").click();
+    D._activityData = [{ ts: "22:30", kind: "spoken", msg: "Goodnight." }, { ts: "22:20", kind: "passed", msg: "x: a → b — not worth considering" }, ...D._activityData];
+    D._renderData();
+    checks.push([`dock: Nova's badge counts what is new since the panel was last opened (${dockBtn("nova").querySelector(".dock-badge")?.textContent})`,
+      dockBtn("nova").querySelector(".dock-badge")?.textContent === "1" && !dockBtn("nova").querySelector(".dock-badge").hidden]);
+    dockBtn("nova").click();
+    checks.push(["dock: opening Nova clears the badge", dockBtn("nova").querySelector(".dock-badge").hidden]);
+
+    const ask = R.getElementById("askNovaInput");
+    ask.value = "Is the garage shut?";
+    R.getElementById("askNovaSend").click();
+    await new Promise(r => setTimeout(r, 30));
+    checks.push([`nova panel: Ask Nova sends through the chat and shows the reply in the panel (${R.getElementById("askNovaReply")?.textContent.trim()})`,
+      chatSent.join() === "Is the garage shut?" && /the garage is shut/.test(R.getElementById("askNovaReply")?.textContent || "")
+      && D._chatState().turns.map(t => t.role).join() === "user,nova"
+      && !!ask.getAttribute("aria-label") && ask.value === ""]);
+
+    D._render();
+    checks.push(["dock: the open panel stays open through a redraw",
+      !R.querySelector('.dock-sheet[data-sheet="nova"]').hidden
+      && R.querySelector('.dock-btn[data-dock="nova"]').getAttribute("aria-expanded") === "true"]);
+
+    R.querySelector('.dock-btn[data-dock="more"]').click();
+    const more = R.querySelector('.dock-sheet[data-sheet="more"]');
+    const items = Array.from(more.querySelectorAll(".more-item")).filter(b => !b.hidden).map(b => b.textContent.trim());
+    checks.push([`dock: More lists its sections (${items.join(", ")})`,
+      items.slice(0, 3).join() === "Operational Mode,Quick Actions,Cognitive Core"
+      && Array.from(more.querySelectorAll(".more-sec")).every(s => s.hidden)]);
+    more.querySelector('.more-item[data-more="actions"]').click();
+    checks.push(["dock: a More section opens on its own, with Back",
+      !more.querySelector('.more-sec[data-more-sec="actions"]').hidden
+      && more.querySelector('.more-sec[data-more-sec="mode"]').hidden
+      && more.querySelector(".more-list").hidden && !!more.querySelector(".more-back")]);
+    more.querySelector(".more-back").click();
+    checks.push(["dock: Back returns to the list", !more.querySelector(".more-list").hidden
+      && Array.from(more.querySelectorAll(".more-sec")).every(s => s.hidden)]);
+
+    R.querySelector('.dock-btn[data-dock="nova"]').click();
+    R.getElementById("novaSeeAll").click();
+    checks.push(["nova panel: See everything opens the Logs tab", D._currentTab === "logs"]);
+
+    const css = D._css();
+    checks.push(["dock: it stays at the bottom, its buttons are big enough to tap, and panels slide only with motion allowed",
+      /\.dock-wrap\{position:sticky;bottom:0/.test(css)
+      && /\.dock-btn\{[^}]*min-height:48px/.test(css)
+      && /\.dock-sheet\{[^}]*transform:translateY\(/.test(css)
+      && /@media \(prefers-reduced-motion: ?reduce\)\{[^@]*\.dock-sheet\{transition:none/.test(css)]);
+    } catch (err) { checks.push([`dock: the dock checks ran to the end (${err.message})`, false]); }
+    D.remove();
   }
 
   let ok = true;

@@ -47,28 +47,37 @@
     const root = this.shadowRoot;
     const input = root?.getElementById("chatInput");
     const msg = root?.getElementById("chatMsg");
-    const c = this._chatState();
     const text = String(input?.value || "").trim();
-    if (!this._hass || !text || c.busy) return;
+    if (!this._hass || !text || this._chatState().busy) return;
     input.value = "";
     if (msg) this._setText(msg, "");
+    await this._chatAsk(text, () => this._renderChat());
+  }
+
+  // Send one message and return Nova's turn. Chat and Ask Nova (dock.js)
+  // both use it, so they share one thread.
+  async _chatAsk(text, redraw) {
+    const c = this._chatState();
     c.turns.push({ role: "user", text });
     c.busy = true;
-    this._renderChat();
+    redraw();
+    let turn;
     try {
       const res = await this._hass.callWS({ type: "nova/chat", text });
       if (res && res.ok) {
-        c.turns.push({ role: "nova", text: res.reply });
+        turn = { role: "nova", text: res.reply };
       } else if (res && res.code === "rate_limited") {
-        c.turns.push({ role: "nova", text: this._t("You're sending too fast, wait a moment"), error: true });
+        turn = { role: "nova", text: this._t("You're sending too fast, wait a moment"), error: true };
       } else {
-        c.turns.push({ role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true });
+        turn = { role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true };
       }
     } catch (err) {
-      c.turns.push({ role: "nova", error: true, text: this._t("Could not reach Nova.") });
+      turn = { role: "nova", error: true, text: this._t("Could not reach Nova.") };
     }
+    c.turns.push(turn);
     c.busy = false;
-    this._renderChat();
+    redraw();
+    return turn;
   }
 
   _wireChat() {

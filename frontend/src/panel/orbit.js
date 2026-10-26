@@ -127,11 +127,14 @@
   _heroLatest() {
     const el = this.shadowRoot?.getElementById("heroLatest");
     if (!el) return;
-    const top = (this._activityData || [])[0];
-    const sig = top ? `${top.ts}|${top.tag}|${top.msg}` : "";
+    // The newest of Nova's plain sentences (dock.js), skipping the quiet
+    // "let them pass" line unless there is nothing else.
+    const lines = this._novaLines();
+    const top = lines.find(l => l.kind !== "passed") || lines[0];
+    const sig = top ? `${top.ts}|${top.text}` : "";
     if (sig === this._heroLatestSig) return;
     this._heroLatestSig = sig;
-    this._setHtml(el, top ? `<span class="dot"></span><b>${this._esc(top.ts || "")}</b> ${this._esc(top.tag || "")} · ${this._esc(top.msg || "")}` : "");
+    this._setHtml(el, top ? `<span class="dot"></span><b>${this._esc(top.ts || "")}</b> ${this._esc(top.text)}` : "");
     el.classList.remove("hero-latest-in");
     void el.offsetWidth;
     el.classList.add("hero-latest-in");

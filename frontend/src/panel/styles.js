@@ -95,6 +95,48 @@
         .orbit-tile,.orbit-tile[data-orbit]{position:relative;left:auto;right:auto;top:auto;width:auto;animation:none}
       }
       @media (prefers-reduced-motion: reduce){.hero-caret,.orbit-tile,.hero-latest-in,.hero-stage.presenting .present-card{animation:none}}
+      /* The dock (8.77.0): five buttons at the bottom, panels slide up over the hero */
+      .dock-wrap{position:sticky;bottom:0;z-index:6;max-width:1100px;margin:16px auto 0;padding-bottom:8px}
+      .dock{display:flex;gap:4px;padding:6px;background:var(--surface);
+        border:1px solid var(--line-soft);border-radius:var(--r-card);box-shadow:0 -8px 32px color-mix(in srgb,var(--bg) 70%,transparent)}
+      .dock-btn{flex:1;min-width:0;min-height:48px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+        padding:6px 2px;background:none;border:0;border-radius:var(--r-tile);color:var(--ink-dim);font:inherit;font-size:var(--t-cap);font-weight:600;cursor:pointer;
+        transition:color .15s,background .15s}
+      .dock-btn svg{width:24px;height:24px;flex:none}
+      .dock-btn:hover{color:var(--ink)}
+      .dock-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      .dock-btn[aria-expanded="true"]{color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,transparent)}
+      .dock-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .dock-badge{position:absolute;top:2px;left:calc(50% + 6px);min-width:18px;padding:0 5px;border-radius:999px;background:var(--bad);
+        color:var(--on-accent);font-size:var(--t-cap);font-weight:700;line-height:18px;text-align:center}
+      .dock-sheet{position:absolute;left:0;right:0;bottom:calc(100% + 8px);max-height:min(55vh,560px);overflow-y:auto;overscroll-behavior:contain;
+        padding:12px 16px 16px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);
+        box-shadow:0 -12px 40px color-mix(in srgb,var(--bg) 80%,transparent);
+        opacity:0;transform:translateY(24px);transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+      .dock-sheet.dock-open{opacity:1;transform:none}
+      .dock-sheet:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      .dock-sheet-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+      .dock-sheet-head .panel-title{margin-right:auto}
+      .dock-sheet .panel{margin:12px 0 0;padding:0;border:0;background:none}
+      .nova-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:var(--t-sm)}
+      .nova-time{flex:none;min-width:44px;color:var(--ink-faint);font-size:var(--t-cap);padding-top:2px}
+      .nova-dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--ink-faint)}
+      .nova-dot-spoken,.nova-dot-pushed{background:var(--gold)}
+      .nova-dot-verify,.nova-dot-held{background:var(--warn)}
+      .nova-dot-goal,.nova-dot-followup{background:var(--good)}
+      .nova-dot-passed{background:var(--line-soft)}
+      .nova-quiet .nova-text{color:var(--ink-faint)}
+      .ask-nova{display:flex;gap:8px;margin-top:12px}
+      .ask-nova .cfg-field{flex:1;min-width:0}
+      .ask-reply:not(:empty){margin-top:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-tile);font-size:var(--t-sm)}
+      .ask-q{color:var(--ink-dim);margin-bottom:4px}
+      .ask-reply .mode-chip{margin-top:8px}
+      .nova-foot{margin-top:12px}
+      .more-item{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;padding:12px 4px;background:none;border:0;
+        border-bottom:1px solid var(--line-soft);color:var(--ink);font:inherit;font-size:var(--t-body);text-align:left;cursor:pointer}
+      .more-item::after{content:"›";color:var(--ink-faint);font-size:var(--t-title)}
+      .more-item:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+      @media (prefers-reduced-motion: reduce){.dock-sheet{transition:none}.dock-btn{transition:none}}
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-card);background:var(--surface-2);
         font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-dim);border:1px solid var(--line-soft)}

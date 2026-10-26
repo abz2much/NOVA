@@ -197,16 +197,43 @@ async def test_activity_log_rows_are_shaped_for_the_panel(ws, load, activity):
     calls, rows = activity
     rows += [
         {"timestamp": "2026-04-23T05:30:00", "urgency": "high", "entity_id": "lock.front_door",
-         "message": "lock.front_door unlocked", "source": "sentinel"},
+         "message": "lock.front_door unlocked", "source": "sentinel",
+         "category": "security", "was_spoken": 1},
         {"timestamp": "garbage", "message": "m"},
     ]
     conn = await _call(ws.ws_get_activity_log, _hass(_entry(load)), hours=24, limit=50)
     first, second = conn.results[0][1]["entries"]
     assert first["urgency"] == "high" and first["source"] == "sentinel"
     assert first["tag"] == "FRONT_DOOR" and len(first["ts"]) == 5
+    # 8.77.0: the kind of entry and whether Nova said it, for the panel's
+    # plain sentences.
+    assert first["category"] == "security" and first["spoken"] is True
+    assert first["kind"] == "spoken"
     assert second == {"ts": "garba", "urgency": "low", "tag": "", "msg": "m",
-                      "source": "observer"}
+                      "source": "observer", "category": "other", "spoken": False,
+                      "kind": "note"}
     assert calls == [(24, 50)]
+
+
+@pytest.mark.parametrize("row, kind", [
+    ({"was_spoken": 1, "pushed": 1}, "spoken"),
+    ({"pushed": 1}, "pushed"),
+    ({"category": "classified", "message": "Hall light: off → on — not worth considering"}, "passed"),
+    ({"category": "doors_windows", "message": "Back door: closed → open — household present, not announced"}, "passed"),
+    ({"category": "motion", "message": "Kitchen motion: off → on — flagged for reasoning"}, "checked"),
+    ({"category": "goal", "message": "Goal #3 'Heating' engaged (run 2): done"}, "goal"),
+    ({"category": "followup", "message": "Follow-up #4 ran: check bins → out"}, "followup"),
+    ({"category": "verify", "message": "Kitchen light did not respond"}, "verify"),
+    ({"category": "security", "message": "Door open", "outcome": "quiet hours"}, "held"),
+    ({"category": "security", "message": "Door open"}, "note"),
+])
+async def test_activity_log_says_what_kind_each_row_is(ws, load, activity, row, kind):
+    # 8.77.0: the panel writes its plain sentences from this, not from the
+    # wording of the message.
+    _, rows = activity
+    rows.append({"timestamp": "2026-04-23T05:30:00", **row})
+    conn = await _call(ws.ws_get_activity_log, _hass(_entry(load)), hours=24, limit=50)
+    assert conn.results[0][1]["entries"][0]["kind"] == kind
 
 
 async def test_current_behaviour_activity_log_hours_and_limit_are_not_bounded(ws, load, activity):
