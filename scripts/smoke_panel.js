@@ -957,12 +957,13 @@ if (require.main === module) setTimeout(async () => {
       elNew._liveData.config = Object.assign({}, elNew._liveData.config, { hero_card_cycle: true });
       elNew._liveData.status.sleep = { state: "AWAKE" };
       await openDashboard();
-      // Wait for the card itself, not a fixed time: a slow machine needs longer.
-      for (let i = 0; i < 40 && !(shown() && /11\.2/.test(card().textContent)); i++) await tick(50);
-      const t2 = card().textContent;
-      checks.push(["ambient: with the setting on, the card comes round by itself with the Energy tab's figures",
-        shown() && elNew._coreStateKey === "presenting" && t2.includes("11.2") && t2.includes("80%")
-        && t2.includes("3.1 kWh") && t2.includes("7.4 kWh") && t2.includes("2,500 W")]);
+      // Wait for the card itself, not a fixed time: a slow machine needs
+      // longer. The wait looks for exactly what the check needs.
+      const full = () => { const t = card().textContent;
+        return shown() && elNew._coreStateKey === "presenting" && t.includes("11.2") && t.includes("80%")
+          && t.includes("3.1 kWh") && t.includes("7.4 kWh") && t.includes("2,500 W"); };
+      for (let i = 0; i < 80 && !full(); i++) await tick(50);
+      checks.push([`ambient: with the setting on, the card comes round by itself with the Energy tab's figures (${shown()}, ${elNew._coreStateKey})`, full()]);
       card().click();
       await tick(200);
       checks.push(["ambient: after a tap it comes round again, so the hero is not only ever one greeting", shown()]);
