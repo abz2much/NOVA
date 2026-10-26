@@ -17,6 +17,10 @@
     [".new-ilog-btn", "mode-chip-on"],
     [".settings-nav-btn", "active"],
     [".area-light-toggle", "on"],
+    [".fpn-drag-room", "fpn-sel"],
+    [".fpn-zone", "fpn-sel"],
+    [".fpn-cam", "fpn-sel"],
+    [".fpn-ent", "fpn-sel"],
   ];
 
   _a11yId(el) {

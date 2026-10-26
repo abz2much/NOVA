@@ -79,7 +79,8 @@
   "da": [
    "SEND",
    "Script",
-   "Status"
+   "Status",
+   "Zone {number}"
   ],
   "de": [
    "BRIEFINGS",
@@ -99,6 +100,7 @@
    "Solar",
    "Status",
    "Vision",
+   "Zone {number}",
    "normal",
    "optional",
    "▶ BRIEFING…"
@@ -156,6 +158,7 @@
    "Source",
    "Suggestions",
    "Vision",
+   "Zone {number}",
    "briefings",
    "garage",
    "normal",
@@ -197,7 +200,7 @@
    "Routines",
    "Script",
    "Status",
-   "Type (room, bath, stairs, door):",
+   "Zone {number}",
    "briefings",
    "garage",
    "oven",

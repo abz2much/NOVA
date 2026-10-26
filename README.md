@@ -82,7 +82,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | Hear about bad weather | Weather warnings from Met Éireann, the US National Weather Service or a CAP feed | [Weather warnings](docs/weather-warnings.md) |
 | Find out why something broke | Checks your setup for problems and explains what it found, with fixes you apply yourself | [Getting started](docs/getting-started.md#when-something-is-not-working) |
 | Use the panel with a keyboard or screen reader | Every button and field says what it is and whether it is on, panel titles are headings, focus stays where you were after a save, and a visible ring shows where you are | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
-| Draw the house on a phone or tablet | The floor plan editor works with a finger or a pen: drag with one finger, pinch to zoom, move two fingers to pan, with handles big enough to grab | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
+| Draw the house on a phone, a tablet or by keyboard | The floor plan editor works with a finger or a pen: drag with one finger, pinch to zoom, move two fingers to pan. Or pick an item and move, resize or delete it with buttons or the arrow keys, no dragging needed | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 
 Nova also shows its reasoning. The Logs tab lists every decision it made, why, and how confident it was. You can tell it when a decision was helpful or unnecessary.
 

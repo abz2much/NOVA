@@ -148,13 +148,25 @@ opacity you can change. You can export the plan as JSON to back it up or move
 it to another install, and import it again. The editor can also estimate how
 much each camera covers.
 
-It works with a mouse, a pen or a finger. With a mouse, drag to move, scroll
-or use **+** and **−** to zoom, drag empty space to pan, and right-click to
-delete. On a phone or tablet, drag an item with one finger, pinch with two
-fingers to zoom and move two fingers to pan; one finger on empty space still
-scrolls the page. Changes are kept only once you press **Save Layout**: until
-then the editor says "Unsaved changes." **Reset Default** asks before it
-replaces your plan.
+It works with a mouse, a pen, a finger or the keyboard. With a mouse, drag to
+move, scroll or use **+** and **−** to zoom, drag empty space to pan, and
+right-click to delete. On a phone or tablet, drag an item with one finger,
+pinch with two fingers to zoom and move two fingers to pan; one finger on
+empty space still scrolls the page.
+
+Tap or click a room, zone, corner, camera or device pin to pick it. A bar
+above the plan then shows its name, with arrows to move it a foot at a time,
+Wider, Narrower, Taller and Shorter for a room, and Delete. With the keyboard,
+Tab moves from item to item on the plan; the arrow keys move the one you are
+on (Shift moves it further), Alt and the arrow keys resize a room, Delete
+removes it and Enter opens a device's controls.
+
+The **Rooms** list under the plan renames a room, changes its type or
+removes it. **+ Add Room** and **+ Outdoor Zone** add a numbered room or zone
+and put you in its name, ready to type over.
+
+Changes are kept only once you press **Save Layout**: until then the editor
+says "Unsaved changes." **Reset Default** asks before it replaces your plan.
 
 **Doorbell Training** is a card in the Cameras group of Settings.
 
