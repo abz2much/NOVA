@@ -728,7 +728,8 @@
             <button class="toggle-btn ${enabled ? "on" : "off"} new-cam-enable-toggle" data-cam="${this._esc(c.entity_id)}">${enabled ? "ON" : "OFF"}</button>
           </div>
           <div class="cfg-row">
-            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
+            <label class="field"><span>Name</span>
+            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off"></label>
           </div>
           <div class="mode-grid">
             ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}

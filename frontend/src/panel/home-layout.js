@@ -112,7 +112,8 @@
       ${rows}
       <div class="cfg-row res-exit-add">
         <select id="resExitPick" aria-labelledby="resExitHead">${this._exitDoorOptions(cfg)}</select>
-        <input id="resExitName" type="text" maxlength="40" placeholder="Name (optional)">
+        <label class="field" for="resExitName"><span>Name (optional)</span>
+          <input id="resExitName" class="cfg-field" type="text" maxlength="40"></label>
         <button class="mode-chip" id="resExitAdd">Add another exit door</button>
       </div>`;
   }

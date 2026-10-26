@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.72.0
+ * v8.72.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.72.0 ",
+      console.log("%c Nova Panel %c v8.72.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -244,6 +244,12 @@ class NovaPanel extends HTMLElement {
     if (this._currentTab === "dashboard") this._presentStart();
     this._a11y(root);
     this._drawNotice();
+    // On a phone the tabs scroll sideways: centre the open one. The row's own
+    // scroll is set, so the page itself never moves.
+    const nav = root.querySelector(".top-nav"), open = root.querySelector(".nav-tab.active");
+    if (nav && open && nav.scrollWidth > nav.clientWidth) {
+      nav.scrollLeft = Math.max(0, open.offsetLeft - nav.offsetLeft - (nav.clientWidth - open.offsetWidth) / 2);
+    }
     this._focusRestore(root, focus);
   }
 
@@ -415,6 +421,7 @@ class NovaPanel extends HTMLElement {
               <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "energy" ? "Energy" : tab === "chat" ? "Chat" : "Command Center"}</div>
             </div>
           </div>
+          <button class="lockdown-control" id="lockdownControl" hidden></button>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
             <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
@@ -427,7 +434,6 @@ class NovaPanel extends HTMLElement {
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
             <button class="nav-tab${tab === "energy" ? " active" : ""}" data-tab="energy">Energy</button>
           </nav>
-          <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : tab === "chat" ? this._htmlChat() : this._htmlDashboard()}
@@ -441,7 +447,6 @@ class NovaPanel extends HTMLElement {
   _htmlDashboard() {
     return `
         <div id="shushMount"></div>
-        <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
             <canvas class="core" id="core" aria-hidden="true"></canvas>
@@ -454,6 +459,7 @@ class NovaPanel extends HTMLElement {
           </div>
           <div class="chips" id="chips"></div>
         </div>
+        <div id="onboardingMount"></div>
 
         <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
           <div class="panel-head">
@@ -540,7 +546,8 @@ ${this._htmlDashboardBody()}`;
             </div>
             <div class="goal-list" id="goalList"></div>
             <div class="goal-create">
-              <input class="cfg-field" id="goalOutcome" maxlength="500" placeholder="Outcome Nova should work toward">
+              <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
+                <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
               <button class="mode-chip" id="goalCreate">ADD GOAL</button>
             </div>
             <div class="toggle-desc" id="goalResult"></div>
@@ -650,7 +657,20 @@ ${this._htmlDashboardBody()}`;
         });
       });
 
-      // A field with no label of its own is named by its hint text.
+      // A field in a row with no label of its own sits under a section
+      // heading ("Exclude whole domains", "Try a sentence"): the heading,
+      // which anyone can see, names it.
+      scope.querySelectorAll(".cfg-row").forEach(row => {
+        const fields = Array.from(row.querySelectorAll("input, textarea, select"))
+          .filter(f => f.closest(ROWS) === row && !this._a11yNamed(f) && f.type !== "hidden" && f.type !== "file");
+        if (!fields.length) return;
+        let prev = row.previousElementSibling;
+        while (prev && (prev.classList.contains("stub-body") || prev.classList.contains("toggle-desc"))) prev = prev.previousElementSibling;
+        if (!prev || !prev.classList.contains("mode-bind-head") || !prev.textContent.trim()) return;
+        fields.forEach(f => f.setAttribute("aria-labelledby", this._a11yId(prev)));
+      });
+
+      // A field with no label at all is named by its hint text.
       scope.querySelectorAll("input[placeholder], textarea[placeholder]").forEach(field => {
         if (!this._a11yNamed(field)) field.setAttribute("aria-label", field.getAttribute("placeholder"));   // i18n-ok: the placeholder, translated before this runs
       });
@@ -1371,8 +1391,10 @@ ${this._htmlDashboardBody()}`;
           </div>
           <div class="stub-body">Durable facts &amp; preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.</div>
           <div class="cfg-row cfg-row-wrap">
-            <input id="newMemKey" class="cfg-field" style="flex:1" placeholder="what (e.g. trash day)" autocomplete="off">
-            <input id="newMemVal" class="cfg-field" style="flex:1" placeholder="is (e.g. Tuesday)" autocomplete="off">
+            <label class="field" for="newMemKey"><span>what (e.g. trash day)</span>
+              <input id="newMemKey" class="cfg-field" autocomplete="off"></label>
+            <label class="field" for="newMemVal"><span>is (e.g. Tuesday)</span>
+              <input id="newMemVal" class="cfg-field" autocomplete="off"></label>
             <select id="newMemSubject" class="cfg-field">
               <option value="household">Household</option>
               <option value="primary">About me</option>
@@ -2034,7 +2056,8 @@ ${this._htmlDashboardBody()}`;
           </div>
           <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "; change it under Settings → Security alarm." : " (the default); change it under Settings → Security alarm."}</div>
           <div class="cfg-row">
-            <input class="cfg-field" id="facesAddName" maxlength="60" placeholder="Resident name">
+            <label class="field" for="facesAddName"><span>Resident name</span>
+              <input class="cfg-field" id="facesAddName" maxlength="60"></label>
             <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
           </div>
           <div class="toggle-desc" id="facesMsg"></div>
@@ -2393,10 +2416,10 @@ ${this._htmlDashboardBody()}`;
     const t = a.type || "appliance";
     return `
       <div class="new-appliance-row">
-        <input class="new-appliance-name cfg-field" type="text" placeholder="Name (e.g. Washer)" value="${this._esc(a.name || "")}">
-        <select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select>
-        <select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select>
-        <input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" placeholder="watts" value="${a.watts || ""}">
+        <label class="field"><span>Name (e.g. Washer)</span><input class="new-appliance-name cfg-field" type="text" value="${this._esc(a.name || "")}"></label>
+        <label class="field"><span>Type</span><select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select></label>
+        <label class="field"><span>Entity</span><select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select></label>
+        <label class="field"><span>watts</span><input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" value="${a.watts || ""}"></label>
         <button class="new-appliance-remove mode-chip" title="Remove appliance" aria-label="Remove appliance">✕</button>
       </div>`;
   }
@@ -3556,7 +3579,8 @@ ${this._htmlDashboardBody()}`;
       ${rows}
       <div class="cfg-row res-exit-add">
         <select id="resExitPick" aria-labelledby="resExitHead">${this._exitDoorOptions(cfg)}</select>
-        <input id="resExitName" type="text" maxlength="40" placeholder="Name (optional)">
+        <label class="field" for="resExitName"><span>Name (optional)</span>
+          <input id="resExitName" class="cfg-field" type="text" maxlength="40"></label>
         <button class="mode-chip" id="resExitAdd">Add another exit door</button>
       </div>`;
   }
@@ -5930,7 +5954,8 @@ ${this._htmlDashboardBody()}`;
             <button class="toggle-btn ${enabled ? "on" : "off"} new-cam-enable-toggle" data-cam="${this._esc(c.entity_id)}">${enabled ? "ON" : "OFF"}</button>
           </div>
           <div class="cfg-row">
-            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
+            <label class="field"><span>Name</span>
+            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off"></label>
           </div>
           <div class="mode-grid">
             ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}
@@ -10167,7 +10192,7 @@ ${this._htmlDashboardBody()}`;
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
         background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
-      .topbar{display:flex;align-items:center;justify-content:flex-start;gap:24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
+      .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
         background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, #7a2513 100%);
@@ -10222,10 +10247,10 @@ ${this._htmlDashboardBody()}`;
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:15px;font-weight:600}
       .panel-meta{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
-      .lockdown-control{margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+      .lockdown-control{margin-left:auto;order:2;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
         padding:8px 12px;border-radius:9px;border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-faint);cursor:pointer}
       .lockdown-control.active{color:#ffd7d7;background:#7d2028;border-color:#d95b65;box-shadow:0 0 16px #d95b6533}
-      .onboarding-card{max-width:1100px;margin:0 auto 16px;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
+      .onboarding-card{max-width:1100px;margin:16px auto 0;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
       .onboarding-progress{position:relative;height:20px;background:var(--surface-2);border-radius:8px;overflow:hidden;margin:12px 0}
       .onboarding-progress i{position:absolute;inset:0 auto 0 0;background:#f4b86033}.onboarding-progress span{position:relative;z-index:1;display:block;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
       .onboarding-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;margin-bottom:10px}
@@ -10420,11 +10445,18 @@ ${this._htmlDashboardBody()}`;
       }
 
       /* Top nav (v7.94.0) */
-      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
+      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px;flex-basis:100%;order:3}
       .nav-tab{font-family:var(--font-body);font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:8px;
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
       .nav-tab.active{background:var(--ember);color:#1e0d06}
       .nav-tab:not(.active):hover{color:var(--ink)}
+      /* A phone shows the tabs as one row that scrolls sideways; the open tab
+         is scrolled into view on every draw. */
+      @media (max-width:640px){
+        .top-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+        .top-nav::-webkit-scrollbar{display:none}
+        .nav-tab{flex:none;white-space:nowrap}
+      }
 
       /* Settings (v7.94.0) */
       .settings-toolbar{max-width:1100px;margin:0 auto 16px;display:flex;flex-direction:column;gap:10px}
@@ -10508,7 +10540,12 @@ ${this._htmlDashboardBody()}`;
         font-family:var(--font-body);font-size:12px;border-radius:8px}
       .cred-input:focus{border-color:var(--gold)}
       .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
-      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
+      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 72px auto;gap:6px;align-items:end}
+      /* After the rule above, so a phone gets two columns: the name on its own row. */
+      @media (max-width:640px){
+        .new-appliance-row{grid-template-columns:1fr 1fr}
+        .new-appliance-row > .field:first-child{grid-column:1 / -1}
+      }
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
         color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
       .new-appliance-row input:focus,.new-appliance-row select:focus{border-color:var(--gold)}
@@ -10569,6 +10606,10 @@ ${this._htmlDashboardBody()}`;
       .chat-compose{display:flex;gap:8px}.chat-compose .cfg-field{flex:1;min-width:0}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
       .cfg-help{margin:-4px 0 10px}
+      .field{display:flex;flex-direction:column;gap:4px;flex:1 1 150px;min-width:0}
+      .cfg-row-wrap,.goal-create,.cfg-row:has(> .field){align-items:flex-end;flex-wrap:wrap}
+      .field > span{font-size:12px;color:var(--ink-dim)}
+      .field > input,.field > select{width:100%}
     `;
   }
 }

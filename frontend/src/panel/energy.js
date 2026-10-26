@@ -237,10 +237,10 @@
     const t = a.type || "appliance";
     return `
       <div class="new-appliance-row">
-        <input class="new-appliance-name cfg-field" type="text" placeholder="Name (e.g. Washer)" value="${this._esc(a.name || "")}">
-        <select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select>
-        <select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select>
-        <input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" placeholder="watts" value="${a.watts || ""}">
+        <label class="field"><span>Name (e.g. Washer)</span><input class="new-appliance-name cfg-field" type="text" value="${this._esc(a.name || "")}"></label>
+        <label class="field"><span>Type</span><select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select></label>
+        <label class="field"><span>Entity</span><select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select></label>
+        <label class="field"><span>watts</span><input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" value="${a.watts || ""}"></label>
         <button class="new-appliance-remove mode-chip" title="Remove appliance" aria-label="Remove appliance">✕</button>
       </div>`;
   }

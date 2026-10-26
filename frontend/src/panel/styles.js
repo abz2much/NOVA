@@ -25,7 +25,7 @@
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
         background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
-      .topbar{display:flex;align-items:center;justify-content:flex-start;gap:24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
+      .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
         background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, #7a2513 100%);
@@ -80,10 +80,10 @@
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:15px;font-weight:600}
       .panel-meta{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
-      .lockdown-control{margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+      .lockdown-control{margin-left:auto;order:2;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
         padding:8px 12px;border-radius:9px;border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-faint);cursor:pointer}
       .lockdown-control.active{color:#ffd7d7;background:#7d2028;border-color:#d95b65;box-shadow:0 0 16px #d95b6533}
-      .onboarding-card{max-width:1100px;margin:0 auto 16px;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
+      .onboarding-card{max-width:1100px;margin:16px auto 0;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
       .onboarding-progress{position:relative;height:20px;background:var(--surface-2);border-radius:8px;overflow:hidden;margin:12px 0}
       .onboarding-progress i{position:absolute;inset:0 auto 0 0;background:#f4b86033}.onboarding-progress span{position:relative;z-index:1;display:block;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
       .onboarding-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;margin-bottom:10px}
@@ -278,11 +278,18 @@
       }
 
       /* Top nav (v7.94.0) */
-      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
+      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px;flex-basis:100%;order:3}
       .nav-tab{font-family:var(--font-body);font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:8px;
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
       .nav-tab.active{background:var(--ember);color:#1e0d06}
       .nav-tab:not(.active):hover{color:var(--ink)}
+      /* A phone shows the tabs as one row that scrolls sideways; the open tab
+         is scrolled into view on every draw. */
+      @media (max-width:640px){
+        .top-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+        .top-nav::-webkit-scrollbar{display:none}
+        .nav-tab{flex:none;white-space:nowrap}
+      }
 
       /* Settings (v7.94.0) */
       .settings-toolbar{max-width:1100px;margin:0 auto 16px;display:flex;flex-direction:column;gap:10px}
@@ -366,7 +373,12 @@
         font-family:var(--font-body);font-size:12px;border-radius:8px}
       .cred-input:focus{border-color:var(--gold)}
       .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
-      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
+      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 72px auto;gap:6px;align-items:end}
+      /* After the rule above, so a phone gets two columns: the name on its own row. */
+      @media (max-width:640px){
+        .new-appliance-row{grid-template-columns:1fr 1fr}
+        .new-appliance-row > .field:first-child{grid-column:1 / -1}
+      }
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
         color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
       .new-appliance-row input:focus,.new-appliance-row select:focus{border-color:var(--gold)}
@@ -427,5 +439,9 @@
       .chat-compose{display:flex;gap:8px}.chat-compose .cfg-field{flex:1;min-width:0}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
       .cfg-help{margin:-4px 0 10px}
+      .field{display:flex;flex-direction:column;gap:4px;flex:1 1 150px;min-width:0}
+      .cfg-row-wrap,.goal-create,.cfg-row:has(> .field){align-items:flex-end;flex-wrap:wrap}
+      .field > span{font-size:12px;color:var(--ink-dim)}
+      .field > input,.field > select{width:100%}
     `;
   }

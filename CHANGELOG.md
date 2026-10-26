@@ -1,3 +1,12 @@
+## [8.72.1] Better on a phone
+
+### Changed
+- **The tabs are one row on a phone** that you can swipe sideways, instead of three rows. The open tab is moved into view.
+- **Lockdown sits in the top bar**, beside the Nova name, instead of on a row of its own.
+- **The head comes first.** The welcome card now sits under the head, so a phone shows live status straight away. On a phone the head starts about a third of the way down the first screen; before, it was below the first screen.
+- **Appliance rows stack on a phone**: the name on its own row, then type, entity and watts.
+- **Fields have labels you can see.** Goals, Memory's Teach form, Faces, appliances, camera names and the exit door name show their label above the field instead of only as a hint that disappears when you type. Fields under a section heading, like the exclusion lists, are named by that heading. Search boxes and the chat box keep their hint.
+
 ## [8.72.0] The panel tells you when something fails
 
 ### Added
