@@ -12,7 +12,7 @@
             <div class="panel-title">Chat</div>
             <div class="panel-meta"><button class="mode-chip" id="chatNew">NEW CHAT</button></div>
           </div>
-          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
           <div class="chat-compose">
             <input class="cfg-field" id="chatInput" maxlength="1000" placeholder="Ask Nova something">
             <button class="mode-chip" id="chatSend">SEND</button>

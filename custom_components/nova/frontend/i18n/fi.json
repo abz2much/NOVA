@@ -396,5 +396,12 @@
   "Arming": "Viritetään",
   "Disarmed": "Viritys pois",
   "Triggered": "Lauennut",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "asentaa Piperin, Whisperin ja openWakeWordin ja rakentaa puheputken seuraavassa uudelleenkäynnistyksessä (Home Assistant OS tai Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "asentaa Piperin, Whisperin ja openWakeWordin ja rakentaa puheputken seuraavassa uudelleenkäynnistyksessä (Home Assistant OS tai Supervised)",
+  "Door": "Ovi",
+  "Light": "Valo",
+  "Lock": "Lukko",
+  "Satellite": "Satelliitti",
+  "Speaker": "Kaiutin",
+  "Switch": "Kytkin",
+  "Water leak": "Vesivuoto"
 }

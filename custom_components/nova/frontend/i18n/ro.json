@@ -396,5 +396,12 @@
   "Arming": "Se armează",
   "Disarmed": "Dezarmat",
   "Triggered": "Declanșat",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instalează Piper, Whisper și openWakeWord și creează fluxul vocal la următoarea repornire (Home Assistant OS sau Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "instalează Piper, Whisper și openWakeWord și creează fluxul vocal la următoarea repornire (Home Assistant OS sau Supervised)",
+  "Door": "Ușă",
+  "Light": "Lumină",
+  "Lock": "Încuietoare",
+  "Satellite": "Satelit",
+  "Speaker": "Difuzor",
+  "Switch": "Întrerupător",
+  "Water leak": "Scurgere de apă"
 }

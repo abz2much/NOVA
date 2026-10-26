@@ -396,5 +396,12 @@
   "Arming": "Kuruluyor",
   "Disarmed": "Devre dışı",
   "Triggered": "Tetiklendi",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "Piper, Whisper ve openWakeWord'ü yükler ve bir sonraki yeniden başlatmada ses hattını kurar (Home Assistant OS veya Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "Piper, Whisper ve openWakeWord'ü yükler ve bir sonraki yeniden başlatmada ses hattını kurar (Home Assistant OS veya Supervised)",
+  "Door": "Kapı",
+  "Light": "Işık",
+  "Lock": "Kilit",
+  "Satellite": "Uydu",
+  "Speaker": "Hoparlör",
+  "Switch": "Anahtar",
+  "Water leak": "Su kaçağı"
 }

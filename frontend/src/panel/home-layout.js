@@ -108,10 +108,10 @@
         : `Not in Nova's safety checks. To include it, give it a door or window device class in Home Assistant.`}</div>`;
     }).join("");
     return `
-      <div class="mode-bind-head">Exit doors <span class="toggle-desc">doors you leave the house by. Nova adds nothing until you pick one.</span></div>
+      <div class="mode-bind-head" id="resExitHead">Exit doors <span class="toggle-desc">doors you leave the house by. Nova adds nothing until you pick one.</span></div>
       ${rows}
       <div class="cfg-row res-exit-add">
-        <select id="resExitPick">${this._exitDoorOptions(cfg)}</select>
+        <select id="resExitPick" aria-labelledby="resExitHead">${this._exitDoorOptions(cfg)}</select>
         <input id="resExitName" type="text" maxlength="40" placeholder="Name (optional)">
         <button class="mode-chip" id="resExitAdd">Add another exit door</button>
       </div>`;

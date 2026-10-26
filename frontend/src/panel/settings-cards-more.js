@@ -335,7 +335,7 @@
       const stale = entry && !("value" in entry) && entry.reason === "stale";
       const cands = m.candidates || [];
       const selectHtml = cands.length ? `
-        <select class="host-health-map-select" data-metric-key="${this._esc(m.key)}">
+        <select class="host-health-map-select" data-metric-key="${this._esc(m.key)}" aria-label="${this._esc(this._tx(m.label))}">
           <option value="">${m.source === "auto" ? "— auto —" : "— none —"}</option>
           ${cands.map(c => `<option value="${this._esc(c.entity_id)}"${mappings[m.key] === c.entity_id ? " selected" : ""}>${this._esc(c.friendly_name)}${c.disabled ? " (disabled)" : ""}</option>`).join("")}
         </select>` : "";
@@ -1046,9 +1046,9 @@
         <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
       </div>
       <div id="newDoclibBody">${this._renderDocLibraryList()}</div>
-      <div class="mode-bind-head">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
+      <div class="mode-bind-head" id="docWatchHead">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
       <div class="cfg-row">
-        <input id="newDoclibWatch" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
+        <input id="newDoclibWatch" aria-labelledby="docWatchHead" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
         <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
       </div>`;
   }

@@ -81,6 +81,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | Use Nova's own speech to text, and know who is speaking | Nova Voice ID passes your speech to Whisper and can tell who is speaking (a hint, never a key). Voice data stays on your own machine. Needs the [Nova Voice ID app](https://github.com/abz2much/nova-voice-id). | [Voice ID](docs/voice-and-speakers.md#voice-id) |
 | Hear about bad weather | Weather warnings from Met Éireann, the US National Weather Service or a CAP feed | [Weather warnings](docs/weather-warnings.md) |
 | Find out why something broke | Checks your setup for problems and explains what it found, with fixes you apply yourself | [Getting started](docs/getting-started.md#when-something-is-not-working) |
+| Use the panel with a keyboard or screen reader | Every button and field says what it is and whether it is on, panel titles are headings, focus stays where you were after a save, and a visible ring shows where you are | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 
 Nova also shows its reasoning. The Logs tab lists every decision it made, why, and how confident it was. You can tell it when a decision was helpful or unnecessary.
 

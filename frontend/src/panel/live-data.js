@@ -158,7 +158,7 @@
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
-          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}">${active ? "CANCEL" : "DELETE"}</button>
+          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "CANCEL" : "DELETE"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "CANCEL" : "DELETE"}</button>
         </div>`;
       }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
@@ -182,9 +182,9 @@
           : `<div class="camera-empty">${this._cameraLoading[eid] ? "LOADING…" : "NO SNAPSHOT"}</div>`;
         return `<div class="camera-slot" data-camera="${this._esc(eid)}">
           ${body}<div class="camera-caption"><b>${this._esc(c.name || eid)}</b><span>${this._esc(eid)}</span></div>
-          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}">REFRESH</button>
-            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}">ANALYZE</button>
-            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}">DIAGNOSE</button></div>
+          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("REFRESH"))} ${this._esc(c.name || eid)}">REFRESH</button>
+            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("ANALYZE"))} ${this._esc(c.name || eid)}">ANALYZE</button>
+            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("DIAGNOSE"))} ${this._esc(c.name || eid)}">DIAGNOSE</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
       }).join(""));
@@ -259,10 +259,31 @@
   // ordering (websocket.py's area-caps builder) so a room with many
   // capabilities always shows them in the same, sensible sequence.
   static AREA_CAP_ORDER = ["sat", "spkr", "mmwave", "cam", "light", "switch", "lock", "climate", "door", "leak", "alarm"];
+  // Line icons on a 24 unit grid, drawn in the text colour, with the name a
+  // screen reader says and a pointer shows.
   static AREA_CAP_ICON = {
-    sat: "🛰️", spkr: "🔊", mmwave: "📡", cam: "📷", light: "💡", switch: "🔌",
-    lock: "🔒", climate: "🌡️", door: "🚪", leak: "💧", alarm: "🔔",
+    sat: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    spkr: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+    mmwave: '<circle cx="12" cy="12" r="1.5"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>',
+    cam: '<path d="M4 7h3l2-2h6l2 2h3v12H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    light: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+    switch: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    climate: '<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>',
+    door: '<path d="M6 21V4h12v17M3 21h18"/><circle cx="14.5" cy="12.5" r=".8"/>',
+    leak: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    alarm: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   };
+  static AREA_CAP_LABEL = {
+    sat: "Satellite", spkr: "Speaker", mmwave: "Presence", cam: "Camera", light: "Light", switch: "Switch",
+    lock: "Lock", climate: "Temperature", door: "Door", leak: "Water leak", alarm: "Security alarm",
+  };
+
+  _areaCapHtml(c) {
+    const label = this._esc(this._tx(NovaPanel.AREA_CAP_LABEL[c] || c));
+    const icon = NovaPanel.AREA_CAP_ICON[c] || '<circle cx="12" cy="12" r="2"/>';
+    return `<div class="area-cap" role="img" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div>`;
+  }
 
   _areaSparklineSvg(values, color) {
     if (!values || values.length < 2) return "";
@@ -281,7 +302,7 @@
     const caps = (a.caps || []).slice().sort((x, y) =>
       NovaPanel.AREA_CAP_ORDER.indexOf(x) - NovaPanel.AREA_CAP_ORDER.indexOf(y)).slice(0, 5);
     const capsRow = caps.length
-      ? `<div class="area-caps">${caps.map(c => `<div class="area-cap" title="${this._esc(c)}">${NovaPanel.AREA_CAP_ICON[c] || "•"}</div>`).join("")}</div>`
+      ? `<div class="area-caps">${caps.map(c => this._areaCapHtml(c)).join("")}</div>`
       : "";
     const spark = this._sparklines?.[a.id] || {};
     const tempSpark = spark.temp ? this._areaSparklineSvg(spark.temp, "var(--gold)") : "";
@@ -294,13 +315,14 @@
     const hasLights = (a.lights_total || 0) > 0;
     const lit = hasLights && (a.lights_on || 0) > 0;
     const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
+    const lightNote = this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total });
     const lightCtl = hasLights
-      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total })}">${lit ? "ON" : "OFF"}</button>`
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${lightNote}" aria-label="${this._esc(a.name)} — ${lightNote}">${lit ? "ON" : "OFF"}</button>`
       : "";
     return `
       <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
         <div class="area-top">
-          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" title="Occupied now"></span>' : ""}</div>
+          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" role="img" aria-label="Occupied now" title="Occupied now"></span>' : ""}</div>
         </div>
         ${capsRow}
         ${climateRow}

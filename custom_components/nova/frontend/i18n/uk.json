@@ -396,5 +396,12 @@
   "Arming": "Постановка на охорону",
   "Disarmed": "Знято з охорони",
   "Triggered": "Тривога",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "встановлює Piper, Whisper і openWakeWord та створює голосовий конвеєр під час наступного перезапуску (Home Assistant OS або Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "встановлює Piper, Whisper і openWakeWord та створює голосовий конвеєр під час наступного перезапуску (Home Assistant OS або Supervised)",
+  "Door": "Двері",
+  "Light": "Світло",
+  "Lock": "Замок",
+  "Satellite": "Супутник",
+  "Speaker": "Динамік",
+  "Switch": "Вимикач",
+  "Water leak": "Протікання води"
 }
