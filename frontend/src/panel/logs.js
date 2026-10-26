@@ -50,11 +50,11 @@
             <div class="panel-meta">Nova internal</div>
           </div>
           <div class="mode-grid">
-            <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">SYSTEM LOG</button>
-            <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
-            <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">SPOKEN HISTORY</button>
-            <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">ACTIONS</button>
-            <button class="mode-chip new-logview${view === "shadow" ? " mode-chip-on" : ""}" data-view="shadow">SHADOW</button>
+            <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">System log</button>
+            <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">Decisions</button>
+            <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">Spoken history</button>
+            <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">Actions</button>
+            <button class="mode-chip new-logview${view === "shadow" ? " mode-chip-on" : ""}" data-view="shadow">Shadow</button>
           </div>
           ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView()
             : view === "actions" ? this._htmlActionsView() : view === "shadow" ? this._htmlShadowView() : `
@@ -134,7 +134,7 @@
         <div class="stub-body" style="margin:-6px 0 4px">${this._esc(e.text)}</div>
         <div class="cfg-row">
           <span class="toggle-desc">${this._esc(speakerNames)}</span>
-          <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">REPEAT</button>
+          <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">Repeat</button>
         </div>`;
     }).join(""));
     container.querySelectorAll(".new-spoken-repeat").forEach(btn => {
@@ -184,7 +184,7 @@
         <div class="stub-body">Loading…</div>
       </div>
       <div class="cfg-row" id="actionLoadMoreRow" hidden>
-        <button class="mode-chip" id="newActionLoadMore">LOAD MORE</button>
+        <button class="mode-chip" id="newActionLoadMore">Load more</button>
       </div>
     `;
   }
@@ -314,15 +314,15 @@
       <div class="panel" style="margin:8px 0">
         <div class="toggle-desc">${this._tHtml("You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.")}</div>
         <div class="cfg-row"><label>${this._esc(this._shadowKind(p.kind))}</label><span>${this._esc(p.example || p.pattern_key)}</span></div>
-        <div class="mode-grid">${btn(p.pattern_key, "stop", "STOP IT")}${btn(p.pattern_key, "keep", "KEEP IT")}</div>
+        <div class="mode-grid">${btn(p.pattern_key, "stop", "Stop it")}${btn(p.pattern_key, "keep", "Keep it")}</div>
       </div>`).join(""));
     const pEl = root?.getElementById("shadowPatterns");
     if (pEl) this._setHtml(pEl, patterns.length ? patterns.map(p => {
       const state = p.stopped ? "STOPPED BY YOU" : p.active ? "NEW PATH DECIDES" : p.ready ? "READY TO SWITCH" : "SHADOW";
       const actions = [
-        p.stopped ? btn(p.pattern_key, "restart", "RESTART") : "",
-        p.active ? btn(p.pattern_key, "deactivate", "BACK TO CURRENT")
-          : (p.ready && !p.stopped ? btn(p.pattern_key, "activate", "SWITCH TO NEW") : ""),
+        p.stopped ? btn(p.pattern_key, "restart", "Restart") : "",
+        p.active ? btn(p.pattern_key, "deactivate", "Back to current")
+          : (p.ready && !p.stopped ? btn(p.pattern_key, "activate", "Switch to new") : ""),
       ].join("");
       return `<div class="new-log-entry">
           <span class="new-log-cat">${this._esc(this._shadowKind(p.kind))}</span>
@@ -341,7 +341,7 @@
           <span class="new-log-msg">${this._esc(r.message)}<br>
             <small>${this._tHtml("Current: {v} ({why})", { v: this._esc(r.actual), why: this._esc(r.actual_reason) })}</small><br>
             <small>${this._tHtml("New: {v} ({why})", { v: this._esc(r.shadow), why: this._esc(r.shadow_reason) })}</small></span>
-          <span class="${same ? "diag-ok" : "diag-warn"}">${same ? "AGREE" : "DIFFER"}</span>
+          <span class="${same ? "diag-ok" : "diag-warn"}">${same ? "Agree" : "Differ"}</span>
         </div>`;
     }).join("") : `<div class="stub-body">Nothing yet.</div>`);
     root?.querySelectorAll(".new-shadow-choice").forEach(b => b.addEventListener("click", async () => {
@@ -365,14 +365,14 @@
   _htmlDecisionsView() {
     return `
       <div class="cfg-row">
-        <button class="mode-chip${this._decisionsUnjudgedOnly ? " mode-chip-on" : ""}" id="newDecUnjudged">UNJUDGED ONLY</button>
+        <button class="mode-chip${this._decisionsUnjudgedOnly ? " mode-chip-on" : ""}" id="newDecUnjudged">Unjudged only</button>
       </div>
       <div class="toggle-desc" id="newDecCount" style="margin:8px 0"></div>
       <div id="decisionEntries" class="new-log-entries">
         <div class="stub-body">Loading…</div>
       </div>
       <div class="cfg-row" id="decisionLoadMoreRow" hidden>
-        <button class="mode-chip" id="newDecLoadMore">LOAD MORE</button>
+        <button class="mode-chip" id="newDecLoadMore">Load more</button>
       </div>
       <div id="decisionDrawer" class="new-decision-drawer" hidden></div>
     `;
@@ -447,7 +447,7 @@
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       this._setHtml(drawer, `
         <div class="panel-head"><div class="panel-title" tabindex="-1">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
-          <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
+          <button class="mode-chip" id="newDecCloseDrawer">Close</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
         ${row("Reason", d.reason)}
@@ -461,9 +461,9 @@
         ${this._decisionBlockHtml("Evidence", d.evidence)}
         <div class="mode-bind-head">Feedback</div>
         <div class="mode-grid">
-          <button class="mode-chip new-dec-fb" data-verdict="good" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>HELPFUL</button>
-          <button class="mode-chip new-dec-fb" data-verdict="unnecessary" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>UNNECESSARY</button>
-          <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>WRONG</button>
+          <button class="mode-chip new-dec-fb" data-verdict="good" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Helpful</button>
+          <button class="mode-chip new-dec-fb" data-verdict="unnecessary" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Unnecessary</button>
+          <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>Wrong</button>
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
       `);

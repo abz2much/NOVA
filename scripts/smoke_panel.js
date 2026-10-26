@@ -709,7 +709,7 @@ if (require.main === module) setTimeout(async () => {
       newRoot.querySelectorAll(".goal-row").length === 2
       && /Guest prep/.test(newRoot.getElementById("goalList")?.textContent || "")],
     ["command center restores the guarded Lockdown control",
-      newRoot.getElementById("lockdownControl")?.textContent === "LOCKDOWN OFF"],
+      newRoot.getElementById("lockdownControl")?.textContent === "Lockdown off"],
   );
   newRoot.getElementById("lockdownControl").click();
   await new Promise(r => setTimeout(r, 20));
@@ -3643,7 +3643,7 @@ if (require.main === module) setTimeout(async () => {
       (() => {
         const dl = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Document Library/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!dl && !dl.querySelector(".stub-tag")
-          && /furnace_manual\.pdf/.test(dl.textContent) && /KEYWORD/.test(dl.textContent)
+          && /furnace_manual\.pdf/.test(dl.textContent) && /Keyword/.test(dl.textContent)
           && !!dl.querySelector("#newDoclibIngest") && !!dl.querySelector("#newVecbkToggle");
       })()],
   );
@@ -4249,7 +4249,7 @@ if (require.main === module) setTimeout(async () => {
         sources: { configured: false, mqtt: false, frigate_sensors: 0, recognition_source: "both" } };
       return { faces: [
         { name: "Sam", camera: "front_door", camera_entity: "camera.front_door", confidence: 93.4, age_seconds: 45, known: true, resident: _faceResidents.includes("Sam"), source: "frigate" },
-        { name: "Visitor", camera: "garden", camera_entity: "camera.garden", confidence: 71, age_seconds: 4000, known: true, resident: false, source: "doubletake" },
+        { name: "Visitor", camera: "garden", camera_entity: "camera.garden", confidence: 71, age_seconds: 4000, known: true, resident: _faceResidents.includes("Visitor"), source: "doubletake" },
         { name: "unknown", camera: "garden", camera_entity: "camera.garden", confidence: 0, age_seconds: 90000, known: false, resident: false, source: "frigate" },
       ], residents: [..._faceResidents], confidence_threshold: 60,
       sources: { configured: true, mqtt: true, frigate_sensors: 2, recognition_source: "both" } };
@@ -4287,7 +4287,7 @@ if (require.main === module) setTimeout(async () => {
     && badges(faceRows[0]).join() === "KNOWN,RESIDENT"
     && /Sam/.test(faceRows[0].textContent) && /front_door/.test(faceRows[0].textContent)
     && /93%/.test(faceRows[0].textContent) && /just now/.test(faceRows[0].textContent)
-    && badges(faceRows[1]).join() === "KNOWN" && /ADD RESIDENT/.test(faceRows[1].textContent)
+    && badges(faceRows[1]).join() === "KNOWN" && /Add resident/.test(faceRows[1].textContent)
     && badges(faceRows[2]).join() === "UNKNOWN" && !faceRows[2].querySelector("button")]);
   checks.push(["faces tab: residents list and the stand down status (off by default)",
     /Sam/.test(sRoot.getElementById("facesResidents")?.textContent || "")
@@ -4298,7 +4298,7 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["faces tab: Add resident calls nova/add_resident and the list refreshes",
     _faceCalls.some(c => c.type === "nova/add_resident" && c.name === "Visitor")
     && /Visitor/.test(sRoot.getElementById("facesResidents")?.textContent || "")
-    && /RESIDENT/.test(Array.from(sRoot.querySelectorAll("#facesBody .face-row"))[1]?.textContent || "")]);
+    && Array.from(sRoot.querySelectorAll("#facesBody .face-row"))[1]?.querySelector('[data-face-remove="Visitor"]')?.textContent.trim() === "Remove resident"]);
   sRoot.getElementById("facesAddName").value = "Anna";
   sRoot.getElementById("facesAdd").click();
   await new Promise(r => setTimeout(r, 30));
@@ -4603,8 +4603,8 @@ if (require.main === module) setTimeout(async () => {
       geometry: "a836aa626ac3def0",
       floorHelpers: "bafb91527e2df228",   // 8.74.0: an open lock pin takes the theme's red
       editorMarkup: "85b5ad23c70d7778",   // 8.75.0: plan labels in the main font, sizes and corners on the scale
-      memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
-      intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
+      memoryMarkup: "5ef3b1d8c97c19bf",   // 8.75.1: button labels in normal case
+      intrusionMarkup: "2b3a31485d01f218",   // 8.75.1: button labels in normal case
       editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
     };
     // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
@@ -5965,6 +5965,46 @@ if (require.main === module) setTimeout(async () => {
     // Mode names and agency words are lower-case values: they start with a capital.
     const named = (css.match(/\.mode-chip\[data-mode\],\s*\.mode-chip\[data-agency\]\{([^}]*)\}/) || [])[1] || "";
     checks.push(["type: mode and agency chips start with a capital", /text-transform:capitalize/.test(named)]);
+  }
+
+  // Button labels are written in normal case (8.75.1). Short status badges,
+  // ON and OFF, and the log codes in the filter row stay in capitals.
+  {
+    const NP = window.customElements.get("nova-panel");
+    const codes = new Set(["ON", "OFF", ...NP.LOG_FILTERS.map(f => f.toUpperCase())]);
+    const B = document.createElement("nova-panel");
+    document.body.appendChild(B);
+    B.hass = { ...hass };
+    await new Promise(r => setTimeout(r, 150));
+    const shouting = new Set();
+    for (const tab of ["dashboard", "intrusion", "chat", "faces", "suggestions", "settings", "logs", "diagnostics", "memory", "energy"]) {
+      B._currentTab = tab; B._render();
+      await new Promise(r => setTimeout(r, 60));
+      if (tab === "logs") for (const v of ["decisions", "actions", "spoken_history", "shadow"]) {
+        B.shadowRoot.querySelector(`.new-logview[data-view="${v}"]`)?.click();
+        await new Promise(r => setTimeout(r, 40));
+        B.shadowRoot.querySelectorAll("button, .mode-chip").forEach(collect);
+      }
+      B.shadowRoot.querySelectorAll("button, .mode-chip").forEach(collect);
+    }
+    function collect(b) {
+      const words = b.textContent.replace(/[^\p{L}\s'’()]/gu, " ").replace(/\s+/g, " ").trim();
+      if (words.replace(/[^A-Z]/g, "").length >= 2 && words === words.toUpperCase() && !codes.has(words)) shouting.add(words);
+    }
+    B.remove();
+    checks.push([`labels: buttons are written in normal case (${shouting.size}: ${[...shouting].slice(0, 8).join(", ")})`, shouting.size === 0]);
+    // The same rule in the source, for buttons only some states draw.
+    const srcDir = path.resolve(__dirname, "..", "frontend", "src", "panel");
+    const loud = [];
+    for (const file of fs.readdirSync(srcDir).filter(f => f.endsWith(".js"))) {
+      fs.readFileSync(path.join(srcDir, file), "utf8").split("\n").forEach((line, i) => {
+        for (const m of line.matchAll(/<button[^>]*>\s*([^<$]*?)\s*<\/button>/g)) {
+          const words = m[1].replace(/[^\p{L}\s'’()]/gu, " ").replace(/\s+/g, " ").trim();
+          if (words.replace(/[^A-Z]/g, "").length >= 2 && words === words.toUpperCase() && !codes.has(words)) loud.push(`${file}:${i + 1} ${words}`);
+        }
+      });
+    }
+    checks.push([`labels: no button in the source is written in capitals (${loud.length}: ${loud.slice(0, 4).join(", ")})`, loud.length === 0]);
   }
 
   let ok = true;

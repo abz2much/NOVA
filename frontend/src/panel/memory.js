@@ -20,7 +20,7 @@
               <option value="household">Household</option>
               <option value="primary">About me</option>
             </select>
-            <button class="mode-chip" id="newMemAdd">TEACH</button>
+            <button class="mode-chip" id="newMemAdd">Teach</button>
           </div>
           <div id="newMemList" class="mem-body"><div class="stub-body">Loading…</div></div>
         </div>

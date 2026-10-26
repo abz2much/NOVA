@@ -12,7 +12,7 @@
             <div class="panel-meta" id="facesMeta">—</div>
           </div>
           <div class="stub-body">Nova does not run its own face engine. It reads names from Frigate or Double Take. No images are shown or stored here. The residents below are the people Nova treats as members of the household.</div>
-          <div class="cfg-row"><button class="mode-chip" id="facesRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="facesRefresh">⟳ Refresh</button></div>
           <div id="facesBody"><div class="stub-body">Loading…</div></div>
         </div>
 
@@ -25,7 +25,7 @@
           <div class="cfg-row">
             <label class="field" for="facesAddName"><span>Resident name</span>
               <input class="cfg-field" id="facesAddName" maxlength="60"></label>
-            <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
+            <button class="mode-chip" id="facesAdd">Add resident</button>
           </div>
           <div class="toggle-desc" id="facesMsg"></div>
           <div id="facesResidents"></div>
@@ -84,14 +84,14 @@
             <span class="dim">· ${this._esc(r.camera)} · ${Math.round(r.confidence)}% · ${this._esc(this._facesAgeText(r.age_seconds))}</span>
           </span>
           ${r.known ? (r.resident
-            ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">REMOVE RESIDENT</button>`
-            : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">ADD RESIDENT</button>`) : ""}
+            ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">Remove resident</button>`
+            : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">Add resident</button>`) : ""}
         </div>`).join(""));
     }
     this._setHtml(resBox, residents.length ? residents.map(n => `
         <div class="feed-row resident-row">
           <span class="feed-text"><b>${this._esc(n)}</b></span>
-          <button class="mode-chip" data-face-remove="${this._esc(n)}">REMOVE</button>
+          <button class="mode-chip" data-face-remove="${this._esc(n)}">Remove</button>
         </div>`).join("")
       : `<div class="stub-body">No residents yet. Add the people who live here.</div>`);
     root.querySelectorAll("[data-face-add]").forEach(b => {

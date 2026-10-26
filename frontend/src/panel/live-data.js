@@ -83,7 +83,7 @@
     if (lockdownBtn) {
       lockdownBtn.hidden = false;
       lockdownBtn.classList.toggle("active", !!lockdown.active);
-      this._setText(lockdownBtn, lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF");
+      this._setText(lockdownBtn, lockdown.active ? "Lockdown active" : "Lockdown off");
       lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
@@ -158,7 +158,7 @@
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
-          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "CANCEL" : "DELETE"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "CANCEL" : "DELETE"}</button>
+          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "Cancel" : "Delete"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "Cancel" : "Delete"}</button>
         </div>`;
       }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
@@ -171,7 +171,7 @@
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) this._setText(camToggle, this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length }));
+      if (camToggle) this._setText(camToggle, this._camOpen ? "Hide cameras ▴" : this._t(cams.length === 1 ? "Show {count} camera ▾" : "Show {count} cameras ▾", { count: cams.length }));
       camStrip.classList.toggle("open", this._camOpen);
       this._setHtml(camStrip, cams.map(c => {
         const eid = c.entity_id;
@@ -182,9 +182,9 @@
           : `<div class="camera-empty">${this._cameraLoading[eid] ? "LOADING…" : "NO SNAPSHOT"}</div>`;
         return `<div class="camera-slot" data-camera="${this._esc(eid)}">
           ${body}<div class="camera-caption"><b>${this._esc(c.name || eid)}</b><span>${this._esc(eid)}</span></div>
-          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("REFRESH"))} ${this._esc(c.name || eid)}">REFRESH</button>
-            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("ANALYZE"))} ${this._esc(c.name || eid)}">ANALYZE</button>
-            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("DIAGNOSE"))} ${this._esc(c.name || eid)}">DIAGNOSE</button></div>
+          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Refresh"))} ${this._esc(c.name || eid)}">Refresh</button>
+            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Analyze"))} ${this._esc(c.name || eid)}">Analyze</button>
+            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("Diagnose"))} ${this._esc(c.name || eid)}">Diagnose</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
       }).join(""));

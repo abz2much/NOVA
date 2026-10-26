@@ -109,7 +109,7 @@
             <div class="panel-title">Energy Management</div>
           </div>
           <div class="stub-body">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
-          <div class="cfg-row"><button class="mode-chip" id="energyRefresh">⟳ REFRESH</button></div>
+          <div class="cfg-row"><button class="mode-chip" id="energyRefresh">⟳ Refresh</button></div>
           <div id="energyStatusBody"><div class="stub-body">Loading…</div></div>
           <div class="cfg-row">
             <label>Peak threshold (kW)</label>
