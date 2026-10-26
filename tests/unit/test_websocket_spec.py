@@ -473,7 +473,8 @@ async def test_activity_rows_use_friendly_names_and_short_stamps(ws, load, monke
     conn = await _call(ws.ws_get_activity_log, _hass(_entry(load)), hours=2, limit=3)
     first, second, third = conn.results[0][1]["entries"]
     assert first == {"ts": "05:30", "urgency": "low", "tag": "KITCHEN LIGHT",
-                     "msg": "Kitchen Light on", "source": "sentinel"}
+                     "msg": "Kitchen Light on", "source": "sentinel",
+                     "category": "other", "spoken": False, "kind": "note"}
     assert second["ts"] == "abc" and second["tag"] == "A_VERY_LONG_OBJECT_I"
     assert third["tag"] == "AGENT" and third["ts"] == ""
 

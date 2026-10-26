@@ -503,5 +503,18 @@
   "Needs adjustment": "Necesită ajustări",
   "Security": "Securitate",
   "Who's home": "Cine e acasă",
-  "Indoor": "Interior"
+  "Indoor": "Interior",
+  "Ask Nova": "Întreab-o pe Nova",
+  "Back to the list": "Înapoi la listă",
+  "I followed up on “{what}”: {answer}": "Am revenit asupra „{what}”: {answer}",
+  "I kept quiet about: {msg}": "Nu am spus nimic despre: {msg}",
+  "I looked into {change}.": "Am verificat {change}.",
+  "I noticed 1 small change and let it pass.": "Am observat 1 mică schimbare și am lăsat-o să treacă.",
+  "I noticed {count} small changes and let them pass.": "Am observat {count} mici schimbări și le-am lăsat să treacă.",
+  "I sent to your phone: {msg}": "Am trimis pe telefonul tău: {msg}",
+  "I told you: {msg}": "Ți-am spus: {msg}",
+  "I worked on your goal “{title}”: {result}": "Am lucrat la obiectivul tău „{title}”: {result}",
+  "More": "Mai mult",
+  "Open chat": "Deschide chatul",
+  "See everything": "Vezi tot"
 }

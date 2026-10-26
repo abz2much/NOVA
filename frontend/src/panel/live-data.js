@@ -89,20 +89,8 @@
       lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
-    // activity feed
-    const entries = (this._activityData && this._activityData.length)
-      ? this._activityData
-      : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
-    const feedEl = root.getElementById("feed");
-    if (feedEl) {
-      this._setHtml(feedEl, entries.map(e => `
-        <div class="feed-row">
-          <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
-          <div class="feed-time">${this._esc(e.ts || "")}</div>
-        </div>`).join(""));
-    }
-    const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) this._setText(feedMeta, this._t("LAST {count}", { count: entries.length }));
+    // Nova's feed, in the dock (dock.js)
+    this._novaRender();
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");

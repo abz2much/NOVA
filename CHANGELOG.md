@@ -1,3 +1,16 @@
+## [8.77.0] The dock and Nova's feed
+
+### Added
+- **A bar of five buttons at the bottom of the Command Center:** Home, Nova, Areas, Goals and More. Each one but Home opens a panel that slides up over the lower part of the hero, so the head stays in view. Tap the button again, Home, Close or Esc to shut it. With "reduce motion" on, panels appear without sliding.
+- **Nova's panel says what Nova did in plain sentences**, such as "I told you: the back door is open" or "I worked on your goal …". Changes it noticed and let pass become one quiet line. The panel writes these itself, so they cost no AI calls. A number on the button counts what is new since you last opened it.
+- **Ask Nova** in the same panel sends a question through the Chat conversation and shows the answer there, with "Open chat" for a longer talk.
+- The activity log now tells the panel what kind each entry is and whether Nova said it out loud.
+
+### Changed
+- **The long column of cards under the hero is gone.** Areas and Goals have their own panels; Operational Mode, Quick Actions, Cognitive Core, Camera Watch and Muted are under More.
+- **The line under the greeting** uses the same plain sentences instead of the raw activity entry.
+- The old Activity list is replaced by the Nova panel; **See everything** opens the Logs tab.
+
 ## [8.76.0] A new Command Center
 
 ### Added

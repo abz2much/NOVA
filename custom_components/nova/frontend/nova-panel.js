@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.76.0
+ * v8.77.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.76.0 ",
+      console.log("%c Nova Panel %c v8.77.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -242,7 +242,7 @@ class NovaPanel extends HTMLElement {
     this._wire();
     this._initCore();
     this._renderData();
-    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._arcsStop(); this._arcsStart(); }
+    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._dockWire(); this._arcsStop(); this._arcsStart(); }
     this._a11y(root);
     this._drawNotice();
     // On a phone the tabs scroll sideways: centre the open one. The row's own
@@ -465,13 +465,7 @@ class NovaPanel extends HTMLElement {
         </div>
         <div id="onboardingMount"></div>
 
-        <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Operational Mode</div>
-          </div>
-          <div id="operationalModeBody"></div>
-        </div>
-${this._htmlDashboardBody()}`;
+${this._dockHtml()}`;
   }
 
   // Setup Doctor problems (warn/down) for the welcome card, or null while
@@ -524,86 +518,6 @@ ${this._htmlDashboardBody()}`;
       </div>`;
   }
 
-  _htmlDashboardBody() {
-    return `
-        <div class="panel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Areas</div>
-            <div class="panel-meta" id="areasMeta">—</div>
-          </div>
-          <div class="areas-grid" id="areasGrid"></div>
-        </div>
-
-        <div class="dashboard-pair">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Cognitive Core</div>
-              <div class="panel-meta" id="cognitiveState">—</div>
-            </div>
-            <div class="metric-grid" id="cognitiveMetrics"></div>
-            <div class="toggle-desc" id="cognitiveAnalysis"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Goals</div>
-              <div class="panel-meta" id="goalsMeta">—</div>
-            </div>
-            <div class="goal-list" id="goalList"></div>
-            <div class="goal-create">
-              <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
-                <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
-              <button class="mode-chip" id="goalCreate">Add goal</button>
-            </div>
-            <div class="toggle-desc" id="goalResult"></div>
-          </div>
-        </div>
-
-        <div class="panel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Quick Actions</div>
-            <div class="panel-meta">CMD</div>
-          </div>
-          <div class="mode-grid">
-            <button class="mode-chip" data-svc="nova.briefing">Briefing</button>
-            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
-            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
-            <button class="mode-chip" data-svc="nova.unshush">Unshush All</button>
-            <button class="mode-chip" data-svc="nova.observer_status">Status Dump</button>
-            <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
-          </div>
-          <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
-        </div>
-
-        <div class="panel" id="mutesPanel" style="max-width:1100px;margin:16px auto 0" hidden>
-          <div class="panel-head">
-            <div class="panel-title">Muted</div>
-            <div class="panel-meta" id="mutesMeta">SAVED</div>
-          </div>
-          <div id="mutesBody"></div>
-        </div>
-
-        <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
-          <div class="camera-head-row">
-            <div>
-              <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
-              <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
-            </div>
-            <button class="camera-toggle" id="camToggle">Show cameras ▾</button>
-          </div>
-          <div class="camera-strip" id="camStrip"></div>
-        </div>
-
-        <div class="grid">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Activity</div>
-              <div class="panel-meta" id="feedMeta">—</div>
-            </div>
-            <div class="feed" id="feed"></div>
-          </div>
-        </div>
-    `;
-  }
 
   // ─── Screen reader names and states ───────────────────────────────────
   // Runs after every redraw (_render, _setHtml) over what was just drawn.
@@ -1996,28 +1910,37 @@ ${this._htmlDashboardBody()}`;
     const root = this.shadowRoot;
     const input = root?.getElementById("chatInput");
     const msg = root?.getElementById("chatMsg");
-    const c = this._chatState();
     const text = String(input?.value || "").trim();
-    if (!this._hass || !text || c.busy) return;
+    if (!this._hass || !text || this._chatState().busy) return;
     input.value = "";
     if (msg) this._setText(msg, "");
+    await this._chatAsk(text, () => this._renderChat());
+  }
+
+  // Send one message and return Nova's turn. Chat and Ask Nova (dock.js)
+  // both use it, so they share one thread.
+  async _chatAsk(text, redraw) {
+    const c = this._chatState();
     c.turns.push({ role: "user", text });
     c.busy = true;
-    this._renderChat();
+    redraw();
+    let turn;
     try {
       const res = await this._hass.callWS({ type: "nova/chat", text });
       if (res && res.ok) {
-        c.turns.push({ role: "nova", text: res.reply });
+        turn = { role: "nova", text: res.reply };
       } else if (res && res.code === "rate_limited") {
-        c.turns.push({ role: "nova", text: this._t("You're sending too fast, wait a moment"), error: true });
+        turn = { role: "nova", text: this._t("You're sending too fast, wait a moment"), error: true };
       } else {
-        c.turns.push({ role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true });
+        turn = { role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true };
       }
     } catch (err) {
-      c.turns.push({ role: "nova", error: true, text: this._t("Could not reach Nova.") });
+      turn = { role: "nova", error: true, text: this._t("Could not reach Nova.") };
     }
+    c.turns.push(turn);
     c.busy = false;
-    this._renderChat();
+    redraw();
+    return turn;
   }
 
   _wireChat() {
@@ -6529,20 +6452,8 @@ ${this._htmlDashboardBody()}`;
       lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
-    // activity feed
-    const entries = (this._activityData && this._activityData.length)
-      ? this._activityData
-      : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
-    const feedEl = root.getElementById("feed");
-    if (feedEl) {
-      this._setHtml(feedEl, entries.map(e => `
-        <div class="feed-row">
-          <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
-          <div class="feed-time">${this._esc(e.ts || "")}</div>
-        </div>`).join(""));
-    }
-    const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) this._setText(feedMeta, this._t("LAST {count}", { count: entries.length }));
+    // Nova's feed, in the dock (dock.js)
+    this._novaRender();
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
@@ -9078,11 +8989,14 @@ ${this._htmlDashboardBody()}`;
   _heroLatest() {
     const el = this.shadowRoot?.getElementById("heroLatest");
     if (!el) return;
-    const top = (this._activityData || [])[0];
-    const sig = top ? `${top.ts}|${top.tag}|${top.msg}` : "";
+    // The newest of Nova's plain sentences (dock.js), skipping the quiet
+    // "let them pass" line unless there is nothing else.
+    const lines = this._novaLines();
+    const top = lines.find(l => l.kind !== "passed") || lines[0];
+    const sig = top ? `${top.ts}|${top.text}` : "";
     if (sig === this._heroLatestSig) return;
     this._heroLatestSig = sig;
-    this._setHtml(el, top ? `<span class="dot"></span><b>${this._esc(top.ts || "")}</b> ${this._esc(top.tag || "")} · ${this._esc(top.msg || "")}` : "");
+    this._setHtml(el, top ? `<span class="dot"></span><b>${this._esc(top.ts || "")}</b> ${this._esc(top.text)}` : "");
     el.classList.remove("hero-latest-in");
     void el.offsetWidth;
     el.classList.add("hero-latest-in");
@@ -9155,6 +9069,285 @@ ${this._htmlDashboardBody()}`;
       ctx.fillStyle = fade; ctx.fillRect(x - cb.width, y - cb.height * 1.5, cb.width * 2, cb.height * 3);
       ctx.restore();
     }
+  }
+  // ─── Command Center dock (8.77.0) ──────────────────────────────────────
+  // Five buttons at the bottom of the Command Center. Each one but Home
+  // opens a panel that slides up over the lower part of the hero, so the
+  // head stays in view; Home, Esc or Close shut it. The boxes that used to
+  // be stacked under the hero live in these panels with their ids
+  // unchanged, so _renderData fills them as before. Nova's panel is the
+  // activity feed in plain sentences, written here from each row's kind
+  // (nova/get_activity_log), so it costs no tokens.
+  static DOCK = [["home", "Home"], ["nova", "Nova"], ["areas", "Areas"], ["goals", "Goals"], ["more", "More"]];
+  static DOCK_ICONS = {
+    home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+    nova: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
+    areas: '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>',
+    goals: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+    more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  };
+  // More's sections: [key, title, id of the panel that says whether it shows].
+  static MORE_SECTIONS = [["mode", "Operational Mode", ""], ["actions", "Quick Actions", ""], ["core", "Cognitive Core", ""],
+    ["cameras", "Camera Watch", "cameraPanel"], ["muted", "Muted", "mutesPanel"]];
+  // What counts towards Nova's badge: things Nova did or said, not changes
+  // it only noted.
+  static NOVA_NEWS = ["spoken", "pushed", "verify", "held", "goal", "followup"];
+
+  _dockHtml() {
+    const head = (title, metaId) => `
+          <div class="dock-sheet-head"><div class="panel-title">${title}</div>${metaId ? `<div class="panel-meta" id="${metaId}">—</div>` : ""}
+            <button class="mode-chip dock-close">Close</button></div>`;
+    const sheet = (key, title, body, metaId) => `
+        <section class="dock-sheet" data-sheet="${key}" id="dockSheet-${key}" role="region" aria-label="${title}" tabindex="-1" hidden>${head(title, metaId)}${body}
+        </section>`;
+    const moreSec = {
+      mode: `
+            <div class="panel" id="operationalModePanel">
+              <div class="panel-head"><div class="panel-title">Operational Mode</div></div>
+              <div id="operationalModeBody"></div>
+            </div>`,
+      actions: `
+            <div class="panel">
+              <div class="panel-head"><div class="panel-title">Quick Actions</div></div>
+              <div class="mode-grid">
+                <button class="mode-chip" data-svc="nova.briefing">Briefing</button>
+                <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
+                <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
+                <button class="mode-chip" data-svc="nova.unshush">Unshush All</button>
+                <button class="mode-chip" data-svc="nova.observer_status">Status Dump</button>
+                <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
+              </div>
+              <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
+            </div>`,
+      core: `
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title">Cognitive Core</div>
+                <div class="panel-meta" id="cognitiveState">—</div>
+              </div>
+              <div class="metric-grid" id="cognitiveMetrics"></div>
+              <div class="toggle-desc" id="cognitiveAnalysis"></div>
+            </div>`,
+      cameras: `
+            <div class="panel camera-panel" id="cameraPanel" hidden>
+              <div class="camera-head-row">
+                <div>
+                  <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
+                  <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
+                </div>
+                <button class="camera-toggle" id="camToggle">Show cameras ▾</button>
+              </div>
+              <div class="camera-strip" id="camStrip"></div>
+            </div>`,
+      muted: `
+            <div class="panel" id="mutesPanel" hidden>
+              <div class="panel-head">
+                <div class="panel-title">Muted</div>
+                <div class="panel-meta" id="mutesMeta">SAVED</div>
+              </div>
+              <div id="mutesBody"></div>
+            </div>`,
+    };
+    const more = `
+          <div class="more-list">${NovaPanel.MORE_SECTIONS.map(([k, t]) => `
+            <button class="more-item" data-more="${k}">${t}</button>`).join("")}
+          </div>${NovaPanel.MORE_SECTIONS.map(([k]) => `
+          <div class="more-sec" data-more-sec="${k}" hidden>
+            <button class="mode-chip more-back">Back to the list</button>${moreSec[k]}
+          </div>`).join("")}`;
+    const nova = `
+          <div class="nova-feed" id="novaFeed" role="log"></div>
+          <div class="ask-nova">
+            <input class="cfg-field" id="askNovaInput" maxlength="1000" placeholder="Ask Nova something" aria-label="Ask Nova">
+            <button class="mode-chip" id="askNovaSend">Send</button>
+          </div>
+          <div class="ask-reply" id="askNovaReply" aria-live="polite"></div>
+          <div class="nova-foot"><button class="mode-chip" id="novaSeeAll">See everything</button></div>`;
+    const areas = `
+          <div class="areas-grid" id="areasGrid"></div>`;
+    const goals = `
+          <div class="goal-list" id="goalList"></div>
+          <div class="goal-create">
+            <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
+              <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
+            <button class="mode-chip" id="goalCreate">Add goal</button>
+          </div>
+          <div class="toggle-desc" id="goalResult"></div>`;
+    const icon = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NovaPanel.DOCK_ICONS[k]}</svg>`;
+    return `
+        <div class="dock-wrap">${sheet("nova", "Nova", nova)}${sheet("areas", "Areas", areas, "areasMeta")}${sheet("goals", "Goals", goals, "goalsMeta")}${sheet("more", "More", more)}
+          <nav class="dock" aria-label="Command Center">${NovaPanel.DOCK.map(([k, label]) => `
+            <button class="dock-btn" data-dock="${k}"${k === "home" ? "" : ` aria-expanded="false" aria-controls="dockSheet-${k}"`}>${icon(k)}<span class="dock-label">${label}</span>${k === "nova" ? '<span class="dock-badge" hidden></span>' : ""}</button>`).join("")}
+          </nav>
+        </div>`;
+  }
+
+  // After each render: wire the dock and put back the panel that was open.
+  _dockWire() {
+    const root = this.shadowRoot;
+    if (!root?.querySelector(".dock")) return;
+    root.querySelectorAll(".dock-btn").forEach(b => b.addEventListener("click", () => {
+      const k = b.getAttribute("data-dock");
+      this._dockOpenSheet(k === "home" || k === this._dockOpen ? null : k, true);
+    }));
+    root.querySelectorAll(".dock-sheet").forEach(s => s.addEventListener("keydown", e => {
+      if (e.key === "Escape") { e.stopPropagation(); this._dockOpenSheet(null, true); }
+    }));
+    root.querySelectorAll(".dock-close").forEach(b => b.addEventListener("click", () => this._dockOpenSheet(null, true)));
+    root.querySelectorAll(".more-item").forEach(b => b.addEventListener("click", () => this._dockMore(b.getAttribute("data-more"))));
+    root.querySelectorAll(".more-back").forEach(b => b.addEventListener("click", () => this._dockMore(null)));
+    root.getElementById("askNovaSend")?.addEventListener("click", () => this._askNova());
+    root.getElementById("askNovaInput")?.addEventListener("keydown", e => { if (e.key === "Enter") this._askNova(); });
+    root.getElementById("novaSeeAll")?.addEventListener("click", () => root.querySelector('.nav-tab[data-tab="logs"]')?.click());
+    this._askNovaDraw();
+    if (this._dockOpen) this._dockOpenSheet(this._dockOpen, false);
+    this._dockMore(this._dockMoreSec || null);
+  }
+
+  // Open one panel (or none). `user` is true for a tap or a key: focus
+  // moves into the panel, or back to its button when it closes.
+  _dockOpenSheet(key, user) {
+    const root = this.shadowRoot;
+    const was = this._dockOpen;
+    this._dockOpen = key || null;
+    if (key === "nova") this._novaMarkSeen();
+    root.querySelectorAll(".dock-btn[aria-expanded]").forEach(b =>
+      b.setAttribute("aria-expanded", String(b.getAttribute("data-dock") === key)));
+    root.querySelectorAll(".dock-sheet").forEach(s => {
+      const open = s.getAttribute("data-sheet") === key;
+      clearTimeout(s._dockTimer);
+      if (open) {
+        s.hidden = false;
+        void s.offsetWidth;   // start the slide from below
+        s.classList.add("dock-open");
+      } else if (!s.hidden) {
+        s.classList.remove("dock-open");
+        // Slide out only when no other panel takes its place.
+        if (this._reduceMotion || !user || key) s.hidden = true;
+        else s._dockTimer = setTimeout(() => { s.hidden = true; }, 300);
+      }
+    });
+    if (!user) return;
+    if (key) root.querySelector(`.dock-sheet[data-sheet="${key}"]`)?.focus();
+    else if (was) root.querySelector(`.dock-btn[data-dock="${was}"]`)?.focus();
+  }
+
+  // Show one of More's sections, or the list when key is null. Cameras and
+  // Muted are listed only while their panels have something to show.
+  _dockMore(key) {
+    const root = this.shadowRoot;
+    const sheet = root?.querySelector('.dock-sheet[data-sheet="more"]');
+    if (!sheet) return;
+    this._dockMoreSec = key || null;
+    sheet.querySelector(".more-list").hidden = !!key;
+    sheet.querySelectorAll(".more-sec").forEach(s => { s.hidden = s.getAttribute("data-more-sec") !== key; });
+    this._dockSync();
+  }
+
+  _dockSync() {
+    const root = this.shadowRoot;
+    NovaPanel.MORE_SECTIONS.forEach(([k, , panelId]) => {
+      const item = root?.querySelector(`.more-item[data-more="${k}"]`);
+      if (item && panelId) item.hidden = !!root.getElementById(panelId)?.hidden;
+    });
+  }
+
+  // ── Nova's feed in plain sentences ──
+  // One line per row, newest first; a run of changes Nova let pass becomes
+  // one quiet line. Rows from before 8.77.0 have no kind and show as written.
+  _novaLines() {
+    const lines = [];
+    for (const e of this._activityData || []) {
+      const msg = String(e.msg || "");
+      const kind = e.kind || "note";
+      const last = lines[lines.length - 1];
+      if (kind === "passed") {
+        if (last && last.kind === "passed") { last.count += 1; continue; }
+        lines.push({ ts: e.ts, kind, count: 1 });
+        continue;
+      }
+      let text = msg;
+      if (kind === "spoken") text = this._t("I told you: {msg}", { msg });
+      else if (kind === "pushed") text = this._t("I sent to your phone: {msg}", { msg });
+      else if (kind === "held") text = this._t("I kept quiet about: {msg}", { msg });
+      else if (kind === "checked") text = this._t("I looked into {change}.", { change: msg.replace(/\s*— flagged for reasoning$/, "") });
+      else if (kind === "goal") {
+        const m = msg.match(/^Goal #\d+ '(.+?)' engaged \(run \d+\): ([\s\S]*)$/);
+        if (m) text = this._t("I worked on your goal “{title}”: {result}", { title: m[1], result: m[2] });
+      } else if (kind === "followup") {
+        const m = msg.match(/^Follow-up #\d+ ran: ([\s\S]+?) → ([\s\S]*)$/);
+        if (m) text = this._t("I followed up on “{what}”: {answer}", { what: m[1], answer: m[2] });
+      }
+      lines.push({ ts: e.ts, kind, text, key: `${e.ts}|${kind}|${msg}` });
+    }
+    for (const l of lines) {
+      if (l.kind !== "passed") continue;
+      l.text = l.count === 1 ? this._t("I noticed 1 small change and let it pass.")
+        : this._t("I noticed {count} small changes and let them pass.", { count: l.count });
+    }
+    return lines;
+  }
+
+  _novaRender() {
+    const root = this.shadowRoot;
+    const feed = root?.getElementById("novaFeed");
+    const lines = this._novaLines();
+    if (feed) {
+      this._setHtml(feed, lines.length ? lines.map(l => `
+            <div class="nova-row${l.kind === "passed" ? " nova-quiet" : ""}">
+              <span class="nova-time">${this._esc(l.ts || "")}</span><span class="nova-dot nova-dot-${this._esc(l.kind)}" aria-hidden="true"></span>
+              <span class="nova-text">${this._esc(l.text)}</span>
+            </div>`).join("") : `<div class="stub-body">${this._esc(this._t("No activity yet."))}</div>`);
+    }
+    this._dockSync();
+    // The badge: things Nova did since the panel was last opened. It waits
+    // for the first activity fetch, so what is already there is not "new".
+    if (!Array.isArray(this._activityData)) return;
+    const news = lines.filter(l => NovaPanel.NOVA_NEWS.includes(l.kind));
+    if (this._novaSeen === undefined || (this._novaSeen && !news.some(l => l.key === this._novaSeen))) {
+      this._novaSeen = news[0]?.key || null;
+    }
+    if (this._dockOpen === "nova") this._novaSeen = news[0]?.key || null;
+    let count = 0;
+    for (const l of news) { if (l.key === this._novaSeen) break; count++; }
+    const badge = root?.querySelector('.dock-btn[data-dock="nova"] .dock-badge');
+    if (badge) {
+      badge.hidden = count === 0;
+      this._setText(badge, count === 0 ? "" : count > 9 ? "9+" : String(count));
+    }
+  }
+
+  _novaMarkSeen() {
+    const news = this._novaLines().filter(l => NovaPanel.NOVA_NEWS.includes(l.kind));
+    this._novaSeen = news[0]?.key || null;
+    const badge = this.shadowRoot?.querySelector('.dock-btn[data-dock="nova"] .dock-badge');
+    if (badge) badge.hidden = true;
+  }
+
+  // ── Ask Nova: the same thread as the Chat tab ──
+  async _askNova() {
+    const input = this.shadowRoot?.getElementById("askNovaInput");
+    const text = String(input?.value || "").trim();
+    if (!this._hass || !text || this._chatState().busy) return;
+    input.value = "";
+    this._askLast = { q: text, a: null };
+    this._askNovaDraw();
+    const turn = await this._chatAsk(text, () => {});
+    this._askLast = { q: text, a: turn };
+    this._askNovaDraw();
+  }
+
+  _askNovaDraw() {
+    const el = this.shadowRoot?.getElementById("askNovaReply");
+    if (!el) return;
+    const last = this._askLast;
+    if (!last) { this._setHtml(el, ""); return; }
+    this._setHtml(el, `
+            <div class="ask-q">${this._esc(last.q)}</div>
+            <div class="ask-a${last.a?.error ? " chat-error" : ""}">${last.a ? this._esc(last.a.text) : this._esc(this._t("Nova is thinking…"))}</div>
+            ${last.a ? `<button class="mode-chip" id="askNovaChat">Open chat</button>` : ""}`);
+    el.querySelector("#askNovaChat")?.addEventListener("click", () =>
+      this.shadowRoot.querySelector('.nav-tab[data-tab="chat"]')?.click());
   }
   // ─── Floor plan: stored layout, working copies and shared helpers ──────
   // The plan is kept in config as floor_plan_rooms (rooms and outdoor zones
@@ -10882,6 +11075,48 @@ ${this._htmlDashboardBody()}`;
         .orbit-tile,.orbit-tile[data-orbit]{position:relative;left:auto;right:auto;top:auto;width:auto;animation:none}
       }
       @media (prefers-reduced-motion: reduce){.hero-caret,.orbit-tile,.hero-latest-in,.hero-stage.presenting .present-card{animation:none}}
+      /* The dock (8.77.0): five buttons at the bottom, panels slide up over the hero */
+      .dock-wrap{position:sticky;bottom:0;z-index:6;max-width:1100px;margin:16px auto 0;padding-bottom:8px}
+      .dock{display:flex;gap:4px;padding:6px;background:var(--surface);
+        border:1px solid var(--line-soft);border-radius:var(--r-card);box-shadow:0 -8px 32px color-mix(in srgb,var(--bg) 70%,transparent)}
+      .dock-btn{flex:1;min-width:0;min-height:48px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+        padding:6px 2px;background:none;border:0;border-radius:var(--r-tile);color:var(--ink-dim);font:inherit;font-size:var(--t-cap);font-weight:600;cursor:pointer;
+        transition:color .15s,background .15s}
+      .dock-btn svg{width:24px;height:24px;flex:none}
+      .dock-btn:hover{color:var(--ink)}
+      .dock-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      .dock-btn[aria-expanded="true"]{color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,transparent)}
+      .dock-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .dock-badge{position:absolute;top:2px;left:calc(50% + 6px);min-width:18px;padding:0 5px;border-radius:999px;background:var(--bad);
+        color:var(--on-accent);font-size:var(--t-cap);font-weight:700;line-height:18px;text-align:center}
+      .dock-sheet{position:absolute;left:0;right:0;bottom:calc(100% + 8px);max-height:min(55vh,560px);overflow-y:auto;overscroll-behavior:contain;
+        padding:12px 16px 16px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);
+        box-shadow:0 -12px 40px color-mix(in srgb,var(--bg) 80%,transparent);
+        opacity:0;transform:translateY(24px);transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+      .dock-sheet.dock-open{opacity:1;transform:none}
+      .dock-sheet:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      .dock-sheet-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+      .dock-sheet-head .panel-title{margin-right:auto}
+      .dock-sheet .panel{margin:12px 0 0;padding:0;border:0;background:none}
+      .nova-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:var(--t-sm)}
+      .nova-time{flex:none;min-width:44px;color:var(--ink-faint);font-size:var(--t-cap);padding-top:2px}
+      .nova-dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--ink-faint)}
+      .nova-dot-spoken,.nova-dot-pushed{background:var(--gold)}
+      .nova-dot-verify,.nova-dot-held{background:var(--warn)}
+      .nova-dot-goal,.nova-dot-followup{background:var(--good)}
+      .nova-dot-passed{background:var(--line-soft)}
+      .nova-quiet .nova-text{color:var(--ink-faint)}
+      .ask-nova{display:flex;gap:8px;margin-top:12px}
+      .ask-nova .cfg-field{flex:1;min-width:0}
+      .ask-reply:not(:empty){margin-top:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-tile);font-size:var(--t-sm)}
+      .ask-q{color:var(--ink-dim);margin-bottom:4px}
+      .ask-reply .mode-chip{margin-top:8px}
+      .nova-foot{margin-top:12px}
+      .more-item{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:48px;padding:12px 4px;background:none;border:0;
+        border-bottom:1px solid var(--line-soft);color:var(--ink);font:inherit;font-size:var(--t-body);text-align:left;cursor:pointer}
+      .more-item::after{content:"›";color:var(--ink-faint);font-size:var(--t-title)}
+      .more-item:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+      @media (prefers-reduced-motion: reduce){.dock-sheet{transition:none}.dock-btn{transition:none}}
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-card);background:var(--surface-2);
         font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-dim);border:1px solid var(--line-soft)}

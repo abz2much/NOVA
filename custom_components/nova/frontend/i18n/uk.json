@@ -503,5 +503,18 @@
   "Needs adjustment": "Потрібне налаштування",
   "Security": "Безпека",
   "Who's home": "Хто вдома",
-  "Indoor": "Удома"
+  "Indoor": "Удома",
+  "Ask Nova": "Запитати Nova",
+  "Back to the list": "Назад до списку",
+  "I followed up on “{what}”: {answer}": "Я перевірила «{what}»: {answer}",
+  "I kept quiet about: {msg}": "Я нічого не сказала про: {msg}",
+  "I looked into {change}.": "Я перевірила {change}.",
+  "I noticed 1 small change and let it pass.": "Я помітила 1 невелику зміну й пропустила її.",
+  "I noticed {count} small changes and let them pass.": "Я помітила невеликі зміни ({count}) й пропустила їх.",
+  "I sent to your phone: {msg}": "Я надіслала вам на телефон: {msg}",
+  "I told you: {msg}": "Я сказала вам: {msg}",
+  "I worked on your goal “{title}”: {result}": "Я попрацювала над вашою ціллю «{title}»: {result}",
+  "More": "Більше",
+  "Open chat": "Відкрити чат",
+  "See everything": "Показати все"
 }

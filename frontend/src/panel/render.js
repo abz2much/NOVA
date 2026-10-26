@@ -22,7 +22,7 @@
     this._wire();
     this._initCore();
     this._renderData();
-    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._arcsStop(); this._arcsStart(); }
+    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._dockWire(); this._arcsStop(); this._arcsStart(); }
     this._a11y(root);
     this._drawNotice();
     // On a phone the tabs scroll sideways: centre the open one. The row's own
@@ -245,13 +245,7 @@
         </div>
         <div id="onboardingMount"></div>
 
-        <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Operational Mode</div>
-          </div>
-          <div id="operationalModeBody"></div>
-        </div>
-${this._htmlDashboardBody()}`;
+${this._dockHtml()}`;
   }
 
   // Setup Doctor problems (warn/down) for the welcome card, or null while
@@ -304,84 +298,4 @@ ${this._htmlDashboardBody()}`;
       </div>`;
   }
 
-  _htmlDashboardBody() {
-    return `
-        <div class="panel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Areas</div>
-            <div class="panel-meta" id="areasMeta">—</div>
-          </div>
-          <div class="areas-grid" id="areasGrid"></div>
-        </div>
-
-        <div class="dashboard-pair">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Cognitive Core</div>
-              <div class="panel-meta" id="cognitiveState">—</div>
-            </div>
-            <div class="metric-grid" id="cognitiveMetrics"></div>
-            <div class="toggle-desc" id="cognitiveAnalysis"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Goals</div>
-              <div class="panel-meta" id="goalsMeta">—</div>
-            </div>
-            <div class="goal-list" id="goalList"></div>
-            <div class="goal-create">
-              <label class="field" for="goalOutcome"><span>Outcome Nova should work toward</span>
-                <input class="cfg-field" id="goalOutcome" maxlength="500"></label>
-              <button class="mode-chip" id="goalCreate">Add goal</button>
-            </div>
-            <div class="toggle-desc" id="goalResult"></div>
-          </div>
-        </div>
-
-        <div class="panel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Quick Actions</div>
-            <div class="panel-meta">CMD</div>
-          </div>
-          <div class="mode-grid">
-            <button class="mode-chip" data-svc="nova.briefing">Briefing</button>
-            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
-            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
-            <button class="mode-chip" data-svc="nova.unshush">Unshush All</button>
-            <button class="mode-chip" data-svc="nova.observer_status">Status Dump</button>
-            <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
-          </div>
-          <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
-        </div>
-
-        <div class="panel" id="mutesPanel" style="max-width:1100px;margin:16px auto 0" hidden>
-          <div class="panel-head">
-            <div class="panel-title">Muted</div>
-            <div class="panel-meta" id="mutesMeta">SAVED</div>
-          </div>
-          <div id="mutesBody"></div>
-        </div>
-
-        <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
-          <div class="camera-head-row">
-            <div>
-              <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
-              <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
-            </div>
-            <button class="camera-toggle" id="camToggle">Show cameras ▾</button>
-          </div>
-          <div class="camera-strip" id="camStrip"></div>
-        </div>
-
-        <div class="grid">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Activity</div>
-              <div class="panel-meta" id="feedMeta">—</div>
-            </div>
-            <div class="feed" id="feed"></div>
-          </div>
-        </div>
-    `;
-  }
 

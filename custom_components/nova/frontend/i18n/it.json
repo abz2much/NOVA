@@ -503,5 +503,18 @@
   "Needs adjustment": "Da regolare",
   "Security": "Sicurezza",
   "Who's home": "Chi è in casa",
-  "Indoor": "Interno"
+  "Indoor": "Interno",
+  "Ask Nova": "Chiedi a Nova",
+  "Back to the list": "Torna all’elenco",
+  "I followed up on “{what}”: {answer}": "Ho verificato «{what}»: {answer}",
+  "I kept quiet about: {msg}": "Non ho detto nulla su: {msg}",
+  "I looked into {change}.": "Ho controllato {change}.",
+  "I noticed 1 small change and let it pass.": "Ho notato 1 piccolo cambiamento e l’ho lasciato passare.",
+  "I noticed {count} small changes and let them pass.": "Ho notato {count} piccoli cambiamenti e li ho lasciati passare.",
+  "I sent to your phone: {msg}": "Ti ho inviato sul telefono: {msg}",
+  "I told you: {msg}": "Ti ho detto: {msg}",
+  "I worked on your goal “{title}”: {result}": "Ho lavorato al tuo obiettivo «{title}»: {result}",
+  "More": "Altro",
+  "Open chat": "Apri chat",
+  "See everything": "Vedi tutto"
 }

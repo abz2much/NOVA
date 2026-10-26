@@ -503,5 +503,18 @@
   "Needs adjustment": "Kaipaa säätöä",
   "Security": "Turvallisuus",
   "Who's home": "Kuka on kotona",
-  "Indoor": "Sisällä"
+  "Indoor": "Sisällä",
+  "Ask Nova": "Kysy Novalta",
+  "Back to the list": "Takaisin listaan",
+  "I followed up on “{what}”: {answer}": "Seurasin asiaa ”{what}”: {answer}",
+  "I kept quiet about: {msg}": "En sanonut mitään asiasta: {msg}",
+  "I looked into {change}.": "Tarkistin: {change}.",
+  "I noticed 1 small change and let it pass.": "Huomasin 1 pienen muutoksen ja annoin sen olla.",
+  "I noticed {count} small changes and let them pass.": "Huomasin {count} pientä muutosta ja annoin niiden olla.",
+  "I sent to your phone: {msg}": "Lähetin puhelimeesi: {msg}",
+  "I told you: {msg}": "Kerroin sinulle: {msg}",
+  "I worked on your goal “{title}”: {result}": "Työskentelin tavoitteesi ”{title}” parissa: {result}",
+  "More": "Lisää",
+  "Open chat": "Avaa chat",
+  "See everything": "Näytä kaikki"
 }

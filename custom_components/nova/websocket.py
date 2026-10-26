@@ -818,6 +818,29 @@ def _clock_time(stamp) -> str:
         return stamp[:5]
 
 
+def _feed_kind(row: dict) -> str:
+    """What one activity row is, for the panel's plain sentences: spoken,
+    pushed (sent to a phone only), passed (a change Nova let go), checked
+    (a change sent on for reasoning), goal, followup, verify (a device that
+    was slow or silent), held (an announcement the gate kept back) or note."""
+    message = row.get("message") or ""
+    category = row.get("category") or ""
+    if row.get("was_spoken"):
+        return "spoken"
+    if row.get("pushed"):
+        return "pushed"
+    if category == "classified" or message.endswith(("— not worth considering",
+                                                     "— household present, not announced")):
+        return "passed"
+    if message.endswith("— flagged for reasoning"):
+        return "checked"
+    if category in ("goal", "followup", "verify"):
+        return category
+    if row.get("outcome"):
+        return "held"
+    return "note"
+
+
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_activity_log",
     vol.Optional("limit", default=50): int,
@@ -843,6 +866,9 @@ async def ws_get_activity_log(hass: HomeAssistant, connection: websocket_api.Act
                 "tag": (label or row.get("source", "")).upper(),
                 "msg": humanize_text(row.get("message", ""), names),
                 "source": row.get("source", "observer"),
+                "category": row.get("category") or "other",
+                "spoken": bool(row.get("was_spoken")),
+                "kind": _feed_kind(row),
             })
         connection.send_result(msg["id"], {"entries": entries})
     except Exception as exc:

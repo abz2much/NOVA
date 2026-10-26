@@ -85,9 +85,10 @@ A few advanced settings have no control in either place and are only set in
 
 ## A tour of the panel
 
-- **Command Center.** The hologram head with live cards round it, your areas with live sensors and a
-  light toggle, Cognitive Core, Goals, Activity, Quick Actions, Operational
-  Mode, a Muted card, and camera snapshots on request.
+- **Command Center.** The hologram head with live cards round it, and a bar
+  of five buttons at the bottom: Home, Nova (what Nova did, and Ask Nova),
+  Areas, Goals and More (Operational Mode, Quick Actions, Cognitive Core,
+  camera snapshots and the Muted list).
 - **Intrusion.** The intrusion status and the Intrusion Log.
 - **Chat.** Type to Nova from the panel. Any Home Assistant user can use it,
   and each person has their own thread. A message can be up to 1000
@@ -123,7 +124,7 @@ The head sits in the middle, with broken arcs turning slowly round it and
 five live cards: Security (locks, the alarm or doors), Who's home, Energy
 (solar now and the battery), Indoor (temperature and humidity) and Weather.
 Tap one to see more beside the head. Under the greeting is Nova's latest
-line, the newest entry from the Activity feed. On a phone or a narrow window
+line, the newest of the sentences in the Nova panel (below). On a phone or a narrow window
 the five cards sit under the head in two columns, without the arcs. With
 "reduce motion" turned on in your device, the arcs and cards stay still.
 
@@ -140,7 +141,24 @@ it. When you ask Nova about energy, a card of the real figures shows at once
 for 30 seconds. Turn the rotation off under **Settings → General → Cards on
 the Command Center**.
 
-The Areas card shows every room Nova watches,
+A bar of five buttons sits at the bottom of the Command Center. Each one
+but Home opens a panel that slides up over the lower part of the hero, so the
+head stays in view; tap the button again, Home, Close or Esc to shut it.
+
+- **Nova** says what Nova did in plain sentences: what it told you, what it
+  sent to your phone, what it kept quiet about, devices that needed a second
+  try, and work on your goals and follow-ups. Changes it noticed and let pass
+  are grouped into one line. These sentences are written by the panel, so
+  they cost no AI calls. A number on the button counts what is new since you
+  last opened it. Ask Nova sends a question through the same conversation as
+  the Chat tab and shows the answer in the panel. **See everything** opens
+  the Logs tab.
+- **Areas** and **Goals** hold the same cards as before.
+- **More** lists Operational Mode, Quick Actions, Cognitive Core, Camera
+  Watch and Muted. Camera Watch and Muted are listed only when they have
+  something to show.
+
+The Areas panel shows every room Nova watches,
 with icons for what each room has, temperature and humidity trends, and a
 light switch. A first run checklist shows the main setup steps, and the
 Lockdown control asks before it acts.

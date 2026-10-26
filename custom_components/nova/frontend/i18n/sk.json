@@ -503,5 +503,18 @@
   "Needs adjustment": "Treba upraviť",
   "Security": "Zabezpečenie",
   "Who's home": "Kto je doma",
-  "Indoor": "Vnútri"
+  "Indoor": "Vnútri",
+  "Ask Nova": "Opýtať sa Novy",
+  "Back to the list": "Späť na zoznam",
+  "I followed up on “{what}”: {answer}": "Overila som „{what}“: {answer}",
+  "I kept quiet about: {msg}": "Nič som nepovedala o: {msg}",
+  "I looked into {change}.": "Preverila som {change}.",
+  "I noticed 1 small change and let it pass.": "Všimla som si 1 drobnú zmenu a nechala ju tak.",
+  "I noticed {count} small changes and let them pass.": "Všimla som si drobné zmeny ({count}) a nechala ich tak.",
+  "I sent to your phone: {msg}": "Poslala som vám do telefónu: {msg}",
+  "I told you: {msg}": "Povedala som vám: {msg}",
+  "I worked on your goal “{title}”: {result}": "Pracovala som na vašom cieli „{title}“: {result}",
+  "More": "Viac",
+  "Open chat": "Otvoriť chat",
+  "See everything": "Zobraziť všetko"
 }

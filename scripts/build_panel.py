@@ -48,6 +48,7 @@ SOURCES = (
     "panel/core-animation.js",       # hero fallback head (canvas 2D)
     "panel/presenting.js",           # Presenting: the energy card beside the head
     "panel/orbit.js",                # Command Center orbit: live cards, arcs, latest line
+    "panel/dock.js",                 # Command Center dock, its panels and the Nova feed
     "panel/floor-plan.js",
     "panel/floor-plan-geometry.js",  # coverage and line-of-sight maths
     "panel/floor-plan-editor.js",
