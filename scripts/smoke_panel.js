@@ -954,6 +954,17 @@ if (require.main === module) setTimeout(async () => {
         return realWS(m);
       };
       elNew._presentCycleMs = 40; elNew._presentFirstMs = 120;
+      // A redraw (the panel does one when its language loads) builds a new
+      // head. In a browser that is the WebGL head again; here it would be
+      // the 2D one, which shows "presenting" as idle. So a redraw in this
+      // block gets the stand-in WebGL head back, as a browser would. CI
+      // failed this check at random when a redraw landed during the wait.
+      elNew._initCore = function () {
+        if (!this.shadowRoot.getElementById("core")) return;
+        global.requestAnimationFrame = () => 0;
+        this._initHologram(stage(fakeGl(true)));
+        global.requestAnimationFrame = realRaf;
+      };
       elNew._liveData.config = Object.assign({}, elNew._liveData.config, { hero_card_cycle: true });
       elNew._liveData.status.sleep = { state: "AWAKE" };
       await openDashboard();
@@ -1262,6 +1273,7 @@ if (require.main === module) setTimeout(async () => {
       elNew._presentCycleMs = 0; elNew._presentFirstMs = 0;
       delete elNew._presentKinds;
       delete elNew._presentGreetEvery;
+      delete elNew._initCore;
       elNew._hass.callWS = realWS;
     }
     elNew._liveData.status.sleep = sleepWas;
