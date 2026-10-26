@@ -14,7 +14,7 @@ const FAKE = {
   "No spoken messages recorded yet.": "XX no spoken messages",
   "Waiting for confirmation": "XX waiting",
   "No residents yet. Add the people who live here.": "XX no residents",
-  "✕ CALL OFF (FALSE ALARM)": "✕ XX CALL OFF",
+  "✕ Call off (false alarm)": "✕ XX call off",
   "Could not add that name.": "XX could not add",
   "Forget everything scene memory has kept?": "XX forget everything?",
 };
@@ -56,7 +56,7 @@ const text = root => root.textContent || "";
   checks.push(["faces: late drawn resident list is translated", text(root).includes("XX no residents")]);
 
   await tab("intrusion");
-  checks.push(["intrusion: late drawn status buttons are translated", text(root).includes("✕ XX CALL OFF")]);
+  checks.push(["intrusion: late drawn status buttons are translated", text(root).includes("✕ XX call off")]);
 
   // Status messages: the faces tab's message after a failed add.
   await tab("faces");
