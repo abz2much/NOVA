@@ -5305,6 +5305,87 @@ if (require.main === module) setTimeout(async () => {
     L.remove();
   }
 
+  // Contrast and size (8.71.1). Read from the panel's own CSS text: jsdom
+  // neither resolves custom properties nor lays anything out.
+  {
+    const css = elNew._css();
+    const lum = h => {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+        .map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const token = name => (css.match(new RegExp(`--${name}:(#[0-9a-fA-F]{6})`)) || [])[1];
+    const rule = sel => {
+      const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // The whole selector of a rule: at a line start or right after a }.
+      const m = css.match(new RegExp(`(?:^|\\})[ \\t]*${esc}\\{([^}]*)\\}`, "m"));
+      return m ? m[1] : "";
+    };
+    const val = (decls, prop) => {
+      const m = decls.match(new RegExp(`(?:^|;)\\s*${prop}:([^;]+)`));
+      if (!m) return null;
+      const v = m[1].trim();
+      const t = v.match(/^var\(--([\w-]+)\)$/);
+      return t ? token(t[1]) : v;
+    };
+    const surfaces = ["bg", "surface", "surface-2"].map(token);
+    const textTokens = ["ink", "ink-dim", "ink-faint"];
+    const weak = [];
+    for (const t of textTokens) for (const s of surfaces) {
+      const r = ratio(token(t), s);
+      if (r < 4.5) weak.push(`${t} on ${s} ${r.toFixed(2)}`);
+    }
+    checks.push([`size: every text colour reads at 4.5:1 or more on every surface (${weak.join("; ") || "all pass"})`,
+      weak.length === 0]);
+    const dimFaint = ratio(token("ink-dim"), token("ink-faint"));
+    checks.push([`size: dim and faint text still look different (${dimFaint.toFixed(2)}:1)`, dimFaint >= 1.2]);
+
+    const pairs = [".mode-chip-on", ".nav-tab.active", ".settings-nav-btn.active"].map(sel => {
+      const d = rule(sel);
+      const fg = val(d, "color"), bg = val(d, "background");
+      return [sel, fg && bg ? ratio(fg, bg) : 0];
+    });
+    checks.push([`size: selected chips and tabs read at 4.5:1 (${pairs.map(([s, r]) => `${s} ${r.toFixed(2)}`).join(", ")})`,
+      pairs.every(([, r]) => r >= 4.5)]);
+
+    const sizes = [...css.matchAll(/font-size:([\d.]+)px/g)].map(m => parseFloat(m[1]));
+    const tiny = sizes.filter(v => v < 11);
+    checks.push([`size: no panel text is smaller than 11px (${tiny.length} rules below)`, tiny.length === 0]);
+    const prose = [".toggle-desc", ".stub-body", ".feed-text", ".camera-note", ".goal-copy span", ".battery-line"];
+    const small = prose.filter(sel => { const v = parseFloat(val(rule(sel), "font-size")); return !(v >= 12); });
+    checks.push([`size: running text is 12px or more (${small.join(", ") || "all pass"})`, small.length === 0]);
+
+    // Inline sizes in templates count too: draw every tab and read them.
+    const P = document.createElement("nova-panel");
+    document.body.appendChild(P);
+    P.hass = { ...hass };
+    await new Promise(r => setTimeout(r, 100));
+    const inline = [];
+    for (const tab of ["dashboard", "settings", "logs", "suggestions", "energy", "memory", "intrusion", "faces", "chat", "diagnostics"]) {
+      P._currentTab = tab; P._render();
+      await new Promise(r => setTimeout(r, 30));
+      P.shadowRoot.querySelectorAll("[style*='font-size']").forEach(el => {
+        const v = parseFloat((el.getAttribute("style").match(/font-size:\s*([\d.]+)px/) || [])[1]);
+        if (v < 11) inline.push(`${tab}:${v}`);
+      });
+    }
+    checks.push([`size: no inline text style below 11px (${inline.slice(0, 5).join(", ") || "none"})`, inline.length === 0]);
+    P.remove();
+
+    // Targets: 24px everywhere, 44px on touch screens.
+    const minH = val(rule("button"), "min-height");
+    const coarse = css.match(/@media \(pointer:coarse\)\{([\s\S]*?)\}\s*\}/);
+    checks.push([`size: every button is at least 24px tall (${minH || "no rule"})`, parseFloat(minH) >= 24]);
+    // A one-glyph button (✕, ×) is only as wide as the glyph unless told otherwise.
+    const iconOnly = [".new-pl-chip > button", ".new-mem-forget", ".new-doclib-del", ".fpn-ent-del"];
+    const narrow = iconOnly.filter(sel => !css.split("}").some(r => r.includes("{")
+      && r.split("{")[0].split(",").map(x => x.trim()).includes(sel) && /min-width:(2[4-9]|[3-9]\d)px/.test(r)));
+    checks.push([`size: one-glyph buttons are at least 24px wide (${narrow.join(", ") || "all"})`, narrow.length === 0]);
+    checks.push(["size: on a touch screen buttons, menus and fields are at least 44px tall",
+      !!coarse && /button[^{]*select[^{]*input[^{]*\{[^}]*min-height:44px/.test(coarse[1])]);
+  }
+
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
   console.log(ok ? "\nSMOKE TEST CLEAN" : "\nSMOKE TEST FAILED");
