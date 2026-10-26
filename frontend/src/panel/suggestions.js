@@ -30,7 +30,7 @@
       const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
       const chips = (s.entity_labels && s.entity_labels.length) ? s.entity_labels : (s.entities || []);
       const entities = chips.length
-        ? `<div class="mode-grid">${chips.map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-size:12px">${this._esc(e)}</span>`).join("")}</div>`
+        ? `<div class="mode-grid">${chips.map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-size:var(--t-sm)">${this._esc(e)}</span>`).join("")}</div>`
         : "";
       const match = s.automation_match || {};
       // The backend names the automations it matched in match.matches.
@@ -53,7 +53,7 @@
           ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
           <div class="stub-body">${this._esc(s.description)}</div>
           ${overlap}
-          ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
+          ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:var(--t-sm);color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
           ${entities}
           <div class="cfg-row"><span class="toggle-desc">${this._tHtml("seen {count}× in 30 days", { count: s.count || "?" })}</span></div>
           <div class="mode-grid">
@@ -61,7 +61,7 @@
             <button class="mode-chip new-sug-dismiss">✕ Dismiss</button>
             <button class="mode-chip new-sug-yaml-btn">⌄ See the automation</button>
           </div>
-          <pre class="new-sug-yaml" hidden style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin-top:8px">${this._esc(s.yaml || "")}</pre>
+          <pre class="new-sug-yaml" hidden style="white-space:pre-wrap;font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:var(--r-ctl);padding:10px;margin-top:8px">${this._esc(s.yaml || "")}</pre>
         </div>`;
     }).join("");
     return `

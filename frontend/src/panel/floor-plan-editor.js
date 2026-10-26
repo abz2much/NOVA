@@ -244,7 +244,7 @@
       : (floorData.viewBox || "0 0 320 150");
     // tabindex -1: Chrome would make the plan a tab stop of its own; Tab
     // should reach the rooms in it instead.
-    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" tabindex="-1" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
+    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" tabindex="-1" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:var(--r-tile);cursor:crosshair;">`;
     svg += '<defs>'
       + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="var(--gold)" stroke-opacity="0.05" stroke-width="0.2"/></pattern>'
       + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="var(--gold)" stroke-opacity="0.12" stroke-width="0.3"/></pattern>'
@@ -296,13 +296,13 @@
         svg += `<g class="fpn-drag-room${picked("room", i)}" data-idx="${i}"${stop(rm.name || "")} style="cursor:move">`;
         svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "var(--good-ink)" : "var(--gold)"}" fill-opacity="${out ? 0.06 : 0.08}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
         svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
-        if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
+        if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-body)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
         svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
         svg += "</g>";
       }
     }
     for (const lbl of (floorData.labels || [])) {
-      svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
+      svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-body)">${this._esc(lbl.text)}</text>`;
     }
 
     // Placed openings as wall markers.
@@ -341,7 +341,7 @@
       svg += `<g class="fpn-cam${picked("cam", ci)}" data-cam-idx="${ci}"${stop(this._t("CAM {number}", { number: ci + 1 }))}>`
         + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "var(--warn)" : "var(--ember)"}" fill-opacity="0.1" stroke="${out ? "var(--warn)" : "var(--ember)"}" stroke-opacity="0.6" stroke-width="0.7" pointer-events="none"/>`
         + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
-        + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
+        + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-body)" pointer-events="none">${ci + 1}</text>`
         + "</g>";
     }
 
@@ -353,8 +353,8 @@
       const nm = ms.name.length > 16 ? (ms.name.slice(0, 15) + "…") : ms.name;
       svg += `<g class="fpn-ent${picked("pin", ei)}" data-ent-idx="${ei}" data-ent-id="${this._esc(ent.e)}"${stop(ms.name)} style="cursor:pointer">`
         + `<circle class="fpn-ent-dot" cx="${ent.x}" cy="${ent.y}" r="3" fill="${ms.color}" stroke="var(--bg)" stroke-width="0.7"/>`
-        + `<text class="fpn-ent-nm" x="${ent.x}" y="${ent.y - 4}" text-anchor="middle" fill="${ms.color}" font-size="3.4" font-family="var(--font-mono)" pointer-events="none">${this._esc(nm)}</text>`
-        + `<text class="fpn-ent-val" x="${ent.x}" y="${ent.y + 6.5}" text-anchor="middle" fill="var(--ink-dim)" font-size="3" font-family="var(--font-mono)" pointer-events="none">${this._esc(ms.val)}</text>`
+        + `<text class="fpn-ent-nm" x="${ent.x}" y="${ent.y - 4}" text-anchor="middle" fill="${ms.color}" font-size="3.4" font-family="var(--font-body)" pointer-events="none">${this._esc(nm)}</text>`
+        + `<text class="fpn-ent-val" x="${ent.x}" y="${ent.y + 6.5}" text-anchor="middle" fill="var(--ink-dim)" font-size="3" font-family="var(--font-body)" pointer-events="none">${this._esc(ms.val)}</text>`
         + "</g>";
     }
 

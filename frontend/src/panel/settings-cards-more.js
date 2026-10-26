@@ -342,7 +342,7 @@
       return `
         <div class="cfg-row">
           <label>${this._esc(this._tx(m.label))}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
-          <span style="font-family:var(--font-mono);font-size:11px">${valueText}${stale ? " (stale)" : ""}</span>
+          <span style="font-family:var(--font-body);font-size:var(--t-cap)">${valueText}${stale ? " (stale)" : ""}</span>
           <span class="${STATUS_CLS[m.status] || "diag-off"}">${STATUS_LABEL[m.status] || (m.status || "").toUpperCase()}</span>
         </div>
         ${selectHtml ? `<div class="cfg-row">${selectHtml}</div>` : ""}`;
@@ -885,7 +885,7 @@
     // category label (delivery/mail/person/...) by camera and time of day.
     const patternsBlock = patterns.length
       ? `<div class="mode-bind-head">Recurring patterns (timing only — not face recognition)</div>
-         <ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.7">
+         <ul style="margin:0 0 10px;padding-left:18px;font-size:var(--t-sm);color:var(--ink-dim);line-height:1.7">
            ${patterns.map(p => `<li>${this._esc(p.description)}</li>`).join("")}
          </ul>`
       : `<div class="stub-body">No recurring patterns yet — needs a few more days of data, or nothing repeats at a consistent time yet.</div>`;
