@@ -401,7 +401,6 @@
   "Doors": "Portes",
   "Double Take only": "Double Take uniquement",
   "Downstairs Hallway": "Couloir du bas",
-  "Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan": "Glisser pour déplacer · poignée en bas à droite pour redimensionner · clic droit pour supprimer · double-clic sur un bord pour ajouter un coin · molette pour zoomer · glisser une zone vide pour se déplacer",
   "Drop manuals & receipts (PDF, .txt, .md) into": "Déposez les manuels & reçus (PDF, .txt, .md) dans",
   "Dry — occasional wit (default)": "Sobre — humour occasionnel (par défaut)",
   "Durable facts & preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.": "Faits & préférences durables dont Nova se souvient en conversation. Apprenez-lui quelque chose, ou oubliez n'importe quoi avec ✕.",
@@ -1314,5 +1313,10 @@
   "Something went wrong.": "Un problème est survenu.",
   "That didn't work: {error}": "Cela n'a pas marché : {error}",
   "That file is over 25 MB.": "Ce fichier dépasse 25 Mo.",
-  "{entity} is not in the list.": "{entity} n'est pas dans la liste."
+  "{entity} is not in the list.": "{entity} n'est pas dans la liste.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Glisser pour déplacer · poignée en bas à droite pour redimensionner · clic droit pour supprimer · cliquer sur le petit cercle d'un bord pour ajouter un coin · molette ou + et − pour zoomer · glisser une zone vide pour se déplacer",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Faites glisser un élément avec un doigt pour le déplacer · touchez le petit cercle d'un bord pour ajouter un coin · pincez à deux doigts pour zoomer · déplacez deux doigts pour vous déplacer",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Revenir au plan par défaut ? Vos propres pièces seront supprimées.",
+  "Zoom in": "Zoom avant",
+  "Zoom out": "Zoom arrière"
 }

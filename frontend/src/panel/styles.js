@@ -416,6 +416,18 @@
       .fpn-canvas{min-height:520px;margin-bottom:10px}
       .fpn-actions{margin-top:4px}
       .fpn-op-marker.op-glow{opacity:1;stroke:var(--ink);stroke-width:2.5;filter:drop-shadow(0 0 6px var(--gold-pale))}
+      .fpn-svg{touch-action:pan-x pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+      .fpn-drag-room,.fpn-zone,.fpn-prop-vtx,.fpn-prop-mid,.fpn-cam,.fpn-ent{touch-action:none}
+      .fpn-zoom{display:inline-flex;gap:6px}
+      .fpn-hint-touch{display:none}
+      .fpn-unsaved{color:var(--warn);align-self:center}
+      .fpn-unsaved[hidden]{display:none}
+      @media (pointer:coarse){
+        .fpn-hint-mouse{display:none}
+        .fpn-hint-touch{display:block}
+        .fpn-zone-vtx,.fpn-prop-vtx,.fpn-zone-mid,.fpn-prop-mid,.fpn-cam-dot,.fpn-ent-dot,.fpn-resize-handle{stroke:transparent;stroke-width:var(--fpn-hit,44px)}
+        .fpn-zone-mid,.fpn-prop-mid{fill:var(--gold);fill-opacity:0.45}
+      }
       /* Openings/cameras rows pack more controls than a plain cfg-row (chip,
          wall/room select, slider, size, entity select, delete). flex-wrap
          alone isn't enough: a native <input type=range>/<select> has no

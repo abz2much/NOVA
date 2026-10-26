@@ -266,7 +266,6 @@
   "Doors": "門",
   "Double Take only": "僅 Double Take",
   "Downstairs Hallway": "樓下走廊",
-  "Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan": "拖曳以移動 · 拖曳右下角控點調整大小 · 右鍵刪除 · 雙擊邊緣新增轉角 · 捲動縮放 · 拖曳空白處平移",
   "Drop manuals & receipts (PDF, .txt, .md) into": "將說明書和收據（PDF、.txt、.md）放入",
   "Dry — occasional wit (default)": "含蓄——偶爾風趣（預設）",
   "DuckDuckGo (no key)": "DuckDuckGo（無需金鑰）",
@@ -1309,5 +1308,10 @@
   "Something went wrong.": "發生了一點問題。",
   "That didn't work: {error}": "操作未成功：{error}",
   "That file is over 25 MB.": "檔案超過 25 MB。",
-  "{entity} is not in the list.": "{entity} 不在清單中。"
+  "{entity} is not in the list.": "{entity} 不在清單中。",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "拖曳以移動 · 拖曳右下角控點調整大小 · 右鍵刪除 · 點按邊緣上的小圓圈新增轉角 · 捲動或使用 + 和 − 縮放 · 拖曳空白處平移",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "用一根手指拖曳項目以移動 · 輕觸邊緣上的小圓圈新增轉角 · 用兩根手指捏合縮放 · 移動兩根手指平移",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "要回到預設平面圖嗎？你自己的房間將被刪除。",
+  "Zoom in": "放大",
+  "Zoom out": "縮小"
 }

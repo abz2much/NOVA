@@ -412,5 +412,10 @@
   "Something went wrong.": "Jokin meni pieleen.",
   "That didn't work: {error}": "Se ei onnistunut: {error}",
   "That file is over 25 MB.": "Tiedosto on yli 25 Mt.",
-  "{entity} is not in the list.": "{entity} ei ole luettelossa."
+  "{entity} is not in the list.": "{entity} ei ole luettelossa.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Vedä siirtääksesi · oikean alakulman kahvasta muutat kokoa · poista hiiren oikealla · lisää kulma napsauttamalla reunan pientä ympyrää · zoomaa vierittämällä tai painikkeilla + ja − · siirrä näkymää vetämällä tyhjää kohtaa",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Siirrä kohdetta vetämällä yhdellä sormella · lisää kulma napauttamalla reunan pientä ympyrää · zoomaa nipistämällä kahdella sormella · siirrä näkymää liikuttamalla kahta sormea",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Palataanko oletuspohjapiirrokseen? Omat huoneesi poistetaan.",
+  "Zoom in": "Lähennä",
+  "Zoom out": "Loitonna"
 }

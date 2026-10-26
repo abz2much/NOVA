@@ -401,7 +401,6 @@
   "Doors": "Drzwi",
   "Double Take only": "Tylko Double Take",
   "Downstairs Hallway": "Korytarz na dole",
-  "Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan": "Przeciągnij, aby przesunąć · uchwyt w prawym dolnym rogu zmienia rozmiar · prawy klik usuwa · podwójny klik na krawędzi dodaje narożnik · przewiń, aby powiększyć · przeciągnij puste miejsce, aby przesunąć widok",
   "Drop manuals & receipts (PDF, .txt, .md) into": "Wrzuć instrukcje i paragony (PDF, .txt, .md) do",
   "Dry — occasional wit (default)": "Sucho — czasem żart (domyślnie)",
   "Durable facts & preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.": "Trwałe fakty i preferencje, które Nova pamięta w rozmowie. Naucz ją czegoś albo zapomnij cokolwiek przyciskiem ✕.",
@@ -1314,5 +1313,10 @@
   "Something went wrong.": "Coś poszło nie tak.",
   "That didn't work: {error}": "To się nie udało: {error}",
   "That file is over 25 MB.": "Plik ma ponad 25 MB.",
-  "{entity} is not in the list.": "{entity} nie ma na liście."
+  "{entity} is not in the list.": "{entity} nie ma na liście.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Przeciągnij, aby przesunąć · uchwyt w prawym dolnym rogu zmienia rozmiar · prawy klik usuwa · kliknięcie małego kółka na krawędzi dodaje narożnik · przewiń lub użyj + i −, aby powiększyć · przeciągnij puste miejsce, aby przesunąć widok",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Przeciągnij element jednym palcem, aby go przesunąć · dotknij małego kółka na krawędzi, aby dodać narożnik · zsuń lub rozsuń dwa palce, aby powiększyć · przesuń dwa palce, aby przesunąć widok",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Wrócić do domyślnego planu piętra? Twoje własne pomieszczenia zostaną usunięte.",
+  "Zoom in": "Powiększ",
+  "Zoom out": "Pomniejsz"
 }

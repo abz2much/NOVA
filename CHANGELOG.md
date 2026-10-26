@@ -1,3 +1,18 @@
+## [8.73.0] Floor plan editor works by touch
+
+### Added
+- **The floor plan editor works with a finger or a pen.** Drag a room, corner, camera or device pin with one finger. Pinch with two fingers to zoom, and move two fingers to pan. One finger on empty space still scrolls the page, so the plan never traps you. Before, touching the plan scrolled the page and nothing could be moved.
+- **Bigger handles on a touch screen.** Corners, camera dots, pins and the resize handle catch a finger about 22px away, at any zoom.
+- **+ and − zoom buttons** beside Fit.
+- **"Unsaved changes."** shows beside Save Layout after an edit, and Save says "Saved." when it is done.
+
+### Changed
+- **Reset Default asks first.** Before, one click replaced your saved plan.
+- **A click that barely moves is a click, not a drag.** Clicking a room no longer nudges it or redraws the plan, and tapping a pin opens its controls without moving it.
+- **A drag keeps going past the edge of the plan.** Before, it stopped where the pointer left the plan.
+- **Zooming in or out to the limit no longer squashes the plan.** Width and height now stop together.
+- **The hint is right.** It said "double-click an edge to add a corner"; a single click on the small circle on the edge does it. A phone shows a hint for fingers instead.
+
 ## [8.72.1] Better on a phone
 
 ### Changed

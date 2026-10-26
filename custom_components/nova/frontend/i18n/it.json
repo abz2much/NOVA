@@ -412,5 +412,10 @@
   "Something went wrong.": "Qualcosa è andato storto.",
   "That didn't work: {error}": "Non ha funzionato: {error}",
   "That file is over 25 MB.": "Il file supera i 25 MB.",
-  "{entity} is not in the list.": "{entity} non è nell'elenco."
+  "{entity} is not in the list.": "{entity} non è nell'elenco.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Trascina per spostare · maniglia in basso a destra per ridimensionare · clic destro per eliminare · clic sul cerchietto di un bordo per aggiungere un angolo · scorri o usa + e − per lo zoom · trascina uno spazio vuoto per spostare la vista",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Trascina un elemento con un dito per spostarlo · tocca il cerchietto di un bordo per aggiungere un angolo · pizzica con due dita per lo zoom · muovi due dita per spostare la vista",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Tornare alla planimetria predefinita? Le tue stanze verranno eliminate.",
+  "Zoom in": "Ingrandisci",
+  "Zoom out": "Riduci"
 }

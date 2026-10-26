@@ -401,7 +401,6 @@
   "Doors": "Двери",
   "Double Take only": "Только Double Take",
   "Downstairs Hallway": "Коридор внизу",
-  "Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan": "Перетащите, чтобы переместить · угол справа внизу меняет размер · правый щелчок удаляет · двойной щелчок по краю добавляет угол · прокрутка масштабирует · перетаскивание пустого места сдвигает вид",
   "Drop manuals & receipts (PDF, .txt, .md) into": "Положите инструкции и чеки (PDF, .txt, .md) в",
   "Dry — occasional wit (default)": "Сдержанно — иногда шутит (по умолчанию)",
   "Durable facts & preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.": "Постоянные факты и предпочтения, которые Nova помнит в разговоре. Научите её чему-нибудь или удалите что угодно кнопкой ✕.",
@@ -1314,5 +1313,10 @@
   "Something went wrong.": "Что-то пошло не так.",
   "That didn't work: {error}": "Не получилось: {error}",
   "That file is over 25 MB.": "Файл больше 25 МБ.",
-  "{entity} is not in the list.": "{entity} нет в списке."
+  "{entity} is not in the list.": "{entity} нет в списке.",
+  "Drag to move · bottom-right handle to resize · right-click to delete · click the small circle on an edge to add a corner · scroll or use + and − to zoom · drag empty space to pan": "Перетащите, чтобы переместить · угол справа внизу меняет размер · правый щелчок удаляет · щелчок по маленькому кружку на краю добавляет угол · прокрутка или + и − масштабируют · перетаскивание пустого места сдвигает вид",
+  "Drag an item with one finger to move it · tap the small circle on an edge to add a corner · pinch with two fingers to zoom · move two fingers to pan": "Перетащите элемент одним пальцем, чтобы переместить его · коснитесь маленького кружка на краю, чтобы добавить угол · сведите или разведите два пальца для масштаба · двигайте двумя пальцами, чтобы сдвинуть вид",
+  "Go back to the default floor plan? Your own rooms will be deleted.": "Вернуть план этажа по умолчанию? Ваши собственные комнаты будут удалены.",
+  "Zoom in": "Увеличить",
+  "Zoom out": "Уменьшить"
 }
