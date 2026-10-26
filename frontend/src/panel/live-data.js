@@ -378,7 +378,7 @@
       this._wireUnmute(el);
     };
     draw(root.getElementById("shushMount"), all ? `
-      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn);border-radius:12px;padding:12px 14px;background:var(--surface)">
+      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn);border-radius:var(--r-tile);padding:12px 14px;background:var(--surface)">
         <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
         <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
       </div>` : "");

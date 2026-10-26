@@ -4602,7 +4602,7 @@ if (require.main === module) setTimeout(async () => {
     const PINS = {
       geometry: "a836aa626ac3def0",
       floorHelpers: "bafb91527e2df228",   // 8.74.0: an open lock pin takes the theme's red
-      editorMarkup: "75477a9b0c3c351e",   // 8.74.0: plan colours come from the theme
+      editorMarkup: "85b5ad23c70d7778",   // 8.75.0: plan labels in the main font, sizes and corners on the scale
       memoryMarkup: "5d6ab3cd038baabf",   // 8.72.1: Teach form labels you can see; a11y id numbers ignored
       intrusionMarkup: "455a99b01c046f72",   // 8.72.1: a11y id numbers ignored (markup unchanged)
       editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
@@ -5343,7 +5343,7 @@ if (require.main === module) setTimeout(async () => {
       if (!m) return null;
       const v = m[1].trim();
       const t = v.match(/^var\(--([\w-]+)\)$/);
-      return t ? token(t[1]) : v;
+      return t ? (token(t[1]) || v) : v;   // a colour token gives its colour; a size token stays as written
     };
     const surfaces = ["bg", "surface", "surface-2"].map(token);
     const textTokens = ["ink", "ink-dim", "ink-faint"];
@@ -5365,11 +5365,13 @@ if (require.main === module) setTimeout(async () => {
     checks.push([`size: selected chips and tabs read at 4.5:1 (${pairs.map(([s, r]) => `${s} ${r.toFixed(2)}`).join(", ")})`,
       pairs.every(([, r]) => r >= 4.5)]);
 
-    const sizes = [...css.matchAll(/font-size:([\d.]+)px/g)].map(m => parseFloat(m[1]));
-    const tiny = sizes.filter(v => v < 11);
-    checks.push([`size: no panel text is smaller than 11px (${tiny.length} rules below)`, tiny.length === 0]);
+    // A size is a named step of the scale (8.75.0): look its pixels up.
+    const px = v => { const t = /var\(--(t-[a-z]+)\)/.exec(v || ""); return t ? parseFloat((css.match(new RegExp(`--${t[1]}:([\\d.]+)px`)) || [])[1]) : parseFloat(v); };
+    const sizes = [...css.matchAll(/font-size:([^;}]+)/g)].map(m => m[1].trim()).filter(v => !v.startsWith("clamp(")).map(px);
+    const tiny = sizes.filter(v => !(v >= 11));
+    checks.push([`size: no panel text is smaller than 11px (${tiny.length} rules below, of ${sizes.length})`, sizes.length > 50 && tiny.length === 0]);
     const prose = [".toggle-desc", ".stub-body", ".feed-text", ".camera-note", ".goal-copy span", ".battery-line"];
-    const small = prose.filter(sel => { const v = parseFloat(val(rule(sel), "font-size")); return !(v >= 12); });
+    const small = prose.filter(sel => { const v = px(val(rule(sel), "font-size")); return !(v >= 12); });
     checks.push([`size: running text is 12px or more (${small.join(", ") || "all pass"})`, small.length === 0]);
 
     // Inline sizes in templates count too: draw every tab and read them.
@@ -5927,6 +5929,42 @@ if (require.main === module) setTimeout(async () => {
       && styleText().includes("--bg:#15110d") && T._theme().head.main.join() === "0.957,0.722,0.376"
       && pick.closest(".cfg-row")?.querySelector("label")?.textContent.trim() === "Theme"]);
     T.remove();
+  }
+
+  // One font, one size scale, three corner sizes (8.75.0).
+  {
+    const srcDir = path.resolve(__dirname, "..", "frontend", "src", "panel");
+    const files = fs.readdirSync(srcDir).filter(f => f.endsWith(".js"));
+    const offScale = [], offCorner = [], monoUse = [];
+    for (const file of files) {
+      fs.readFileSync(path.join(srcDir, file), "utf8").split("\n").forEach((line, i) => {
+        for (const m of line.matchAll(/font-size:\s*([^;}"'`]+)/g)) {
+          if (!/^(var\(--t-[a-z]+\)|clamp\()/.test(m[1].trim())) offScale.push(`${file}:${i + 1} ${m[1].trim()}`);
+        }
+        for (const m of line.matchAll(/border-radius:\s*([^;}"'`]+)/g)) {
+          if (!/^(var\(--r-(ctl|tile|card)\)|50%|999px|0)$/.test(m[1].trim())) offCorner.push(`${file}:${i + 1} ${m[1].trim()}`);
+        }
+        if (/var\(--font-mono\)/.test(line) && !/new-sug-yaml|--font-mono:/.test(line)) monoUse.push(`${file}:${i + 1}`);
+      });
+    }
+    checks.push([`type: every font size is on the scale 12/14/16/20/24/32/48 (${offScale.length}: ${offScale.slice(0, 4).join(", ")})`, offScale.length === 0]);
+    checks.push([`type: every corner is one of three sizes (${offCorner.length}: ${offCorner.slice(0, 4).join(", ")})`, offCorner.length === 0]);
+    checks.push([`type: monospace only for code blocks (${monoUse.length}: ${monoUse.slice(0, 4).join(", ")})`, monoUse.length === 0]);
+
+    const css = elNew._css();
+    const host = (css.match(/:host\{([^}]*)\}/) || [])[1] || "";
+    const scale = ["cap:12px", "sm:14px", "body:16px", "title:20px", "h:24px", "fig:32px", "hero:48px"].every(s => host.includes(`--t-${s.replace(":", ":")}`));
+    const corners = ["ctl:8px", "tile:12px", "card:16px"].every(s => host.includes(`--r-${s}`));
+    const coreSrc = fs.readFileSync(path.join(srcDir, "core.js"), "utf8");
+    const fontUrl = (coreSrc.match(/fonts\.googleapis\.com\/css2\?[^"]+/) || [""])[0];
+    checks.push([`type: one font, Plus Jakarta Sans, with the scale and corners defined once`,
+      scale && corners && /--font-body:'Plus Jakarta Sans'/.test(host) && /--font-display:'Plus Jakarta Sans'/.test(host)
+      && /Plus\+Jakarta\+Sans/.test(fontUrl) && !/Fraunces|Manrope/.test(fontUrl)]);
+    const chip = (css.match(/(?:^|\n)\s*\.mode-chip\{([^}]*)\}/) || [])[1] || "";
+    checks.push(["type: buttons are in normal case, not capitals", !!chip && !/uppercase/.test(chip)]);
+    // Mode names and agency words are lower-case values: they start with a capital.
+    const named = (css.match(/\.mode-chip\[data-mode\],\s*\.mode-chip\[data-agency\]\{([^}]*)\}/) || [])[1] || "";
+    checks.push(["type: mode and agency chips start with a capital", /text-transform:capitalize/.test(named)]);
   }
 
   let ok = true;

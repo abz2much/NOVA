@@ -1,3 +1,11 @@
+## [8.75.0] One font, bigger text
+
+### Changed
+- **One font, Plus Jakarta Sans, for headings, text and numbers.** The serif and the second sans font are no longer loaded, and the monospace font is kept only for automation code. Numbers line up in columns.
+- **Bigger, easier text on one size scale** (12, 14, 16, 20, 24, 32, 48). Most text was 11 or 12px across 16 different sizes; now nothing is under 12px and buttons are 14px.
+- **Three corner sizes** instead of fourteen, so cards, tiles and buttons match.
+- **Chip buttons are no longer forced into capitals.** Mode and energy-agency chips start with a capital letter. Some button labels are still written in capitals; they change in a later release.
+
 ## [8.74.0] Colour themes
 
 ### Added
