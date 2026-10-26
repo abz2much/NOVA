@@ -59,16 +59,12 @@
    "WARNING",
    "anthropic",
    "binary_sensor",
-   "cam",
    "gemini",
    "groq",
    "llama-3.3-70b-versatile",
    "ma'am",
-   "mmwave",
    "ollama",
    "openai",
-   "sat",
-   "spkr",
    "Čeština",
    "— auto —"
   ],
@@ -154,6 +150,7 @@
    "Routine",
    "Routines",
    "SATELLITE",
+   "Satellite",
    "Satellites",
    "Script",
    "Source",
@@ -171,6 +168,7 @@
    "OFF",
    "ON",
    "SATELLITE",
+   "Satellite",
    "Script"
   ],
   "nb": [

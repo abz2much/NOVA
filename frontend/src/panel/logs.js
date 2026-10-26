@@ -409,7 +409,7 @@
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
       const outcomeLabel = d.outcome ? d.outcome.toUpperCase() : "UNJUDGED";
       const when = d.ts ? new Date(d.ts * 1000).toLocaleString() : "";
-      return `<div class="new-log-entry new-decision-row" data-id="${this._esc(d.id)}">
+      return `<div class="new-log-entry new-decision-row" data-id="${this._esc(d.id)}" tabindex="0" role="button">
           <span class="new-log-ts">${this._esc(when)}</span>
           <span class="new-log-cat">${this._esc((d.kind || "").toUpperCase())}</span>
           <span class="new-log-msg">${this._esc(d.decision || "")}</span>
@@ -419,7 +419,11 @@
     const loadMoreRow = this.shadowRoot?.getElementById("decisionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._decisionsCursor;
     container.querySelectorAll(".new-decision-row").forEach(row => {
-      row.addEventListener("click", () => this._openDecisionDetail(parseInt(row.getAttribute("data-id"), 10)));
+      const open = () => this._openDecisionDetail(parseInt(row.getAttribute("data-id"), 10));
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+      });
     });
   }
 
@@ -442,7 +446,7 @@
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       this._setHtml(drawer, `
-        <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
+        <div class="panel-head"><div class="panel-title" tabindex="-1">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
@@ -463,8 +467,16 @@
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
       `);
+      // The detail opens below the list, so it is brought into view and
+      // takes focus; closing it goes back to the row it came from.
+      const title = drawer.querySelector(".panel-title");
+      if (title) {
+        if (typeof title.scrollIntoView === "function") title.scrollIntoView({ behavior: "smooth", block: "start" });
+        title.focus({ preventScroll: true });
+      }
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
         drawer.hidden = true; this._setHtml(drawer, "");
+        this.shadowRoot?.querySelector(`.new-decision-row[data-id="${id}"]`)?.focus();
       });
       drawer.querySelectorAll(".new-dec-fb").forEach(btn => {
         btn.addEventListener("click", () => this._submitDecisionOutcome(
@@ -555,7 +567,7 @@
       const safeCat = this._esc(e.cat);
       return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
         <span class="new-log-ts">${this._esc(e.ts)}</span>
-        <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+        <span class="new-log-cat" style="color:${cat.color}"><span aria-hidden="true">${cat.icon}</span> ${safeCat}</span>
         <span class="new-log-msg">${this._esc(e.msg)}</span>
       </div>`;
     }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`);

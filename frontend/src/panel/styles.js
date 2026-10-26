@@ -9,6 +9,9 @@
         --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
       }
       *{box-sizing:border-box}
+      /* Keyboard focus is always visible; a pointer click shows no ring. */
+      :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      button:disabled,select:disabled,input:disabled,textarea:disabled{opacity:.45;cursor:not-allowed}
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
         background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
@@ -208,6 +211,8 @@
       .area-caps{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;min-height:20px}
       .area-cap{width:21px;height:21px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
         display:flex;align-items:center;justify-content:center;font-size:10.5px;opacity:.85}
+      .area-cap svg{width:13px;height:13px;fill:none;stroke:var(--ink-dim);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .new-decision-row{cursor:pointer}
       .area-climate{display:flex;gap:10px;margin-bottom:9px}
       .area-climate-item{flex:1;min-width:0}
       .area-climate-num{font-family:var(--font-mono);font-size:12.5px;font-weight:500;display:flex;align-items:baseline;gap:3px}
@@ -295,12 +300,12 @@
       .cfg-row label{font-size:12.5px;color:var(--ink-dim)}
       select.cfg-field,input.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}
-      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
+      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold)}
       .cfg-num{width:84px;min-width:0;text-align:right}
       .door-map-sel-new{flex:1;min-width:0;max-width:220px}
       textarea.cfg-field.vp-json{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-mono);font-size:12px;padding:6px 9px;border-radius:8px;resize:vertical}
-      textarea.cfg-field.vp-json:focus{border-color:var(--gold);outline:none}
+      textarea.cfg-field.vp-json:focus{border-color:var(--gold)}
       .vp-row{flex-wrap:wrap}.vp-row .toggle-desc{flex:1;min-width:0;overflow-wrap:anywhere}
       .vp-editor select.cfg-field{flex:1;min-width:0;max-width:100%}
       .vp-note{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 8px}
@@ -332,7 +337,7 @@
       .new-model-custom{grid-column:2/4;width:100%;box-sizing:border-box;padding:6px 9px;
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--gold);
         font-family:var(--font-mono);font-size:11px;border-radius:8px}
-      .new-model-custom:focus{outline:none;border-color:var(--gold)}
+      .new-model-custom:focus{border-color:var(--gold)}
       .new-model-refresh{padding:5px 9px;font-size:12px;line-height:1}
       .new-model-warning{grid-column:1/-1;font-size:10.5px;color:var(--warn);margin-top:2px}
       .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
@@ -342,12 +347,12 @@
       .cred-input{width:100%;min-width:0;box-sizing:border-box;padding:6px 8px;
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:11.5px;border-radius:8px}
-      .cred-input:focus{outline:none;border-color:var(--gold)}
+      .cred-input:focus{border-color:var(--gold)}
       .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
       .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
         color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
-      .new-appliance-row input:focus,.new-appliance-row select:focus{outline:none;border-color:var(--gold)}
+      .new-appliance-row input:focus,.new-appliance-row select:focus{border-color:var(--gold)}
       .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:#ff8a8a;
         border:1px solid #ff5a5a4d;background:transparent;border-radius:7px;cursor:pointer}
       .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}

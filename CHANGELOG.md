@@ -1,3 +1,11 @@
+## [8.71.0] Panel works with a screen reader
+
+### Added
+- **Screen readers can find their way round the panel.** Panel titles are headings. Every field is named by its label. Every ON/OFF button says which setting it is and whether it is on. The current tab is marked. Chat replies are read out as they arrive.
+- **A visible focus ring** shows where you are when you use the keyboard. Disabled buttons now look disabled.
+- **Room feature icons are drawn icons with names** (Speaker, Lock, Water leak…) instead of emoji. A room's light button names the room, and each camera and goal button names its camera or goal.
+- **Decisions in Logs open from the keyboard.** The detail scrolls into view and takes focus; Close takes you back to the row.
+
 ## [8.70.3] Keyboard focus kept
 
 ### Fixed

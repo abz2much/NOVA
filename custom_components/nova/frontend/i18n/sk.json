@@ -396,5 +396,12 @@
   "Arming": "Zapínanie",
   "Disarmed": "Vypnuté",
   "Triggered": "Spustené",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "nainštaluje Piper, Whisper a openWakeWord a pri ďalšom reštarte zostaví hlasový kanál (Home Assistant OS alebo Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "nainštaluje Piper, Whisper a openWakeWord a pri ďalšom reštarte zostaví hlasový kanál (Home Assistant OS alebo Supervised)",
+  "Door": "Dvere",
+  "Light": "Svetlo",
+  "Lock": "Zámok",
+  "Satellite": "Satelit",
+  "Speaker": "Reproduktor",
+  "Switch": "Vypínač",
+  "Water leak": "Únik vody"
 }

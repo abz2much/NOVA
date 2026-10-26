@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.70.3
+ * v8.71.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.70.3 ",
+      console.log("%c Nova Panel %c v8.71.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -242,6 +242,7 @@ class NovaPanel extends HTMLElement {
     this._initCore();
     this._renderData();
     if (this._currentTab === "dashboard") this._presentStart();
+    this._a11y(root);
     this._focusRestore(root, focus);
   }
 
@@ -353,8 +354,8 @@ class NovaPanel extends HTMLElement {
         if (value !== raw) swaps.push([node, value]);
       }
       swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
-      root.querySelectorAll("[title],[placeholder]").forEach(el => {
-        ["title", "placeholder"].forEach(attr => {
+      root.querySelectorAll("[title],[placeholder],[aria-label]").forEach(el => {
+        ["title", "placeholder", "aria-label"].forEach(attr => {
           const raw = el.getAttribute(attr);
           const value = raw == null ? raw : this._tx(raw);
           if (value !== raw) el.setAttribute(attr, value);
@@ -371,6 +372,7 @@ class NovaPanel extends HTMLElement {
     const focus = this._focusMark(el);
     el.innerHTML = html;   // i18n-ok: the helper itself
     this._localizeDOM(el);
+    this._a11y(el);
     this._focusRestore(el, focus);
   }
 
@@ -439,7 +441,7 @@ class NovaPanel extends HTMLElement {
         <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
-            <canvas class="core" id="core"></canvas>
+            <canvas class="core" id="core" aria-hidden="true"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>
@@ -589,6 +591,84 @@ ${this._htmlDashboardBody()}`;
     `;
   }
 
+  // ─── Screen reader names and states ───────────────────────────────────
+  // Runs after every redraw (_render, _setHtml) over what was just drawn.
+  // Most cards share a few row shapes, so names and states are read from
+  // what is already on screen instead of being written into every
+  // template: a row's label names its fields, an "on" class becomes
+  // aria-pressed, a panel title becomes a heading. The names are the
+  // visible text, so a translation reaches them too.
+  static A11Y_PRESSED = [
+    [".toggle-btn", "on"],
+    [".mode-chip[data-cfg-key]", "mode-chip-on"],
+    [".mode-chip[data-lab-area]", "mode-chip-on"],
+    [".mode-chip[data-mode]", "mode-chip-on"],
+    [".mode-chip[data-agency]", "mode-chip-on"],
+    [".new-cam-loc-chip", "mode-chip-on"],
+    [".new-log-filter", "mode-chip-on"],
+    [".new-logview", "mode-chip-on"],
+    [".new-ilog-btn", "mode-chip-on"],
+    [".settings-nav-btn", "active"],
+    [".area-light-toggle", "on"],
+  ];
+
+  _a11yId(el) {
+    if (!el.id) {
+      this._a11ySeq = (this._a11ySeq || 0) + 1;
+      el.id = `a11y-${this._a11ySeq}`;
+    }
+    return el.id;
+  }
+
+  _a11yNamed(el) {
+    return el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby") || (el.labels && el.labels.length > 0);
+  }
+
+  _a11y(scope) {
+    if (!scope || typeof scope.querySelectorAll !== "function") return;
+    try {
+      scope.querySelectorAll(".panel-title").forEach(t => {
+        t.setAttribute("role", "heading");
+        t.setAttribute("aria-level", "2");
+      });
+
+      // A row's own label names the fields and toggles in it.
+      const ROWS = ".cfg-row, .pairing-row, .toggle-row, .new-model-row, .cred-row";
+      scope.querySelectorAll(ROWS).forEach(row => {
+        const label = Array.from(row.children).find(c => c.tagName === "LABEL"
+          || ["pairing-label", "toggle-label", "model-label"].some(k => c.classList.contains(k)));
+        if (!label || !label.textContent.trim()) return;
+        const desc = row.classList.contains("toggle-row")
+          ? Array.from(row.children).find(c => c.classList.contains("toggle-desc")) : null;
+        row.querySelectorAll("select, input, textarea, .toggle-btn").forEach(field => {
+          if (field.closest(ROWS) !== row || this._a11yNamed(field)) return;
+          field.setAttribute("aria-labelledby", this._a11yId(label));
+          if (desc && desc.textContent.trim()) field.setAttribute("aria-describedby", this._a11yId(desc));
+        });
+      });
+
+      // A field with no label of its own is named by its hint text.
+      scope.querySelectorAll("input[placeholder], textarea[placeholder]").forEach(field => {
+        if (!this._a11yNamed(field)) field.setAttribute("aria-label", field.getAttribute("placeholder"));   // i18n-ok: the placeholder, translated before this runs
+      });
+
+      for (const [sel, onClass] of NovaPanel.A11Y_PRESSED) {
+        scope.querySelectorAll(sel).forEach(b => b.setAttribute("aria-pressed", String(b.classList.contains(onClass))));
+      }
+
+      scope.querySelectorAll(".nav-tab").forEach(t => {
+        if (t.classList.contains("active")) t.setAttribute("aria-current", "page");
+        else t.removeAttribute("aria-current");
+      });
+
+      // A chip's × names the item it takes off the list.
+      scope.querySelectorAll(".new-pl-chip > button").forEach(b => {
+        const item = Array.from(b.parentElement.childNodes)
+          .filter(n => n !== b).map(n => n.textContent).join("").trim();
+        if (item) b.setAttribute("aria-label", `${this._tx("Remove")} ${item}`);   // i18n-ok: built with _tx
+      });
+    } catch (_) { /* names are an extra: the panel works without them */ }
+  }
   // ─── Logs ─────────────────────────────────────────────────────────────
   // Ported from Classic's own _fetchDebugLog (nova-panel.js) — same single
   // nova/get_debug_log call, same client-side category+search filtering,
@@ -1000,7 +1080,7 @@ ${this._htmlDashboardBody()}`;
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
       const outcomeLabel = d.outcome ? d.outcome.toUpperCase() : "UNJUDGED";
       const when = d.ts ? new Date(d.ts * 1000).toLocaleString() : "";
-      return `<div class="new-log-entry new-decision-row" data-id="${this._esc(d.id)}">
+      return `<div class="new-log-entry new-decision-row" data-id="${this._esc(d.id)}" tabindex="0" role="button">
           <span class="new-log-ts">${this._esc(when)}</span>
           <span class="new-log-cat">${this._esc((d.kind || "").toUpperCase())}</span>
           <span class="new-log-msg">${this._esc(d.decision || "")}</span>
@@ -1010,7 +1090,11 @@ ${this._htmlDashboardBody()}`;
     const loadMoreRow = this.shadowRoot?.getElementById("decisionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._decisionsCursor;
     container.querySelectorAll(".new-decision-row").forEach(row => {
-      row.addEventListener("click", () => this._openDecisionDetail(parseInt(row.getAttribute("data-id"), 10)));
+      const open = () => this._openDecisionDetail(parseInt(row.getAttribute("data-id"), 10));
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+      });
     });
   }
 
@@ -1033,7 +1117,7 @@ ${this._htmlDashboardBody()}`;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       this._setHtml(drawer, `
-        <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
+        <div class="panel-head"><div class="panel-title" tabindex="-1">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
@@ -1054,8 +1138,16 @@ ${this._htmlDashboardBody()}`;
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
       `);
+      // The detail opens below the list, so it is brought into view and
+      // takes focus; closing it goes back to the row it came from.
+      const title = drawer.querySelector(".panel-title");
+      if (title) {
+        if (typeof title.scrollIntoView === "function") title.scrollIntoView({ behavior: "smooth", block: "start" });
+        title.focus({ preventScroll: true });
+      }
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
         drawer.hidden = true; this._setHtml(drawer, "");
+        this.shadowRoot?.querySelector(`.new-decision-row[data-id="${id}"]`)?.focus();
       });
       drawer.querySelectorAll(".new-dec-fb").forEach(btn => {
         btn.addEventListener("click", () => this._submitDecisionOutcome(
@@ -1146,7 +1238,7 @@ ${this._htmlDashboardBody()}`;
       const safeCat = this._esc(e.cat);
       return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
         <span class="new-log-ts">${this._esc(e.ts)}</span>
-        <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+        <span class="new-log-cat" style="color:${cat.color}"><span aria-hidden="true">${cat.icon}</span> ${safeCat}</span>
         <span class="new-log-msg">${this._esc(e.msg)}</span>
       </div>`;
     }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`);
@@ -1801,7 +1893,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-title">Chat</div>
             <div class="panel-meta"><button class="mode-chip" id="chatNew">NEW CHAT</button></div>
           </div>
-          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
           <div class="chat-compose">
             <input class="cfg-field" id="chatInput" maxlength="1000" placeholder="Ask Nova something">
             <button class="mode-chip" id="chatSend">SEND</button>
@@ -3422,10 +3514,10 @@ ${this._htmlDashboardBody()}`;
         : `Not in Nova's safety checks. To include it, give it a door or window device class in Home Assistant.`}</div>`;
     }).join("");
     return `
-      <div class="mode-bind-head">Exit doors <span class="toggle-desc">doors you leave the house by. Nova adds nothing until you pick one.</span></div>
+      <div class="mode-bind-head" id="resExitHead">Exit doors <span class="toggle-desc">doors you leave the house by. Nova adds nothing until you pick one.</span></div>
       ${rows}
       <div class="cfg-row res-exit-add">
-        <select id="resExitPick">${this._exitDoorOptions(cfg)}</select>
+        <select id="resExitPick" aria-labelledby="resExitHead">${this._exitDoorOptions(cfg)}</select>
         <input id="resExitName" type="text" maxlength="40" placeholder="Name (optional)">
         <button class="mode-chip" id="resExitAdd">Add another exit door</button>
       </div>`;
@@ -5407,7 +5499,7 @@ ${this._htmlDashboardBody()}`;
       const stale = entry && !("value" in entry) && entry.reason === "stale";
       const cands = m.candidates || [];
       const selectHtml = cands.length ? `
-        <select class="host-health-map-select" data-metric-key="${this._esc(m.key)}">
+        <select class="host-health-map-select" data-metric-key="${this._esc(m.key)}" aria-label="${this._esc(this._tx(m.label))}">
           <option value="">${m.source === "auto" ? "— auto —" : "— none —"}</option>
           ${cands.map(c => `<option value="${this._esc(c.entity_id)}"${mappings[m.key] === c.entity_id ? " selected" : ""}>${this._esc(c.friendly_name)}${c.disabled ? " (disabled)" : ""}</option>`).join("")}
         </select>` : "";
@@ -6118,9 +6210,9 @@ ${this._htmlDashboardBody()}`;
         <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
       </div>
       <div id="newDoclibBody">${this._renderDocLibraryList()}</div>
-      <div class="mode-bind-head">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
+      <div class="mode-bind-head" id="docWatchHead">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
       <div class="cfg-row">
-        <input id="newDoclibWatch" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
+        <input id="newDoclibWatch" aria-labelledby="docWatchHead" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
         <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
       </div>`;
   }
@@ -6425,7 +6517,7 @@ ${this._htmlDashboardBody()}`;
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
-          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}">${active ? "CANCEL" : "DELETE"}</button>
+          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}" aria-label="${this._esc(this._tx(active ? "CANCEL" : "DELETE"))} ${this._esc(g.title || g.outcome || `Goal ${g.id}`)}">${active ? "CANCEL" : "DELETE"}</button>
         </div>`;
       }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
@@ -6449,9 +6541,9 @@ ${this._htmlDashboardBody()}`;
           : `<div class="camera-empty">${this._cameraLoading[eid] ? "LOADING…" : "NO SNAPSHOT"}</div>`;
         return `<div class="camera-slot" data-camera="${this._esc(eid)}">
           ${body}<div class="camera-caption"><b>${this._esc(c.name || eid)}</b><span>${this._esc(eid)}</span></div>
-          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}">REFRESH</button>
-            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}">ANALYZE</button>
-            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}">DIAGNOSE</button></div>
+          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("REFRESH"))} ${this._esc(c.name || eid)}">REFRESH</button>
+            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("ANALYZE"))} ${this._esc(c.name || eid)}">ANALYZE</button>
+            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}" aria-label="${this._esc(this._tx("DIAGNOSE"))} ${this._esc(c.name || eid)}">DIAGNOSE</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
       }).join(""));
@@ -6526,10 +6618,31 @@ ${this._htmlDashboardBody()}`;
   // ordering (websocket.py's area-caps builder) so a room with many
   // capabilities always shows them in the same, sensible sequence.
   static AREA_CAP_ORDER = ["sat", "spkr", "mmwave", "cam", "light", "switch", "lock", "climate", "door", "leak", "alarm"];
+  // Line icons on a 24 unit grid, drawn in the text colour, with the name a
+  // screen reader says and a pointer shows.
   static AREA_CAP_ICON = {
-    sat: "🛰️", spkr: "🔊", mmwave: "📡", cam: "📷", light: "💡", switch: "🔌",
-    lock: "🔒", climate: "🌡️", door: "🚪", leak: "💧", alarm: "🔔",
+    sat: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    spkr: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+    mmwave: '<circle cx="12" cy="12" r="1.5"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>',
+    cam: '<path d="M4 7h3l2-2h6l2 2h3v12H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    light: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>',
+    switch: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    climate: '<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>',
+    door: '<path d="M6 21V4h12v17M3 21h18"/><circle cx="14.5" cy="12.5" r=".8"/>',
+    leak: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    alarm: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   };
+  static AREA_CAP_LABEL = {
+    sat: "Satellite", spkr: "Speaker", mmwave: "Presence", cam: "Camera", light: "Light", switch: "Switch",
+    lock: "Lock", climate: "Temperature", door: "Door", leak: "Water leak", alarm: "Security alarm",
+  };
+
+  _areaCapHtml(c) {
+    const label = this._esc(this._tx(NovaPanel.AREA_CAP_LABEL[c] || c));
+    const icon = NovaPanel.AREA_CAP_ICON[c] || '<circle cx="12" cy="12" r="2"/>';
+    return `<div class="area-cap" role="img" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div>`;
+  }
 
   _areaSparklineSvg(values, color) {
     if (!values || values.length < 2) return "";
@@ -6548,7 +6661,7 @@ ${this._htmlDashboardBody()}`;
     const caps = (a.caps || []).slice().sort((x, y) =>
       NovaPanel.AREA_CAP_ORDER.indexOf(x) - NovaPanel.AREA_CAP_ORDER.indexOf(y)).slice(0, 5);
     const capsRow = caps.length
-      ? `<div class="area-caps">${caps.map(c => `<div class="area-cap" title="${this._esc(c)}">${NovaPanel.AREA_CAP_ICON[c] || "•"}</div>`).join("")}</div>`
+      ? `<div class="area-caps">${caps.map(c => this._areaCapHtml(c)).join("")}</div>`
       : "";
     const spark = this._sparklines?.[a.id] || {};
     const tempSpark = spark.temp ? this._areaSparklineSvg(spark.temp, "var(--gold)") : "";
@@ -6561,13 +6674,14 @@ ${this._htmlDashboardBody()}`;
     const hasLights = (a.lights_total || 0) > 0;
     const lit = hasLights && (a.lights_on || 0) > 0;
     const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
+    const lightNote = this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total });
     const lightCtl = hasLights
-      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total })}">${lit ? "ON" : "OFF"}</button>`
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${lightNote}" aria-label="${this._esc(a.name)} — ${lightNote}">${lit ? "ON" : "OFF"}</button>`
       : "";
     return `
       <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
         <div class="area-top">
-          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" title="Occupied now"></span>' : ""}</div>
+          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" role="img" aria-label="Occupied now" title="Occupied now"></span>' : ""}</div>
         </div>
         ${capsRow}
         ${climateRow}
@@ -9969,6 +10083,9 @@ ${this._htmlDashboardBody()}`;
         --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
       }
       *{box-sizing:border-box}
+      /* Keyboard focus is always visible; a pointer click shows no ring. */
+      :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+      button:disabled,select:disabled,input:disabled,textarea:disabled{opacity:.45;cursor:not-allowed}
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
         background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
@@ -10168,6 +10285,8 @@ ${this._htmlDashboardBody()}`;
       .area-caps{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;min-height:20px}
       .area-cap{width:21px;height:21px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
         display:flex;align-items:center;justify-content:center;font-size:10.5px;opacity:.85}
+      .area-cap svg{width:13px;height:13px;fill:none;stroke:var(--ink-dim);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .new-decision-row{cursor:pointer}
       .area-climate{display:flex;gap:10px;margin-bottom:9px}
       .area-climate-item{flex:1;min-width:0}
       .area-climate-num{font-family:var(--font-mono);font-size:12.5px;font-weight:500;display:flex;align-items:baseline;gap:3px}
@@ -10255,12 +10374,12 @@ ${this._htmlDashboardBody()}`;
       .cfg-row label{font-size:12.5px;color:var(--ink-dim)}
       select.cfg-field,input.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}
-      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
+      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold)}
       .cfg-num{width:84px;min-width:0;text-align:right}
       .door-map-sel-new{flex:1;min-width:0;max-width:220px}
       textarea.cfg-field.vp-json{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-mono);font-size:12px;padding:6px 9px;border-radius:8px;resize:vertical}
-      textarea.cfg-field.vp-json:focus{border-color:var(--gold);outline:none}
+      textarea.cfg-field.vp-json:focus{border-color:var(--gold)}
       .vp-row{flex-wrap:wrap}.vp-row .toggle-desc{flex:1;min-width:0;overflow-wrap:anywhere}
       .vp-editor select.cfg-field{flex:1;min-width:0;max-width:100%}
       .vp-note{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 8px}
@@ -10292,7 +10411,7 @@ ${this._htmlDashboardBody()}`;
       .new-model-custom{grid-column:2/4;width:100%;box-sizing:border-box;padding:6px 9px;
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--gold);
         font-family:var(--font-mono);font-size:11px;border-radius:8px}
-      .new-model-custom:focus{outline:none;border-color:var(--gold)}
+      .new-model-custom:focus{border-color:var(--gold)}
       .new-model-refresh{padding:5px 9px;font-size:12px;line-height:1}
       .new-model-warning{grid-column:1/-1;font-size:10.5px;color:var(--warn);margin-top:2px}
       .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
@@ -10302,12 +10421,12 @@ ${this._htmlDashboardBody()}`;
       .cred-input{width:100%;min-width:0;box-sizing:border-box;padding:6px 8px;
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:11.5px;border-radius:8px}
-      .cred-input:focus{outline:none;border-color:var(--gold)}
+      .cred-input:focus{border-color:var(--gold)}
       .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
       .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
         color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
-      .new-appliance-row input:focus,.new-appliance-row select:focus{outline:none;border-color:var(--gold)}
+      .new-appliance-row input:focus,.new-appliance-row select:focus{border-color:var(--gold)}
       .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:#ff8a8a;
         border:1px solid #ff5a5a4d;background:transparent;border-radius:7px;cursor:pointer}
       .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}

@@ -23,6 +23,7 @@
     this._initCore();
     this._renderData();
     if (this._currentTab === "dashboard") this._presentStart();
+    this._a11y(root);
     this._focusRestore(root, focus);
   }
 
@@ -134,8 +135,8 @@
         if (value !== raw) swaps.push([node, value]);
       }
       swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
-      root.querySelectorAll("[title],[placeholder]").forEach(el => {
-        ["title", "placeholder"].forEach(attr => {
+      root.querySelectorAll("[title],[placeholder],[aria-label]").forEach(el => {
+        ["title", "placeholder", "aria-label"].forEach(attr => {
           const raw = el.getAttribute(attr);
           const value = raw == null ? raw : this._tx(raw);
           if (value !== raw) el.setAttribute(attr, value);
@@ -152,6 +153,7 @@
     const focus = this._focusMark(el);
     el.innerHTML = html;   // i18n-ok: the helper itself
     this._localizeDOM(el);
+    this._a11y(el);
     this._focusRestore(el, focus);
   }
 
@@ -220,7 +222,7 @@
         <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
-            <canvas class="core" id="core"></canvas>
+            <canvas class="core" id="core" aria-hidden="true"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>

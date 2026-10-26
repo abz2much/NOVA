@@ -650,7 +650,7 @@ if (require.main === module) setTimeout(async () => {
       (() => {
         const nrTile = Array.from(newRoot.querySelectorAll(".area-tile")).find(t => /Network Room/.test(t.textContent));
         const icons = nrTile ? Array.from(nrTile.querySelectorAll(".area-cap")).map(c => c.getAttribute("title")) : [];
-        return icons.length === 5 && icons.join(",") === "cam,light,switch,climate,leak";
+        return icons.length === 5 && icons.join(",") === "Camera,Light,Switch,Temperature,Water leak";
       })()],
     ["new look: a room with no temp/humidity sensor renders no climate row or accent bar",
       (() => {
@@ -4589,8 +4589,8 @@ if (require.main === module) setTimeout(async () => {
       geometry: "a836aa626ac3def0",
       floorHelpers: "b94425681aba57c7",
       editorMarkup: "fa1ab165a9a30f0a",
-      memoryMarkup: "85c7ab87155e29f7",
-      intrusionMarkup: "88c37a0e4f95ee4d",
+      memoryMarkup: "b477b7381f8bea8f",   // 8.71.0: screen reader names and states added
+      intrusionMarkup: "9c83bd184510fdd8",   // 8.71.0: screen reader names and states added
       editorDrag: "1394062ae0bd2b40",
     };
     const flat = s => String(s).replace(/\s+/g, " ").trim();
@@ -5173,6 +5173,136 @@ if (require.main === module) setTimeout(async () => {
     checks.push(["focus: the 20 second poll keeps focus on the same room's light button",
       !!area && D.activeElement?.getAttribute("data-light-area") === area && D.activeElement !== target]);
     dashP.remove();
+  }
+
+  // Screen reader structure (8.71.0). Names and states a screen reader needs,
+  // checked on fresh panels.
+  {
+    const open = async (tab, callWS) => {
+      const el = document.createElement("nova-panel");
+      el._currentTab = tab;
+      document.body.appendChild(el);
+      el.hass = { ...hass, callWS: callWS || hass.callWS };
+      await new Promise(r => setTimeout(r, 150));
+      return el;
+    };
+    // The accessible name, as far as jsdom can work it out.
+    const nameOf = (root, el) => {
+      const lb = el.getAttribute("aria-labelledby");
+      if (lb) return lb.split(/\s+/).map(id => root.getElementById(id)?.textContent.trim() || "").join(" ").trim();
+      if (el.getAttribute("aria-label")) return el.getAttribute("aria-label").trim();
+      if (el.labels && el.labels.length) return Array.from(el.labels).map(l => l.textContent.trim()).join(" ");
+      if (/^(BUTTON|SUMMARY)$/.test(el.tagName)) return el.textContent.trim();
+      return "";
+    };
+    // Every card counts, open or not; a field hidden on purpose (e.g. Custom… honorific) does not.
+    const shown = el => !el.hidden && el.type !== "hidden" && el.type !== "file" && el.style.display !== "none";
+
+    const S = await open("settings");
+    const SR = S.shadowRoot;
+    const titles = Array.from(SR.querySelectorAll(".panel-title"));
+    checks.push(["a11y: every panel title is a heading a screen reader can jump to",
+      titles.length > 10 && titles.every(t => t.getAttribute("role") === "heading" && t.getAttribute("aria-level"))]);
+
+    const unnamed = Array.from(SR.querySelectorAll("select, input, textarea")).filter(shown)
+      .filter(el => !nameOf(SR, el)).map(el => el.getAttribute("data-cfg-key") || el.id || el.className);
+    checks.push([`a11y: every settings field has a name (${unnamed.length} without: ${unnamed.slice(0, 6).join(", ")})`,
+      unnamed.length === 0]);
+
+    const toggles = Array.from(SR.querySelectorAll(".toggle-btn"));
+    const badToggles = toggles.filter(b => {
+      const on = b.classList.contains("on");
+      const name = nameOf(SR, b);
+      return b.getAttribute("aria-pressed") !== String(on) || !name || /^(ON|OFF|YES|NO)$/i.test(name);
+    }).map(b => b.getAttribute("data-cfg-key") || b.className);
+    checks.push([`a11y: every ON/OFF toggle says what it is and whether it is on (${badToggles.length} wrong: ${badToggles.slice(0, 5).join(", ")})`,
+      toggles.length > 20 && badToggles.length === 0]);
+
+    const chipToggles = Array.from(SR.querySelectorAll(".mode-chip[data-cfg-key]"));
+    checks.push(["a11y: on/off chips say whether they are on",
+      chipToggles.length > 0 && chipToggles.every(b => b.getAttribute("aria-pressed") === String(b.classList.contains("mode-chip-on")))]);
+
+    const tabs = Array.from(SR.querySelectorAll(".nav-tab"));
+    checks.push(["a11y: the current tab is marked, and only that one",
+      tabs.filter(t => t.getAttribute("aria-current") === "page").map(t => t.getAttribute("data-tab")).join() === "settings"]);
+
+    const removers = Array.from(SR.querySelectorAll(".new-pl-chip button"));
+    checks.push(["a11y: a chip's × button names the item it removes",
+      removers.length > 0 && removers.every(b => {
+        const item = b.parentElement.textContent.replace(/×/g, "").trim();
+        return nameOf(SR, b).includes(item) && /Remove/.test(nameOf(SR, b));
+      })]);
+    S.remove();
+
+    // CSS: a visible focus ring and a visible disabled state.
+    const cssDoc2 = new JSDOM(`<style>${elNew._css()}</style><button class="toggle-btn" disabled>OFF</button><button class="mode-chip" disabled>X</button>`).window;
+    const op = el => parseFloat(cssDoc2.getComputedStyle(el).opacity || "1");
+    checks.push(["a11y: disabled buttons look disabled",
+      Array.from(cssDoc2.document.querySelectorAll("button")).every(b => op(b) < 0.7)]);
+    checks.push(["a11y: there is a visible keyboard focus ring and no rule hides it",
+      /:focus-visible\s*\{[^}]*outline:\s*2px/.test(elNew._css()) && !/outline:\s*none/.test(elNew._css())]);
+
+    // Dashboard: room tiles, the hero canvas, goals and cameras.
+    const Dp = await open("dashboard");
+    const DR = Dp.shadowRoot;
+    const caps = Array.from(DR.querySelectorAll(".area-cap"));
+    checks.push(["a11y: room feature icons are drawn, not emoji, and each has a name",
+      caps.length > 0 && caps.every(c => !/\p{Extended_Pictographic}/u.test(c.textContent)
+        && c.querySelector("svg") && c.getAttribute("role") === "img" && /^[A-Z]/.test(c.getAttribute("aria-label") || ""))]);
+    const light = DR.querySelector(".area-light-toggle[data-light-area]");
+    const room = light?.closest(".area-tile")?.querySelector(".area-name")?.textContent.trim();
+    checks.push(["a11y: a room's light button names the room and says whether it is on",
+      !!light && nameOf(DR, light).includes(room) && light.getAttribute("aria-pressed") === String(light.classList.contains("on"))]);
+    checks.push(["a11y: the decorative head is hidden from screen readers",
+      DR.getElementById("core")?.getAttribute("aria-hidden") === "true"]);
+    const goalBtn = DR.querySelector(".goal-action");
+    const goalTitle = goalBtn?.closest(".goal-row")?.querySelector("b")?.textContent.trim();
+    checks.push(["a11y: a goal's button names the goal",
+      !!goalBtn && nameOf(DR, goalBtn).includes(goalTitle)]);
+    Dp._camOpen = true; Dp._renderData();
+    const camBtn = DR.querySelector(".camera-refresh");
+    const camName = camBtn?.closest(".camera-slot")?.querySelector(".camera-caption b")?.textContent.trim();
+    checks.push(["a11y: each camera's buttons name the camera",
+      !!camBtn && nameOf(DR, camBtn).includes(camName)]);
+    Dp.remove();
+
+    // Chat: replies are announced and the box has a name.
+    const C = await open("chat");
+    const log = C.shadowRoot.getElementById("chatLog");
+    checks.push(["a11y: chat replies are announced and the message box has a name",
+      log?.getAttribute("role") === "log" && log?.getAttribute("aria-live") === "polite"
+      && !!nameOf(C.shadowRoot, C.shadowRoot.getElementById("chatInput"))]);
+    C.remove();
+
+    // Logs: a decision row works from the keyboard, and its detail takes focus.
+    const decisions = [{ id: 11, ts: 1786000000, kind: "observer", decision: "stay quiet", outcome: null },
+      { id: 12, ts: 1786000100, kind: "observer", decision: "announce", outcome: "good" }];
+    const baseCall = hass.callWS;
+    const L = await open("logs", async (m) => {
+      if (m.type === "nova/list_decisions") return { decisions, next_cursor: null };
+      if (m.type === "nova/get_decision") return { decision: { ...decisions.find(d => d.id === m.decision_id), reason: "quiet hours" } };
+      return baseCall(m);
+    });
+    L._logView = "decisions"; L._render();
+    await new Promise(r => setTimeout(r, 80));
+    const LR = L.shadowRoot;
+    const row = LR.querySelector(".new-decision-row");
+    const rowOk = !!row && row.getAttribute("tabindex") === "0" && row.getAttribute("role") === "button";
+    row?.focus();
+    row?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    const drawer = LR.getElementById("decisionDrawer");
+    const inDrawer = !!drawer && !drawer.hidden && drawer.contains(LR.activeElement);
+    LR.getElementById("newDecCloseDrawer")?.click();
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["a11y: a decision row opens with Enter, its detail takes focus, and closing returns to the row",
+      rowOk && inDrawer && LR.activeElement?.getAttribute("data-id") === row.getAttribute("data-id")]);
+    const logIcon = (() => { L._logView = "system"; L._render(); return null; })();
+    await new Promise(r => setTimeout(r, 80));
+    const cat = LR.querySelector(".new-log-cat");
+    checks.push(["a11y: log category emoji are hidden from screen readers",
+      !!cat && Array.from(cat.querySelectorAll("[aria-hidden='true']")).some(s => /\p{Extended_Pictographic}/u.test(s.textContent))]);
+    L.remove();
   }
 
   let ok = true;

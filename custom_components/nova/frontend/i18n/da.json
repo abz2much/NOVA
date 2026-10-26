@@ -396,5 +396,12 @@
   "Arming": "Aktiverer",
   "Disarmed": "Frakoblet",
   "Triggered": "Udløst",
-  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installerer Piper, Whisper og openWakeWord og bygger stemmepipelinen ved næste genstart (Home Assistant OS eller Supervised)"
+  "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS or Supervised)": "installerer Piper, Whisper og openWakeWord og bygger stemmepipelinen ved næste genstart (Home Assistant OS eller Supervised)",
+  "Door": "Dør",
+  "Light": "Lys",
+  "Lock": "Lås",
+  "Satellite": "Satellit",
+  "Speaker": "Højttaler",
+  "Switch": "Kontakt",
+  "Water leak": "Vandlæk"
 }

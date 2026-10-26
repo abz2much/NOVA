@@ -26,6 +26,7 @@ OUT = ROOT / "custom_components" / "nova" / "frontend" / "nova-panel.js"
 SOURCES = (
     "panel/core.js",                 # class opening, lifecycle, HA contract, data
     "panel/render.js",               # tab shell and dashboard
+    "panel/a11y.js",                 # screen reader names and states, after each redraw
     "panel/logs.js",                 # system log, spoken history, actions, decisions
     "panel/memory.js",
     "panel/intrusion.js",
