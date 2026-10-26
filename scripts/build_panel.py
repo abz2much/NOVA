@@ -47,6 +47,7 @@ SOURCES = (
     "panel/core-hologram.js",        # hero hologram (WebGL 2)
     "panel/core-animation.js",       # hero fallback head (canvas 2D)
     "panel/presenting.js",           # Presenting: the energy card beside the head
+    "panel/orbit.js",                # Command Center orbit: live cards, arcs, latest line
     "panel/floor-plan.js",
     "panel/floor-plan-geometry.js",  # coverage and line-of-sight maths
     "panel/floor-plan-editor.js",

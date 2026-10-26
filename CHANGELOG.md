@@ -1,3 +1,15 @@
+## [8.76.0] A new Command Center
+
+### Added
+- **The head is in the middle**, with three broken arcs turning slowly round it in opposite directions. They fade behind the greeting so the words stay clear, and stand still when your device asks for less motion.
+- **Five live cards round the head:** Security, Who's home, Energy, Indoor and Weather. They update with the rest of the panel, and a number that changes counts up to its new value. Tap one to see more beside the head.
+- **Nova's latest line** under the greeting: the newest entry from the Activity feed, which slides in when a new one arrives.
+
+### Changed
+- **Pop-up cards appear beside the head instead of covering the greeting.** When one ends it shrinks into its live card, which glows.
+- **On a phone** the cards sit under the head in two columns, without the arcs.
+- The guide said a pop-up card stays 15 seconds and comes every 20; it stays 8 and comes every 9, and the guide now says so.
+
 ## [8.75.1] Buttons in normal case
 
 ### Changed

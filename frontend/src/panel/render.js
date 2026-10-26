@@ -22,7 +22,7 @@
     this._wire();
     this._initCore();
     this._renderData();
-    if (this._currentTab === "dashboard") this._presentStart();
+    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._arcsStop(); this._arcsStart(); }
     this._a11y(root);
     this._drawNotice();
     // On a phone the tabs scroll sideways: centre the open one. The row's own
@@ -230,13 +230,16 @@
         <div id="shushMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
+            <canvas class="hero-arcs" id="heroArcs" aria-hidden="true"></canvas>
             <canvas class="core" id="core" aria-hidden="true"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>
               <div class="state-sub" id="stateSub">—</div>
+              <div class="hero-latest" id="heroLatest" aria-live="polite"></div>
             </div>
             <div class="present-card" id="presentCard" role="button" tabindex="0" title="Dismiss"></div>
+            <div class="orbit" id="orbit">${this._orbitHtml()}</div>
           </div>
           <div class="chips" id="chips"></div>
         </div>

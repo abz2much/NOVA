@@ -288,7 +288,7 @@
     const wasNarrow = h.narrow;
     h.W = rect.width; h.H = rect.height;
     h.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    h.narrow = h.W < 640;
+    h.narrow = h.W < 820;   // the hero is one column below 820px
     h.canvas.width = Math.round(h.W * h.dpr); h.canvas.height = Math.round(h.H * h.dpr);
     if (!h.built || wasNarrow !== h.narrow) this._holoUpload(h);
     const gl = h.gl;
@@ -301,8 +301,8 @@
 
   _holoLayout(h) {
     if (h.narrow) { const S = h.H * 0.25; return { S, hx: h.W / 2, hy: h.H * 0.33 }; }
-    const S = h.H * 0.27;
-    return { S, hx: Math.max(h.W * 0.27, S * 1.9), hy: h.H * 0.3 };
+    const S = h.H * 0.17;
+    return { S, hx: h.W / 2, hy: h.H * 0.34 };   // in the middle of the orbit, clear of the greeting (8.76.0)
   }
 
   // Try to start the hologram on this canvas. False when WebGL 2 is missing
