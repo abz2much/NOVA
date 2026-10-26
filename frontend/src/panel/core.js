@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.73.1
+ * v8.74.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,9 +78,9 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.73.1 ",
-        "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
-        "color: #e2542f; background: #050403; padding: 2px 6px;");
+      console.log("%c Nova Panel %c v8.74.0 ",
+        "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
+        "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
     if (!document.getElementById("nova-new-fonts")) {
       const l = document.createElement("link");
@@ -175,6 +175,7 @@ class NovaPanel extends HTMLElement {
     }
     if (this._currentTab === "logs") this._fetchDebugLog();
     this._loadUiStrings();
+    this._applyTheme();
     this._detectFlare();
     this._renderData();
   }

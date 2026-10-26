@@ -1,3 +1,12 @@
+## [8.74.0] Colour themes
+
+### Added
+- **Pick the panel's colours in Settings → General → Theme.** Deep Teal is the new default; Twilight Denim, Pine Mist and Smoked Lilac are the other choices, and **Classic** keeps the warm ember and gold look from before. The whole panel changes at once, the hologram head included, and the head keeps running while it does.
+- Every theme was worked out from one base and accent colour and checked: text, status colours and the log colours all reach 4.5:1 or better on the cards they sit on.
+
+### Changed
+- **Every colour the panel draws now comes from the theme.** Before, about 70 colours were written straight into the code; the energy flow now has its own four colours in every theme, so solar, grid, house and battery stay apart.
+
 ## [8.73.1] Floor plan editor without dragging
 
 ### Added

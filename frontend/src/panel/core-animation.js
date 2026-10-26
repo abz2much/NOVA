@@ -106,7 +106,7 @@
   _lerp(a, b, t) { return a + (b - a) * t; }
 
   _colorForHeat(t) {
-    const stops = [[126, 36, 18], [226, 84, 47], [244, 184, 96], [255, 231, 189]];
+    const stops = this._theme().head.ramp;
     t = Math.max(0, Math.min(1, t));
     const seg = t * (stops.length - 1);
     const i = Math.min(stops.length - 2, Math.floor(seg));
@@ -203,7 +203,7 @@
     const hx = narrow ? W / 2 : Math.max(size * 0.5, W * 0.26), hy = H / 2;
     const hc = this._colorForHeat(Math.min(1, c.hot * 0.8 + 0.2));
     const wide = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.75);
-    wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, "rgba(20,12,8,0)");
+    wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, rgba(this._theme().head.fade, 0));
     ctx.fillStyle = wide; ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = "lighter";
     const dustN = Math.round(this._dust.length * Math.max(0.3, Math.min(1, c.count / 110)));
@@ -228,7 +228,7 @@
     const E = { open: Math.max(0, c.open * f.blink), wide: c.wide, brow: c.brow, smile: c.smile, mo: Math.min(1, c.mouth) };
 
     const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, size * 0.52);
-    halo.addColorStop(0, rgba(hc, 0.5 * c.glow)); halo.addColorStop(1, "rgba(20,12,8,0)");
+    halo.addColorStop(0, rgba(hc, 0.5 * c.glow)); halo.addColorStop(1, rgba(this._theme().head.fade, 0));
     ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(hx, hy, size * 0.52, 0, Math.PI * 2); ctx.fill();
 
     ctx.globalCompositeOperation = "lighter";
@@ -303,7 +303,7 @@
       if (E.open > 0.12) {
         ctx.scale(1, ry / rx);
         const core = ctx.createRadialGradient(f.gx * rx * 0.2, f.gy * rx * 0.25, 0, 0, 0, rx);
-        core.addColorStop(0, `rgba(255,244,222,${0.95 * c.glow + 0.05})`);
+        core.addColorStop(0, rgba(this._theme().head.eye, 0.95 * c.glow + 0.05));
         core.addColorStop(0.35, rgba(eyeC, 0.95)); core.addColorStop(1, rgba(eyeC, 0.15));
         ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
       } else {

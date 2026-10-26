@@ -296,9 +296,9 @@
   _renderHazardWarnings(list) {
     if (!Array.isArray(list)) return `<div class="stub-body">Loading…</div>`;
     if (!list.length) return `<div class="stub-body">No warnings in force for your area.</div>`;
-    const colour = { yellow: "#e6b800", orange: "#f08c00", red: "#e03131" };
+    const colour = { yellow: "var(--hazard-yellow)", orange: "var(--hazard-orange)", red: "var(--hazard-red)" };
     return list.map(w => `
-      <div class="hazard-warning" data-level="${this._esc(w.level)}" style="border-left:4px solid ${colour[w.level] || "#888"};padding:4px 8px;margin:6px 0">
+      <div class="hazard-warning" data-level="${this._esc(w.level)}" style="border-left:4px solid ${colour[w.level] || "var(--hazard-none)"};padding:4px 8px;margin:6px 0">
         <div><b class="hazard-level" style="color:${colour[w.level] || "inherit"}">${this._esc(String(w.level || "").toUpperCase())}</b> ${this._esc(w.headline_text || "")}</div>
         <div class="toggle-desc">${this._esc((w.counties || []).join(", "))}${w.from && w.to ? ` · ${this._esc(w.from)} to ${this._esc(w.to)}` : ""}</div>
         ${w.description_text ? `<div class="stub-body hazard-description" style="white-space:pre-line">${this._esc(w.description_text)}</div>` : ""}

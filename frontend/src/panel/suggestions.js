@@ -25,7 +25,7 @@
     }
     const rows = sugs.map(s => {
       const pct = Math.round((s.confidence || 0) * 100);
-      const confColor = pct >= 80 ? "#5fbf7a" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
+      const confColor = pct >= 80 ? "var(--good)" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
       const label = NovaPanel.SUGGESTION_TYPE_LABEL[s.pattern_type] || "Learned pattern";
       const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
       const chips = (s.entity_labels && s.entity_labels.length) ? s.entity_labels : (s.entities || []);

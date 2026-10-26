@@ -50,6 +50,7 @@ SOURCES = (
     "panel/floor-plan.js",
     "panel/floor-plan-geometry.js",  # coverage and line-of-sight maths
     "panel/floor-plan-editor.js",
+    "panel/themes.js",               # colour themes: every colour the panel draws
     "panel/styles.js",
     "panel/define.js",               # class closing and custom element registration
 )

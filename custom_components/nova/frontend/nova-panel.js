@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.73.1
+ * v8.74.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,9 +80,9 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.73.1 ",
-        "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
-        "color: #e2542f; background: #050403; padding: 2px 6px;");
+      console.log("%c Nova Panel %c v8.74.0 ",
+        "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
+        "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
     if (!document.getElementById("nova-new-fonts")) {
       const l = document.createElement("link");
@@ -177,6 +177,7 @@ class NovaPanel extends HTMLElement {
     }
     if (this._currentTab === "logs") this._fetchDebugLog();
     this._loadUiStrings();
+    this._applyTheme();
     this._detectFlare();
     this._renderData();
   }
@@ -742,26 +743,26 @@ ${this._htmlDashboardBody()}`;
   static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
     "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE", "VOICE"];
   static LOG_CATEGORIES = {
-    CONV: { color: "#5fd0e0", icon: "💬" },
-    REPLY: { color: "#4fb8ff", icon: "💭" },
-    LOCAL: { color: "#5fbf7a", icon: "⚡" },
-    LEARN: { color: "#8fd15c", icon: "🧠" },
+    CONV: { color: "var(--log-conv)", icon: "💬" },
+    REPLY: { color: "var(--log-reply)", icon: "💭" },
+    LOCAL: { color: "var(--log-local)", icon: "⚡" },
+    LEARN: { color: "var(--log-learn)", icon: "🧠" },
     AGENT: { color: "var(--gold)", icon: "🤖" },
-    AUTO: { color: "#ffb454", icon: "🔁" },
-    MODE: { color: "#c9a0ff", icon: "🎚️" },
-    CONFIG: { color: "#9d8cff", icon: "⚙️" },
-    CLASSIFY: { color: "#9d8cff", icon: "🏷️" },
-    CAMERA: { color: "#5fbf7a", icon: "📷" },
-    ENERGY: { color: "#ffcf6a", icon: "🔌" },
-    BIO: { color: "#ff8fc7", icon: "💓" },
-    OFFER: { color: "#ffd27a", icon: "🙋" },
-    SAFETY: { color: "#ff8a8a", icon: "🛡️" },
-    ERROR: { color: "#ff6b81", icon: "❌" },
+    AUTO: { color: "var(--log-auto)", icon: "🔁" },
+    MODE: { color: "var(--log-mode)", icon: "🎚️" },
+    CONFIG: { color: "var(--log-config)", icon: "⚙️" },
+    CLASSIFY: { color: "var(--log-classify)", icon: "🏷️" },
+    CAMERA: { color: "var(--log-camera)", icon: "📷" },
+    ENERGY: { color: "var(--log-energy)", icon: "🔌" },
+    BIO: { color: "var(--log-bio)", icon: "💓" },
+    OFFER: { color: "var(--log-offer)", icon: "🙋" },
+    SAFETY: { color: "var(--log-safety)", icon: "🛡️" },
+    ERROR: { color: "var(--log-error)", icon: "❌" },
     WARNING: { color: "var(--warn)", icon: "⚠️" },
     GATE: { color: "var(--ink-faint)", icon: "🚧" },
     DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
     OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
-    VOICE: { color: "#7fe0c4", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
+    VOICE: { color: "var(--log-voice)", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
   };
 
   _htmlLogs() {
@@ -3107,7 +3108,7 @@ ${this._htmlDashboardBody()}`;
     }
     const rows = sugs.map(s => {
       const pct = Math.round((s.confidence || 0) * 100);
-      const confColor = pct >= 80 ? "#5fbf7a" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
+      const confColor = pct >= 80 ? "var(--good)" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
       const label = NovaPanel.SUGGESTION_TYPE_LABEL[s.pattern_type] || "Learned pattern";
       const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
       const chips = (s.entity_labels && s.entity_labels.length) ? s.entity_labels : (s.entities || []);
@@ -4391,6 +4392,12 @@ ${this._htmlDashboardBody()}`;
         </select>
       </div>
       <div class="cfg-row">
+        <label>Theme</label>
+        <select id="uiTheme" class="cfg-field" data-cfg-key="ui_theme">
+          ${this._optSelect(Object.entries(NovaPanel.THEMES).map(([key, t]) => [key, t.label]), this._themeKey())}
+        </select>
+      </div>
+      <div class="cfg-row">
         <label>Sleep state</label>
         <select class="cfg-field" data-cfg-key="sleep_override">
           ${this._optSelect([["auto", "Auto (occupancy + quiet hours)"], ["awake", "Awake"], ["asleep", "Asleep"]], cfg.sleep_override || "auto")}
@@ -5526,9 +5533,9 @@ ${this._htmlDashboardBody()}`;
   _renderHazardWarnings(list) {
     if (!Array.isArray(list)) return `<div class="stub-body">Loading…</div>`;
     if (!list.length) return `<div class="stub-body">No warnings in force for your area.</div>`;
-    const colour = { yellow: "#e6b800", orange: "#f08c00", red: "#e03131" };
+    const colour = { yellow: "var(--hazard-yellow)", orange: "var(--hazard-orange)", red: "var(--hazard-red)" };
     return list.map(w => `
-      <div class="hazard-warning" data-level="${this._esc(w.level)}" style="border-left:4px solid ${colour[w.level] || "#888"};padding:4px 8px;margin:6px 0">
+      <div class="hazard-warning" data-level="${this._esc(w.level)}" style="border-left:4px solid ${colour[w.level] || "var(--hazard-none)"};padding:4px 8px;margin:6px 0">
         <div><b class="hazard-level" style="color:${colour[w.level] || "inherit"}">${this._esc(String(w.level || "").toUpperCase())}</b> ${this._esc(w.headline_text || "")}</div>
         <div class="toggle-desc">${this._esc((w.counties || []).join(", "))}${w.from && w.to ? ` · ${this._esc(w.from)} to ${this._esc(w.to)}` : ""}</div>
         ${w.description_text ? `<div class="stub-body hazard-description" style="white-space:pre-line">${this._esc(w.description_text)}</div>` : ""}
@@ -6736,7 +6743,7 @@ ${this._htmlDashboardBody()}`;
       : "";
     const spark = this._sparklines?.[a.id] || {};
     const tempSpark = spark.temp ? this._areaSparklineSvg(spark.temp, "var(--gold)") : "";
-    const humSpark = spark.humidity ? this._areaSparklineSvg(spark.humidity, "#6ea8ff") : "";
+    const humSpark = spark.humidity ? this._areaSparklineSvg(spark.humidity, "var(--info)") : "";
     const climateRow = (a.temp || a.humidity) ? `
       <div class="area-climate">
         ${a.temp ? `<div class="area-climate-item"><div class="area-climate-num">${this._esc(a.temp)}</div>${tempSpark}</div>` : ""}
@@ -6808,7 +6815,7 @@ ${this._htmlDashboardBody()}`;
       this._wireUnmute(el);
     };
     draw(root.getElementById("shushMount"), all ? `
-      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn,#d9a300);border-radius:12px;padding:12px 14px;background:var(--surface)">
+      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn);border-radius:12px;padding:12px 14px;background:var(--surface)">
         <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
         <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
       </div>` : "");
@@ -8120,7 +8127,7 @@ ${this._htmlDashboardBody()}`;
     h.scanY -= dt * cur.scan * 0.9; if (h.scanY < -2.4) h.scanY = 1.2;
     const breathY = reduce ? 0 : Math.sin(h.clock * 2 * Math.PI / (key === "asleep" ? 7 : 5)) * 0.018 * cur.breath;
     const lay = this._holoLayout(h), t = reduce ? 0 : h.clock;
-    const gold = [0.957, 0.722, 0.376], deep = [0.62, 0.27, 0.12], pale = [1.0, 0.89, 0.68], ember = [0.886, 0.33, 0.18];
+    const hd = this._theme().head, gold = hd.main, deep = hd.deep, pale = hd.pale, ember = hd.warm;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, h.fbo.scene.fb); gl.viewport(0, 0, h.fbo.scene.w, h.fbo.scene.h);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -8268,7 +8275,7 @@ ${this._htmlDashboardBody()}`;
   _lerp(a, b, t) { return a + (b - a) * t; }
 
   _colorForHeat(t) {
-    const stops = [[126, 36, 18], [226, 84, 47], [244, 184, 96], [255, 231, 189]];
+    const stops = this._theme().head.ramp;
     t = Math.max(0, Math.min(1, t));
     const seg = t * (stops.length - 1);
     const i = Math.min(stops.length - 2, Math.floor(seg));
@@ -8365,7 +8372,7 @@ ${this._htmlDashboardBody()}`;
     const hx = narrow ? W / 2 : Math.max(size * 0.5, W * 0.26), hy = H / 2;
     const hc = this._colorForHeat(Math.min(1, c.hot * 0.8 + 0.2));
     const wide = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.75);
-    wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, "rgba(20,12,8,0)");
+    wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, rgba(this._theme().head.fade, 0));
     ctx.fillStyle = wide; ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = "lighter";
     const dustN = Math.round(this._dust.length * Math.max(0.3, Math.min(1, c.count / 110)));
@@ -8390,7 +8397,7 @@ ${this._htmlDashboardBody()}`;
     const E = { open: Math.max(0, c.open * f.blink), wide: c.wide, brow: c.brow, smile: c.smile, mo: Math.min(1, c.mouth) };
 
     const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, size * 0.52);
-    halo.addColorStop(0, rgba(hc, 0.5 * c.glow)); halo.addColorStop(1, "rgba(20,12,8,0)");
+    halo.addColorStop(0, rgba(hc, 0.5 * c.glow)); halo.addColorStop(1, rgba(this._theme().head.fade, 0));
     ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(hx, hy, size * 0.52, 0, Math.PI * 2); ctx.fill();
 
     ctx.globalCompositeOperation = "lighter";
@@ -8465,7 +8472,7 @@ ${this._htmlDashboardBody()}`;
       if (E.open > 0.12) {
         ctx.scale(1, ry / rx);
         const core = ctx.createRadialGradient(f.gx * rx * 0.2, f.gy * rx * 0.25, 0, 0, 0, rx);
-        core.addColorStop(0, `rgba(255,244,222,${0.95 * c.glow + 0.05})`);
+        core.addColorStop(0, rgba(this._theme().head.eye, 0.95 * c.glow + 0.05));
         core.addColorStop(0.35, rgba(eyeC, 0.95)); core.addColorStop(1, rgba(eyeC, 0.15));
         ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
       } else {
@@ -9080,7 +9087,7 @@ ${this._htmlDashboardBody()}`;
       }
       case "lock": {
         const locked = s === "locked";
-        return { color: locked ? dim : "#ff5a5a", name, val: locked ? "LOCK" : "OPEN" };
+        return { color: locked ? dim : "var(--bad-strong)", name, val: locked ? "LOCK" : "OPEN" };
       }
       case "cover": {
         const open = s === "open" || s === "opening";
@@ -9621,8 +9628,8 @@ ${this._htmlDashboardBody()}`;
     // should reach the rooms in it instead.
     let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" tabindex="-1" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
     svg += '<defs>'
-      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(244,184,96,0.05)" stroke-width="0.2"/></pattern>'
-      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(244,184,96,0.12)" stroke-width="0.3"/></pattern>'
+      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="var(--gold)" stroke-opacity="0.05" stroke-width="0.2"/></pattern>'
+      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="var(--gold)" stroke-opacity="0.12" stroke-width="0.3"/></pattern>'
       + '</defs>';
     const sel = floor === this._editorFloor && this._fpSelItem() ? this._fpSel : null;
     const picked = (kind, i) => sel && sel.kind === kind && sel.i === i ? " fpn-sel" : "";
@@ -9642,7 +9649,7 @@ ${this._htmlDashboardBody()}`;
     let prop = [];
     try { prop = this._propertyPts() || []; } catch (_) { prop = []; }
     if (prop.length >= 2) {
-      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="rgba(244,184,96,0.03)" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
+      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="var(--gold)" fill-opacity="0.03" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
       for (let vi = 0; vi < prop.length; vi++) {
         const a = prop[vi], b = prop[(vi + 1) % prop.length];
         svg += `<circle class="fpn-prop-mid" data-prop-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2.2" fill="none" stroke="var(--gold)" stroke-width="0.7" opacity="0.5" style="cursor:copy"/>`;
@@ -9654,7 +9661,7 @@ ${this._htmlDashboardBody()}`;
 
     for (let i = 0; i < (floorData.rooms || []).length; i++) {
       const rm = floorData.rooms[i];
-      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "#8fdba8" };
+      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "var(--good-ink)" };
       const c = colors[rm.type] || "var(--gold)";
       const out = rm.type === "outdoor";
       const fs = rm.w > 80 ? 7 : (rm.w > 50 ? 5.5 : (rm.w > 25 ? 4 : 3));
@@ -9669,7 +9676,7 @@ ${this._htmlDashboardBody()}`;
         svg += "</g>";
       } else {
         svg += `<g class="fpn-drag-room${picked("room", i)}" data-idx="${i}"${stop(rm.name || "")} style="cursor:move">`;
-        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
+        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "var(--good-ink)" : "var(--gold)"}" fill-opacity="${out ? 0.06 : 0.08}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
         svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
         if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
         svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
@@ -9688,7 +9695,7 @@ ${this._htmlDashboardBody()}`;
       els.forEach((e, i) => {
         if (e.type === "dormer") {
           const dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === "rear" ? mxy : mny;
-          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="#b06aff" opacity="0.9" rx="1.5" pointer-events="none"/>`;
+          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="var(--fp-dormer)" opacity="0.9" rx="1.5" pointer-events="none"/>`;
           return;
         }
         const w = e.w || 20, p = e.pos != null ? e.pos : 0.5, horiz = (e.wall === "front" || e.wall === "back");
@@ -9702,7 +9709,7 @@ ${this._htmlDashboardBody()}`;
         else if (e.wall === "back") { cx = bx0 + p * (bx1 - bx0); cy = by1; }
         else if (e.wall === "left") { cx = bx0; cy = by0 + p * (by1 - by0); }
         else { cx = bx1; cy = by0 + p * (by1 - by0); }
-        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "#5a7a8a" : (e.kind === "cellar" ? "#c98a2a" : (e.kind === "cased" ? "#78b9d7" : "var(--warn)")));
+        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "var(--fp-interior)" : (e.kind === "cellar" ? "var(--fp-cellar)" : (e.kind === "cased" ? "var(--fp-cased)" : "var(--warn)")));
         const ex = horiz ? cx - w / 2 : cx - 2, ey = horiz ? cy - 2 : cy - w / 2, ew = horiz ? w : 4, eh = horiz ? 4 : w;
         svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${ex}" y="${ey}" width="${ew}" height="${eh}" fill="${col}" opacity="0.9" rx="1" pointer-events="none"/>`;
       });
@@ -9714,7 +9721,7 @@ ${this._htmlDashboardBody()}`;
     for (let ci = 0; ci < cams.length; ci++) {
       const cam = cams[ci], out = cam.indoor === false;
       svg += `<g class="fpn-cam${picked("cam", ci)}" data-cam-idx="${ci}"${stop(this._t("CAM {number}", { number: ci + 1 }))}>`
-        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "rgba(232,178,61,0.10)" : "rgba(226,84,47,0.10)"}" stroke="${out ? "rgba(232,178,61,0.6)" : "rgba(226,84,47,0.6)"}" stroke-width="0.7" pointer-events="none"/>`
+        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "var(--warn)" : "var(--ember)"}" fill-opacity="0.1" stroke="${out ? "var(--warn)" : "var(--ember)"}" stroke-opacity="0.6" stroke-width="0.7" pointer-events="none"/>`
         + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
         + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
         + "</g>";
@@ -10500,12 +10507,73 @@ ${this._htmlDashboardBody()}`;
       this._fpZoom(e.deltaY < 0 ? 0.85 : 1.18, toPlan(e));
     }, { passive: false });
   }
+  // ─── Themes ───────────────────────────────────────────────────────────
+  // Every colour the panel draws comes from here (8.74.0); the smoke test
+  // fails on a colour written anywhere else. A theme is a set of CSS colour
+  // tokens plus the hologram head's colours. Each was worked out from one of
+  // the palettes in Abi's notes, and every text and status colour reaches
+  // 4.5:1 on the cards it sits on (scripts/smoke_panel.js checks again).
+  // Classic is the look from before themes, value for value.
+  //   tokens: ember is the main accent (active tabs, buttons), gold the
+  //   highlight (numbers, links); good, warn and bad are status colours, and
+  //   their -ink forms are for text. c-* are the energy flow's four series.
+  //   head: ramp is the canvas head's four steps from dim to bright; main,
+  //   deep, pale and warm are the WebGL head's colours (0 to 1); eye is the
+  //   bright centre of the canvas head's eyes, and fade the colour its glow
+  //   fades out towards.
+  static THEME_DEFAULT = "deep_teal";
+  static THEMES = {
+    deep_teal: {
+      label: "Deep Teal",
+      tokens: { "bg": "#011b21", "surface": "#082c33", "surface-2": "#0e3b43", "line-soft": "#1b5059", "ink": "#eefffa", "ink-dim": "#a2bcbb", "ink-faint": "#87a5a5", "ember": "#8fffe0", "gold": "#8fffe0", "gold-pale": "#d2fff3", "warn": "#fbbf24", "good": "#a3e635", "good-ink": "#bfee72", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#8fffe0", "c-battery": "#c084fc", "orb-deep": "#2c5f5a", "media-bg": "#000e10", "glow-top": "#1b4443", "hero-end": "#04242a" },
+      head: { ramp: [[29,73,71],[51,107,100],[143,255,224],[216,255,244]], main: [0.561,1.0,0.878], deep: [0.2,0.42,0.392], pale: [0.824,1.0,0.953], warm: [0.757,1.0,0.933], eye: [233,255,249], fade: [1,27,33] },
+    },
+    twilight_denim: {
+      label: "Twilight Denim",
+      tokens: { "bg": "#111522", "surface": "#1e263b", "surface-2": "#273150", "line-soft": "#303d59", "ink": "#dce3ef", "ink-dim": "#aab2c4", "ink-faint": "#949cb0", "ember": "#98a9c4", "gold": "#98a9c4", "gold-pale": "#d6dde7", "warn": "#fbbf24", "good": "#8bef92", "good-ink": "#aef4b3", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#98a9c4", "c-battery": "#c084fc", "orb-deep": "#3a4153", "media-bg": "#080a11", "glow-top": "#29303f", "hero-end": "#181e2f" },
+      head: { ramp: [[44,51,66],[64,73,91],[152,169,196],[219,225,234]], main: [0.596,0.663,0.769], deep: [0.251,0.286,0.357], pale: [0.839,0.867,0.906], warm: [0.776,0.816,0.875], eye: [234,238,243], fade: [17,21,34] },
+    },
+    pine_mist: {
+      label: "Pine Mist",
+      tokens: { "bg": "#051f20", "surface": "#0b2b26", "surface-2": "#123630", "line-soft": "#235347", "ink": "#daf1de", "ink-dim": "#9cb7a8", "ink-faint": "#84a093", "ember": "#8eb69b", "gold": "#8eb69b", "gold-pale": "#d2e2d7", "warn": "#fbbf24", "good": "#a3e635", "good-ink": "#bfee72", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#8eb69b", "c-battery": "#c084fc", "orb-deep": "#2e4c45", "media-bg": "#021010", "glow-top": "#1e3a36", "hero-end": "#082523" },
+      head: { ramp: [[32,61,57],[53,84,75],[142,182,155],[215,229,220]], main: [0.557,0.714,0.608], deep: [0.208,0.329,0.294], pale: [0.824,0.886,0.843], warm: [0.757,0.843,0.784], eye: [232,240,235], fade: [5,31,32] },
+    },
+    smoked_lilac: {
+      label: "Smoked Lilac",
+      tokens: { "bg": "#17151c", "surface": "#292531", "surface-2": "#37323f", "line-soft": "#45404f", "ink": "#e2dde7", "ink-dim": "#b8b3be", "ink-faint": "#a19ca7", "ember": "#b4a6d6", "gold": "#b4a6d6", "gold-pale": "#e1dbef", "warn": "#fbbf24", "good": "#8bef92", "good-ink": "#aef4b3", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#b4a6d6", "c-battery": "#2dd4bf", "orb-deep": "#464154", "media-bg": "#0c0a0e", "glow-top": "#332f3d", "hero-end": "#201d27" },
+      head: { ramp: [[54,50,65],[78,72,93],[180,166,214],[229,224,241]], main: [0.706,0.651,0.839], deep: [0.306,0.282,0.365], pale: [0.882,0.859,0.937], warm: [0.839,0.808,0.91], eye: [240,237,247], fade: [23,21,28] },
+    },
+    classic: {
+      label: "Classic",
+      tokens: { "bg": "#15110d", "surface": "#1e1712", "surface-2": "#2a2119", "line-soft": "#33291f", "ink": "#f3ece1", "ink-dim": "#b6a897", "ink-faint": "#988a78", "ember": "#e2542f", "gold": "#f4b860", "gold-pale": "#ffe3ad", "warn": "#e8b23d", "good": "#5fbf7a", "good-ink": "#8fdba8", "bad": "#ff6b81", "bad-strong": "#ff5a5a", "bad-ink": "#ff9a9a", "alarm-bg": "#7d2028", "alarm-line": "#d95b65", "alarm-ink": "#ffd7d7", "on-accent": "#1e0d06", "info": "#6ea8ff", "c-solar": "#f4b860", "c-grid": "#6ea8ff", "c-house": "#e2542f", "c-battery": "#2aa198", "orb-deep": "#7a2513", "media-bg": "#080706", "glow-top": "#2a1c11", "hero-end": "#19140f" },
+      head: { ramp: [[126,36,18],[226,84,47],[244,184,96],[255,231,189]], main: [0.957,0.722,0.376], deep: [0.62,0.27,0.12], pale: [1.0,0.89,0.68], warm: [0.886,0.33,0.18], eye: [255,244,222], fade: [20,12,8] },
+    },
+  };
+  // The same in every theme: floor plan door kinds, weather warning levels
+  // (yellow, orange, red as everywhere else) and the log kinds.
+  static THEME_SHARED = { "fp-dormer": "#b06aff", "fp-interior": "#5a7a8a", "fp-cellar": "#c98a2a", "fp-cased": "#78b9d7", "hazard-yellow": "#e6b800", "hazard-orange": "#f08c00", "hazard-red": "#e03131", "hazard-none": "#888888", "log-conv": "#5fd0e0", "log-reply": "#4fb8ff", "log-local": "#5fbf7a", "log-learn": "#8fd15c", "log-auto": "#ffb454", "log-mode": "#c9a0ff", "log-config": "#9d8cff", "log-classify": "#9d8cff", "log-camera": "#5fbf7a", "log-energy": "#ffcf6a", "log-bio": "#ff8fc7", "log-offer": "#ffd27a", "log-safety": "#ff8a8a", "log-error": "#ff6b81", "log-voice": "#7fe0c4" };
+
+  _themeKey() {
+    const key = this._liveData?.config?.ui_theme;
+    return Object.prototype.hasOwnProperty.call(NovaPanel.THEMES, key) ? key : NovaPanel.THEME_DEFAULT;
+  }
+  _theme() { return NovaPanel.THEMES[this._themeKey()]; }
+  // The chosen theme's tokens as CSS declarations, for the :host rule.
+  _themeTokens() {
+    this._themeShown = this._themeKey();
+    const all = { ...NovaPanel.THEME_SHARED, ...this._theme().tokens };
+    return Object.entries(all).map(([k, v]) => `--${k}:${v};`).join("");
+  }
+  // Puts a newly chosen theme on the open panel by rewriting its stylesheet,
+  // not the page, so the head and the Command Center keep running.
+  _applyTheme() {
+    const style = this.shadowRoot?.querySelector("style");
+    if (style && this._themeShown !== this._themeKey()) style.textContent = this._css();   // i18n-ok: a stylesheet, not words
+  }
   _css() {
     return `
       :host{
-        --bg:#15110d; --surface:#1e1712; --surface-2:#2a2119; --line-soft:#33291f;
-        --ink:#f3ece1; --ink-dim:#b6a897; --ink-faint:#988a78;
-        --ember:#e2542f; --gold:#f4b860; --gold-pale:#ffe3ad; --warn:#e8b23d;
+        ${this._themeTokens()}
         --font-display:'Fraunces',ui-serif,Georgia,serif;
         --font-body:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;
         --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
@@ -10526,15 +10594,15 @@ ${this._htmlDashboardBody()}`;
       }
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
-        background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
+        background-image:radial-gradient(ellipse 900px 500px at 50% -8%, color-mix(in srgb,var(--glow-top) 50%,transparent) 0%, transparent 60%);}
       .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
-        background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, #7a2513 100%);
-        box-shadow:0 0 14px 1px #e2542f55;}
+        background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, var(--orb-deep) 100%);
+        box-shadow:0 0 14px 1px color-mix(in srgb,var(--ember) 33%,transparent);}
       .brand-name{font-family:var(--font-display);font-size:18px;font-weight:600}
       .brand-tag{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase}
-      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),#19140fdd);
+      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--hero-end) 87%,transparent));
         border:1px solid var(--line-soft);border-radius:22px;overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(300px,36cqw,440px)}
@@ -10574,7 +10642,7 @@ ${this._htmlDashboardBody()}`;
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--surface-2);
         font-family:var(--font-mono);font-size:11px;color:var(--ink-dim);border:1px solid var(--line-soft)}
-      .chip .dot{width:6px;height:6px;border-radius:50%;background:#6fbf8a}
+      .chip .dot{width:6px;height:6px;border-radius:50%;background:var(--good)}
       .chip.warn .dot{background:var(--warn)}
       .chip b{color:var(--ink);font-weight:600}
       .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
@@ -10584,16 +10652,16 @@ ${this._htmlDashboardBody()}`;
       .panel-meta{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
       .lockdown-control{margin-left:auto;order:2;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
         padding:8px 12px;border-radius:9px;border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-faint);cursor:pointer}
-      .lockdown-control.active{color:#ffd7d7;background:#7d2028;border-color:#d95b65;box-shadow:0 0 16px #d95b6533}
-      .onboarding-card{max-width:1100px;margin:16px auto 0;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
+      .lockdown-control.active{color:var(--alarm-ink);background:var(--alarm-bg);border-color:var(--alarm-line);box-shadow:0 0 16px color-mix(in srgb,var(--alarm-line) 20%,transparent)}
+      .onboarding-card{max-width:1100px;margin:16px auto 0;background:linear-gradient(135deg,color-mix(in srgb,var(--gold) 7%,transparent),var(--surface));border:1px solid color-mix(in srgb,var(--gold) 40%,transparent);border-radius:16px;padding:16px}
       .onboarding-progress{position:relative;height:20px;background:var(--surface-2);border-radius:8px;overflow:hidden;margin:12px 0}
-      .onboarding-progress i{position:absolute;inset:0 auto 0 0;background:#f4b86033}.onboarding-progress span{position:relative;z-index:1;display:block;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
+      .onboarding-progress i{position:absolute;inset:0 auto 0 0;background:color-mix(in srgb,var(--gold) 20%,transparent)}.onboarding-progress span{position:relative;z-index:1;display:block;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
       .onboarding-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;margin-bottom:10px}
       .onboarding-step{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;color:var(--ink-dim)}
       .onboarding-step.done{opacity:.62}.onboarding-step b{display:block;font-size:11px}.onboarding-step small{display:block;font-size:11px;color:var(--ink-faint);margin-top:2px}
       .welcome-checks,.welcome-hello{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;margin-bottom:10px;color:var(--ink-dim)}
       .welcome-checks > b{display:block;font-size:11px}.welcome-checks small,.welcome-hello small{display:block;font-size:11px;color:var(--ink-faint);margin-top:2px}
-      .welcome-hello{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.welcome-hello .welcome-reply{color:var(--ink-dim);font-size:11px}.welcome-hello .welcome-error{color:#d95b65}
+      .welcome-hello{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.welcome-hello .welcome-reply{color:var(--ink-dim);font-size:11px}.welcome-hello .welcome-error{color:var(--bad)}
       .dashboard-pair{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
       @media (max-width:760px){.dashboard-pair{grid-template-columns:1fr}}
       .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
@@ -10608,7 +10676,6 @@ ${this._htmlDashboardBody()}`;
       .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
       .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
       .energy-flow-wrap{margin:0 0 10px;display:flex;justify-content:center}
-      .energy-flow,#energyOutlookPanel{--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
       .energy-flow{display:block;width:100%;height:auto;max-height:clamp(220px,38vh,320px);margin:0 auto}
       .energy-flow .flow[data-flow="solar"]{--flow-c:var(--c-solar)}
       .energy-flow .flow[data-flow="grid"]{--flow-c:var(--c-grid)}
@@ -10648,9 +10715,9 @@ ${this._htmlDashboardBody()}`;
       .energy-today{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
       .energy-battery{display:flex;align-items:center;gap:18px}
       .battery-tank{width:72px;height:auto;flex:none}
-      .battery-tank .tank-outline{fill:var(--surface-2);stroke:#2aa198;stroke-width:3}
-      .battery-tank .tank-cap{fill:#2aa198}
-      .battery-tank .tank-fill{fill:#2aa198;opacity:.85;transform-box:fill-box;transform-origin:50% 100%;
+      .battery-tank .tank-outline{fill:var(--surface-2);stroke:var(--c-battery);stroke-width:3}
+      .battery-tank .tank-cap{fill:var(--c-battery)}
+      .battery-tank .tank-fill{fill:var(--c-battery);opacity:.85;transform-box:fill-box;transform-origin:50% 100%;
         transform:scaleY(calc(var(--tank-pct,0) / 100));transition:transform .6s ease}
       .battery-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
       .battery-pct{font-family:var(--font-mono);font-size:26px;color:var(--ink)}
@@ -10711,12 +10778,12 @@ ${this._htmlDashboardBody()}`;
       .area-tile{position:relative;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:13px;
         padding:12px 12px 10px;overflow:hidden;transition:border-color .25s,box-shadow .25s}
       .area-tile::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
-        background:linear-gradient(90deg,#6ea8ff,var(--gold) 55%,var(--ember));opacity:.55}
+        background:linear-gradient(90deg,var(--info),var(--gold) 55%,var(--ember));opacity:.55}
       .area-tile.no-temp::before{display:none}
-      .area-tile.active{border-color:#e2542f70;box-shadow:inset 0 0 14px #e2542f14,0 0 14px #e2542f12}
+      .area-tile.active{border-color:color-mix(in srgb,var(--ember) 44%,transparent);box-shadow:inset 0 0 14px color-mix(in srgb,var(--ember) 8%,transparent),0 0 14px color-mix(in srgb,var(--ember) 7%,transparent)}
       .area-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
       .area-name{font-family:var(--font-display);font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:6px}
-      .live-dot{width:6px;height:6px;border-radius:50%;background:#5fbf7a;box-shadow:0 0 6px 1px #5fbf7a99;
+      .live-dot{width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 6px 1px color-mix(in srgb,var(--good) 60%,transparent);
         animation:novaLivePulse 2.4s ease-in-out infinite;flex:none}
       @keyframes novaLivePulse{0%,100%{opacity:1}50%{opacity:.45}}
       @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
@@ -10736,7 +10803,7 @@ ${this._htmlDashboardBody()}`;
       .area-light-toggle{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.05em;
         padding:3px 9px;border-radius:7px;border:1px solid var(--line-soft);background:var(--surface);
         color:var(--ink-faint);cursor:pointer}
-      .area-light-toggle.on{background:#f4b8602a;border-color:#f4b86070;color:var(--gold-pale)}
+      .area-light-toggle.on{background:color-mix(in srgb,var(--gold) 16%,transparent);border-color:color-mix(in srgb,var(--gold) 44%,transparent);color:var(--gold-pale)}
       .camera-panel{grid-column:1/-1}
       .camera-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
       .camera-note{font-size:12px;color:var(--ink-dim);max-width:46ch}
@@ -10745,17 +10812,17 @@ ${this._htmlDashboardBody()}`;
       .camera-strip{display:none;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-top:12px}
       .camera-strip.open{display:grid}
       .camera-slot{border-radius:10px;background:var(--surface-2);border:1px solid var(--line-soft);overflow:hidden;padding-bottom:9px}
-      .camera-slot img,.camera-empty{width:100%;aspect-ratio:16/9;object-fit:cover;display:flex;align-items:center;justify-content:center;background:#080706;color:var(--ink-faint);font-family:var(--font-mono);font-size:11px}
+      .camera-slot img,.camera-empty{width:100%;aspect-ratio:16/9;object-fit:cover;display:flex;align-items:center;justify-content:center;background:var(--media-bg);color:var(--ink-faint);font-family:var(--font-mono);font-size:11px}
       .camera-caption{padding:8px 9px 4px;display:flex;flex-direction:column;gap:2px}.camera-caption b{font-size:12px}.camera-caption span{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint)}
       .camera-actions{display:flex;flex-wrap:wrap;gap:5px;padding:4px 9px}.camera-actions .mode-chip{padding:4px 7px;font-size:11px}
       .camera-diagnostic{font-size:11px;color:var(--ink-dim);line-height:1.35;padding:5px 9px 0;overflow-wrap:anywhere}
       .nova-notice{position:fixed;left:16px;right:16px;bottom:16px;margin:0 auto;width:fit-content;z-index:20;max-width:560px;
         padding:10px 16px;border-radius:12px;background:var(--surface-2);border:1px solid var(--gold);color:var(--ink);
         font-size:13px;line-height:1.4;box-shadow:0 6px 24px #0008;cursor:pointer}
-      .nova-notice.error{border-color:#ff6b81;color:#ffd7d7}
+      .nova-notice.error{border-color:var(--bad);color:var(--alarm-ink)}
       .nova-notice[hidden]{display:none}
-      .danger{color:#ff9a9a;border-color:#ff5a5a66}
-      .danger:hover{border-color:#ff6b81;background:#ff5a5a14}
+      .danger{color:var(--bad-ink);border-color:color-mix(in srgb,var(--bad-strong) 40%,transparent)}
+      .danger:hover{border-color:var(--bad);background:color-mix(in srgb,var(--bad-strong) 8%,transparent)}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
       .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
       .intr-snap{margin-bottom:10px}
@@ -10764,7 +10831,7 @@ ${this._htmlDashboardBody()}`;
       .new-ilog-item:first-of-type{border-top:none}
       .new-log-entry{display:grid;grid-template-columns:70px 110px 1fr;gap:10px;padding:7px 8px;
         font-family:var(--font-mono);font-size:11px;border-bottom:1px solid var(--line-soft);align-items:baseline}
-      .new-log-entry-error{background:#ff5a5a14}
+      .new-log-entry-error{background:color-mix(in srgb,var(--bad-strong) 8%,transparent)}
       .new-log-ts{color:var(--ink-faint)}
       .new-log-cat{white-space:nowrap;font-weight:600}
       .new-log-msg{color:var(--ink-dim);word-break:break-word}
@@ -10783,7 +10850,7 @@ ${this._htmlDashboardBody()}`;
       .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px;flex-basis:100%;order:3}
       .nav-tab{font-family:var(--font-body);font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:8px;
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
-      .nav-tab.active{background:var(--ember);color:#1e0d06}
+      .nav-tab.active{background:var(--ember);color:var(--on-accent)}
       .nav-tab:not(.active):hover{color:var(--ink)}
       /* A phone shows the tabs as one row that scrolls sideways; the open tab
          is scrolled into view on every draw. */
@@ -10801,7 +10868,7 @@ ${this._htmlDashboardBody()}`;
       .settings-nav{display:flex;flex-wrap:wrap;gap:6px}
       .settings-nav-btn{font-family:var(--font-body);font-size:12px;font-weight:600;padding:6px 12px;border-radius:20px;
         border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-dim);cursor:pointer}
-      .settings-nav-btn.active{background:var(--ember);border-color:var(--ember);color:#1e0d06}
+      .settings-nav-btn.active{background:var(--ember);border-color:var(--ember);color:var(--on-accent)}
       .settings-grid{max-width:1100px;margin:0 auto;column-count:2;column-gap:14px}
       @media (max-width:720px){.settings-grid{column-count:1}}
       .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
@@ -10845,15 +10912,15 @@ ${this._htmlDashboardBody()}`;
       .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
         padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
       .mode-chip:hover{border-color:var(--gold)}
-      .mode-chip-on{background:var(--ember);border-color:var(--ember);color:#1e0d06}
+      .mode-chip-on{background:var(--ember);border-color:var(--ember);color:var(--on-accent)}
       .mode-bindings>summary{cursor:pointer;list-style:none}
       .mode-bindings>summary::-webkit-details-marker{display:none}
       .mode-bindings>summary::before{content:"▸ ";color:var(--ink-faint)}
       .mode-bindings[open]>summary::before{content:"▾ "}
       .mode-bind-head{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em;
         text-transform:uppercase;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--line-soft)}
-      .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
-      .diag-down{color:#ff6b81} .diag-off{color:var(--ink-faint)}
+      .diag-ok{color:var(--good)} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
+      .diag-down{color:var(--bad)} .diag-off{color:var(--ink-faint)}
       .new-model-list{display:flex;flex-direction:column;gap:10px}
       .new-model-row{display:grid;grid-template-columns:88px 1fr 1.3fr auto;gap:6px;align-items:center}
       .model-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--ink-faint);text-transform:uppercase}
@@ -10884,13 +10951,13 @@ ${this._htmlDashboardBody()}`;
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
         color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
       .new-appliance-row input:focus,.new-appliance-row select:focus{border-color:var(--gold)}
-      .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:#ff8a8a;
-        border:1px solid #ff5a5a4d;background:transparent;border-radius:7px;cursor:pointer}
-      .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}
+      .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:var(--bad-ink);
+        border:1px solid color-mix(in srgb,var(--bad-strong) 30%,transparent);background:transparent;border-radius:7px;cursor:pointer}
+      .new-appliance-remove:hover{border-color:var(--bad-strong);background:color-mix(in srgb,var(--bad-strong) 8%,transparent)}
       .new-pl-chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:11px;
         padding:5px 8px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim)}
       .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del,.new-dep-cal-del,.new-mem-forget{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
-      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover,.new-dep-cal-del:hover,.new-mem-forget:hover{color:#ff5a5a}
+      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover,.new-dep-cal-del:hover,.new-mem-forget:hover{color:var(--bad-strong)}
       .new-camset-row{padding:10px 0;border-top:1px solid var(--line-soft)}
       .new-camset-row:first-of-type{border-top:none}
       .toggle-list{display:flex;flex-direction:column;gap:2px}
@@ -10902,7 +10969,7 @@ ${this._htmlDashboardBody()}`;
       .toggle-btn{grid-column:2;grid-row:1/3;align-self:center;font-family:var(--font-mono);font-size:11px;font-weight:600;
         letter-spacing:.05em;padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);
         color:var(--ink-faint);cursor:pointer;min-width:44px}
-      .toggle-btn.on{background:#5fbf7a2a;border-color:#5fbf7a70;color:#8fdba8}
+      .toggle-btn.on{background:color-mix(in srgb,var(--good) 16%,transparent);border-color:color-mix(in srgb,var(--good) 44%,transparent);color:var(--good-ink)}
       .toggle-row select.cfg-field{grid-column:2;grid-row:1/3;align-self:center}
       .pairing-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
       .pairing-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
