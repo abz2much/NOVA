@@ -439,10 +439,6 @@
   "Second thing": "İkinci şey",
   "Theme": "Tema",
   "Deep Teal": "Derin petrol mavisi",
-  "Twilight Denim": "Alacakaranlık denim",
-  "Pine Mist": "Çam sisi",
-  "Smoked Lilac": "Dumanlı leylak",
-  "Classic": "Klasik",
   "Add goal": "Hedef ekle",
   "Add resident": "Sakin ekle",
   "Agree": "Aynı",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "“{title}” hedefin üzerinde çalıştım: {result}",
   "More": "Daha fazla",
   "Open chat": "Sohbeti aç",
-  "See everything": "Tümünü gör"
+  "See everything": "Tümünü gör",
+  "Midnight Signal": "Gece yarısı sinyali",
+  "Plum Dusk": "Erik alacakaranlığı",
+  "Cocoa Bark": "Kakao kabuğu",
+  "Forest Mint": "Orman nanesi",
+  "Slate Harbour": "Arduvaz liman"
 }

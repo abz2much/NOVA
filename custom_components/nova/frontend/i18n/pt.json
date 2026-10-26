@@ -439,10 +439,6 @@
   "Second thing": "Segunda coisa",
   "Theme": "Tema",
   "Deep Teal": "Azul-petróleo profundo",
-  "Twilight Denim": "Ganga do crepúsculo",
-  "Pine Mist": "Névoa de pinheiro",
-  "Smoked Lilac": "Lilás esfumado",
-  "Classic": "Clássico",
   "Add goal": "Adicionar objetivo",
   "Add resident": "Adicionar residente",
   "Agree": "Concordam",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Trabalhei no seu objetivo “{title}”: {result}",
   "More": "Mais",
   "Open chat": "Abrir chat",
-  "See everything": "Ver tudo"
+  "See everything": "Ver tudo",
+  "Midnight Signal": "Sinal da meia-noite",
+  "Plum Dusk": "Crepúsculo ameixa",
+  "Cocoa Bark": "Casca de cacau",
+  "Forest Mint": "Menta da floresta",
+  "Slate Harbour": "Porto ardósia"
 }

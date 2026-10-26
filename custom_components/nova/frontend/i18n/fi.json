@@ -439,10 +439,6 @@
   "Second thing": "Toinen asia",
   "Theme": "Teema",
   "Deep Teal": "Syvä sinivihreä",
-  "Twilight Denim": "Iltahämärän denim",
-  "Pine Mist": "Mäntysumu",
-  "Smoked Lilac": "Savuinen syreeni",
-  "Classic": "Klassinen",
   "Add goal": "Lisää tavoite",
   "Add resident": "Lisää asukas",
   "Agree": "Sama",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Työskentelin tavoitteesi ”{title}” parissa: {result}",
   "More": "Lisää",
   "Open chat": "Avaa chat",
-  "See everything": "Näytä kaikki"
+  "See everything": "Näytä kaikki",
+  "Midnight Signal": "Keskiyön signaali",
+  "Plum Dusk": "Luumuhämärä",
+  "Cocoa Bark": "Kaakaokaarna",
+  "Forest Mint": "Metsäminttu",
+  "Slate Harbour": "Liuskesatama"
 }

@@ -439,10 +439,6 @@
   "Second thing": "Andre ting",
   "Theme": "Tema",
   "Deep Teal": "Dyp petrol",
-  "Twilight Denim": "Skumringsdenim",
-  "Pine Mist": "Furutåke",
-  "Smoked Lilac": "Røykfarget syrin",
-  "Classic": "Klassisk",
   "Add goal": "Legg til mål",
   "Add resident": "Legg til beboer",
   "Agree": "Enige",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Jeg jobbet med målet ditt «{title}»: {result}",
   "More": "Mer",
   "Open chat": "Åpne chat",
-  "See everything": "Se alt"
+  "See everything": "Se alt",
+  "Midnight Signal": "Midnattssignal",
+  "Plum Dusk": "Plommeskumring",
+  "Cocoa Bark": "Kakaobark",
+  "Forest Mint": "Skogsmynte",
+  "Slate Harbour": "Skiferhavn"
 }

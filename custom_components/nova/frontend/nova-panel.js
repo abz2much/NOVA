@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.77.1
+ * v8.78.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.77.1 ",
+      console.log("%c Nova Panel %c v8.78.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -10917,46 +10917,100 @@ ${this._dockHtml()}`;
   }
   // ─── Themes ───────────────────────────────────────────────────────────
   // Every colour the panel draws comes from here (8.74.0); the smoke test
-  // fails on a colour written anywhere else. A theme is a set of CSS colour
-  // tokens plus the hologram head's colours. Each was worked out from one of
-  // the palettes in Abi's notes, and every text and status colour reaches
-  // 4.5:1 on the cards it sits on (scripts/smoke_panel.js checks again).
-  // Classic is the look from before themes, value for value.
-  //   tokens: ember is the main accent (active tabs, buttons), gold the
-  //   highlight (numbers, links); good, warn and bad are status colours, and
-  //   their -ink forms are for text. c-* are the energy flow's four series.
+  // fails on a colour written anywhere else.
+  // 8.78.0: the themes are Oriel's (github.com/abz2much/oriel), built the
+  // same way: each is two seed colours, a base and an accent, and
+  // _themeBuild works out every token from them. Cards are glass over a lit
+  // page, text is neutral, and the accent is kept for what it means: the
+  // open tab, an "on" state, links and focus, the head. Solar and home keep
+  // their own colours in every theme; the battery takes the accent. Every
+  // text and status colour reaches 4.5:1 on the cards it sits on
+  // (scripts/smoke_panel.js checks again).
+  //   tokens: page is the page background; glass is the card fill (used
+  //   faded) and shadow its shadow; surface and surface-2 are what a card
+  //   and a cell inside it come to over the page. ember is the accent fill
+  //   (open tab, buttons), on-accent the text on it, gold the accent as text
+  //   (links, focus, "on"). dark-a and black are the dark panel (Energy),
+  //   with on-dark text. c-* are the energy flow's four series.
   //   head: ramp is the canvas head's four steps from dim to bright; main,
   //   deep, pale and warm are the WebGL head's colours (0 to 1); eye is the
   //   bright centre of the canvas head's eyes, and fade the colour its glow
   //   fades out towards.
   static THEME_DEFAULT = "deep_teal";
-  static THEMES = {
-    deep_teal: {
-      label: "Deep Teal",
-      tokens: { "bg": "#011b21", "surface": "#082c33", "surface-2": "#0e3b43", "line-soft": "#1b5059", "ink": "#eefffa", "ink-dim": "#a2bcbb", "ink-faint": "#87a5a5", "ember": "#8fffe0", "gold": "#8fffe0", "gold-pale": "#d2fff3", "warn": "#fbbf24", "good": "#a3e635", "good-ink": "#bfee72", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#8fffe0", "c-battery": "#c084fc", "orb-deep": "#2c5f5a", "media-bg": "#000e10", "glow-top": "#1b4443", "hero-end": "#04242a" },
-      head: { ramp: [[29,73,71],[51,107,100],[143,255,224],[216,255,244]], main: [0.561,1.0,0.878], deep: [0.2,0.42,0.392], pale: [0.824,1.0,0.953], warm: [0.757,1.0,0.933], eye: [233,255,249], fade: [1,27,33] },
-    },
-    twilight_denim: {
-      label: "Twilight Denim",
-      tokens: { "bg": "#111522", "surface": "#1e263b", "surface-2": "#273150", "line-soft": "#303d59", "ink": "#dce3ef", "ink-dim": "#aab2c4", "ink-faint": "#949cb0", "ember": "#98a9c4", "gold": "#98a9c4", "gold-pale": "#d6dde7", "warn": "#fbbf24", "good": "#8bef92", "good-ink": "#aef4b3", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#98a9c4", "c-battery": "#c084fc", "orb-deep": "#3a4153", "media-bg": "#080a11", "glow-top": "#29303f", "hero-end": "#181e2f" },
-      head: { ramp: [[44,51,66],[64,73,91],[152,169,196],[219,225,234]], main: [0.596,0.663,0.769], deep: [0.251,0.286,0.357], pale: [0.839,0.867,0.906], warm: [0.776,0.816,0.875], eye: [234,238,243], fade: [17,21,34] },
-    },
-    pine_mist: {
-      label: "Pine Mist",
-      tokens: { "bg": "#051f20", "surface": "#0b2b26", "surface-2": "#123630", "line-soft": "#235347", "ink": "#daf1de", "ink-dim": "#9cb7a8", "ink-faint": "#84a093", "ember": "#8eb69b", "gold": "#8eb69b", "gold-pale": "#d2e2d7", "warn": "#fbbf24", "good": "#a3e635", "good-ink": "#bfee72", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#8eb69b", "c-battery": "#c084fc", "orb-deep": "#2e4c45", "media-bg": "#021010", "glow-top": "#1e3a36", "hero-end": "#082523" },
-      head: { ramp: [[32,61,57],[53,84,75],[142,182,155],[215,229,220]], main: [0.557,0.714,0.608], deep: [0.208,0.329,0.294], pale: [0.824,0.886,0.843], warm: [0.757,0.843,0.784], eye: [232,240,235], fade: [5,31,32] },
-    },
-    smoked_lilac: {
-      label: "Smoked Lilac",
-      tokens: { "bg": "#17151c", "surface": "#292531", "surface-2": "#37323f", "line-soft": "#45404f", "ink": "#e2dde7", "ink-dim": "#b8b3be", "ink-faint": "#a19ca7", "ember": "#b4a6d6", "gold": "#b4a6d6", "gold-pale": "#e1dbef", "warn": "#fbbf24", "good": "#8bef92", "good-ink": "#aef4b3", "bad": "#fb7185", "bad-strong": "#f43f5e", "bad-ink": "#fda4af", "alarm-bg": "#7f1d2d", "alarm-line": "#f87185", "alarm-ink": "#ffe4e8", "on-accent": "#000000", "info": "#60a5fa", "c-solar": "#facc15", "c-grid": "#60a5fa", "c-house": "#b4a6d6", "c-battery": "#2dd4bf", "orb-deep": "#464154", "media-bg": "#0c0a0e", "glow-top": "#332f3d", "hero-end": "#201d27" },
-      head: { ramp: [[54,50,65],[78,72,93],[180,166,214],[229,224,241]], main: [0.706,0.651,0.839], deep: [0.306,0.282,0.365], pale: [0.882,0.859,0.937], warm: [0.839,0.808,0.91], eye: [240,237,247], fade: [23,21,28] },
-    },
-    classic: {
-      label: "Classic",
-      tokens: { "bg": "#15110d", "surface": "#1e1712", "surface-2": "#2a2119", "line-soft": "#33291f", "ink": "#f3ece1", "ink-dim": "#b6a897", "ink-faint": "#988a78", "ember": "#e2542f", "gold": "#f4b860", "gold-pale": "#ffe3ad", "warn": "#e8b23d", "good": "#5fbf7a", "good-ink": "#8fdba8", "bad": "#ff6b81", "bad-strong": "#ff5a5a", "bad-ink": "#ff9a9a", "alarm-bg": "#7d2028", "alarm-line": "#d95b65", "alarm-ink": "#ffd7d7", "on-accent": "#1e0d06", "info": "#6ea8ff", "c-solar": "#f4b860", "c-grid": "#6ea8ff", "c-house": "#e2542f", "c-battery": "#2aa198", "orb-deep": "#7a2513", "media-bg": "#080706", "glow-top": "#2a1c11", "hero-end": "#19140f" },
-      head: { ramp: [[126,36,18],[226,84,47],[244,184,96],[255,231,189]], main: [0.957,0.722,0.376], deep: [0.62,0.27,0.12], pale: [1.0,0.89,0.68], warm: [0.886,0.33,0.18], eye: [255,244,222], fade: [20,12,8] },
-    },
-  };
+  static THEMES = this._themeTable({
+    deep_teal: { label: "Deep Teal", style: "dark", base: "#03313A", accent: "#8FFFE0" },
+    midnight_signal: { label: "Midnight Signal", style: "dark", base: "#0B132B", accent: "#39FF88" },
+    plum_dusk: { label: "Plum Dusk", style: "dark", base: "#1A0B2E", accent: "#FFB7A5" },
+    cocoa_bark: { label: "Cocoa Bark", style: "dark", base: "#382A28", accent: "#C1A094" },
+    forest_mint: { label: "Forest Mint", style: "dark", base: "#18251D", accent: "#B7FF72" },
+    slate_harbour: { label: "Slate Harbour", style: "dark", base: "#11212D", accent: "#9BA8AB" },
+  });
+
+  // Each theme with its tokens and head colours worked out from its seeds.
+  static _themeTable(defs) {
+    const out = {};
+    for (const [key, def] of Object.entries(defs)) out[key] = { ...def, ...this._themeBuild(def) };
+    return out;
+  }
+
+  // Oriel's colour maths: colours are [r, g, b] (0 to 255).
+  static _themeBuild(def) {
+    const hex = h => { h = String(h).replace("#", ""); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const toHex = c => "#" + c.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+    const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+    const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    // Step c towards `to` until it reaches `ratio` on every surface given.
+    const reach = (c, surfaces, ratio, to) => {
+      for (let t = 0; t <= 1; t += 0.02) { const x = mix(c, to, t); if (surfaces.every(s => contrast(x, s) >= ratio)) return x; }
+      return to;
+    };
+    const W = [255, 255, 255], K = [0, 0, 0];
+    const B = hex(def.base), A = hex(def.accent);
+    // The fixed data and status hues, made for dark glass.
+    const GOOD = hex("#8fdc9c"), WARN = hex("#f4c860"), BAD = hex("#ff9a86"), BAD_STRONG = hex("#ff6a58");
+    const SOLAR = hex("#facc15"), HOME = hex("#60a5fa"), GRID = hex("#94a3b8"), INFO = hex("#7cb8ff");
+    // The page: a gradient of the base, lit near the top.
+    const page = [mix(B, W, 0.07), B, mix(B, K, 0.35)];
+    const pageRep = mix(page[1], page[2], 0.3);
+    // The lightest glass that keeps near-white text readable on cards and cells.
+    let g = 0.4, glass, surface, cell, ink;
+    for (; g >= 0.06; g -= 0.02) {
+      glass = mix(B, W, g); surface = mix(pageRep, glass, 0.2); cell = mix(surface, glass, 0.34);
+      ink = mix(W, B, 0.06);
+      if ([surface, cell].every(s => contrast(mix(s, ink, 0.62), s) >= 4.6)) break;
+    }
+    const inkDim = reach(mix(cell, ink, 0.84), [cell, surface], 4.6, ink);
+    const inkFaint = reach(mix(cell, ink, 0.58), [cell, surface], 4.6, ink);
+    const darkA = mix(B, K, 0.45), black = mix(B, K, 0.8), onDark = mix(W, B, 0.03);
+    const chip = mix(B, K, 0.45);
+    const on = [W, mix(A, K, 0.85)].sort((x, y) => contrast(y, A) - contrast(x, A))[0];
+    const good = reach(GOOD, [surface, cell], 4.6, W), warn = reach(WARN, [surface, cell], 4.6, W), bad = reach(BAD, [surface, cell], 4.6, W);
+    const alarmBg = mix(chip, BAD_STRONG, 0.42);
+    const tokens = {
+      page: `radial-gradient(1100px 700px at 46% 0%,${toHex(mix(B, W, 0.18))}99,transparent 62%),radial-gradient(800px 600px at 92% 100%,${toHex(A)}12,transparent 70%),linear-gradient(160deg,${toHex(page[0])} 0%,${toHex(page[1])} 55%,${toHex(page[2])} 100%)`,
+      bg: toHex(page[1]), glass: toHex(glass), shadow: toHex(mix(B, K, 0.75)),
+      surface: toHex(surface), "surface-2": toHex(cell), "line-soft": toHex(mix(surface, glass, 0.9)),
+      ink: toHex(ink), "ink-dim": toHex(inkDim), "ink-faint": toHex(inkFaint),
+      ember: toHex(A), "on-accent": toHex(on), gold: toHex(reach(A, [surface, cell], 4.6, W)), "gold-pale": toHex(mix(A, W, 0.45)),
+      warn: toHex(warn), good: toHex(good), "good-ink": toHex(reach(mix(GOOD, W, 0.25), [surface, cell], 4.6, W)),
+      bad: toHex(bad), "bad-strong": toHex(BAD_STRONG), "bad-ink": toHex(reach(mix(BAD, W, 0.3), [surface, cell], 4.6, W)),
+      "alarm-bg": toHex(alarmBg), "alarm-line": toHex(BAD_STRONG), "alarm-ink": toHex(reach(hex("#ffe4e8"), [alarmBg], 4.6, W)),
+      info: toHex(reach(INFO, [surface, cell], 4.6, W)),
+      "c-solar": toHex(SOLAR), "c-grid": toHex(GRID), "c-house": toHex(HOME), "c-battery": toHex(A),
+      "dark-a": toHex(darkA), black: toHex(black), "on-dark": toHex(onDark),
+      "orb-deep": toHex(mix(A, B, 0.6)), "media-bg": toHex(black), "glow-top": toHex(mix(B, W, 0.16)), "hero-end": toHex(mix(B, K, 0.2)),
+    };
+    const unit = c => c.map(v => +(v / 255).toFixed(3));
+    const head = {
+      ramp: [mix(A, B, 0.8), mix(A, B, 0.6), A, mix(A, W, 0.65)].map(c => c.map(Math.round)),
+      main: unit(A), deep: unit(mix(A, B, 0.6)), pale: unit(mix(A, W, 0.65)), warm: unit(mix(A, W, 0.35)),
+      eye: mix(A, W, 0.82).map(Math.round), fade: mix(B, K, 0.3).map(Math.round),
+    };
+    return { tokens, head };
+  }
+
   // The same in every theme: floor plan door kinds, weather warning levels
   // (yellow, orange, red as everywhere else) and the log kinds.
   static THEME_SHARED = { "fp-dormer": "#b06aff", "fp-interior": "#5a7a8a", "fp-cellar": "#c98a2a", "fp-cased": "#78b9d7", "hazard-yellow": "#e6b800", "hazard-orange": "#f08c00", "hazard-red": "#e03131", "hazard-none": "#888888", "log-conv": "#5fd0e0", "log-reply": "#4fb8ff", "log-local": "#5fbf7a", "log-learn": "#8fd15c", "log-auto": "#ffb454", "log-mode": "#c9a0ff", "log-config": "#9d8cff", "log-classify": "#9d8cff", "log-camera": "#5fbf7a", "log-energy": "#ffcf6a", "log-bio": "#ff8fc7", "log-offer": "#ffd27a", "log-safety": "#ff8a8a", "log-error": "#ff6b81", "log-voice": "#7fe0c4" };
@@ -11003,9 +11057,8 @@ ${this._dockHtml()}`;
         .new-pl-chip > button,.new-mem-forget,.new-doclib-del,.fpn-ent-del{min-width:44px}
         .vp-link{min-height:0}
       }
-      .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
-        padding:20px 16px 40px;min-height:100vh;
-        background-image:radial-gradient(ellipse 900px 500px at 50% -8%, color-mix(in srgb,var(--glow-top) 50%,transparent) 0%, transparent 60%);}
+      .wrap{background:var(--page);background-color:var(--bg);color:var(--ink);font-family:var(--font-body);
+        padding:20px 16px 40px;min-height:100vh}
       .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
@@ -11013,18 +11066,23 @@ ${this._dockHtml()}`;
         box-shadow:0 0 14px 1px color-mix(in srgb,var(--ember) 33%,transparent);}
       .brand-name{font-family:var(--font-display);font-size:var(--t-title);font-weight:600}
       .brand-tag{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint);letter-spacing:.06em;text-transform:uppercase}
-      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--hero-end) 87%,transparent));
-        border:1px solid var(--line-soft);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
+      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 18%,transparent),color-mix(in srgb,var(--glass) 6%,transparent));
+        border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 36%,transparent),0 18px 44px color-mix(in srgb,var(--shadow) 45%,transparent);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(520px,54cqw,620px)}
       /* The orbit (8.76.0): arcs behind the head, five cards round it. */
       canvas.hero-arcs{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
       .orbit{position:absolute;inset:0;pointer-events:none}
       .orbit-tile{position:absolute;width:200px;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
-        padding:14px 16px;border-radius:var(--r-tile);border:1px solid var(--line-soft);background:color-mix(in srgb,var(--surface) 82%,transparent);
+        padding:14px 16px;border-radius:var(--r-tile);border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);
+        background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 10%,transparent));
+        box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 10px 26px color-mix(in srgb,var(--shadow) 40%,transparent);
         color:var(--ink);font-family:var(--font-body);text-align:left;cursor:pointer;transition:border-color .6s,box-shadow .6s;animation:orbit-drift 9s ease-in-out infinite}
       .orbit-tile:nth-child(even){animation-duration:11s;animation-delay:-3s}
       .orbit-tile[data-orbit="security"]{left:3%;top:6%}.orbit-tile[data-orbit="home"]{left:1%;top:37%}.orbit-tile[data-orbit="energy"]{left:4%;top:68%}
+      /* Energy sits on a dark panel, as in Oriel. */
+      .orbit-tile[data-orbit="energy"]{background:linear-gradient(180deg,var(--dark-a),var(--black));color:var(--on-dark);border-color:color-mix(in srgb,var(--on-dark) 10%,transparent)}
+      .orbit-tile[data-orbit="energy"] .orbit-cap,.orbit-tile[data-orbit="energy"] .orbit-sub{color:color-mix(in srgb,var(--on-dark) 72%,var(--black))}
       .orbit-tile[data-orbit="climate"]{right:3%;top:6%}.orbit-tile[data-orbit="weather"]{right:1%;top:68%}
       .orbit-cap{font-size:var(--t-cap);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
       .orbit-v{font-size:var(--t-h);font-weight:700;line-height:1.15}
@@ -11058,7 +11116,7 @@ ${this._dockHtml()}`;
       .hero-copy{position:absolute;left:50%;bottom:5%;width:min(48%,540px);transform:translateX(-50%);pointer-events:none;
         display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
       .hero-word{font-family:var(--font-display);font-weight:700;font-size:clamp(36px,5cqw,56px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
-        background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
+        background:linear-gradient(100deg,var(--ink),color-mix(in srgb,var(--ink) 78%,var(--ink-dim)));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
       .hero-word.dim{filter:brightness(.62)}
       .hero-caret{display:inline-block;width:.06em;height:.8em;margin-left:.06em;background:var(--gold);vertical-align:-.04em;animation:hero-caret 1s steps(1) infinite}
       @keyframes hero-caret{50%{opacity:0}}
@@ -11128,7 +11186,9 @@ ${this._dockHtml()}`;
       .chip.warn .dot{background:var(--warn)}
       .chip b{color:var(--ink);font-weight:600}
       .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
-      .panel{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);padding:16px 16px 14px}
+      .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 12%,transparent));background-color:color-mix(in srgb,var(--bg) 40%,transparent);
+        border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);border-radius:var(--r-card);padding:16px 16px 14px;
+        box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 12px 30px color-mix(in srgb,var(--shadow) 38%,transparent)}
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:var(--t-body);font-weight:600}
       .panel-meta{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint)}
@@ -11325,10 +11385,10 @@ ${this._dockHtml()}`;
       }
 
       /* Top nav (v7.94.0) */
-      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-tile);padding:4px;flex-basis:100%;order:3}
+      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:color-mix(in srgb,var(--glass) 14%,transparent);border:1px solid color-mix(in srgb,var(--glass) 22%,transparent);border-radius:var(--r-tile);padding:4px;flex-basis:100%;order:3}
       .nav-tab{font-family:var(--font-body);font-size:var(--t-sm);font-weight:600;padding:7px 14px;border-radius:var(--r-ctl);
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
-      .nav-tab.active{background:var(--ember);color:var(--on-accent)}
+      .nav-tab.active{background:var(--ember);background-image:linear-gradient(180deg,color-mix(in srgb,var(--ember) 78%,var(--gold-pale)),var(--ember));color:var(--on-accent);box-shadow:0 4px 14px color-mix(in srgb,var(--ember) 30%,transparent)}
       .nav-tab:not(.active):hover{color:var(--ink)}
       /* A phone shows the tabs as one row that scrolls sideways; the open tab
          is scrolled into view on every draw. */

@@ -1276,10 +1276,6 @@
   "Second thing": "Andra saken",
   "Theme": "Tema",
   "Deep Teal": "Djup petrol",
-  "Twilight Denim": "Skymningsdenim",
-  "Pine Mist": "Talldimma",
-  "Smoked Lilac": "Rökig syren",
-  "Classic": "Klassisk",
   "Add goal": "Lägg till mål",
   "Add resident": "Lägg till boende",
   "Agree": "Överens",
@@ -1353,5 +1349,10 @@
   "I worked on your goal “{title}”: {result}": "Jag arbetade med ditt mål ”{title}”: {result}",
   "More": "Mer",
   "Open chat": "Öppna chatt",
-  "See everything": "Visa allt"
+  "See everything": "Visa allt",
+  "Midnight Signal": "Midnattssignal",
+  "Plum Dusk": "Plommonskymning",
+  "Cocoa Bark": "Kakaobark",
+  "Forest Mint": "Skogsmynta",
+  "Slate Harbour": "Skifferhamn"
 }

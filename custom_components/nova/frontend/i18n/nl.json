@@ -1276,10 +1276,6 @@
   "Second thing": "Tweede ding",
   "Theme": "Thema",
   "Deep Teal": "Diep petrol",
-  "Twilight Denim": "Schemerdenim",
-  "Pine Mist": "Dennenmist",
-  "Smoked Lilac": "Rokerig lila",
-  "Classic": "Klassiek",
   "Add goal": "Doel toevoegen",
   "Add resident": "Bewoner toevoegen",
   "Agree": "Eens",
@@ -1353,5 +1349,10 @@
   "I worked on your goal “{title}”: {result}": "Ik heb aan je doel “{title}” gewerkt: {result}",
   "More": "Meer",
   "Open chat": "Chat openen",
-  "See everything": "Alles bekijken"
+  "See everything": "Alles bekijken",
+  "Midnight Signal": "Middernachtsignaal",
+  "Plum Dusk": "Pruimenschemer",
+  "Cocoa Bark": "Cacaobast",
+  "Forest Mint": "Bosmunt",
+  "Slate Harbour": "Leisteenhaven"
 }
