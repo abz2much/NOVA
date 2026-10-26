@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.75.1
+ * v8.76.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.75.1 ",
+      console.log("%c Nova Panel %c v8.76.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -242,7 +242,7 @@ class NovaPanel extends HTMLElement {
     this._wire();
     this._initCore();
     this._renderData();
-    if (this._currentTab === "dashboard") this._presentStart();
+    if (this._currentTab === "dashboard") { this._presentStart(); this._orbitWire(); this._arcsStop(); this._arcsStart(); }
     this._a11y(root);
     this._drawNotice();
     // On a phone the tabs scroll sideways: centre the open one. The row's own
@@ -450,13 +450,16 @@ class NovaPanel extends HTMLElement {
         <div id="shushMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
+            <canvas class="hero-arcs" id="heroArcs" aria-hidden="true"></canvas>
             <canvas class="core" id="core" aria-hidden="true"></canvas>
             <div class="hero-copy">
               <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
               <div class="state-line" id="stateLine">Watching over the house.</div>
               <div class="state-sub" id="stateSub">—</div>
+              <div class="hero-latest" id="heroLatest" aria-live="polite"></div>
             </div>
             <div class="present-card" id="presentCard" role="button" tabindex="0" title="Dismiss"></div>
+            <div class="orbit" id="orbit">${this._orbitHtml()}</div>
           </div>
           <div class="chips" id="chips"></div>
         </div>
@@ -6498,6 +6501,8 @@ ${this._htmlDashboardBody()}`;
     this._typeHeroWord(words[state]);
     // A card on show keeps the head turned towards it, unless the house sleeps.
     this._targetCoreState(this._presenting && state !== "asleep" ? "presenting" : state);
+    this._heroLatest();
+    this._orbitRefresh();
 
     // status chips
     const chipDefs = [
@@ -7948,7 +7953,7 @@ ${this._htmlDashboardBody()}`;
     const wasNarrow = h.narrow;
     h.W = rect.width; h.H = rect.height;
     h.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    h.narrow = h.W < 640;
+    h.narrow = h.W < 820;   // the hero is one column below 820px
     h.canvas.width = Math.round(h.W * h.dpr); h.canvas.height = Math.round(h.H * h.dpr);
     if (!h.built || wasNarrow !== h.narrow) this._holoUpload(h);
     const gl = h.gl;
@@ -7961,8 +7966,8 @@ ${this._htmlDashboardBody()}`;
 
   _holoLayout(h) {
     if (h.narrow) { const S = h.H * 0.25; return { S, hx: h.W / 2, hy: h.H * 0.33 }; }
-    const S = h.H * 0.27;
-    return { S, hx: Math.max(h.W * 0.27, S * 1.9), hy: h.H * 0.3 };
+    const S = h.H * 0.17;
+    return { S, hx: h.W / 2, hy: h.H * 0.34 };   // in the middle of the orbit, clear of the greeting (8.76.0)
   }
 
   // Try to start the hologram on this canvas. False when WebGL 2 is missing
@@ -8357,7 +8362,7 @@ ${this._htmlDashboardBody()}`;
 
     const ctx = this._ctx, W = this._coreW, H = this._coreH;
     if (!W || !H) { this._resizeCore(); return; }
-    const narrow = W < 640;
+    const narrow = W < 820;   // the hero is one column below 820px
     const f = this._face;
     if (reduce) {
       f.blink = 1; f.gx = 0; f.gy = this._coreStateKey === "reasoning" ? 0.8 : 0;
@@ -8368,8 +8373,8 @@ ${this._htmlDashboardBody()}`;
     ctx.clearRect(0, 0, W, H);
 
     // stage: wide glow behind the head, sparks drifting across the panel
-    const size = narrow ? Math.min(W, H) : H * 1.02;
-    const hx = narrow ? W / 2 : Math.max(size * 0.5, W * 0.26), hy = H / 2;
+    const size = narrow ? Math.min(W, H) : H * 0.76;
+    const hx = W / 2, hy = narrow ? H / 2 : H * 0.36;   // in the middle of the orbit (8.76.0)
     const hc = this._colorForHeat(Math.min(1, c.hot * 0.8 + 0.2));
     const wide = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.75);
     wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, rgba(this._theme().head.fade, 0));
@@ -8886,6 +8891,7 @@ ${this._htmlDashboardBody()}`;
     const root = this.shadowRoot, el = root.getElementById("presentCard");
     if (!el) return;
     this._presentId = card.id || null;
+    this._presentKind = card.kind;
     this._setHtml(el, html);
     root.getElementById("heroStage")?.classList.add("presenting");
     this._presenting = true;
@@ -8906,6 +8912,8 @@ ${this._htmlDashboardBody()}`;
     if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
     if (!this._presenting) return;
     this._presenting = false;
+    this._orbitSettle(this._presentKind);
+    this._presentKind = null;
     this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
     this._targetCoreState(this._coreState());
   }
@@ -8940,6 +8948,213 @@ ${this._htmlDashboardBody()}`;
     const now = has(d.solar_w) ? `<div class="pc-now"><span>Now</span> <span>· ${n(d.solar_w, 0)} W</span></div>` : "";
     return `${big ? `<div class="pc-cap">Solar made</div><div class="pc-big"><span class="pc-fig" data-unit="kWh">${n(d.solar_today_kwh, 1)}</span></div>` : ""}${now}${svg}`
       + (rows.length ? `<div class="pc-rows">${rows.map(([label, value]) => `<div class="pc-row"><span>${label}</span><b>${value}</b></div>`).join("")}</div>` : "");
+  }
+  // ─── Command Center orbit (8.76.0) ──────────────────────────────────────
+  // The head sits in the middle of the hero with broken arcs turning behind
+  // it, and five live cards round it. The cards use the same readings as the
+  // pop-up cards (presenting.js), so they add no work of their own except
+  // Energy, which is read at most once a minute. Tapping a card pops it up
+  // beside the head; when a pop-up card ends it settles into its card.
+  static ORBIT_KINDS = ["security", "home", "energy", "climate", "weather"];
+
+  _orbitHtml() {
+    const caps = { security: "Security", home: "Who's home", energy: "Energy", climate: "Indoor", weather: "Weather" };
+    return NovaPanel.ORBIT_KINDS.map(k => `
+      <button class="orbit-tile" data-orbit="${k}">
+        <span class="orbit-cap">${caps[k]}</span><span class="orbit-v">—</span><span class="orbit-sub"></span>
+      </button>`).join("");
+  }
+
+  _orbitWire() {
+    this.shadowRoot?.querySelectorAll(".orbit-tile[data-orbit]").forEach(t => {
+      t.addEventListener("click", () => this._orbitShow(t.getAttribute("data-orbit")));
+    });
+  }
+
+  // The figure and the line under it for each card, or null for "—".
+  _orbitValues(energy) {
+    const n = (v, dp) => this._presentNum(v, dp);
+    const out = {};
+    const sec = this._presentSecurityData();
+    if (sec) {
+      const alarm = !sec.alarm ? "" : sec.alarm.startsWith("armed_") ? this._tx("ARMED")
+        : sec.alarm === "disarmed" ? this._tx("Disarmed") : sec.alarm === "triggered" ? this._tx("Triggered") : this._tx("Arming");
+      const doors = sec.doors_total > 0 ? (sec.doors_open > 0 ? `${n(sec.doors_open, 0)} ${this._tx("Open")}` : this._tx("Closed")) : "";
+      out.security = sec.locks_total ? [`${n(sec.locks_locked, 0)}/${n(sec.locks_total, 0)}`, alarm || doors]
+        : [alarm || doors, ""];
+    }
+    const home = this._presentHomeData();
+    if (home) out.home = [`${n(home.home, 0)}/${n(home.total, 0)}`, home.people.filter(p => p.home).slice(0, 2).map(p => p.name).join(", ")];
+    if (energy) {
+      const has = v => typeof v === "number" && isFinite(v);
+      const big = has(energy.solar_w) ? `${n(energy.solar_w, 0)} W` : has(energy.solar_today_kwh) ? `${n(energy.solar_today_kwh, 1)} kWh` : "";
+      if (big) out.energy = [big, has(energy.battery_pct) ? `${this._tx("Battery")} ${n(energy.battery_pct, 0)}%` : ""];
+    }
+    const cl = this._presentClimateData();
+    if (cl && cl.temp != null) {
+      const tenths = Math.round(cl.temp * 10) / 10;
+      out.climate = [`${n(tenths, Number.isInteger(tenths) ? 0 : 1)}${cl.unit || "°"}`, cl.humidity != null ? `${n(cl.humidity, 0)}%` : ""];
+    }
+    const w = this._presentWeatherData();
+    const wst = w && this._hass?.states?.[w.id];
+    if (wst) {
+      const unit = wst.attributes?.temperature_unit || wst.attributes?.unit_of_measurement || "°";
+      const cond = w.id.startsWith("weather.") && typeof this._hass.formatEntityState === "function" ? this._hass.formatEntityState(wst) : "";
+      out.weather = [`${n(w.temp, 0)}${unit}`, cond];
+    }
+    return out;
+  }
+
+  // Updates the five cards. Energy is read again when `force` is set or a
+  // minute has passed; the others are read from what the panel already has.
+  async _orbitRefresh(force = false) {
+    const root = this.shadowRoot;
+    if (!root?.getElementById("orbit")) return;
+    if (force || !this._orbitEnergyAt || Date.now() - this._orbitEnergyAt > 60000) {
+      this._orbitEnergyAt = Date.now();
+      try { this._orbitEnergy = await this._presentEnergyData(); }
+      catch (_) { this._orbitEnergy = null; }   // quiet: a card with no reading shows "—"
+    }
+    const vals = this._orbitValues(this._orbitEnergy);
+    for (const k of NovaPanel.ORBIT_KINDS) {
+      const t = root.querySelector(`.orbit-tile[data-orbit="${k}"]`);
+      if (!t) continue;
+      const [v, sub] = vals[k] || ["—", ""];
+      this._orbitSetValue(t.querySelector(".orbit-v"), v);
+      this._setText(t.querySelector(".orbit-sub"), sub);
+      t.setAttribute("aria-label", `${t.querySelector(".orbit-cap").textContent} ${v} ${sub}`.trim());   // i18n-ok: built from translated parts
+    }
+  }
+
+  // A figure that changes counts up or down to its new value.
+  _orbitSetValue(el, text) {
+    if (!el) return;
+    const num = s => { const m = /^([\d.,]+)(.*)$/.exec(String(s || "")); return m ? [parseFloat(m[1].replace(",", ".")), m[2], m[1]] : null; };
+    const from = num(el.textContent), to = num(text);
+    if (this._reduceMotion || !from || !to || from[1] !== to[1] || from[0] === to[0] || /\//.test(text)) { this._setText(el, text); return; }
+    const dp = (to[2].split(/[.,]/)[1] || "").length, start = performance.now();
+    const step = now => {
+      const p = Math.min(1, (now - start) / 700), e = 1 - Math.pow(1 - p, 3);
+      this._setText(el, p < 1 ? `${this._presentNum(from[0] + (to[0] - from[0]) * e, dp)}${to[1]}` : text);
+      if (p < 1) (window.requestAnimationFrame || (f => setTimeout(() => f(performance.now()), 16)))(step);
+    };
+    step(start);
+  }
+
+  // Tapping a card shows its pop-up card beside the head.
+  async _orbitShow(kind) {
+    const def = this._presentKinds()[kind];
+    if (!def) return;
+    let data = null;
+    try { data = await def.ambient(); } catch (_) { /* quiet: nothing to show, the card stays as it is */ }
+    if (!data || !def.html(data)) return;
+    const now = Date.now() / 1000;
+    this._presentRestartCycle();
+    this._onPresentCard({ v: 1, kind, id: `orbit-${kind}-${Date.now()}`, created: now, expires: now + 8, data });
+  }
+
+  // A pop-up card that ends shrinks into its card, which glows. A copy of the
+  // card does the moving, so the hero's own state changes at once.
+  _orbitSettle(kind) {
+    const root = this.shadowRoot, stage = root?.getElementById("heroStage"), card = root?.getElementById("presentCard");
+    const tile = root?.querySelector(`.orbit-tile[data-orbit="${kind}"]`);
+    if (!stage || !card || !tile) return;
+    tile.classList.add("orbit-flash");
+    setTimeout(() => tile.classList.remove("orbit-flash"), 1400);
+    if (this._reduceMotion) return;
+    const sb = stage.getBoundingClientRect(), cb = card.getBoundingClientRect(), tb = tile.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.removeAttribute("id"); ghost.removeAttribute("role"); ghost.removeAttribute("tabindex");
+    ghost.className = "present-card present-ghost";
+    ghost.setAttribute("aria-hidden", "true");
+    Object.assign(ghost.style, { left: `${cb.left - sb.left}px`, top: `${cb.top - sb.top}px`, width: `${cb.width}px` });
+    stage.appendChild(ghost);
+    const dx = (tb.left + tb.width / 2) - (cb.left + cb.width / 2), dy = (tb.top + tb.height / 2) - (cb.top + cb.height / 2);
+    window.requestAnimationFrame?.(() => { ghost.style.transform = `translate(${dx}px,${dy}px) scale(.45)`; ghost.style.opacity = "0"; });
+    setTimeout(() => ghost.remove(), 800);
+  }
+
+  // Nova's latest line under the greeting: the newest activity entry.
+  _heroLatest() {
+    const el = this.shadowRoot?.getElementById("heroLatest");
+    if (!el) return;
+    const top = (this._activityData || [])[0];
+    const sig = top ? `${top.ts}|${top.tag}|${top.msg}` : "";
+    if (sig === this._heroLatestSig) return;
+    this._heroLatestSig = sig;
+    this._setHtml(el, top ? `<span class="dot"></span><b>${this._esc(top.ts || "")}</b> ${this._esc(top.tag || "")} · ${this._esc(top.msg || "")}` : "");
+    el.classList.remove("hero-latest-in");
+    void el.offsetWidth;
+    el.classList.add("hero-latest-in");
+  }
+
+  // ── The arcs behind the head ──
+  // Three broken arcs turn round the head, the middle one the other way,
+  // and fade out behind the greeting. With less motion they are drawn once.
+  _arcsStart() {
+    const canvas = this.shadowRoot?.getElementById("heroArcs");
+    if (!canvas || this._arcsRaf) return;
+    let ctx = null;
+    try { ctx = canvas.getContext("2d"); } catch (_) { ctx = null; }
+    if (!ctx) return;
+    this._arcsCtx = ctx;
+    const frame = now => {
+      this._arcsRaf = null;
+      if (!canvas.isConnected || this._currentTab !== "dashboard") return;
+      if (!document.hidden) this._arcsFrame(canvas, ctx, now);
+      if (this._reduceMotion) return;
+      const next = window.requestAnimationFrame || (f => setTimeout(() => f(performance.now()), 33));
+      this._arcsRaf = next(frame) || true;
+    };
+    frame(performance.now());
+    if (!this._arcsVisibility) {
+      this._arcsVisibility = () => { if (!document.hidden && !this._arcsRaf) this._arcsStart(); };
+      document.addEventListener("visibilitychange", this._arcsVisibility);
+    }
+  }
+
+  _arcsStop() {
+    if (this._arcsRaf && typeof this._arcsRaf === "number" && window.cancelAnimationFrame) window.cancelAnimationFrame(this._arcsRaf);
+    this._arcsRaf = null;
+  }
+
+  _arcsFrame(canvas, ctx, now) {
+    this._arcsDrawn = (this._arcsDrawn || 0) + 1;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    if (!W || !H) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const { hx, hy, S } = this._holoLayout({ W, H, narrow: W < 820 });
+    const t = this._reduceMotion ? 0 : now / 1000;
+    const a = this._theme().head.main.map(v => Math.round(v * 255));
+    const col = alpha => `rgba(${a[0]},${a[1]},${a[2]},${alpha})`;
+    ctx.lineCap = "round";
+    // [radius, turn speed, arc pieces (start, end in radians), width, alpha]
+    [[1.55, 0.35, [[0, 1.1], [1.6, 2.3], [3.4, 4.6], [5.0, 5.6]], 2, 0.55],
+     [2.25, -0.22, [[0.4, 1.9], [2.6, 3.0], [3.6, 5.2]], 1.5, 0.35],
+     [2.8, 0.12, [[0, 0.5], [1.2, 2.8], [4.0, 4.4], [4.9, 6.0]], 1, 0.22]].forEach(([k, speed, pieces, w, alpha]) => {
+      const r = S * k, rot = t * speed;
+      ctx.lineWidth = w; ctx.strokeStyle = col(alpha);
+      for (const [a0, a1] of pieces) {
+        ctx.beginPath(); ctx.arc(hx, hy, r, a0 + rot, a1 + rot); ctx.stroke();
+        const ex = hx + Math.cos(a1 + rot) * r, ey = hy + Math.sin(a1 + rot) * r;
+        const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 6);
+        g.addColorStop(0, col(0.9)); g.addColorStop(1, col(0));
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ex, ey, 6, 0, 6.283); ctx.fill();
+      }
+    });
+    // Clear the arcs behind the greeting so the words stay easy to read.
+    const copy = this.shadowRoot?.querySelector(".hero-copy"), sb = canvas.getBoundingClientRect();
+    if (copy) {
+      const cb = copy.getBoundingClientRect(), x = cb.left - sb.left + cb.width / 2, y = cb.top - sb.top + cb.height / 2;
+      ctx.save(); ctx.globalCompositeOperation = "destination-out";
+      const fade = ctx.createRadialGradient(x, y, 10, x, y, Math.max(cb.width * 0.62, 60));
+      fade.addColorStop(0, "rgba(0,0,0,1)"); fade.addColorStop(0.7, "rgba(0,0,0,.85)"); fade.addColorStop(1, "rgba(0,0,0,0)");   // colour-ok: an eraser, not a colour on screen
+      ctx.fillStyle = fade; ctx.fillRect(x - cb.width, y - cb.height * 1.5, cb.width * 2, cb.height * 3);
+      ctx.restore();
+    }
   }
   // ─── Floor plan: stored layout, working copies and shared helpers ──────
   // The plan is kept in config as floor_plan_rooms (rooms and outdoor zones
@@ -10608,11 +10823,33 @@ ${this._htmlDashboardBody()}`;
       .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--hero-end) 87%,transparent));
         border:1px solid var(--line-soft);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
-      .hero-stage{position:relative;height:clamp(300px,36cqw,440px)}
-      .present-card{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);display:none;flex-direction:column;gap:8px;
+      .hero-stage{position:relative;height:clamp(520px,54cqw,620px)}
+      /* The orbit (8.76.0): arcs behind the head, five cards round it. */
+      canvas.hero-arcs{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+      .orbit{position:absolute;inset:0;pointer-events:none}
+      .orbit-tile{position:absolute;width:200px;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+        padding:14px 16px;border-radius:var(--r-tile);border:1px solid var(--line-soft);background:color-mix(in srgb,var(--surface) 82%,transparent);
+        color:var(--ink);font-family:var(--font-body);text-align:left;cursor:pointer;transition:border-color .6s,box-shadow .6s;animation:orbit-drift 9s ease-in-out infinite}
+      .orbit-tile:nth-child(even){animation-duration:11s;animation-delay:-3s}
+      .orbit-tile[data-orbit="security"]{left:3%;top:6%}.orbit-tile[data-orbit="home"]{left:1%;top:37%}.orbit-tile[data-orbit="energy"]{left:4%;top:68%}
+      .orbit-tile[data-orbit="climate"]{right:3%;top:6%}.orbit-tile[data-orbit="weather"]{right:1%;top:68%}
+      .orbit-cap{font-size:var(--t-cap);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+      .orbit-v{font-size:var(--t-h);font-weight:700;line-height:1.15}
+      .orbit-sub{font-size:var(--t-sm);color:var(--ink-dim);min-height:1.2em}
+      .orbit-tile.orbit-flash{border-color:color-mix(in srgb,var(--gold) 60%,transparent);box-shadow:0 0 28px color-mix(in srgb,var(--gold) 25%,transparent)}
+      @keyframes orbit-drift{50%{transform:translateY(-6px)}}
+      .present-card.present-ghost{position:absolute;display:flex;right:auto;bottom:auto;pointer-events:none;z-index:3;transform-origin:center;
+        transition:transform .6s ease-in,opacity .6s ease-in}
+      @keyframes pc-in{from{opacity:0;transform:scale(.85) translateX(-30px)}}
+      .hero-latest{display:flex;justify-content:center;align-items:baseline;gap:8px;font-size:var(--t-sm);color:var(--ink-dim);min-height:1.4em}
+      .hero-latest b{font-weight:600;color:var(--ink)}
+      .hero-latest .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);flex:none;align-self:center}
+      .hero-latest-in{animation:latest-in .5s ease-out}
+      @keyframes latest-in{from{opacity:0;transform:translateY(12px)}}
+      .present-card{position:absolute;right:3%;top:30%;width:270px;display:none;flex-direction:column;gap:8px;z-index:2;
         padding:14px 18px;border:1px solid var(--line-soft);border-radius:var(--r-card);background:var(--surface-2);cursor:pointer;text-align:left}
-      .hero-stage.presenting .present-card{display:flex}
-      .hero-stage.presenting .hero-copy{display:none}
+      .hero-stage.presenting .present-card{display:flex;animation:pc-in .45s cubic-bezier(.2,.8,.2,1)}
+      .present-card .pc-fig{font-size:clamp(40px,4.6cqw,56px)}
       .pc-cap{font-family:var(--font-body);font-size:var(--t-sm);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim)}
       .pc-big{font-family:var(--font-display);font-weight:500;line-height:1}
       .pc-fig{font-size:clamp(44px,8cqw,84px);letter-spacing:-.02em;
@@ -10625,23 +10862,26 @@ ${this._htmlDashboardBody()}`;
       .pc-row b{font-weight:500;color:var(--gold-pale)}
       canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
       canvas.core:active{cursor:grabbing}
-      .hero-copy{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);pointer-events:none;
-        display:flex;flex-direction:column;gap:8px;text-align:left}
-      .hero-word{font-family:var(--font-display);font-weight:500;font-size:clamp(44px,8cqw,100px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
+      .hero-copy{position:absolute;left:50%;bottom:5%;width:min(48%,540px);transform:translateX(-50%);pointer-events:none;
+        display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+      .hero-word{font-family:var(--font-display);font-weight:700;font-size:clamp(36px,5cqw,56px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
         background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
       .hero-word.dim{filter:brightness(.62)}
       .hero-caret{display:inline-block;width:.06em;height:.8em;margin-left:.06em;background:var(--gold);vertical-align:-.04em;animation:hero-caret 1s steps(1) infinite}
       @keyframes hero-caret{50%{opacity:0}}
       .state-line{font-family:var(--font-display);font-size:clamp(17px,2cqw,21px);font-weight:500;margin:0;text-wrap:balance}
       .state-sub{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint)}
-      @container (max-width:639px){
+      @container (max-width:819px){
         .hero-stage{height:auto;display:flex;flex-direction:column}
-        canvas.core{position:relative;height:300px}
-        .present-card{position:relative;left:auto;right:auto;top:auto;transform:none;margin:0 16px 20px;align-items:center;text-align:center}
+        canvas.hero-arcs{display:none}
+        canvas.core{position:relative;height:260px}
+        .present-card{position:relative;left:auto;right:auto;top:auto;width:auto;transform:none;margin:0 16px 14px;align-items:center;text-align:center}
         .pc-row{width:100%}
-        .hero-copy{position:relative;left:auto;right:auto;top:auto;transform:none;align-items:center;text-align:center;padding:0 16px 20px}
+        .hero-copy{position:relative;left:auto;right:auto;bottom:auto;width:auto;transform:none;align-items:center;text-align:center;padding:0 16px 16px}
+        .orbit{position:relative;inset:auto;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 16px;pointer-events:auto}
+        .orbit-tile,.orbit-tile[data-orbit]{position:relative;left:auto;right:auto;top:auto;width:auto;animation:none}
       }
-      @media (prefers-reduced-motion: reduce){.hero-caret{animation:none}}
+      @media (prefers-reduced-motion: reduce){.hero-caret,.orbit-tile,.hero-latest-in,.hero-stage.presenting .present-card{animation:none}}
       .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-card);background:var(--surface-2);
         font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-dim);border:1px solid var(--line-soft)}

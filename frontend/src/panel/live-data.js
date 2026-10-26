@@ -61,6 +61,8 @@
     this._typeHeroWord(words[state]);
     // A card on show keeps the head turned towards it, unless the house sleeps.
     this._targetCoreState(this._presenting && state !== "asleep" ? "presenting" : state);
+    this._heroLatest();
+    this._orbitRefresh();
 
     // status chips
     const chipDefs = [

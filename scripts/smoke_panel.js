@@ -6007,6 +6007,71 @@ if (require.main === module) setTimeout(async () => {
     checks.push([`labels: no button in the source is written in capitals (${loud.length}: ${loud.slice(0, 4).join(", ")})`, loud.length === 0]);
   }
 
+  // The Command Center orbit (8.76.0): the head in the middle with arcs
+  // behind it, five live cards round it, pop-up cards beside it that settle
+  // into their card, and Nova's latest line under the greeting.
+  {
+    // A home of its own: no other locks, people or weather than these.
+    const states = {
+      ...Object.fromEntries(Object.entries(hass.states).filter(([k]) => !/^(lock|person|weather)\./.test(k))),
+      "person.sam": { state: "home", attributes: { friendly_name: "Sam" } },
+      "person.ada": { state: "not_home", attributes: { friendly_name: "Ada" } },
+      "lock.front": { state: "locked", attributes: {} },
+      "lock.back": { state: "unlocked", attributes: {} },
+      "weather.home": { state: "rainy", attributes: { temperature: 9, temperature_unit: "°C" } },
+    };
+    const O = document.createElement("nova-panel");
+    O._currentTab = "dashboard";
+    O._presentFirstMs = 60000;   // no rotation card while this block runs
+    document.body.appendChild(O);
+    O.hass = { ...hass, states, callWS: async (m) => {
+      if (m.type === "nova/energy_flow") return m.action === "status" ? { solar: { w: 640 }, battery: { pct: 82 } } : { solar_kwh: 3.2 };
+      return hass.callWS(m);
+    } };
+    await new Promise(r => setTimeout(r, 200));
+    const R = O.shadowRoot;
+    O._liveData.areas = [{ name: "Kitchen", temp: "21.4°C", humidity: "45" }];
+    O._activityData = [{ ts: "23:02", tag: "OBS", msg: "motion in kitchen" }];
+    O._renderData();
+    await O._orbitRefresh?.(true);
+    const tile = k => R.querySelector(`.orbit-tile[data-orbit="${k}"]`);
+    const val = k => tile(k)?.querySelector(".orbit-v")?.textContent.trim();
+    const arcs = R.getElementById("heroArcs");
+    checks.push([`orbit: five live cards round the head, with the arcs layer behind it (${["security", "home", "energy", "climate", "weather"].map(val).join(" | ")})`,
+      !!arcs && arcs.tagName === "CANVAS" && arcs.getAttribute("aria-hidden") === "true"
+      && R.querySelectorAll(".orbit-tile").length === 5 && tile("security")?.tagName === "BUTTON"
+      && val("security") === "1/2" && val("home") === "1/2" && val("energy") === "640 W"
+      && /^21[.,]4°C$/.test(val("climate") || "") && val("weather") === "9°C"]);
+
+    tile("security")?.click();
+    await new Promise(r => setTimeout(r, 30));
+    const stage = R.getElementById("heroStage");
+    const css = O._css();
+    checks.push(["orbit: tapping a card pops it up beside the head, and the greeting stays",
+      O._presenting && O._presentKind === "security" && stage.classList.contains("presenting")
+      && !/\.hero-stage\.presenting \.hero-copy\{display:none\}/.test(css)
+      && /Locked/.test(R.getElementById("presentCard").textContent)]);
+
+    O._presentEnd();
+    const ghost = R.querySelector(".present-ghost");
+    checks.push(["orbit: when a card ends it settles into its orbit card, which glows",
+      !O._presenting && !stage.classList.contains("presenting") && !!ghost
+      && !!tile("security")?.classList.contains("orbit-flash")]);
+
+    checks.push([`orbit: Nova's latest line sits under the greeting (${R.getElementById("heroLatest")?.textContent.trim()})`,
+      /23:02/.test(R.getElementById("heroLatest")?.textContent || "") && /motion in kitchen/.test(R.getElementById("heroLatest")?.textContent || "")]);
+
+    const lay = O._holoLayout({ W: 1000, H: 600, narrow: false });
+    const order = Array.from(stage.children).map(c => c.id || c.className).join(",");
+    checks.push([`orbit: the head is in the middle, and a phone reads head, greeting, card, then the cards (${order})`,
+      lay.hx === 500 && /^heroArcs,core,hero-copy,presentCard,orbit/.test(order.replace("hero-copy", "hero-copy"))]);
+
+    O._reduceMotion = true;
+    O._arcsStop?.(); O._arcsStart?.();
+    checks.push(["orbit: with less motion the arcs are drawn once and do not keep moving", typeof O._arcsStart === "function" && !O._arcsRaf]);
+    O.remove();
+  }
+
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
   console.log(ok ? "\nSMOKE TEST CLEAN" : "\nSMOKE TEST FAILED");

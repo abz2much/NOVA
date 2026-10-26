@@ -85,7 +85,7 @@ A few advanced settings have no control in either place and are only set in
 
 ## A tour of the panel
 
-- **Command Center.** The hologram head, your areas with live sensors and a
+- **Command Center.** The hologram head with live cards round it, your areas with live sensors and a
   light toggle, Cognitive Core, Goals, Activity, Quick Actions, Operational
   Mode, a Muted card, and camera snapshots on request.
 - **Intrusion.** The intrusion status and the Intrusion Log.
@@ -114,14 +114,23 @@ A few advanced settings have no control in either place and are only set in
 - **Energy.** See [Energy](energy.md).
 
 The Command Center is Nova's only dashboard. Its hologram head, a head, neck
-and shoulders drawn in glowing gold lines, shows what Nova is doing (idle,
-thinking or asleep), so it looks the same whether you have no cameras or
-twelve. It breathes, blinks, follows the mouse and can be turned by
+and shoulders drawn in glowing lines in the theme's colour, shows what Nova is
+doing (idle, thinking or asleep), so it looks the same whether you have no
+cameras or twelve. It breathes, blinks, follows the mouse and can be turned by
 dragging. A browser without WebGL 2 shows a simpler head instead.
 
-While the house is awake, a card of live figures comes round beside the head.
-The first appears about 15 seconds after the page opens. Each card stays for
-15 seconds and a new one comes every 20. The cards are energy, security
+The head sits in the middle, with broken arcs turning slowly round it and
+five live cards: Security (locks, the alarm or doors), Who's home, Energy
+(solar now and the battery), Indoor (temperature and humidity) and Weather.
+Tap one to see more beside the head. Under the greeting is Nova's latest
+line, the newest entry from the Activity feed. On a phone or a narrow window
+the five cards sit under the head in two columns, without the arcs. With
+"reduce motion" turned on in your device, the arcs and cards stay still.
+
+While the house is awake, a card of live figures also comes round beside the
+head. The first appears about 15 seconds after the page opens. Each card stays
+for 8 seconds and a new one comes every 9; when it ends it shrinks into its
+live card, which glows. The cards are energy, security
 (locks, alarm and doors, counts only), the date and time, who is home, the
 next calendar event, reminders due in the next 24 hours, the weather outside
 and the indoor temperature. A card with nothing to show is skipped. Cards

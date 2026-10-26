@@ -378,6 +378,7 @@
     const root = this.shadowRoot, el = root.getElementById("presentCard");
     if (!el) return;
     this._presentId = card.id || null;
+    this._presentKind = card.kind;
     this._setHtml(el, html);
     root.getElementById("heroStage")?.classList.add("presenting");
     this._presenting = true;
@@ -398,6 +399,8 @@
     if (this._presentTick) { clearInterval(this._presentTick); this._presentTick = null; }
     if (!this._presenting) return;
     this._presenting = false;
+    this._orbitSettle(this._presentKind);
+    this._presentKind = null;
     this.shadowRoot?.getElementById("heroStage")?.classList.remove("presenting");
     this._targetCoreState(this._coreState());
   }

@@ -188,7 +188,7 @@
 
     const ctx = this._ctx, W = this._coreW, H = this._coreH;
     if (!W || !H) { this._resizeCore(); return; }
-    const narrow = W < 640;
+    const narrow = W < 820;   // the hero is one column below 820px
     const f = this._face;
     if (reduce) {
       f.blink = 1; f.gx = 0; f.gy = this._coreStateKey === "reasoning" ? 0.8 : 0;
@@ -199,8 +199,8 @@
     ctx.clearRect(0, 0, W, H);
 
     // stage: wide glow behind the head, sparks drifting across the panel
-    const size = narrow ? Math.min(W, H) : H * 1.02;
-    const hx = narrow ? W / 2 : Math.max(size * 0.5, W * 0.26), hy = H / 2;
+    const size = narrow ? Math.min(W, H) : H * 0.76;
+    const hx = W / 2, hy = narrow ? H / 2 : H * 0.36;   // in the middle of the orbit (8.76.0)
     const hc = this._colorForHeat(Math.min(1, c.hot * 0.8 + 0.2));
     const wide = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.75);
     wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, rgba(this._theme().head.fade, 0));
