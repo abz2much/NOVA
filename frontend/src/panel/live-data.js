@@ -368,23 +368,35 @@
     const entities = Array.isArray(m.entities) ? m.entities : [];
     const categories = Array.isArray(m.categories) ? m.categories : [];
     const all = m.all === true;
-    if (!all && !entities.length && !categories.length) { panel.hidden = true; this._setHtml(body, ""); return; }
+    // A blanket shush is the first thing on the page, above the head.
+    // Each part is redrawn only when it changes: the banner is an alert,
+    // and a screen reader would read it out again on every 20 second poll.
+    const draw = (el, html) => {
+      if (!el || el._html === html) return;
+      el._html = html;
+      this._setHtml(el, html);
+      this._wireUnmute(el);
+    };
+    draw(root.getElementById("shushMount"), all ? `
+      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn,#d9a300);border-radius:12px;padding:12px 14px;background:var(--surface)">
+        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
+        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
+      </div>` : "");
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; draw(body, ""); return; }
     panel.hidden = false;
     const row = (label, kind, value) => `
       <div class="feed-row">
         <span class="feed-text">${label}${value ? ` <b>${this._esc(value)}</b>` : ""}</span>
         <button class="mode-chip" data-unmute="${kind}" data-unmute-value="${this._esc(value || "")}">Unmute</button>
       </div>`;
-    const banner = all ? `
-      <div class="mute-banner" role="alert" style="border:1px solid var(--warn,#d9a300);border-radius:8px;padding:10px 12px;margin-bottom:10px">
-        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
-        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
-      </div>` : "";
-    this._setHtml(body, banner
+    draw(body, (all ? `<div class="toggle-desc" style="margin-bottom:8px">Blanket shush is on.</div>` : "")
       + entities.map(e => row("Entity", "entity", e)).join("")
       + categories.map(c => row("Category", "category", c)).join("")
       + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`);
-    body.querySelectorAll("[data-unmute]").forEach(btn => {
+  }
+
+  _wireUnmute(scope) {
+    scope.querySelectorAll("[data-unmute]").forEach(btn => {
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
         const kind = btn.getAttribute("data-unmute");
@@ -395,7 +407,8 @@
         try {
           await this._hass.callService("nova", "unshush", data);
         } catch (err) {
-          console.error("Nova: unshush failed", err);
+          this._fail(err, "unshush");
+          btn.disabled = false;
         }
         this._fetchLiveData();
       });
@@ -480,7 +493,7 @@
       await this._hass.callService("light", turnOn ? "turn_on" : "turn_off", {}, { area_id: areaId });
       setTimeout(() => { try { this._fetchLiveData(); } catch (_) {} }, 500);
     } catch (err) {
-      console.error(`Nova: ${roomName} lights toggle failed`, err);
+      this._fail(err, `${roomName} lights toggle`);
     }
   }
 

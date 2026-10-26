@@ -605,7 +605,7 @@
         <div class="cfg-row">
           <label>Keep scene memory for <span class="toggle-desc">days (1 to 90)</span></label>
           <input class="cfg-field cfg-num" type="number" min="1" max="90" step="1" data-cfg-key="scene_memory_retention_days" value="${Math.max(1, Math.min(90, Number(cfg.scene_memory_retention_days ?? 14) || 14))}" ${cfg.scene_memory_enabled ? "" : "disabled"}>
-          <button class="mode-chip" id="sceneMemoryClear">Forget everything</button>
+          <button class="mode-chip danger" id="sceneMemoryClear">Forget everything</button>
         </div>
         ${onOff("pattern_learn_doors", "Learn doors & windows", "Door and window contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
@@ -712,7 +712,7 @@
         </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
-          <button class="mode-chip" id="newCamDisableAll">Disable all</button>
+          <button class="mode-chip danger" id="newCamDisableAll">Disable all</button>
         </div>
       </div>`;
     const rows = cams.map(c => {
@@ -789,7 +789,7 @@
           (this._liveData.config.cameras || []).forEach(c => { c.enabled = !off.has(c.entity_id); });
         }
         this._rerenderCameraSettings();
-      } catch (err) { console.error("Nova: camera enable/disable failed", err); }
+      } catch (err) { this._fail(err, "camera enable/disable"); }
     };
     const curDisabled = () => {
       const v = (this._data()?.config || {}).disabled_cameras;
@@ -823,7 +823,7 @@
             this._liveData.config.camera_names = res?.camera_names || {};
             if (Array.isArray(res?.cameras)) this._liveData.config.cameras = res.cameras;
           }
-        } catch (err) { console.error("Nova: camera rename failed", err); }
+        } catch (err) { this._fail(err, "camera rename"); }
       };
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
       input.addEventListener("blur", save);
@@ -839,7 +839,7 @@
           if (Array.isArray(res?.cameras) && this._liveData?.config) this._liveData.config.cameras = res.cameras;
           this._rerenderCameraSettings();
         } catch (err) {
-          console.error("Nova: camera location failed", err);
+          this._fail(err, "camera location");
           chipEl.disabled = false;
         }
       });
@@ -1075,7 +1075,7 @@
         try {
           await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
           await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab
-        } catch (err) { console.error("Nova: document delete failed", err); }
+        } catch (err) { this._fail(err, "document delete"); }
       });
     });
   }
@@ -1095,7 +1095,7 @@
           await this._hass.callWS({ type: "nova/documents", action: "ingest" });
           await this._fetchDocLibrary();
         } catch (err) {
-          console.error("Nova: ingest failed", err);
+          this._fail(err, "ingest");
         } finally {
           ingestBtn.disabled = false;
           this._setText(ingestBtn, orig);
@@ -1114,7 +1114,7 @@
           const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
           const host = root.getElementById("newDoclibBody");
           if (host) this._setHtml(host, this._renderDocSearchResults(res?.results || []));
-        } catch (err) { console.error("Nova: document search failed", err); }
+        } catch (err) { this._fail(err, "document search"); }
       });
     }
 
@@ -1125,7 +1125,11 @@
       fileInput.addEventListener("change", async () => {
         const file = fileInput.files && fileInput.files[0];
         if (!file || !this._hass) return;
-        if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
+        if (file.size > 25 * 1024 * 1024) {
+          fileInput.value = "";
+          this._notice(this._tx("That file is over 25 MB."), "error");
+          return;
+        }
         upBtn.disabled = true;
         const orig = upBtn.textContent;
         this._setText(upBtn, "⬆ UPLOADING…");
@@ -1141,7 +1145,7 @@
             await this._fetchDocLibrary();
           }
         } catch (err) {
-          console.error("Nova: document upload failed", err);
+          this._fail(err, "document upload");
         } finally {
           upBtn.disabled = false;
           this._setText(upBtn, orig);
@@ -1171,7 +1175,7 @@
             await this._fetchDocLibrary();
           }
         } catch (err) {
-          console.error("Nova: watch scan failed", err);
+          this._fail(err, "watch scan");
         } finally {
           scanBtn.disabled = false;
           this._setText(scanBtn, orig);
@@ -1187,7 +1191,7 @@
         try {
           await this._hass.callWS({ type: "nova/semantic_search", action: mode });
         } catch (err) {
-          console.error("Nova: semantic search toggle failed", err);
+          this._fail(err, "semantic search toggle");
         }
         await this._fetchVectorBackend();
       });

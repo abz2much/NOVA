@@ -1305,5 +1305,14 @@
   "Satellite": "Спутник",
   "Speaker": "Динамик",
   "Switch": "Выключатель",
-  "Water leak": "Протечка воды"
+  "Water leak": "Протечка воды",
+  "Call off this alert as a false alarm?": "Отменить эту тревогу как ложную?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Сначала выберите динамики в разделе Настройки → Динамики для объявлений.",
+  "Done.": "Готово.",
+  "Forget \"{name}\"?": "Забыть «{name}»?",
+  "Remove this link? Nova will not add it back on its own.": "Удалить эту связь? Nova не добавит её снова сама.",
+  "Something went wrong.": "Что-то пошло не так.",
+  "That didn't work: {error}": "Не получилось: {error}",
+  "That file is over 25 MB.": "Файл больше 25 МБ.",
+  "{entity} is not in the list.": "{entity} нет в списке."
 }

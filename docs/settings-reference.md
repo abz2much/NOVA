@@ -41,7 +41,7 @@ need them if you edit that file by hand.
 | `hero_card_cycle` | Settings → General → Cards on the Command Center | On by default. Shows a card of live figures beside the hologram head every 20 seconds while the house is awake. |
 | `voice_phrases` | Settings → Voice Phrases | Things you say, linked to a script, automation, scene, shell command or another allowed service. Holds the on/off switch (`enabled`, on by default) and up to 100 phrases. Saved only through the card, which checks every phrase; the general settings save can't write it. See [Voice phrases](voice-and-speakers.md#voice-phrases). |
 | `voice_confirm_entities` | `config.json` only | Entity ids that must ask first while Voice Confirmation is on, or, written with a leading `!`, never ask. Use it to make a voice phrase's shell command ask first, such as `shell_command.heat_boost`. Reload Nova after editing. |
-| Mutes (`nova.shush` and `nova.unshush`) | The Muted card on the Command Center, or the services | Entity, category and blanket mutes are saved in `nova/output_mutes.json` and survive a restart. The Muted card lists them with an Unmute button and shows a banner while the blanket mute is on. Critical safety alerts are never muted. |
+| Mutes (`nova.shush` and `nova.unshush`) | The Muted card on the Command Center, or the services | Entity, category and blanket mutes are saved in `nova/output_mutes.json` and survive a restart. The Muted card lists them with an Unmute button. While the blanket mute is on, a banner at the top of the Command Center says so. Critical safety alerts are never muted. |
 
 ## Off until you set them up
 

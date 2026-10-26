@@ -403,5 +403,14 @@
   "Satellite": "Супутник",
   "Speaker": "Динамік",
   "Switch": "Вимикач",
-  "Water leak": "Протікання води"
+  "Water leak": "Протікання води",
+  "Call off this alert as a false alarm?": "Скасувати цю тривогу як хибну?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Спершу виберіть динаміки в Налаштування → Динаміки для оголошень.",
+  "Done.": "Готово.",
+  "Forget \"{name}\"?": "Забути «{name}»?",
+  "Remove this link? Nova will not add it back on its own.": "Видалити цей зв'язок? Nova не додасть його знову сама.",
+  "Something went wrong.": "Щось пішло не так.",
+  "That didn't work: {error}": "Не вдалося: {error}",
+  "That file is over 25 MB.": "Файл більший за 25 МБ.",
+  "{entity} is not in the list.": "{entity} немає у списку."
 }

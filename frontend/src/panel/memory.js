@@ -162,7 +162,7 @@
             <label>${this._esc(f.key)}</label>
             <div style="display:flex;align-items:center;gap:6px">
               <span class="toggle-desc">${this._esc(f.value)}${hedge}${expiry}</span>
-              <button class="new-mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
+              <button class="new-mem-forget danger" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
             </div>
           </div>`;
     };
@@ -182,7 +182,7 @@
     const kind = subject === "primary" ? "preference" : "fact";
     const { reply, failed, err } = await this._memAsk({ type: "nova/add_knowledge", key, value, subject, kind });
     if (failed) {
-      console.error("Nova: teach failed", err);
+      this._fail(err, "teach");
     } else {
       this._keepKnowledge(reply?.facts || []);
       [keyEl, valEl].forEach(el => { if (el) el.value = ""; });
@@ -194,8 +194,10 @@
 
   async _forgetKnowledge(id) {
     if (!this._hass) return;
+    const fact = (this._knowledge?.facts || []).find(f => f.id === id);
+    if (!window.confirm(this._t("Forget \"{name}\"?", { name: fact ? fact.key : "" }))) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/forget_knowledge", fact_id: id });
-    if (failed) console.error("Nova: forget failed", err);
+    if (failed) this._fail(err, "forget");
     else this._keepKnowledge(reply?.facts || []);
     this._renderKnowledgeList();
   }
@@ -203,7 +205,7 @@
   async _pendingFactAction(id, action) {
     if (!this._hass) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/pending_fact_action", fact_id: id, action });
-    if (failed) console.error(`Nova: ${action} failed`, err);
+    if (failed) this._fail(err, `${action}`);
     else this._keepKnowledge(reply?.facts || this._knowledge?.facts || [], reply?.pending || []);
     this._renderKnowledgeList();
     this._renderPendingFacts();
@@ -212,7 +214,7 @@
   async _editPendingFact(id, value) {
     if (!this._hass || !value) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/edit_pending_fact", fact_id: id, value });
-    if (failed) console.error("Nova: edit pending fact failed", err);
+    if (failed) this._fail(err, "edit pending fact");
     else this._keepKnowledge(this._knowledge?.facts || [], reply?.pending || []);
     this._renderPendingFacts();
   }
@@ -233,7 +235,7 @@
       </div>
       <div class="mode-grid" style="margin-bottom:10px">
         <button class="mode-chip new-pending-confirm" data-id="${f.id}">✓ Confirm</button>
-        <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
+        <button class="mode-chip danger new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
       </div>`).join(""));
     this._memBind(box, ".new-pending-confirm", id => this._pendingFactAction(id, "confirm"));
@@ -293,7 +295,7 @@
     this._setHtml(list, rel.confirmed.length ? rel.confirmed.map(r => `
       <div class="cfg-row" data-id="${r.id}">
         <label>${this._esc(r.subject)} <b>${this._esc(r.predicate)}</b> ${this._esc(r.object)}</label>
-        <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
+        <button class="new-rel-remove danger" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
         ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "House member owns the bike", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
@@ -310,7 +312,10 @@
         object: row.querySelector(".rel-object").value,
       });
     }));
-    list.querySelectorAll(".new-rel-remove").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "remove")));
+    list.querySelectorAll(".new-rel-remove").forEach(b => b.addEventListener("click", e => {
+      const id = idOf(e.currentTarget);
+      if (window.confirm(this._tx("Remove this link? Nova will not add it back on its own."))) this._relationAction(id, "remove");
+    }));
   }
 
   async _relationAction(id, action) {

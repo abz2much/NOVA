@@ -236,7 +236,7 @@
       await this._hass.callWS({ type: "nova/automation_trial_feedback", trial_id: trialId, verdict });
       this._fetchAutomationTrials();
     } catch (err) {
-      console.error("Nova: automation trial feedback failed", err);
+      this._fail(err, "automation trial feedback");
     }
   }
 
@@ -252,7 +252,7 @@
         try {
           res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
         } catch (err) {
-          console.error(`Nova: suggestion ${action} failed`, err);
+          this._fail(err, `suggestion ${action}`);
         }
         // Only a settled suggestion (installed, acknowledged, covered or
         // dismissed) greys out. A failed install stays pending on the
@@ -289,7 +289,7 @@
         try {
           res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action: "restore" });
         } catch (err) {
-          console.error("Nova: suggestion restore failed", err);
+          this._fail(err, "suggestion restore");
         }
         if (res && res.ok) {
           row.style.opacity = "0.35";

@@ -403,5 +403,14 @@
   "Satellite": "Satelit",
   "Speaker": "Difuzor",
   "Switch": "Întrerupător",
-  "Water leak": "Scurgere de apă"
+  "Water leak": "Scurgere de apă",
+  "Call off this alert as a false alarm?": "Anulezi această alertă ca alarmă falsă?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Alege mai întâi difuzoarele, în Setări → Difuzoare pentru anunțuri.",
+  "Done.": "Gata.",
+  "Forget \"{name}\"?": "Uiți „{name}”?",
+  "Remove this link? Nova will not add it back on its own.": "Elimini această legătură? Nova nu o va adăuga din nou singură.",
+  "Something went wrong.": "Ceva nu a mers bine.",
+  "That didn't work: {error}": "Nu a funcționat: {error}",
+  "That file is over 25 MB.": "Fișierul depășește 25 MB.",
+  "{entity} is not in the list.": "{entity} nu este în listă."
 }

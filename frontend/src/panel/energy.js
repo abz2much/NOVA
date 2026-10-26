@@ -189,7 +189,7 @@
         try {
           await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
         } catch (err) {
-          console.error("Nova: failed to set energy agency", err);
+          this._fail(err, "set energy agency");
         }
         await this._fetchEnergyStatus();
       });
@@ -298,7 +298,7 @@
           });
         });
         await this._rawSaveConfig("appliance_profile", JSON.stringify(out));
-        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { console.error("Nova: appliance reload failed", err); }
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { this._fail(err, "appliance reload"); }
         await this._fetchLiveData();
         if (this._currentTab === "energy") this._render();
       });

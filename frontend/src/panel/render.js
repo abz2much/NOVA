@@ -24,6 +24,7 @@
     this._renderData();
     if (this._currentTab === "dashboard") this._presentStart();
     this._a11y(root);
+    this._drawNotice();
     this._focusRestore(root, focus);
   }
 
@@ -213,12 +214,14 @@
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : tab === "chat" ? this._htmlChat() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
+        <div class="nova-notice" id="novaNotice" role="status" aria-live="polite" hidden></div>
       </div>
     `;
   }
 
   _htmlDashboard() {
     return `
+        <div id="shushMount"></div>
         <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">

@@ -1300,5 +1300,14 @@
   "Satellite": "语音卫星",
   "Speaker": "扬声器",
   "Switch": "开关",
-  "Water leak": "漏水"
+  "Water leak": "漏水",
+  "Call off this alert as a false alarm?": "将此警报作为误报取消？",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "请先选择扬声器：设置 → 播报扬声器。",
+  "Done.": "完成。",
+  "Forget \"{name}\"?": "忘记“{name}”？",
+  "Remove this link? Nova will not add it back on its own.": "删除此关联？Nova 不会自行重新添加。",
+  "Something went wrong.": "出了点问题。",
+  "That didn't work: {error}": "操作未成功：{error}",
+  "That file is over 25 MB.": "文件超过 25 MB。",
+  "{entity} is not in the list.": "{entity} 不在列表中。"
 }

@@ -403,5 +403,14 @@
   "Satellite": "Satelliitti",
   "Speaker": "Kaiutin",
   "Switch": "Kytkin",
-  "Water leak": "Vesivuoto"
+  "Water leak": "Vesivuoto",
+  "Call off this alert as a false alarm?": "Perutaanko tämä hälytys vääränä hälytyksenä?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Valitse ensin kaiuttimet kohdassa Asetukset → Kuulutusten kaiuttimet.",
+  "Done.": "Valmis.",
+  "Forget \"{name}\"?": "Unohdetaanko \"{name}\"?",
+  "Remove this link? Nova will not add it back on its own.": "Poistetaanko tämä yhteys? Nova ei lisää sitä takaisin itsestään.",
+  "Something went wrong.": "Jokin meni pieleen.",
+  "That didn't work: {error}": "Se ei onnistunut: {error}",
+  "That file is over 25 MB.": "Tiedosto on yli 25 Mt.",
+  "{entity} is not in the list.": "{entity} ei ole luettelossa."
 }

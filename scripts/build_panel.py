@@ -27,6 +27,7 @@ SOURCES = (
     "panel/core.js",                 # class opening, lifecycle, HA contract, data
     "panel/render.js",               # tab shell and dashboard
     "panel/a11y.js",                 # screen reader names and states, after each redraw
+    "panel/notice.js",               # the Done / That didn't work message at the bottom
     "panel/logs.js",                 # system log, spoken history, actions, decisions
     "panel/memory.js",
     "panel/intrusion.js",

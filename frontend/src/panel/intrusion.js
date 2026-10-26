@@ -85,7 +85,7 @@
       </div>
       <div class="mode-grid">
         <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
-        <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+        <button class="mode-chip danger new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
       </div>`);
     this._setHtml(body, parts.join(""));
 
@@ -96,22 +96,23 @@
     });
     // Call off and acknowledge: the button stays disabled until the fresh
     // status redraws it, and comes back only when the action failed.
-    const action = (selector, name) => {
+    const action = (selector, name, askFirst) => {
       const btn = body.querySelector(selector);
       if (!btn) return;
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
+        if (askFirst && !askFirst()) return;
         btn.disabled = true;
         try {
           await this._intrSend(name, { reason: "panel" });
           await this._fetchIntrusion();
         } catch (err) {
-          console.error(`Nova: intrusion ${name} failed`, err);
+          this._fail(err, `intrusion ${name}`);
           btn.disabled = false;
         }
       });
     };
-    action(".new-intr-dismiss", "dismiss");
+    action(".new-intr-dismiss", "dismiss", () => window.confirm(this._tx("Call off this alert as a false alarm?")));
     action(".new-intr-ack", "acknowledge");
   }
 
@@ -167,7 +168,7 @@
       try {
         await this._intrSend("label", { event_id: eventId, label: btn.getAttribute("data-label") });
         await this._fetchIntrusionLog();
-      } catch (err) { console.error("Nova: intrusion label failed", err); }
+      } catch (err) { this._fail(err, "intrusion label"); }
     }));
   }
 

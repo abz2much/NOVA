@@ -233,7 +233,7 @@
             if (statusEl) { this._setText(statusEl, "configured"); statusEl.classList.add("cred-configured"); }
             this._markProviderAvailability({ [p]: true });
           }
-        } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
+        } catch (err) { this._fail(err, `save credential for ${p}`); }
       });
     });
     root.querySelectorAll(".cred-clear").forEach(btn => {
@@ -253,7 +253,7 @@
               this._markProviderAvailability({ [p]: false });
             }
           }
-        } catch (err) { console.error(`Nova: failed to clear credential for ${p}`, err); }
+        } catch (err) { this._fail(err, `clear credential for ${p}`); }
       });
     });
   }

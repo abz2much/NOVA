@@ -1,3 +1,15 @@
+## [8.72.0] The panel tells you when something fails
+
+### Added
+- **A failure is shown on screen.** Saving a setting, a Quick Action, a lockdown change, a camera, document or memory action and the others now show "That didn't work:" and the reason at the bottom of the panel. Before, most of them only wrote to the browser console. Screen readers read the message out.
+- **Quick Actions and service tests say "Done."** when they ran, and their button waits while they run.
+- **An entity id that is not in the list says so**, instead of nothing happening. So does a document over 25 MB, and Brief me now with no announcement speakers chosen.
+- **Call Off, Forget and removing a link ask first.**
+
+### Changed
+- **Destructive buttons are red**: Call Off, Forget, Reject, Remove, Forget everything, Clear credential, Disable all cameras and Reset Default.
+- **"Blanket shush is on" is the first thing on the Command Center**, above the head, instead of below Quick Actions. It is read out once, not on every refresh.
+
 ## [8.71.1] Easier to read and tap
 
 ### Changed
