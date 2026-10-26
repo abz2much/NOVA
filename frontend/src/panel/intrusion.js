@@ -173,8 +173,9 @@
 
   _wireIntrusion() {
     this._fetchIntrusion();
+    this._fetchIntrusionLog();
     const refresh = this.shadowRoot.getElementById("newIlogRefresh");
-    if (!refresh) { this._fetchIntrusionLog(); return; }
+    if (!refresh) return;
     refresh.addEventListener("click", async () => {
       const label = refresh.textContent;
       refresh.disabled = true;

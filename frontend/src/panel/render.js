@@ -40,8 +40,11 @@
     const request = ++this._uiLangRequest;
     this._uiLangLoaded = full;
     if (base === "en") {
+      // English is what the DOM already shows, so redraw only when leaving
+      // a translation, never on the first load.
+      const hadStrings = !!this._uiStrings;
       this._uiStrings = null;
-      if (this._renderedOnce) this._render();
+      if (hadStrings && this._renderedOnce) this._render();
       return;
     }
     const grab = async (lang) => {

@@ -194,12 +194,12 @@
 
   // Hazard status is fetched once per element lifetime (same on-demand
   // pattern as Diagnostics). A source, location or level change re-fetches it.
-  async _fetchHazardStatus() {
+  async _fetchHazardStatus({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._hazard = await this._hass.callWS({ type: "nova/hazard", action: "status" });
     } catch (_) { this._hazard = null; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _hazardMonitorCardBody() {
@@ -904,12 +904,12 @@
 
   // Wellbeing status is fetched once per element lifetime (same on-demand
   // pattern as Diagnostics/Hazard/Energy).
-  async _fetchBio() {
+  async _fetchBio({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._bio = await this._hass.callWS({ type: "nova/biometrics", action: "status" });
     } catch (_) { this._bio = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _wellbeingContextCardBody() {
@@ -966,20 +966,20 @@
 
   // Document Library (RAG) — fetched once per element lifetime, like the
   // other on-demand cards (Diagnostics/Hazard/Energy/Wellbeing).
-  async _fetchDocLibrary() {
+  async _fetchDocLibrary({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._docLib = await this._hass.callWS({ type: "nova/documents", action: "status" });
     } catch (_) { this._docLib = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
-  async _fetchVectorBackend() {
+  async _fetchVectorBackend({ render = true } = {}) {
     if (!this._hass) return;
     try {
       this._vecbk = await this._hass.callWS({ type: "nova/semantic_search", action: "status" });
     } catch (_) { this._vecbk = { error: true }; }
-    if (this._currentTab === "settings") this._render();
+    if (render && this._currentTab === "settings") this._render();
   }
 
   _renderDocLibraryList() {

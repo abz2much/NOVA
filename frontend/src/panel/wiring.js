@@ -492,18 +492,23 @@
       });
     }
 
+    // The first visit reads four card statuses. They redraw the tab once,
+    // together, not once each: every redraw wipes what is being typed.
+    const firstReads = [];
     if (!this._hazFetchedOnce) {
       this._hazFetchedOnce = true;
-      this._fetchHazardStatus();
+      firstReads.push(this._fetchHazardStatus({ render: false }));
     }
     if (!this._bioFetchedOnce) {
       this._bioFetchedOnce = true;
-      this._fetchBio();
+      firstReads.push(this._fetchBio({ render: false }));
     }
     if (!this._docLibFetchedOnce) {
       this._docLibFetchedOnce = true;
-      this._fetchDocLibrary();
-      this._fetchVectorBackend();
+      firstReads.push(this._fetchDocLibrary({ render: false }), this._fetchVectorBackend({ render: false }));
+    }
+    if (firstReads.length) {
+      Promise.all(firstReads).then(() => { if (this._currentTab === "settings") this._render(); });
     }
     this._wireDocLibrary();
     const bioToggle = root.getElementById("newBioToggle");

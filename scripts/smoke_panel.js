@@ -2194,7 +2194,7 @@ if (require.main === module) setTimeout(async () => {
     !!outLang && outLang.value === "auto" && /^Auto/.test(outLang.options[0].textContent)
     && outLangNames.length > 20 && outLangNames.join("|") === [...outLangNames].sort((x, y) => x.localeCompare(y)).join("|")
     && Array.from(outLang.options).some(o => o.value === "de" && o.textContent === "German")
-    && /not affected/.test(outLang.parentElement.textContent)]);
+    && /not affected/.test(outLang.parentElement.nextElementSibling?.textContent || "")]);
   outLang.value = "de";
   outLang.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
@@ -5040,6 +5040,71 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["_t leaves a placeholder with no value as it is",
     elNew._t("{count} RECENT", {}) === "{count} récents"]);
   elNew._uiStrings = savedStrings;
+
+  // Panel review fixes (8.70.2). Each check uses its own fresh panel, so no
+  // state from the sections above can hide or cause a failure.
+  {
+    const fresh = async (tab, callWS) => {
+      const el = document.createElement("nova-panel");
+      el._currentTab = tab;
+      document.body.appendChild(el);
+      el.hass = { ...hass, callWS: callWS || hass.callWS };
+      return el;
+    };
+    const baseWS = hass.callWS;
+
+    // The Intrusion Log loads by itself when the tab opens.
+    const intr = await fresh("intrusion");
+    await new Promise(r => setTimeout(r, 60));
+    checks.push(["review: the Intrusion Log loads when the tab opens, without pressing Refresh",
+      intr.shadowRoot.querySelectorAll(".new-ilog-item").length === 2]);
+    intr.remove();
+
+    // Opening Settings for the first time redraws the tab at most once more
+    // after its first draw, not once per status fetch.
+    let renders = 0;
+    const settingsEl = document.createElement("nova-panel");
+    settingsEl._currentTab = "settings";
+    const origRender = settingsEl._render.bind(settingsEl);
+    settingsEl._render = () => { renders++; origRender(); };
+    document.body.appendChild(settingsEl);
+    settingsEl.hass = { ...hass, callWS: baseWS };
+    await new Promise(r => setTimeout(r, 120));
+    checks.push([`review: opening Settings redraws it at most once after the first draw (drew ${renders} times)`,
+      renders <= 2]);
+
+    // Help text sits under its row, not squeezed beside the control.
+    // Rows built to wrap (.vp-row) put their text on its own line already.
+    const squeezed = Array.from(settingsEl.shadowRoot.querySelectorAll(".cfg-row:not(.vp-row)")).filter(row => {
+      const kids = Array.from(row.children);
+      return kids.some(k => /^(SELECT|INPUT|BUTTON|TEXTAREA)$/.test(k.tagName))
+        && kids.some(k => k.classList.contains("toggle-desc") && k.textContent.trim().length > 40);
+    }).map(row => row.querySelector("label")?.textContent.trim());
+    checks.push([`review: long help text is never squeezed beside a control (${squeezed.join(", ") || "none"})`,
+      squeezed.length === 0]);
+    settingsEl.remove();
+
+    // The panel's stylesheet has no stray declarations outside a rule.
+    // A stray line closes a rule that was never opened, so count the braces.
+    const css = elNew._css().replace(/\/\*[\s\S]*?\*\//g, "");
+    let depth = 0, stray = 0;
+    for (const ch of css) {
+      if (ch === "{") depth++;
+      else if (ch === "}") { if (depth === 0) stray++; else depth--; }
+    }
+    checks.push([`review: no stray CSS outside a rule (${stray} unopened, ${depth} unclosed)`,
+      stray === 0 && depth === 0]);
+
+    // A Setup Doctor problem shows its name on the same line as its detail.
+    // jsdom ignores a shadow root's stylesheet when it computes styles, so
+    // the panel's real CSS is checked in a plain document of its own.
+    const cssDoc = new JSDOM(`<style>${elNew._css()}</style><div class="welcome-checks"><b>Setup checks</b>`
+      + `<small class="welcome-problem">• <b>Assist pipeline</b>: none</small></div>`).window;
+    const probe = cssDoc.document.querySelector(".welcome-checks");
+    const display = el => cssDoc.getComputedStyle(el).display;
+    checks.push(["review: a Setup Doctor problem keeps its name on the same line as its detail",
+      display(probe.querySelector(".welcome-problem b")) !== "block" && display(probe.firstElementChild) === "block"]);
+  }
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }

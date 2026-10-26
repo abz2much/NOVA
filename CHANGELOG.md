@@ -1,3 +1,12 @@
+## [8.70.2] Panel fixes
+
+### Fixed
+- **The Intrusion Log loads when you open the tab.** Before, it showed "Loading…" until you pressed Refresh.
+- **Opening Settings no longer redraws the page four extra times.** The card statuses it reads on the first visit now redraw it once, together, so text you start typing is not wiped.
+- **The panel no longer redraws itself once for no reason on first load in English.** On the Command Center this also stops the head restarting.
+- **Long help text sits under its setting.** "Nova speaks", Garage and Basement no longer squeeze their help into a narrow column beside the menu.
+- **Setup checks on the welcome card read on one line**: the name of the check, then what is wrong.
+
 ## [8.70.1] Camera summaries kept through a restart
 
 ### Fixed
