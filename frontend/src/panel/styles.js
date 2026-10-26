@@ -247,6 +247,13 @@
       .camera-caption{padding:8px 9px 4px;display:flex;flex-direction:column;gap:2px}.camera-caption b{font-size:12px}.camera-caption span{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint)}
       .camera-actions{display:flex;flex-wrap:wrap;gap:5px;padding:4px 9px}.camera-actions .mode-chip{padding:4px 7px;font-size:11px}
       .camera-diagnostic{font-size:11px;color:var(--ink-dim);line-height:1.35;padding:5px 9px 0;overflow-wrap:anywhere}
+      .nova-notice{position:fixed;left:16px;right:16px;bottom:16px;margin:0 auto;width:fit-content;z-index:20;max-width:560px;
+        padding:10px 16px;border-radius:12px;background:var(--surface-2);border:1px solid var(--gold);color:var(--ink);
+        font-size:13px;line-height:1.4;box-shadow:0 6px 24px #0008;cursor:pointer}
+      .nova-notice.error{border-color:#ff6b81;color:#ffd7d7}
+      .nova-notice[hidden]{display:none}
+      .danger{color:#ff9a9a;border-color:#ff5a5a66}
+      .danger:hover{border-color:#ff6b81;background:#ff5a5a14}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
       .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
       .intr-snap{margin-bottom:10px}

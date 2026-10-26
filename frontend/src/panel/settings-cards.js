@@ -499,7 +499,7 @@
         <span class="cred-status" data-cred-status="${p}">…</span>
         <input class="cred-input" type="password" data-cred-provider="${p}" placeholder="enter to set or replace" autocomplete="off">
         <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
-        <button class="mode-chip cred-clear" data-cred-provider="${p}">CLEAR</button>
+        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">CLEAR</button>
       </div>`).join("");
     return `
       <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
@@ -678,7 +678,7 @@
     try {
       await this._hass.callWS({ type: "nova/update_config", key, value });
     } catch (err) {
-      console.error(`Nova: failed to save ${key}`, err);
+      this._fail(err, `save ${key}`);
     }
   }
 

@@ -87,7 +87,8 @@ list is in [Safety and security](safety-and-security.md#how-alerts-reach-you).
 - **Unshush** (`nova.unshush`) undoes it. With no arguments it clears all
   mutes.
 - Mutes survive a restart. The Command Center's **Muted** card lists them with
-  an Unmute button, and shows a banner when the blanket shush is on.
+  an Unmute button. When the blanket shush is on, a banner with an Unshush
+  button is the first thing on the Command Center, above the head.
 
 ## Limits
 

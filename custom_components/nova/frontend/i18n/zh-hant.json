@@ -1300,5 +1300,14 @@
   "Satellite": "語音衛星",
   "Speaker": "揚聲器",
   "Switch": "開關",
-  "Water leak": "漏水"
+  "Water leak": "漏水",
+  "Call off this alert as a false alarm?": "將此警報作為誤報取消？",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "請先選擇揚聲器：設定 → 播報揚聲器。",
+  "Done.": "完成。",
+  "Forget \"{name}\"?": "忘記「{name}」？",
+  "Remove this link? Nova will not add it back on its own.": "刪除此關聯？Nova 不會自行重新加入。",
+  "Something went wrong.": "發生了一點問題。",
+  "That didn't work: {error}": "操作未成功：{error}",
+  "That file is over 25 MB.": "檔案超過 25 MB。",
+  "{entity} is not in the list.": "{entity} 不在清單中。"
 }

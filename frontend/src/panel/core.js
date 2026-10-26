@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.71.1
+ * v8.72.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.71.1 ",
+      console.log("%c Nova Panel %c v8.72.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -142,7 +142,7 @@ class NovaPanel extends HTMLElement {
       const res = await this._hass.callWS({ type: "nova/get_area_sparklines" });
       this._sparklines = res?.sparklines || {};
     } catch (err) {
-      console.warn("Nova: sparkline fetch failed", err);
+      console.warn("Nova: sparkline fetch failed", err);   // quiet: background refresh every 5 minutes; a notice would nag
       return;
     }
     this._renderData();
@@ -160,7 +160,7 @@ class NovaPanel extends HTMLElement {
         this._activityData = log?.entries || [];
       } catch (_) { this._activityData = []; }
     } catch (err) {
-      console.warn("Nova: panel data fetch failed", err);
+      console.warn("Nova: panel data fetch failed", err);   // quiet: background refresh every 20 seconds; a notice would nag
     }
     try {
       this._solar = await this._hass.callWS({ type: "nova/solar", action: "status" });

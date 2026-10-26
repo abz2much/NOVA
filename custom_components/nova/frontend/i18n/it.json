@@ -403,5 +403,14 @@
   "Satellite": "Satellite",
   "Speaker": "Altoparlante",
   "Switch": "Interruttore",
-  "Water leak": "Perdita d'acqua"
+  "Water leak": "Perdita d'acqua",
+  "Call off this alert as a false alarm?": "Annullare questo allarme come falso allarme?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Scegli prima gli altoparlanti, in Impostazioni → Altoparlanti per gli annunci.",
+  "Done.": "Fatto.",
+  "Forget \"{name}\"?": "Dimenticare \"{name}\"?",
+  "Remove this link? Nova will not add it back on its own.": "Rimuovere questo collegamento? Nova non lo aggiungerà di nuovo da sola.",
+  "Something went wrong.": "Qualcosa è andato storto.",
+  "That didn't work: {error}": "Non ha funzionato: {error}",
+  "That file is over 25 MB.": "Il file supera i 25 MB.",
+  "{entity} is not in the list.": "{entity} non è nell'elenco."
 }

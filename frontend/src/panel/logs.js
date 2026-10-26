@@ -350,7 +350,7 @@
         await this._hass.callWS({ type: "nova/convenience_choice",
           pattern_key: b.getAttribute("data-key"), choice: b.getAttribute("data-choice") });
       } catch (err) {
-        console.warn("Nova: convenience choice failed", err);
+        this._fail(err, "convenience choice");
       }
       this._fetchShadow();
     }));
@@ -600,7 +600,7 @@
         const c = this.shadowRoot?.getElementById("newLogEntries");
         if (c) this._setHtml(c, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`);
       } else {
-        console.warn("Nova: System Log refresh failed, keeping cached entries", err);
+        console.warn("Nova: System Log refresh failed, keeping cached entries", err);   // quiet: background refresh, rows on screen are kept
       }
     } finally {
       this._debugLogFetchInFlight = false;

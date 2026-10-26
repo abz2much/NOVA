@@ -1305,5 +1305,14 @@
   "Satellite": "Satelliet",
   "Speaker": "Luidspreker",
   "Switch": "Schakelaar",
-  "Water leak": "Waterlek"
+  "Water leak": "Waterlek",
+  "Call off this alert as a false alarm?": "Dit alarm afblazen als vals alarm?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Kies eerst luidsprekers, bij Instellingen → Aankondigingsluidsprekers.",
+  "Done.": "Klaar.",
+  "Forget \"{name}\"?": "\"{name}\" vergeten?",
+  "Remove this link? Nova will not add it back on its own.": "Deze koppeling verwijderen? Nova voegt hem niet zelf weer toe.",
+  "Something went wrong.": "Er ging iets mis.",
+  "That didn't work: {error}": "Dat lukte niet: {error}",
+  "That file is over 25 MB.": "Dat bestand is groter dan 25 MB.",
+  "{entity} is not in the list.": "{entity} staat niet in de lijst."
 }

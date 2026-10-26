@@ -1,5 +1,9 @@
   _wire() {
     const root = this.shadowRoot;
+    root.getElementById("novaNotice")?.addEventListener("click", () => {
+      this._noticeState = null;
+      this._drawNotice();
+    });
     const presentCard = root.getElementById("presentCard");
     if (presentCard) {
       presentCard.addEventListener("click", () => this._presentEnd());
@@ -32,7 +36,7 @@
           this._liveData.lockdown = res.lockdown;
           if (this._liveData.config) this._liveData.config.lockdown = res.lockdown;
         }
-      } catch (err) { console.error("Nova: lockdown change failed", err); }
+      } catch (err) { this._fail(err, "lockdown change"); }
       lockdownBtn.disabled = false;
       this._renderData();
     });
@@ -107,10 +111,14 @@
           if (dataAttr) {
             try { data = JSON.parse(dataAttr); } catch (_) { data = {}; }
           }
+          btn.disabled = true;
           try {
             await this._hass.callService(domain, service, data);
+            this._notice(this._tx("Done."));
           } catch (err) {
-            console.error(`Nova: service ${svcAttr} failed`, err);
+            this._fail(err, `service ${svcAttr}`);
+          } finally {
+            btn.disabled = false;
           }
         });
       });
@@ -334,9 +342,10 @@
         if (isNaN(limit) || limit < 1) limit = 40;
         try {
           await this._hass.callService("nova", "train_doorbell_backlog", { limit });
+          this._notice(this._tx("Done."));
           setTimeout(() => this._fetchLiveData(), 4000);
         } catch (err) {
-          console.error("Nova: doorbell backlog scan failed", err);
+          this._fail(err, "doorbell backlog scan");
         }
       });
     }
@@ -348,7 +357,7 @@
         try {
           await this._hass.callWS({ type: "nova/clear_scene_memory" });
         } catch (err) {
-          console.error("Nova: clearing scene memory failed", err);
+          this._fail(err, "clearing scene memory");
         }
       });
     }
@@ -371,7 +380,7 @@
             await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
           }
         } else {
-          console.warn(`Nova: "${eid}" is not a known entity id`);
+          this._notice(this._t("{entity} is not in the list.", { entity: eid }), "error");
         }
       });
     }
@@ -398,24 +407,24 @@
     };
     exclAdd("newExclEntAdd", "newExclEntInput", "excluded_entities", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v]) return true;
-      console.warn(`Nova: "${v}" is not a known entity id`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newAuditSensorAdd", "newAuditSensorInput", "infrastructure_audit_sensors", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && /^(binary_)?sensor\./.test(v)) return true;
-      console.warn(`Nova: "${v}" is not a known sensor`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newExemptLockAdd", "newExemptLockInput", "lockdown_exempt_locks", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("lock.")) return true;
-      console.warn(`Nova: "${v}" is not a known lock`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
     exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("calendar.")) return true;
-      console.warn(`Nova: "${v}" is not a known calendar`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
@@ -475,7 +484,7 @@
         const spk = cfg.announcement_speakers;
         const hasTargets = (Array.isArray(spk) && spk.length > 0) || !!cfg.broadcast_group;
         if (!hasTargets) {
-          console.warn("Nova: no announcement speakers set — choose them in Settings → Announcement Speakers");
+          this._notice(this._tx("Choose announcement speakers first, in Settings → Announcement Speakers."), "error");
           return;
         }
         briefNow.disabled = true;
@@ -483,8 +492,9 @@
         this._setText(briefNow, "▶ BRIEFING…");
         try {
           await this._hass.callService("nova", "briefing", { announce: true });
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error("Nova: briefing failed", err);
+          this._fail(err, "briefing");
         } finally {
           briefNow.disabled = false;
           this._setText(briefNow, orig);
@@ -520,7 +530,7 @@
         try {
           await this._hass.callWS({ type: "nova/biometrics", action: enabling ? "enable" : "disable" });
         } catch (err) {
-          console.error("Nova: wellbeing toggle failed", err);
+          this._fail(err, "wellbeing toggle");
         }
         await this._fetchBio();
       });
@@ -574,8 +584,9 @@
         const [domain, service] = svcAttr.split(".");
         try {
           await this._hass.callService(domain, service, {});
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error(`Nova: service ${svcAttr} failed`, err);
+          this._fail(err, `service ${svcAttr}`);
         }
       });
     });
@@ -607,8 +618,9 @@
         const [domain, service] = svcAttr.split(".");
         try {
           await this._hass.callService(domain, service, {});
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error(`Nova: service ${svcAttr} failed`, err);
+          this._fail(err, `service ${svcAttr}`);
         }
       });
     });
@@ -618,8 +630,9 @@
       if (!entity_id || !this._hass) return;
       try {
         await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+        this._notice(this._tx("Done."));
       } catch (err) {
-        console.error("Nova: camera analyze failed", err);
+        this._fail(err, "camera analyze");
       }
     });
   }
@@ -664,7 +677,7 @@
         try {
           await this._hass.callWS({ type: "nova/mode", action: "set", mode });
         } catch (err) {
-          console.error("Nova: failed to set mode", err);
+          this._fail(err, "set mode");
         }
         await this._fetchLiveData();
       });
@@ -688,7 +701,7 @@
     try {
       await this._hass.callWS({ type: "nova/update_config", key, value });
     } catch (err) {
-      console.error(`Nova: failed to save ${key}`, err);
+      this._fail(err, `save ${key}`);
     }
     await this._fetchLiveData();
     // Re-render on any tab except the dashboard — a full _render() there

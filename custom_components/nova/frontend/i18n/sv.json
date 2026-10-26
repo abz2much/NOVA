@@ -1305,5 +1305,14 @@
   "Satellite": "Satellit",
   "Speaker": "Högtalare",
   "Switch": "Brytare",
-  "Water leak": "Vattenläcka"
+  "Water leak": "Vattenläcka",
+  "Call off this alert as a false alarm?": "Avbryt detta larm som falsklarm?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Välj högtalare först, under Inställningar → Högtalare för meddelanden.",
+  "Done.": "Klart.",
+  "Forget \"{name}\"?": "Glöm \"{name}\"?",
+  "Remove this link? Nova will not add it back on its own.": "Ta bort den här kopplingen? Nova lägger inte till den igen av sig själv.",
+  "Something went wrong.": "Något gick fel.",
+  "That didn't work: {error}": "Det fungerade inte: {error}",
+  "That file is over 25 MB.": "Filen är större än 25 MB.",
+  "{entity} is not in the list.": "{entity} finns inte i listan."
 }

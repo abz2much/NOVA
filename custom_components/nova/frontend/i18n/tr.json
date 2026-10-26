@@ -403,5 +403,14 @@
   "Satellite": "Uydu",
   "Speaker": "Hoparlör",
   "Switch": "Anahtar",
-  "Water leak": "Su kaçağı"
+  "Water leak": "Su kaçağı",
+  "Call off this alert as a false alarm?": "Bu uyarı yanlış alarm olarak iptal edilsin mi?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Önce hoparlörleri seçin: Ayarlar → Duyuru hoparlörleri.",
+  "Done.": "Tamam.",
+  "Forget \"{name}\"?": "\"{name}\" unutulsun mu?",
+  "Remove this link? Nova will not add it back on its own.": "Bu bağlantı kaldırılsın mı? Nova onu kendiliğinden yeniden eklemez.",
+  "Something went wrong.": "Bir şeyler ters gitti.",
+  "That didn't work: {error}": "Olmadı: {error}",
+  "That file is over 25 MB.": "Dosya 25 MB'tan büyük.",
+  "{entity} is not in the list.": "{entity} listede yok."
 }

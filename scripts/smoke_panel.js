@@ -669,19 +669,20 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["new look: area light toggle calls light.turn_off targeted at the area",
     _serviceCalls.some(c => c.domain === "light" && c.service === "turn_off" && c.target?.area_id === "garage")]);
 
-  // Muted card: lists entity and category mutes, shows the blanket shush
-  // banner, and each Unmute button calls the existing nova.unshush service.
+  // Muted card: lists entity and category mutes; the blanket shush banner
+  // sits above the head (8.72.0); each Unmute button calls nova.unshush.
   const mutesPanel = newRoot.getElementById("mutesPanel");
+  const shushMount = newRoot.getElementById("shushMount");
   checks.push(
-    ["muted card shows entity and category mutes plus the blanket banner",
+    ["muted card shows entity and category mutes, and the blanket banner shows above the head",
       !!mutesPanel && !mutesPanel.hidden
       && /light\.hall/.test(mutesPanel.textContent) && /appliance/.test(mutesPanel.textContent)
-      && !!mutesPanel.querySelector(".mute-banner") && /after a restart/.test(mutesPanel.textContent)],
+      && !!shushMount?.querySelector(".mute-banner") && /after a restart/.test(shushMount.textContent)],
   );
   _serviceCalls.length = 0;
   mutesPanel.querySelector('[data-unmute="entity"]').click();
   mutesPanel.querySelector('[data-unmute="category"]').click();
-  mutesPanel.querySelector('[data-unmute="all"]').click();
+  shushMount.querySelector('[data-unmute="all"]').click();
   await new Promise(r => setTimeout(r, 20));
   checks.push(["muted card: Unmute buttons call nova.unshush with the entity, category and no data",
     _serviceCalls.length === 3
@@ -4588,9 +4589,9 @@ if (require.main === module) setTimeout(async () => {
     const PINS = {
       geometry: "a836aa626ac3def0",
       floorHelpers: "b94425681aba57c7",
-      editorMarkup: "fa1ab165a9a30f0a",
-      memoryMarkup: "b477b7381f8bea8f",   // 8.71.0: screen reader names and states added
-      intrusionMarkup: "9c83bd184510fdd8",   // 8.71.0: screen reader names and states added
+      editorMarkup: "751159320d6b97e6",   // 8.72.0: Reset Default marked as destructive
+      memoryMarkup: "a5e53569f70d8ede",   // 8.72.0: destructive buttons marked
+      intrusionMarkup: "3ff368fc2c262d7f",   // 8.72.0: Call Off marked as destructive
       editorDrag: "1394062ae0bd2b40",
     };
     const flat = s => String(s).replace(/\s+/g, " ").trim();
@@ -5384,6 +5385,110 @@ if (require.main === module) setTimeout(async () => {
     checks.push([`size: one-glyph buttons are at least 24px wide (${narrow.join(", ") || "all"})`, narrow.length === 0]);
     checks.push(["size: on a touch screen buttons, menus and fields are at least 44px tall",
       !!coarse && /button[^{]*select[^{]*input[^{]*\{[^}]*min-height:44px/.test(coarse[1])]);
+  }
+
+  // Feedback and safety (8.72.0): a failure is shown, not only logged; a
+  // quick action says it ran; destructive buttons ask first and look it.
+  {
+    const open = async (tab, overrides) => {
+      const el = document.createElement("nova-panel");
+      el._currentTab = tab;
+      document.body.appendChild(el);
+      el.hass = { ...hass, ...(overrides || {}) };
+      await new Promise(r => setTimeout(r, 150));
+      return el;
+    };
+    const notice = el => el.shadowRoot.getElementById("novaNotice");
+    const shownNotice = el => { const n = notice(el); return n && !n.hidden ? n.textContent.trim() : ""; };
+
+    // A failed save shows the reason on screen, and the notice is announced.
+    const failWS = async (m) => {
+      if (m.type === "nova/update_config") throw { code: "home_assistant_error", message: "Disk is read only" };
+      return hass.callWS(m);
+    };
+    const S = await open("settings", { callWS: failWS });
+    S.shadowRoot.querySelector('.toggle-btn[data-cfg-key="sentinel_enabled"]').click();
+    await new Promise(r => setTimeout(r, 80));
+    checks.push(["feedback: a failed save shows its reason on screen",
+      /Disk is read only/.test(shownNotice(S)) && notice(S).getAttribute("role") === "status"
+      && notice(S).classList.contains("error")]);
+    S._render();
+    checks.push(["feedback: the notice stays up through a redraw", /Disk is read only/.test(shownNotice(S))]);
+
+    // An entity id that does not exist says so instead of doing nothing.
+    S._settingsSection = "learning"; S._render();
+    const inp = S.shadowRoot.getElementById("newExclEntInput");
+    inp.value = "light.not_a_thing";
+    S.shadowRoot.getElementById("newExclEntAdd").click();
+    await new Promise(r => setTimeout(r, 30));
+    checks.push(["feedback: an unknown entity id is reported on screen",
+      /light\.not_a_thing/.test(shownNotice(S))]);
+    S.remove();
+
+    // Quick Actions say when they ran, and when they failed.
+    const D = await open("dashboard");
+    D.shadowRoot.querySelector('.mode-chip[data-svc="nova.briefing"]').click();
+    await new Promise(r => setTimeout(r, 40));
+    const doneText = shownNotice(D);
+    D.remove();
+    const Dfail = await open("dashboard", { callService: async () => { throw { message: "Service not found" }; } });
+    Dfail.shadowRoot.querySelector('.mode-chip[data-svc="nova.briefing"]').click();
+    await new Promise(r => setTimeout(r, 40));
+    checks.push(["feedback: a quick action says Done, or why it failed",
+      /^Done/.test(doneText) && /Service not found/.test(shownNotice(Dfail))]);
+
+    // The blanket shush warning sits above the head, not below Quick Actions.
+    const R = Dfail.shadowRoot;
+    const banner = R.querySelector(".mute-banner");
+    const hero = R.querySelector(".hero");
+    checks.push(["feedback: the blanket shush warning is above the head",
+      !!banner && !!hero && !!(banner.compareDocumentPosition(hero) & window.Node.DOCUMENT_POSITION_FOLLOWING)]);
+    Dfail.remove();
+
+    // Destructive actions ask first. With the question answered No, nothing is sent.
+    const sent = [];
+    const spyWS = async (m) => { sent.push(m); return hass.callWS(m); };
+    const savedConfirm = window.confirm;
+    window.confirm = () => false;
+    const I = await open("intrusion", { callWS: spyWS });
+    I.shadowRoot.querySelector(".new-intr-dismiss").click();
+    await new Promise(r => setTimeout(r, 30));
+    const M = await open("memory", { callWS: spyWS });
+    await new Promise(r => setTimeout(r, 60));
+    M.shadowRoot.querySelector(".new-mem-forget")?.click();
+    M.shadowRoot.querySelector(".new-rel-remove")?.click();
+    await new Promise(r => setTimeout(r, 30));
+    window.confirm = savedConfirm;
+    checks.push(["safety: Call Off, Forget and Remove link ask first, and No sends nothing",
+      !!M.shadowRoot.querySelector(".new-mem-forget") && !!M.shadowRoot.querySelector(".new-rel-remove")
+      && !sent.some(m => m.action === "dismiss" || m.type === "nova/forget_knowledge"
+        || (m.type === "nova/relation_action" && m.action === "remove"))]);
+
+    // Destructive buttons look it.
+    M._knowledge = { ...(M._knowledge || {}), pending: [{ id: 99, key: "bin day", value: "Monday" }] };
+    M._renderPendingFacts();
+    const dangerIn = (root, sels) => sels.filter(s => { const b = root.querySelector(s); return !b || !b.classList.contains("danger"); });
+    const missing = [
+      ...dangerIn(I.shadowRoot, [".new-intr-dismiss"]),
+      ...dangerIn(M.shadowRoot, [".new-mem-forget", ".new-rel-remove", ".new-pending-reject"]),
+    ];
+    I.remove(); M.remove();
+    const S2 = await open("settings");
+    missing.push(...dangerIn(S2.shadowRoot, ["#sceneMemoryClear", ".cred-clear", "#newCamDisableAll", "#fpnReset"]));
+    S2.remove();
+    checks.push([`safety: destructive buttons are marked as such (${missing.join(", ") || "all"})`, missing.length === 0]);
+
+    // Every console error or warning in the panel also tells the user, or
+    // says why it stays quiet (a background refresh).
+    const srcDir = path.resolve(__dirname, "..", "frontend", "src", "panel");
+    const silent = [];
+    for (const file of fs.readdirSync(srcDir).filter(f => f.endsWith(".js"))) {
+      fs.readFileSync(path.join(srcDir, file), "utf8").split("\n").forEach((line, i) => {
+        if (/console\.(error|warn)\(/.test(line) && !/\/\/ quiet:/.test(line)) silent.push(`${file}:${i + 1}`);
+      });
+    }
+    checks.push([`feedback: no failure is only written to the console (${silent.length}: ${silent.slice(0, 4).join(", ")})`,
+      silent.length === 0]);
   }
 
   let ok = true;

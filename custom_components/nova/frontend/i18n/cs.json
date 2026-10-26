@@ -1305,5 +1305,14 @@
   "Satellite": "Satelit",
   "Speaker": "Reproduktor",
   "Switch": "Vypínač",
-  "Water leak": "Únik vody"
+  "Water leak": "Únik vody",
+  "Call off this alert as a false alarm?": "Odvolat tento poplach jako planý?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Nejdřív vyberte reproduktory, v Nastavení → Reproduktory pro oznámení.",
+  "Done.": "Hotovo.",
+  "Forget \"{name}\"?": "Zapomenout „{name}“?",
+  "Remove this link? Nova will not add it back on its own.": "Odebrat tento vztah? Nova ho sama znovu nepřidá.",
+  "Something went wrong.": "Něco se pokazilo.",
+  "That didn't work: {error}": "Nepovedlo se: {error}",
+  "That file is over 25 MB.": "Soubor je větší než 25 MB.",
+  "{entity} is not in the list.": "{entity} není v seznamu."
 }

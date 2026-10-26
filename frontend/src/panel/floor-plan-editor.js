@@ -42,7 +42,7 @@
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
-        <button class="mode-chip" id="fpnReset">Reset Default</button>
+        <button class="mode-chip danger" id="fpnReset">Reset Default</button>
         <button class="mode-chip" id="fpnExport">⬇ Export</button>
         <button class="mode-chip" id="fpnImport">⬆ Import</button>
         <input type="file" id="fpnImportFile" accept=".json,application/json" style="display:none">
@@ -326,7 +326,7 @@
     on("fpnZoomFit", "click", () => { this._editVB = null; redraw(); });
     on("fpnUnits", "click", async () => {
       try { await this._fpSaveKey("floor_plan_units", this._fpUnits() === "metric" ? "imperial" : "metric"); }
-      catch (err) { console.error("Nova: floor plan units save failed", err); }
+      catch (err) { this._fail(err, "floor plan units save"); }
       redraw();
     });
 
@@ -452,11 +452,11 @@
         for (const [key, v] of writes) await this._hass.callWS({ type: "nova/update_config", key, value: JSON.stringify(v) });
         if (this._liveData?.config) writes.forEach(([key, v]) => { this._liveData.config[key] = v; });
         this._editingPlan = this._editingEntities = this._editingCameras = this._editingElements = this._editingProperty = null;
-      } catch (err) { console.error("Nova: floor plan save failed", err); }
+      } catch (err) { this._fail(err, "floor plan save"); }
     });
     on("fpnReset", "click", async () => {
       try { await this._fpSaveKey("floor_plan_rooms", "", {}); }
-      catch (err) { console.error("Nova: floor plan reset failed", err); }
+      catch (err) { this._fail(err, "floor plan reset"); }
       this._editingPlan = null;
       this._editorFloor = null;
       redraw();
@@ -470,7 +470,7 @@
         link.download = "nova-floor-plan.json";
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch (err) { console.error("Nova: floor plan export failed", err); }
+      } catch (err) { this._fail(err, "floor plan export"); }
     });
     const importFile = root.getElementById("fpnImportFile");
     if (importFile && root.getElementById("fpnImport")) {
@@ -486,7 +486,7 @@
             this._editingPlan = layout;
             if (!layout[this._editorFloor]) this._editorFloor = Object.keys(layout)[0];
             redraw();
-          } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
+          } catch (err) { this._fail(err, "floor plan import — invalid layout file"); }
         };
         reader.readAsText(file);
         importFile.value = "";
@@ -525,7 +525,7 @@
           await this._fpSaveKey("floor_plan_bg", JSON.stringify(all));
           redraw();
         } catch (err) {
-          console.error("Nova: floor plan background upload failed", err);
+          this._fail(err, "floor plan background upload");
         } finally {
           bgFile.value = "";
         }
@@ -541,7 +541,7 @@
       });
       opacity.addEventListener("change", async () => {
         try { await this._fpSaveKey("floor_plan_bg_opacity", String(parseFloat(opacity.value))); }
-        catch (err) { console.error("Nova: floor plan bg opacity save failed", err); }
+        catch (err) { this._fail(err, "floor plan bg opacity save"); }
       });
     }
 

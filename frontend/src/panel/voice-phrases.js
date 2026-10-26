@@ -311,7 +311,7 @@
       const on = !(this._vp && this._vp.enabled !== false);
       try {
         await this._hass.callWS({ type: "nova/voice_phrases_set_enabled", enabled: on });
-      } catch (err) { console.error("Nova: voice phrases switch failed", err); }
+      } catch (err) { this._fail(err, "voice phrases switch"); }
       await this._fetchVoicePhrases();
     } else if (btn.id === "vpAdd") {
       this._vpEdit = this._vpEditFrom(null);
@@ -324,13 +324,13 @@
       if (!e || !window.confirm(this._t("Delete the voice phrase \"{name}\"?", { name: e.name }))) return;
       try {
         await this._hass.callWS({ type: "nova/voice_phrases_delete", phrase_id: pid });
-      } catch (err) { console.error("Nova: voice phrase delete failed", err); }
+      } catch (err) { this._fail(err, "voice phrase delete"); }
       await this._fetchVoicePhrases();
     } else if (btn.classList.contains("vp-toggle")) {
       const e = this._vpFind(pid);
       if (!e) return;
       const res = await this._vpSave({ ...e, enabled: e.enabled === false });
-      if (!res.ok) console.error("Nova: voice phrase toggle failed", res.error);
+      if (!res.ok) this._fail({ message: res.error }, "voice phrase toggle");
       await this._fetchVoicePhrases();
     } else if (btn.classList.contains("vp-link")) {
       const target = this.shadowRoot?.getElementById("settings-card-" + btn.getAttribute("data-goto"));

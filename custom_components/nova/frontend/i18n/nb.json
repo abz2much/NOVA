@@ -403,5 +403,14 @@
   "Satellite": "Satellitt",
   "Speaker": "Høyttaler",
   "Switch": "Bryter",
-  "Water leak": "Vannlekkasje"
+  "Water leak": "Vannlekkasje",
+  "Call off this alert as a false alarm?": "Avlyse denne alarmen som falsk alarm?",
+  "Choose announcement speakers first, in Settings → Announcement Speakers.": "Velg høyttalere først, under Innstillinger → Høyttalere for kunngjøringer.",
+  "Done.": "Ferdig.",
+  "Forget \"{name}\"?": "Glemme \"{name}\"?",
+  "Remove this link? Nova will not add it back on its own.": "Fjerne denne koblingen? Nova legger den ikke til igjen av seg selv.",
+  "Something went wrong.": "Noe gikk galt.",
+  "That didn't work: {error}": "Det fungerte ikke: {error}",
+  "That file is over 25 MB.": "Filen er over 25 MB.",
+  "{entity} is not in the list.": "{entity} er ikke på listen."
 }

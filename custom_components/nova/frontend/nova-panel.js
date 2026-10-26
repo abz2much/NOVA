@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.71.1
+ * v8.72.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -80,7 +80,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.71.1 ",
+      console.log("%c Nova Panel %c v8.72.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -144,7 +144,7 @@ class NovaPanel extends HTMLElement {
       const res = await this._hass.callWS({ type: "nova/get_area_sparklines" });
       this._sparklines = res?.sparklines || {};
     } catch (err) {
-      console.warn("Nova: sparkline fetch failed", err);
+      console.warn("Nova: sparkline fetch failed", err);   // quiet: background refresh every 5 minutes; a notice would nag
       return;
     }
     this._renderData();
@@ -162,7 +162,7 @@ class NovaPanel extends HTMLElement {
         this._activityData = log?.entries || [];
       } catch (_) { this._activityData = []; }
     } catch (err) {
-      console.warn("Nova: panel data fetch failed", err);
+      console.warn("Nova: panel data fetch failed", err);   // quiet: background refresh every 20 seconds; a notice would nag
     }
     try {
       this._solar = await this._hass.callWS({ type: "nova/solar", action: "status" });
@@ -243,6 +243,7 @@ class NovaPanel extends HTMLElement {
     this._renderData();
     if (this._currentTab === "dashboard") this._presentStart();
     this._a11y(root);
+    this._drawNotice();
     this._focusRestore(root, focus);
   }
 
@@ -432,12 +433,14 @@ class NovaPanel extends HTMLElement {
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : tab === "chat" ? this._htmlChat() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
+        <div class="nova-notice" id="novaNotice" role="status" aria-live="polite" hidden></div>
       </div>
     `;
   }
 
   _htmlDashboard() {
     return `
+        <div id="shushMount"></div>
         <div id="onboardingMount"></div>
         <div class="hero">
           <div class="hero-stage" id="heroStage">
@@ -668,6 +671,35 @@ ${this._htmlDashboardBody()}`;
         if (item) b.setAttribute("aria-label", `${this._tx("Remove")} ${item}`);   // i18n-ok: built with _tx
       });
     } catch (_) { /* names are an extra: the panel works without them */ }
+  }
+  // ─── Notices ──────────────────────────────────────────────────────────
+  // One short message at the bottom of the panel: "Done." after an action,
+  // or what went wrong after a failure. It is a polite live region, so a
+  // screen reader says it without moving focus. The message is kept on the
+  // element, not in the DOM, so a redraw puts it straight back.
+  _notice(text, kind = "ok") {
+    const ms = kind === "error" ? 8000 : 4000;
+    this._noticeState = { text: String(text || ""), kind };
+    if (this._noticeTimer) clearTimeout(this._noticeTimer);
+    this._noticeTimer = setTimeout(() => { this._noticeState = null; this._drawNotice(); }, ms);
+    this._drawNotice();
+  }
+
+  // A failed action: `where` is logged for the developer; the user sees the
+  // server's own reason, or a plain sentence when it gave none.
+  _fail(err, where) {
+    console.error(`Nova: ${where || "action"} failed`, err);   // quiet: the notice below tells the user
+    const reason = (err && (err.message || err.error || err.reason)) || this._tx("Something went wrong.");
+    this._notice(this._t("That didn't work: {error}", { error: reason }), "error");
+  }
+
+  _drawNotice() {
+    const el = this.shadowRoot?.getElementById("novaNotice");
+    if (!el) return;
+    const n = this._noticeState;
+    el.classList.toggle("error", !!n && n.kind === "error");
+    this._setText(el, n ? n.text : "");
+    el.hidden = !n;
   }
   // ─── Logs ─────────────────────────────────────────────────────────────
   // Ported from Classic's own _fetchDebugLog (nova-panel.js) — same single
@@ -1021,7 +1053,7 @@ ${this._htmlDashboardBody()}`;
         await this._hass.callWS({ type: "nova/convenience_choice",
           pattern_key: b.getAttribute("data-key"), choice: b.getAttribute("data-choice") });
       } catch (err) {
-        console.warn("Nova: convenience choice failed", err);
+        this._fail(err, "convenience choice");
       }
       this._fetchShadow();
     }));
@@ -1271,7 +1303,7 @@ ${this._htmlDashboardBody()}`;
         const c = this.shadowRoot?.getElementById("newLogEntries");
         if (c) this._setHtml(c, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`);
       } else {
-        console.warn("Nova: System Log refresh failed, keeping cached entries", err);
+        console.warn("Nova: System Log refresh failed, keeping cached entries", err);   // quiet: background refresh, rows on screen are kept
       }
     } finally {
       this._debugLogFetchInFlight = false;
@@ -1489,7 +1521,7 @@ ${this._htmlDashboardBody()}`;
             <label>${this._esc(f.key)}</label>
             <div style="display:flex;align-items:center;gap:6px">
               <span class="toggle-desc">${this._esc(f.value)}${hedge}${expiry}</span>
-              <button class="new-mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
+              <button class="new-mem-forget danger" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
             </div>
           </div>`;
     };
@@ -1509,7 +1541,7 @@ ${this._htmlDashboardBody()}`;
     const kind = subject === "primary" ? "preference" : "fact";
     const { reply, failed, err } = await this._memAsk({ type: "nova/add_knowledge", key, value, subject, kind });
     if (failed) {
-      console.error("Nova: teach failed", err);
+      this._fail(err, "teach");
     } else {
       this._keepKnowledge(reply?.facts || []);
       [keyEl, valEl].forEach(el => { if (el) el.value = ""; });
@@ -1521,8 +1553,10 @@ ${this._htmlDashboardBody()}`;
 
   async _forgetKnowledge(id) {
     if (!this._hass) return;
+    const fact = (this._knowledge?.facts || []).find(f => f.id === id);
+    if (!window.confirm(this._t("Forget \"{name}\"?", { name: fact ? fact.key : "" }))) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/forget_knowledge", fact_id: id });
-    if (failed) console.error("Nova: forget failed", err);
+    if (failed) this._fail(err, "forget");
     else this._keepKnowledge(reply?.facts || []);
     this._renderKnowledgeList();
   }
@@ -1530,7 +1564,7 @@ ${this._htmlDashboardBody()}`;
   async _pendingFactAction(id, action) {
     if (!this._hass) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/pending_fact_action", fact_id: id, action });
-    if (failed) console.error(`Nova: ${action} failed`, err);
+    if (failed) this._fail(err, `${action}`);
     else this._keepKnowledge(reply?.facts || this._knowledge?.facts || [], reply?.pending || []);
     this._renderKnowledgeList();
     this._renderPendingFacts();
@@ -1539,7 +1573,7 @@ ${this._htmlDashboardBody()}`;
   async _editPendingFact(id, value) {
     if (!this._hass || !value) return;
     const { reply, failed, err } = await this._memAsk({ type: "nova/edit_pending_fact", fact_id: id, value });
-    if (failed) console.error("Nova: edit pending fact failed", err);
+    if (failed) this._fail(err, "edit pending fact");
     else this._keepKnowledge(this._knowledge?.facts || [], reply?.pending || []);
     this._renderPendingFacts();
   }
@@ -1560,7 +1594,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="mode-grid" style="margin-bottom:10px">
         <button class="mode-chip new-pending-confirm" data-id="${f.id}">✓ Confirm</button>
-        <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
+        <button class="mode-chip danger new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
       </div>`).join(""));
     this._memBind(box, ".new-pending-confirm", id => this._pendingFactAction(id, "confirm"));
@@ -1620,7 +1654,7 @@ ${this._htmlDashboardBody()}`;
     this._setHtml(list, rel.confirmed.length ? rel.confirmed.map(r => `
       <div class="cfg-row" data-id="${r.id}">
         <label>${this._esc(r.subject)} <b>${this._esc(r.predicate)}</b> ${this._esc(r.object)}</label>
-        <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
+        <button class="new-rel-remove danger" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
         ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "House member owns the bike", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
@@ -1637,7 +1671,10 @@ ${this._htmlDashboardBody()}`;
         object: row.querySelector(".rel-object").value,
       });
     }));
-    list.querySelectorAll(".new-rel-remove").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "remove")));
+    list.querySelectorAll(".new-rel-remove").forEach(b => b.addEventListener("click", e => {
+      const id = idOf(e.currentTarget);
+      if (window.confirm(this._tx("Remove this link? Nova will not add it back on its own."))) this._relationAction(id, "remove");
+    }));
   }
 
   async _relationAction(id, action) {
@@ -1778,7 +1815,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="mode-grid">
         <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
-        <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+        <button class="mode-chip danger new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
       </div>`);
     this._setHtml(body, parts.join(""));
 
@@ -1789,22 +1826,23 @@ ${this._htmlDashboardBody()}`;
     });
     // Call off and acknowledge: the button stays disabled until the fresh
     // status redraws it, and comes back only when the action failed.
-    const action = (selector, name) => {
+    const action = (selector, name, askFirst) => {
       const btn = body.querySelector(selector);
       if (!btn) return;
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
+        if (askFirst && !askFirst()) return;
         btn.disabled = true;
         try {
           await this._intrSend(name, { reason: "panel" });
           await this._fetchIntrusion();
         } catch (err) {
-          console.error(`Nova: intrusion ${name} failed`, err);
+          this._fail(err, `intrusion ${name}`);
           btn.disabled = false;
         }
       });
     };
-    action(".new-intr-dismiss", "dismiss");
+    action(".new-intr-dismiss", "dismiss", () => window.confirm(this._tx("Call off this alert as a false alarm?")));
     action(".new-intr-ack", "acknowledge");
   }
 
@@ -1860,7 +1898,7 @@ ${this._htmlDashboardBody()}`;
       try {
         await this._intrSend("label", { event_id: eventId, label: btn.getAttribute("data-label") });
         await this._fetchIntrusionLog();
-      } catch (err) { console.error("Nova: intrusion label failed", err); }
+      } catch (err) { this._fail(err, "intrusion label"); }
     }));
   }
 
@@ -1964,7 +2002,7 @@ ${this._htmlDashboardBody()}`;
       try {
         await this._hass.callWS({ type: "nova/chat_new" });
       } catch (err) {
-        console.error("Nova: chat reset failed", err);
+        this._fail(err, "chat reset");
       }
     });
     this._renderChat();
@@ -2307,7 +2345,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
         } catch (err) {
-          console.error("Nova: failed to set energy agency", err);
+          this._fail(err, "set energy agency");
         }
         await this._fetchEnergyStatus();
       });
@@ -2416,7 +2454,7 @@ ${this._htmlDashboardBody()}`;
           });
         });
         await this._rawSaveConfig("appliance_profile", JSON.stringify(out));
-        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { console.error("Nova: appliance reload failed", err); }
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { this._fail(err, "appliance reload"); }
         await this._fetchLiveData();
         if (this._currentTab === "energy") this._render();
       });
@@ -3253,7 +3291,7 @@ ${this._htmlDashboardBody()}`;
       await this._hass.callWS({ type: "nova/automation_trial_feedback", trial_id: trialId, verdict });
       this._fetchAutomationTrials();
     } catch (err) {
-      console.error("Nova: automation trial feedback failed", err);
+      this._fail(err, "automation trial feedback");
     }
   }
 
@@ -3269,7 +3307,7 @@ ${this._htmlDashboardBody()}`;
         try {
           res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
         } catch (err) {
-          console.error(`Nova: suggestion ${action} failed`, err);
+          this._fail(err, `suggestion ${action}`);
         }
         // Only a settled suggestion (installed, acknowledged, covered or
         // dismissed) greys out. A failed install stays pending on the
@@ -3306,7 +3344,7 @@ ${this._htmlDashboardBody()}`;
         try {
           res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action: "restore" });
         } catch (err) {
-          console.error("Nova: suggestion restore failed", err);
+          this._fail(err, "suggestion restore");
         }
         if (res && res.ok) {
           row.style.opacity = "0.35";
@@ -3890,7 +3928,7 @@ ${this._htmlDashboardBody()}`;
       const on = !(this._vp && this._vp.enabled !== false);
       try {
         await this._hass.callWS({ type: "nova/voice_phrases_set_enabled", enabled: on });
-      } catch (err) { console.error("Nova: voice phrases switch failed", err); }
+      } catch (err) { this._fail(err, "voice phrases switch"); }
       await this._fetchVoicePhrases();
     } else if (btn.id === "vpAdd") {
       this._vpEdit = this._vpEditFrom(null);
@@ -3903,13 +3941,13 @@ ${this._htmlDashboardBody()}`;
       if (!e || !window.confirm(this._t("Delete the voice phrase \"{name}\"?", { name: e.name }))) return;
       try {
         await this._hass.callWS({ type: "nova/voice_phrases_delete", phrase_id: pid });
-      } catch (err) { console.error("Nova: voice phrase delete failed", err); }
+      } catch (err) { this._fail(err, "voice phrase delete"); }
       await this._fetchVoicePhrases();
     } else if (btn.classList.contains("vp-toggle")) {
       const e = this._vpFind(pid);
       if (!e) return;
       const res = await this._vpSave({ ...e, enabled: e.enabled === false });
-      if (!res.ok) console.error("Nova: voice phrase toggle failed", res.error);
+      if (!res.ok) this._fail({ message: res.error }, "voice phrase toggle");
       await this._fetchVoicePhrases();
     } else if (btn.classList.contains("vp-link")) {
       const target = this.shadowRoot?.getElementById("settings-card-" + btn.getAttribute("data-goto"));
@@ -4719,7 +4757,7 @@ ${this._htmlDashboardBody()}`;
         <span class="cred-status" data-cred-status="${p}">…</span>
         <input class="cred-input" type="password" data-cred-provider="${p}" placeholder="enter to set or replace" autocomplete="off">
         <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
-        <button class="mode-chip cred-clear" data-cred-provider="${p}">CLEAR</button>
+        <button class="mode-chip danger cred-clear" data-cred-provider="${p}">CLEAR</button>
       </div>`).join("");
     return `
       <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
@@ -4898,7 +4936,7 @@ ${this._htmlDashboardBody()}`;
     try {
       await this._hass.callWS({ type: "nova/update_config", key, value });
     } catch (err) {
-      console.error(`Nova: failed to save ${key}`, err);
+      this._fail(err, `save ${key}`);
     }
   }
 
@@ -5137,7 +5175,7 @@ ${this._htmlDashboardBody()}`;
             if (statusEl) { this._setText(statusEl, "configured"); statusEl.classList.add("cred-configured"); }
             this._markProviderAvailability({ [p]: true });
           }
-        } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
+        } catch (err) { this._fail(err, `save credential for ${p}`); }
       });
     });
     root.querySelectorAll(".cred-clear").forEach(btn => {
@@ -5157,7 +5195,7 @@ ${this._htmlDashboardBody()}`;
               this._markProviderAvailability({ [p]: false });
             }
           }
-        } catch (err) { console.error(`Nova: failed to clear credential for ${p}`, err); }
+        } catch (err) { this._fail(err, `clear credential for ${p}`); }
       });
     });
   }
@@ -5769,7 +5807,7 @@ ${this._htmlDashboardBody()}`;
         <div class="cfg-row">
           <label>Keep scene memory for <span class="toggle-desc">days (1 to 90)</span></label>
           <input class="cfg-field cfg-num" type="number" min="1" max="90" step="1" data-cfg-key="scene_memory_retention_days" value="${Math.max(1, Math.min(90, Number(cfg.scene_memory_retention_days ?? 14) || 14))}" ${cfg.scene_memory_enabled ? "" : "disabled"}>
-          <button class="mode-chip" id="sceneMemoryClear">Forget everything</button>
+          <button class="mode-chip danger" id="sceneMemoryClear">Forget everything</button>
         </div>
         ${onOff("pattern_learn_doors", "Learn doors & windows", "Door and window contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
@@ -5876,7 +5914,7 @@ ${this._htmlDashboardBody()}`;
         </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
-          <button class="mode-chip" id="newCamDisableAll">Disable all</button>
+          <button class="mode-chip danger" id="newCamDisableAll">Disable all</button>
         </div>
       </div>`;
     const rows = cams.map(c => {
@@ -5953,7 +5991,7 @@ ${this._htmlDashboardBody()}`;
           (this._liveData.config.cameras || []).forEach(c => { c.enabled = !off.has(c.entity_id); });
         }
         this._rerenderCameraSettings();
-      } catch (err) { console.error("Nova: camera enable/disable failed", err); }
+      } catch (err) { this._fail(err, "camera enable/disable"); }
     };
     const curDisabled = () => {
       const v = (this._data()?.config || {}).disabled_cameras;
@@ -5987,7 +6025,7 @@ ${this._htmlDashboardBody()}`;
             this._liveData.config.camera_names = res?.camera_names || {};
             if (Array.isArray(res?.cameras)) this._liveData.config.cameras = res.cameras;
           }
-        } catch (err) { console.error("Nova: camera rename failed", err); }
+        } catch (err) { this._fail(err, "camera rename"); }
       };
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
       input.addEventListener("blur", save);
@@ -6003,7 +6041,7 @@ ${this._htmlDashboardBody()}`;
           if (Array.isArray(res?.cameras) && this._liveData?.config) this._liveData.config.cameras = res.cameras;
           this._rerenderCameraSettings();
         } catch (err) {
-          console.error("Nova: camera location failed", err);
+          this._fail(err, "camera location");
           chipEl.disabled = false;
         }
       });
@@ -6239,7 +6277,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
           await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab
-        } catch (err) { console.error("Nova: document delete failed", err); }
+        } catch (err) { this._fail(err, "document delete"); }
       });
     });
   }
@@ -6259,7 +6297,7 @@ ${this._htmlDashboardBody()}`;
           await this._hass.callWS({ type: "nova/documents", action: "ingest" });
           await this._fetchDocLibrary();
         } catch (err) {
-          console.error("Nova: ingest failed", err);
+          this._fail(err, "ingest");
         } finally {
           ingestBtn.disabled = false;
           this._setText(ingestBtn, orig);
@@ -6278,7 +6316,7 @@ ${this._htmlDashboardBody()}`;
           const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
           const host = root.getElementById("newDoclibBody");
           if (host) this._setHtml(host, this._renderDocSearchResults(res?.results || []));
-        } catch (err) { console.error("Nova: document search failed", err); }
+        } catch (err) { this._fail(err, "document search"); }
       });
     }
 
@@ -6289,7 +6327,11 @@ ${this._htmlDashboardBody()}`;
       fileInput.addEventListener("change", async () => {
         const file = fileInput.files && fileInput.files[0];
         if (!file || !this._hass) return;
-        if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
+        if (file.size > 25 * 1024 * 1024) {
+          fileInput.value = "";
+          this._notice(this._tx("That file is over 25 MB."), "error");
+          return;
+        }
         upBtn.disabled = true;
         const orig = upBtn.textContent;
         this._setText(upBtn, "⬆ UPLOADING…");
@@ -6305,7 +6347,7 @@ ${this._htmlDashboardBody()}`;
             await this._fetchDocLibrary();
           }
         } catch (err) {
-          console.error("Nova: document upload failed", err);
+          this._fail(err, "document upload");
         } finally {
           upBtn.disabled = false;
           this._setText(upBtn, orig);
@@ -6335,7 +6377,7 @@ ${this._htmlDashboardBody()}`;
             await this._fetchDocLibrary();
           }
         } catch (err) {
-          console.error("Nova: watch scan failed", err);
+          this._fail(err, "watch scan");
         } finally {
           scanBtn.disabled = false;
           this._setText(scanBtn, orig);
@@ -6351,7 +6393,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/semantic_search", action: mode });
         } catch (err) {
-          console.error("Nova: semantic search toggle failed", err);
+          this._fail(err, "semantic search toggle");
         }
         await this._fetchVectorBackend();
       });
@@ -6727,23 +6769,35 @@ ${this._htmlDashboardBody()}`;
     const entities = Array.isArray(m.entities) ? m.entities : [];
     const categories = Array.isArray(m.categories) ? m.categories : [];
     const all = m.all === true;
-    if (!all && !entities.length && !categories.length) { panel.hidden = true; this._setHtml(body, ""); return; }
+    // A blanket shush is the first thing on the page, above the head.
+    // Each part is redrawn only when it changes: the banner is an alert,
+    // and a screen reader would read it out again on every 20 second poll.
+    const draw = (el, html) => {
+      if (!el || el._html === html) return;
+      el._html = html;
+      this._setHtml(el, html);
+      this._wireUnmute(el);
+    };
+    draw(root.getElementById("shushMount"), all ? `
+      <div class="mute-banner" role="alert" style="max-width:1100px;margin:0 auto 16px;border:1px solid var(--warn,#d9a300);border-radius:12px;padding:12px 14px;background:var(--surface)">
+        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
+        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
+      </div>` : "");
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; draw(body, ""); return; }
     panel.hidden = false;
     const row = (label, kind, value) => `
       <div class="feed-row">
         <span class="feed-text">${label}${value ? ` <b>${this._esc(value)}</b>` : ""}</span>
         <button class="mode-chip" data-unmute="${kind}" data-unmute-value="${this._esc(value || "")}">Unmute</button>
       </div>`;
-    const banner = all ? `
-      <div class="mute-banner" role="alert" style="border:1px solid var(--warn,#d9a300);border-radius:8px;padding:10px 12px;margin-bottom:10px">
-        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
-        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
-      </div>` : "";
-    this._setHtml(body, banner
+    draw(body, (all ? `<div class="toggle-desc" style="margin-bottom:8px">Blanket shush is on.</div>` : "")
       + entities.map(e => row("Entity", "entity", e)).join("")
       + categories.map(c => row("Category", "category", c)).join("")
       + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`);
-    body.querySelectorAll("[data-unmute]").forEach(btn => {
+  }
+
+  _wireUnmute(scope) {
+    scope.querySelectorAll("[data-unmute]").forEach(btn => {
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
         const kind = btn.getAttribute("data-unmute");
@@ -6754,7 +6808,8 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callService("nova", "unshush", data);
         } catch (err) {
-          console.error("Nova: unshush failed", err);
+          this._fail(err, "unshush");
+          btn.disabled = false;
         }
         this._fetchLiveData();
       });
@@ -6839,12 +6894,16 @@ ${this._htmlDashboardBody()}`;
       await this._hass.callService("light", turnOn ? "turn_on" : "turn_off", {}, { area_id: areaId });
       setTimeout(() => { try { this._fetchLiveData(); } catch (_) {} }, 500);
     } catch (err) {
-      console.error(`Nova: ${roomName} lights toggle failed`, err);
+      this._fail(err, `${roomName} lights toggle`);
     }
   }
 
   _wire() {
     const root = this.shadowRoot;
+    root.getElementById("novaNotice")?.addEventListener("click", () => {
+      this._noticeState = null;
+      this._drawNotice();
+    });
     const presentCard = root.getElementById("presentCard");
     if (presentCard) {
       presentCard.addEventListener("click", () => this._presentEnd());
@@ -6877,7 +6936,7 @@ ${this._htmlDashboardBody()}`;
           this._liveData.lockdown = res.lockdown;
           if (this._liveData.config) this._liveData.config.lockdown = res.lockdown;
         }
-      } catch (err) { console.error("Nova: lockdown change failed", err); }
+      } catch (err) { this._fail(err, "lockdown change"); }
       lockdownBtn.disabled = false;
       this._renderData();
     });
@@ -6952,10 +7011,14 @@ ${this._htmlDashboardBody()}`;
           if (dataAttr) {
             try { data = JSON.parse(dataAttr); } catch (_) { data = {}; }
           }
+          btn.disabled = true;
           try {
             await this._hass.callService(domain, service, data);
+            this._notice(this._tx("Done."));
           } catch (err) {
-            console.error(`Nova: service ${svcAttr} failed`, err);
+            this._fail(err, `service ${svcAttr}`);
+          } finally {
+            btn.disabled = false;
           }
         });
       });
@@ -7179,9 +7242,10 @@ ${this._htmlDashboardBody()}`;
         if (isNaN(limit) || limit < 1) limit = 40;
         try {
           await this._hass.callService("nova", "train_doorbell_backlog", { limit });
+          this._notice(this._tx("Done."));
           setTimeout(() => this._fetchLiveData(), 4000);
         } catch (err) {
-          console.error("Nova: doorbell backlog scan failed", err);
+          this._fail(err, "doorbell backlog scan");
         }
       });
     }
@@ -7193,7 +7257,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/clear_scene_memory" });
         } catch (err) {
-          console.error("Nova: clearing scene memory failed", err);
+          this._fail(err, "clearing scene memory");
         }
       });
     }
@@ -7216,7 +7280,7 @@ ${this._htmlDashboardBody()}`;
             await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
           }
         } else {
-          console.warn(`Nova: "${eid}" is not a known entity id`);
+          this._notice(this._t("{entity} is not in the list.", { entity: eid }), "error");
         }
       });
     }
@@ -7243,24 +7307,24 @@ ${this._htmlDashboardBody()}`;
     };
     exclAdd("newExclEntAdd", "newExclEntInput", "excluded_entities", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v]) return true;
-      console.warn(`Nova: "${v}" is not a known entity id`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newAuditSensorAdd", "newAuditSensorInput", "infrastructure_audit_sensors", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && /^(binary_)?sensor\./.test(v)) return true;
-      console.warn(`Nova: "${v}" is not a known sensor`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newExemptLockAdd", "newExemptLockInput", "lockdown_exempt_locks", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("lock.")) return true;
-      console.warn(`Nova: "${v}" is not a known lock`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
     exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
       if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("calendar.")) return true;
-      console.warn(`Nova: "${v}" is not a known calendar`);
+      this._notice(this._t("{entity} is not in the list.", { entity: v }), "error");
       return false;
     });
     const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
@@ -7320,7 +7384,7 @@ ${this._htmlDashboardBody()}`;
         const spk = cfg.announcement_speakers;
         const hasTargets = (Array.isArray(spk) && spk.length > 0) || !!cfg.broadcast_group;
         if (!hasTargets) {
-          console.warn("Nova: no announcement speakers set — choose them in Settings → Announcement Speakers");
+          this._notice(this._tx("Choose announcement speakers first, in Settings → Announcement Speakers."), "error");
           return;
         }
         briefNow.disabled = true;
@@ -7328,8 +7392,9 @@ ${this._htmlDashboardBody()}`;
         this._setText(briefNow, "▶ BRIEFING…");
         try {
           await this._hass.callService("nova", "briefing", { announce: true });
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error("Nova: briefing failed", err);
+          this._fail(err, "briefing");
         } finally {
           briefNow.disabled = false;
           this._setText(briefNow, orig);
@@ -7365,7 +7430,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/biometrics", action: enabling ? "enable" : "disable" });
         } catch (err) {
-          console.error("Nova: wellbeing toggle failed", err);
+          this._fail(err, "wellbeing toggle");
         }
         await this._fetchBio();
       });
@@ -7419,8 +7484,9 @@ ${this._htmlDashboardBody()}`;
         const [domain, service] = svcAttr.split(".");
         try {
           await this._hass.callService(domain, service, {});
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error(`Nova: service ${svcAttr} failed`, err);
+          this._fail(err, `service ${svcAttr}`);
         }
       });
     });
@@ -7452,8 +7518,9 @@ ${this._htmlDashboardBody()}`;
         const [domain, service] = svcAttr.split(".");
         try {
           await this._hass.callService(domain, service, {});
+          this._notice(this._tx("Done."));
         } catch (err) {
-          console.error(`Nova: service ${svcAttr} failed`, err);
+          this._fail(err, `service ${svcAttr}`);
         }
       });
     });
@@ -7463,8 +7530,9 @@ ${this._htmlDashboardBody()}`;
       if (!entity_id || !this._hass) return;
       try {
         await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+        this._notice(this._tx("Done."));
       } catch (err) {
-        console.error("Nova: camera analyze failed", err);
+        this._fail(err, "camera analyze");
       }
     });
   }
@@ -7509,7 +7577,7 @@ ${this._htmlDashboardBody()}`;
         try {
           await this._hass.callWS({ type: "nova/mode", action: "set", mode });
         } catch (err) {
-          console.error("Nova: failed to set mode", err);
+          this._fail(err, "set mode");
         }
         await this._fetchLiveData();
       });
@@ -7533,7 +7601,7 @@ ${this._htmlDashboardBody()}`;
     try {
       await this._hass.callWS({ type: "nova/update_config", key, value });
     } catch (err) {
-      console.error(`Nova: failed to save ${key}`, err);
+      this._fail(err, `save ${key}`);
     }
     await this._fetchLiveData();
     // Re-render on any tab except the dashboard — a full _render() there
@@ -9320,7 +9388,7 @@ ${this._htmlDashboardBody()}`;
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
-        <button class="mode-chip" id="fpnReset">Reset Default</button>
+        <button class="mode-chip danger" id="fpnReset">Reset Default</button>
         <button class="mode-chip" id="fpnExport">⬇ Export</button>
         <button class="mode-chip" id="fpnImport">⬆ Import</button>
         <input type="file" id="fpnImportFile" accept=".json,application/json" style="display:none">
@@ -9604,7 +9672,7 @@ ${this._htmlDashboardBody()}`;
     on("fpnZoomFit", "click", () => { this._editVB = null; redraw(); });
     on("fpnUnits", "click", async () => {
       try { await this._fpSaveKey("floor_plan_units", this._fpUnits() === "metric" ? "imperial" : "metric"); }
-      catch (err) { console.error("Nova: floor plan units save failed", err); }
+      catch (err) { this._fail(err, "floor plan units save"); }
       redraw();
     });
 
@@ -9730,11 +9798,11 @@ ${this._htmlDashboardBody()}`;
         for (const [key, v] of writes) await this._hass.callWS({ type: "nova/update_config", key, value: JSON.stringify(v) });
         if (this._liveData?.config) writes.forEach(([key, v]) => { this._liveData.config[key] = v; });
         this._editingPlan = this._editingEntities = this._editingCameras = this._editingElements = this._editingProperty = null;
-      } catch (err) { console.error("Nova: floor plan save failed", err); }
+      } catch (err) { this._fail(err, "floor plan save"); }
     });
     on("fpnReset", "click", async () => {
       try { await this._fpSaveKey("floor_plan_rooms", "", {}); }
-      catch (err) { console.error("Nova: floor plan reset failed", err); }
+      catch (err) { this._fail(err, "floor plan reset"); }
       this._editingPlan = null;
       this._editorFloor = null;
       redraw();
@@ -9748,7 +9816,7 @@ ${this._htmlDashboardBody()}`;
         link.download = "nova-floor-plan.json";
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch (err) { console.error("Nova: floor plan export failed", err); }
+      } catch (err) { this._fail(err, "floor plan export"); }
     });
     const importFile = root.getElementById("fpnImportFile");
     if (importFile && root.getElementById("fpnImport")) {
@@ -9764,7 +9832,7 @@ ${this._htmlDashboardBody()}`;
             this._editingPlan = layout;
             if (!layout[this._editorFloor]) this._editorFloor = Object.keys(layout)[0];
             redraw();
-          } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
+          } catch (err) { this._fail(err, "floor plan import — invalid layout file"); }
         };
         reader.readAsText(file);
         importFile.value = "";
@@ -9803,7 +9871,7 @@ ${this._htmlDashboardBody()}`;
           await this._fpSaveKey("floor_plan_bg", JSON.stringify(all));
           redraw();
         } catch (err) {
-          console.error("Nova: floor plan background upload failed", err);
+          this._fail(err, "floor plan background upload");
         } finally {
           bgFile.value = "";
         }
@@ -9819,7 +9887,7 @@ ${this._htmlDashboardBody()}`;
       });
       opacity.addEventListener("change", async () => {
         try { await this._fpSaveKey("floor_plan_bg_opacity", String(parseFloat(opacity.value))); }
-        catch (err) { console.error("Nova: floor plan bg opacity save failed", err); }
+        catch (err) { this._fail(err, "floor plan bg opacity save"); }
       });
     }
 
@@ -10321,6 +10389,13 @@ ${this._htmlDashboardBody()}`;
       .camera-caption{padding:8px 9px 4px;display:flex;flex-direction:column;gap:2px}.camera-caption b{font-size:12px}.camera-caption span{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint)}
       .camera-actions{display:flex;flex-wrap:wrap;gap:5px;padding:4px 9px}.camera-actions .mode-chip{padding:4px 7px;font-size:11px}
       .camera-diagnostic{font-size:11px;color:var(--ink-dim);line-height:1.35;padding:5px 9px 0;overflow-wrap:anywhere}
+      .nova-notice{position:fixed;left:16px;right:16px;bottom:16px;margin:0 auto;width:fit-content;z-index:20;max-width:560px;
+        padding:10px 16px;border-radius:12px;background:var(--surface-2);border:1px solid var(--gold);color:var(--ink);
+        font-size:13px;line-height:1.4;box-shadow:0 6px 24px #0008;cursor:pointer}
+      .nova-notice.error{border-color:#ff6b81;color:#ffd7d7}
+      .nova-notice[hidden]{display:none}
+      .danger{color:#ff9a9a;border-color:#ff5a5a66}
+      .danger:hover{border-color:#ff6b81;background:#ff5a5a14}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.05em}
       .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
       .intr-snap{margin-bottom:10px}

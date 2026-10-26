@@ -83,7 +83,7 @@
       try {
         await this._hass.callWS({ type: "nova/chat_new" });
       } catch (err) {
-        console.error("Nova: chat reset failed", err);
+        this._fail(err, "chat reset");
       }
     });
     this._renderChat();
