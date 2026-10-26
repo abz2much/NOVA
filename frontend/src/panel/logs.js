@@ -245,7 +245,7 @@
             <label>${this._esc(targetName)}</label>
             <span class="toggle-desc">${this._tHtml("approval: {approval} · execution: {execution}", { approval: this._esc(t.approval_result), execution: this._esc(t.execution_result) })}</span>
           </div>
-          ${t.reason_text ? `<div class="stub-body" style="margin:-4px 0 6px;font-size:11px">${this._esc(t.reason_text)}</div>` : ""}`;
+          ${t.reason_text ? `<div class="stub-body" style="margin:-4px 0 6px;font-size:12px">${this._esc(t.reason_text)}</div>` : ""}`;
       }).join("");
       return `
         <details class="new-log-entry" style="display:block">
@@ -431,7 +431,7 @@
     const text = value === null || value === undefined || value === ""
       ? "—" : (typeof value === "object" ? JSON.stringify(value, null, 2) : String(value));
     return `<div class="mode-bind-head">${this._esc(label)}</div>
-      <pre class="new-sug-yaml" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin:0 0 8px">${this._esc(text)}</pre>`;
+      <pre class="new-sug-yaml" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:11px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin:0 0 8px">${this._esc(text)}</pre>`;
   }
 
   async _openDecisionDetail(id) {

@@ -1,3 +1,10 @@
+## [8.71.1] Easier to read and tap
+
+### Changed
+- **Faint text is easier to read.** Timestamps, hints and OFF buttons now meet the 4.5:1 contrast standard on every background. Selected chips use dark text on orange, like the selected tab.
+- **No text smaller than 11px**, and descriptions and help text are 12px.
+- **Bigger buttons.** Every button is at least 24px. On a touch screen every button, menu and field is at least 44px, including the small ✕ buttons.
+
 ## [8.71.0] Panel works with a screen reader
 
 ### Added
