@@ -23,6 +23,7 @@ import json
 import logging
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 try:  # every current Home Assistant has the label registry
@@ -73,10 +74,27 @@ def exclusion_snapshot(hass: HomeAssistant) -> tuple[set, set, set]:
     return _exclusion_config(hass)
 
 
-def _label_match(hass, entity_id: str, labels: set) -> bool:
-    """The entity carries one of the labels, given by id or by name."""
+def _carried_labels(hass, entity_id: str) -> set:
+    """The label ids on the entity and on its device (8.82.0): most homes
+    label devices, and an entity inherits its device's labels."""
     entry = er.async_get(hass).async_get(entity_id)
-    carried = getattr(entry, "labels", None) if entry else None
+    if entry is None:
+        return set()
+    carried = set(getattr(entry, "labels", None) or ())
+    device_id = getattr(entry, "device_id", None)
+    if device_id:
+        try:
+            device = dr.async_get(hass).async_get(device_id)
+            carried |= set(getattr(device, "labels", None) or ())
+        except Exception:
+            pass
+    return carried
+
+
+def _label_match(hass, entity_id: str, labels: set) -> bool:
+    """The entity, or its device, carries one of the labels, given by id or
+    by name."""
+    carried = _carried_labels(hass, entity_id)
     if not carried:
         return False
     if set(carried) & labels:
@@ -89,6 +107,47 @@ def _label_match(hass, entity_id: str, labels: set) -> bool:
         if label is not None and getattr(label, "name", None) in labels:
             return True
     return False
+
+
+# ── what the home's own labels say a sensor is (8.82.0) ─────────────────────
+# Three labels beat any guess from a name: Appliance (never a way in), Entry
+# Point (a way in) and Group (repeats other sensors, so never counted).
+ROLE_APPLIANCE = "appliance"
+ROLE_ENTRY_POINT = "entry_point"
+ROLE_GROUP = "group"
+
+
+def _role_key(text) -> str:
+    """"Entry Point", "entry-point" and "entry_point" are one key."""
+    return "_".join(str(text or "").strip().lower().replace("-", " ").split())
+
+
+def label_roles(hass, entity_id: str | None) -> set:
+    """Every label on the entity and its device, by id and by name, as
+    keys to compare with the ROLE_ names. Empty on any error."""
+    if not entity_id:
+        return set()
+    try:
+        carried = _carried_labels(hass, entity_id)
+        keys = {_role_key(lid) for lid in carried}
+        if _lr is not None and carried:
+            registry = _lr.async_get(hass)
+            for label_id in carried:
+                label = registry.async_get_label(label_id)
+                if label is not None:
+                    keys.add(_role_key(getattr(label, "name", "")))
+        return keys
+    except Exception:
+        return set()
+
+
+def is_group_sensor(hass, state) -> bool:
+    """A sensor that repeats others: labelled Group, or a Home Assistant
+    group (it lists its members in an entity_id attribute)."""
+    members = state.attributes.get("entity_id")
+    if isinstance(members, (list, tuple)) and members:
+        return True
+    return ROLE_GROUP in label_roles(hass, state.entity_id)
 
 
 def is_excluded(hass: HomeAssistant, entity_id: str | None,

@@ -184,6 +184,15 @@ after the alarm goes off is still spoken.
 - Appliance and cabinet doors never count as a way in: a fridge, freezer,
   oven, dishwasher, washing machine, dryer, microwave or cabinet. Nor does
   anything on your exclude list.
+- Nova reads your own Home Assistant labels, on the entity or its device,
+  and they beat any guess from a name. Labels are matched by name or id,
+  ignoring case, spaces and hyphens:
+  - **Appliance**: never a way in.
+  - **Entry Point**: an outside door or window, always a way in.
+  - **Group**: a sensor that repeats others, such as a floor's motion
+    group. It never counts as a way in or as someone moving, so one person
+    is not counted twice. A Home Assistant group is recognised by its member
+    list even without the label.
 - When someone is home and the alarm is armed home, night or custom bypass,
   or the household is asleep, walking from room to room never confirms an
   intrusion. Only the alarm itself going off, or a person on camera that

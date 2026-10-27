@@ -217,10 +217,19 @@ def is_way_in(hass, state) -> bool:
     the house, so anything garage named stays in. Does not look at the
     device class or whether it is open; callers do."""
     from . import outdoor
-    from .entity_filter import is_appliance_opening, is_excluded
+    from .entity_filter import (ROLE_APPLIANCE, ROLE_ENTRY_POINT, is_appliance_opening,
+                                is_excluded, is_group_sensor, label_roles)
     eid = state.entity_id
     fname = state.attributes.get("friendly_name") or ""
-    if is_appliance_opening(eid, fname) or is_excluded(hass, eid):
+    if is_excluded(hass, eid) or is_group_sensor(hass, state):
+        return False
+    # The home's own labels beat any guess from the name (8.82.0).
+    roles = label_roles(hass, eid)
+    if ROLE_APPLIANCE in roles:
+        return False
+    if ROLE_ENTRY_POINT in roles:
+        return True
+    if is_appliance_opening(eid, fname):
         return False
     if "garage" in (eid + " " + fname).lower():
         return True
@@ -233,9 +242,13 @@ def is_person_motion(hass, state) -> bool:
     excluded from Nova, and outdoor sensors are not. Does not look at the
     device class or the state; callers do."""
     from . import outdoor
-    from .entity_filter import is_excluded, is_object_sensor
+    from .entity_filter import is_excluded, is_group_sensor, is_object_sensor
     eid = state.entity_id
     fname = state.attributes.get("friendly_name") or ""
     if is_object_sensor(eid, fname) or is_excluded(hass, eid):
+        return False
+    # A group repeats its members: counting it too makes one person two
+    # rooms (8.82.0).
+    if is_group_sensor(hass, state):
         return False
     return not outdoor.is_outdoor(hass, eid, fname)

@@ -125,7 +125,8 @@ alerts. Normal alerts go to every selected device.
 
 Panel, **Settings → Excluded Entities**: entities, domains or labels Nova
 should ignore. Presence detection, room routing, the observer and routine
-learning all skip them. Nova can still control one if you ask by name.
+learning all skip them. Nova can still control one if you ask by name. A
+label counts whether it is on the entity itself or on its device.
 
 Panel, **Settings → Observer Tuning**: live counts, the cloud link status,
 and **Hourly Cap**, the most observer calls per hour (30 by default, 0 for

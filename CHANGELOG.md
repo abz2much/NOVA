@@ -1,3 +1,15 @@
+## [8.82.0] Nova reads your labels
+
+### Changed
+- **Nova reads your Home Assistant labels for what a sensor is, and they beat any guess from its name.** A label counts whether it is on the entity or on its device (most homes label devices). Matched by name or id, ignoring case, spaces and hyphens.
+  - **Appliance:** never a way into the house (a fridge or oven door).
+  - **Entry Point:** an outside door or window, always a way in.
+  - **Group:** a sensor that repeats others, such as a floor's motion group. It never counts as a way in or as someone moving. A Home Assistant group is recognised by its member list even without the label.
+- **Excluded labels** (Settings, Excluded Entities) now also match a label on the entity's device.
+
+### Fixed
+- A floor or room group sensor could count as a second room, so one person in the kitchen looked like movement through two places, which is what an intrusion check looks for.
+
 ## [8.81.0] Nova trusts your alarm when you're out
 
 ### Changed
