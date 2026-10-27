@@ -1,3 +1,8 @@
+## [8.83.1] The circles always show
+
+### Fixed
+- **Nova's core, rings and arcs on the Command Center sometimes never appeared,** however often the page was refreshed, until you opened another tab and came back (changing the theme did that). Home Assistant can hand the panel its data before putting it on the page; the first draw then ran on a canvas that wasn't on the page yet, and the animation stopped for good. The circles now start as soon as the panel is on the page.
+
 ## [8.83.0] When the alarm goes off
 
 ### Changed
