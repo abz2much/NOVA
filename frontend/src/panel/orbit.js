@@ -140,8 +140,8 @@
     el.classList.add("hero-latest-in");
   }
 
-  // ── The arcs behind the head ──
-  // Three broken arcs turn round the head, the middle one the other way,
+  // ── The arcs round the avatar ──
+  // Three broken arcs turn round Nova's core, the middle one the other way,
   // and fade out behind the greeting. With less motion they are drawn once.
   _arcsStart() {
     const canvas = this.shadowRoot?.getElementById("heroArcs");
@@ -178,8 +178,14 @@
     if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    const { hx, hy, S } = this._holoLayout({ W, H, narrow: W < 820 });
-    const t = this._reduceMotion ? 0 : now / 1000;
+    const { hx, hy, S } = this._coreLayout({ W, H, narrow: W < 820 });
+    // The arcs turn and glow with Nova's mood (core-rings.js): fast while
+    // thinking, slow and dim asleep.
+    const dt = this._arcsLast ? Math.min(0.1, (now - this._arcsLast) / 1000) : 0;
+    this._arcsLast = now;
+    const mood = this._core?.cur || this._coreMood();
+    this._arcsClock = (this._arcsClock || 0) + dt * mood.speed;
+    const t = this._reduceMotion ? 0 : this._arcsClock, lit = 0.4 + 0.6 * mood.glow;
     const a = this._theme().head.main.map(v => Math.round(v * 255));
     const col = alpha => `rgba(${a[0]},${a[1]},${a[2]},${alpha})`;
     ctx.lineCap = "round";
@@ -188,7 +194,7 @@
      [2.25, -0.22, [[0.4, 1.9], [2.6, 3.0], [3.6, 5.2]], 1.5, 0.35],
      [2.8, 0.12, [[0, 0.5], [1.2, 2.8], [4.0, 4.4], [4.9, 6.0]], 1, 0.22]].forEach(([k, speed, pieces, w, alpha]) => {
       const r = S * k, rot = t * speed;
-      ctx.lineWidth = w; ctx.strokeStyle = col(alpha);
+      ctx.lineWidth = w; ctx.strokeStyle = col(alpha * lit);
       for (const [a0, a1] of pieces) {
         ctx.beginPath(); ctx.arc(hx, hy, r, a0 + rot, a1 + rot); ctx.stroke();
         const ex = hx + Math.cos(a1 + rot) * r, ey = hy + Math.sin(a1 + rot) * r;

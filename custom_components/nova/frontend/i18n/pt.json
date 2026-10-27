@@ -383,7 +383,6 @@
   "since {date}": "desde {date}",
   "{agree} of {n} verdicts agree": "{agree} de {n} veredictos concordam",
   "Cards on the Command Center": "Cartões na Central de Comando",
-  "Now and then, show a card of live figures beside the head while the house is awake": "De tempos a tempos, mostra ao lado da cabeça um cartão com valores em tempo real enquanto a casa está acordada",
   "Arming": "A armar",
   "Disarmed": "Desarmado",
   "Triggered": "Disparado",
@@ -517,5 +516,6 @@
   "Plum Dusk": "Crepúsculo ameixa",
   "Cocoa Bark": "Casca de cacau",
   "Forest Mint": "Menta da floresta",
-  "Slate Harbour": "Porto ardósia"
+  "Slate Harbour": "Porto ardósia",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "De vez em quando, mostra ao lado da Nova um cartão com valores em tempo real enquanto a casa está acordada"
 }

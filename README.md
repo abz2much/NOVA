@@ -4,7 +4,7 @@
 
 A home butler for Home Assistant. You talk to it, it watches over your home, and it learns how you live.
 
-<img src="docs/media/command-center.webp" alt="The Nova Command Center: a glowing hologram head in the middle with turning arcs, five live cards round it for security, who is home, energy, indoor and weather, and a bar of five buttons at the bottom" width="100%">
+<img src="docs/media/command-center.webp" alt="The Nova Command Center: Nova's glowing core inside turning rings in the middle, five live cards round it for security, who is home, energy, indoor and weather, and a bar of five buttons at the bottom" width="100%">
 
 [![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant&logoColor=white)](https://github.com/abz2much/NOVA)
 [![Release](https://img.shields.io/github/v/release/abz2much/NOVA?color=00d9ff)](https://github.com/abz2much/NOVA/releases)
@@ -70,7 +70,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 |---|---|---|
 | Talk to your home | Voice and text conversation, with a calm, dry personality you can turn up or down | [Voice and speakers](docs/voice-and-speakers.md) |
 | Type to Nova from the panel | The Chat tab gives each person their own thread. Unlocking, opening and disarming from there need a tap on your phone | [Safety and security](docs/safety-and-security.md#chat) |
-| See the house at a glance | The Command Center shows the hologram head with turning arcs and live cards round it (security, who is home, energy, indoor, weather), Nova's latest line, and pop-up cards that settle into place | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
+| See the house at a glance | The Command Center shows Nova's core inside turning rings that change with its mood, live cards round it (security, who is home, energy, indoor, weather), Nova's latest line, and pop-up cards that settle into place | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 | Run things with your own words | "Nova, the house is cold" runs the script, automation or scene you link to it. Works offline, with the usual safety checks | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
 | Keep the home safe | Watches for intrusion, smoke, carbon monoxide, leaks, freezing pipes, and doors or windows left open. Can lock up at night | [Safety and security](docs/safety-and-security.md) |
 | Know who comes to the door | Analyses doorbell presses and learns regular visitors. Package Watch and face recognition (Frigate or Double Take) are off until you turn them on | [Cameras and faces](docs/cameras-and-faces.md) |

@@ -1212,7 +1212,6 @@
   "since {date}": "od {date}",
   "{agree} of {n} verdicts agree": "{agree} z {n} werdyktów zgodnych",
   "Cards on the Command Center": "Karty w Centrum dowodzenia",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Od czasu do czasu pokazuj obok głowy kartę z danymi na żywo, gdy dom nie śpi",
   "Arming": "Uzbrajanie",
   "Disarmed": "Rozbrojony",
   "Triggered": "Wyzwolony",
@@ -1354,5 +1353,6 @@
   "Plum Dusk": "Śliwkowy zmierzch",
   "Cocoa Bark": "Kakaowa kora",
   "Forest Mint": "Leśna mięta",
-  "Slate Harbour": "Łupkowa przystań"
+  "Slate Harbour": "Łupkowa przystań",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Od czasu do czasu pokazuje obok Novy kartę z bieżącymi danymi, gdy dom nie śpi"
 }

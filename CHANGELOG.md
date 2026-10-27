@@ -1,3 +1,16 @@
+## [8.79.0] Nova's core and rings
+
+### Changed
+- **The head on the Command Center is replaced by Nova's core and rings:** a glowing core inside two turning rings, in the theme's colour, the same mark as the icon.
+- **It shows Nova's mood.** At rest it turns slowly and breathes. While Nova is thinking, the rings spin fast and the core pulses. When it speaks, ripples spread from the core. When a card pops up, the rings brighten on that side. When the house is asleep, it goes dim and slow. The big arcs round it turn at the same pace.
+- **It is drawn with plain canvas 2D**, so the page is lighter on a tablet and no longer needs WebGL. The 3D head and the older 2D head are removed.
+- The Settings line for the pop-up cards says "beside Nova" instead of "beside the head", in all 20 languages.
+- The README pictures show the new look.
+
+### Fixed
+- Three guides gave the wrong pop-up card timings; they now say a new card every 9 seconds, each shown for 8.
+- A panel test for the pop-up cards could fail at random in CI when the page redrew during it. The stand-in for the 3D head it needed is gone with the head.
+
 ## [8.78.0] Oriel's themes
 
 ### Changed

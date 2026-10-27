@@ -775,82 +775,79 @@ if (require.main === module) setTimeout(async () => {
     !newRoot.getElementById("onboardingCard")
     && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);
 
-  // ── 8.0.1: the ember head survives being rebuilt (leaving the Command
-  // Center and coming back builds a new head; the old expression cache must
-  // not outlive it). A stand-in canvas context lets the real frame code run.
-  const _fakeCtx = new Proxy({}, {
-    get: (t, k) => (k in t ? t[k]
-      : /^create/.test(String(k)) ? () => ({ addColorStop() {} })
-      : k === "measureText" ? () => ({ width: 10 }) : () => {}),
-    set: (t, k, v) => { t[k] = v; return true; },
-  });
-  let _headError = null;
-  try {
-    elNew._ctx = _fakeCtx; elNew._canvas = newRoot.getElementById("core");
-    elNew._coreW = 900; elNew._coreH = 320;
-    elNew._makeHead();
-    let _t = performance.now();
-    // Let the expression settle, as it does in a real browser after a moment.
-    for (let i = 0; i < 400; i++) { _t += 50; elNew._coreFrame(_t); }
-    elNew._makeHead();
-    for (let i = 0; i < 3; i++) { _t += 50; elNew._coreFrame(_t); }
-  } catch (err) { _headError = err; }
-  elNew._ctx = null;
-  checks.push(["command center: the ember head can be rebuilt and drawn again without errors",
-    !_headError && elNew._headGeoKey !== null]);
-
-  // ── 8.50.0: the WebGL hologram. jsdom has no WebGL, so a stand-in
-  // context lets the real setup, frame and teardown code run.
+  // ── 8.79.0: Nova's avatar is a core and rings, drawn in canvas 2D. jsdom
+  // has no canvas, so a stand-in context lets the real frame code run.
   {
-    const T = (k) => elNew._holoTargets(k);
-    checks.push(["hologram: asleep closes the eyes, thinking lifts sparks, presenting turns only a little, unknown is idle",
-      T("asleep").target.open === 0 && T("reasoning").target.lift === 1 && T("reasoning").target.scan > 0
-      && T("presenting").target.yaw > 0 && T("presenting").target.yaw <= 0.35
-      && T("nonsense").key === "idle" && T(undefined).key === "idle"]);
-    const _lost = [];
-    const fakeGl = (shadersCompile) => new Proxy({}, {
+    const NPc = window.customElements.get("nova-panel");
+    const proto = NPc.prototype;
+    checks.push(["avatar: the 3D head and the 2D head are gone",
+      typeof proto._initHologram !== "function" && typeof proto._holoFrame !== "function"
+      && typeof proto._makeHead !== "function" && typeof proto._holoTargets !== "function"
+      && typeof proto._coreFrame === "function" && !!newRoot.getElementById("core")]);
+    const M = NPc.CORE_MOODS || {};
+    checks.push([`avatar: each mood has its own look (${Object.keys(M).join(", ")})`,
+      Object.keys(M).join() === "idle,listening,reasoning,speaking,presenting,asleep"
+      && M.reasoning.speed > M.idle.speed * 2 && M.reasoning.pulse > M.idle.pulse
+      && M.asleep.glow < M.idle.glow && M.asleep.speed < M.idle.speed && M.asleep.size < 1
+      && M.listening.squeeze < 1 && M.speaking.ripple > 0 && M.presenting.lean > 0]);
+    elNew._targetCoreState("presenting");
+    const keptPresenting = elNew._coreStateKey === "presenting";
+    elNew._targetCoreState("nonsense");
+    checks.push(["avatar: it knows every mood even with no canvas, and an unknown mood is idle",
+      keptPresenting && elNew._coreStateKey === "idle"]);
+
+    const calls = { arc: 0, stroke: 0, fill: 0, gradients: 0 };
+    const fakeCtx = new Proxy({}, {
       get: (t, k) => (k in t ? t[k]
-        : k === "getShaderParameter" ? () => shadersCompile
-        : k === "getProgramParameter" ? () => true
-        : k === "getAttribLocation" ? () => 0
-        : k === "getExtension" ? (n) => (n === "WEBGL_lose_context" ? { loseContext: () => _lost.push(1) } : null)
-        : k === "getShaderInfoLog" || k === "getProgramInfoLog" ? () => "failed"
-        : () => ({})),
+        : /^create/.test(String(k)) ? () => { calls.gradients++; return { addColorStop() {} }; }
+        : k === "arc" ? () => { calls.arc++; } : k === "stroke" ? () => { calls.stroke++; } : k === "fill" ? () => { calls.fill++; }
+        : () => {}),
+      set: (t, k, v) => { t[k] = v; return true; },
     });
-    const stage = (gl) => {
-      const c = newRoot.getElementById("core");
-      c.getContext = (kind) => (kind === "webgl2" ? gl : null);
-      c.getBoundingClientRect = () => ({ width: 900, height: 320, left: 0, top: 0 });
-      return c;
-    };
-    let _holoError = null, started = false, frames = 0;
-    const realRaf = global.requestAnimationFrame;
-    global.requestAnimationFrame = () => 0;   // drive frames by hand
+    const coreCanvas = newRoot.getElementById("core");
+    const realGet = coreCanvas.getContext;
+    Object.defineProperty(coreCanvas, "clientWidth", { value: 1000, configurable: true });
+    Object.defineProperty(coreCanvas, "clientHeight", { value: 600, configurable: true });
+    coreCanvas.getContext = (kind) => (kind === "2d" ? fakeCtx : null);
+    const realRafA = global.requestAnimationFrame, rafs = [];
+    global.requestAnimationFrame = (f) => { rafs.push(f); return rafs.length; };
+    let drawError = null, perMood = {};
     try {
-      started = elNew._initHologram(stage(fakeGl(true)));
+      elNew._initCore();
       let t = performance.now();
-      for (const key of ["idle", "reasoning", "asleep", "speaking", "presenting", "listening"]) {
-        elNew._targetCoreState(key);
-        for (let i = 0; i < 20; i++) { t += 50; elNew._holoFrame(t); frames++; }
+      for (const mood of Object.keys(M)) {
+        elNew._targetCoreState(mood);
+        const before = calls.arc;
+        for (let i = 0; i < 12; i++) { t += 50; elNew._coreFrame(t); }
+        perMood[mood] = calls.arc - before;
       }
-    } catch (err) { _holoError = err; }
-    global.requestAnimationFrame = realRaf;
-    checks.push(["hologram: starts on WebGL 2 and draws every state without errors",
-      started && !_holoError && frames === 120 && !!elNew._holo && !!elNew._holo.fbo.scene]);
-    checks.push(["hologram: knows the voice and presenting states the fallback head does not",
-      elNew._coreStateKey === "listening"]);
-    const held = elNew._holo;
-    elNew._holoStop();
-    checks.push(["hologram: stopping it releases the graphics context and the loop",
-      held.stopped && elNew._holo === null && _lost.length === 1 && !elNew._animHandle]);
-    elNew._targetCoreState("listening");
-    checks.push(["fallback head shows states it does not know as idle",
-      elNew._coreStateKey === "idle"]);
-    const before = stage(fakeGl(false));
-    const fellBack = elNew._initHologram(before);
-    const after = newRoot.getElementById("core");
-    checks.push(["hologram: a failed start hands the 2D head a fresh canvas",
-      fellBack === false && !elNew._holo && after && after !== before && after.id === "core"]);
+    } catch (err) { drawError = err; }
+    checks.push([`avatar: it draws every mood without errors (${drawError ? drawError.message : Object.entries(perMood).map(([k, v]) => k + " " + v).join(", ")})`,
+      !drawError && !!elNew._core && Object.values(perMood).every(n => n > 0) && calls.gradients > 0 && rafs.length >= 1]);
+    const ripplesOff = perMood.idle, ripplesOn = perMood.speaking;
+    checks.push(["avatar: speaking draws ripples round the core", ripplesOn > ripplesOff]);
+    elNew._currentTab = "settings";
+    rafs.shift()?.(performance.now());
+    checks.push(["avatar: it stops when the Command Center is not showing", elNew._core === null]);
+    elNew._currentTab = "dashboard";
+    // With less motion it draws once, and again for each new mood, never in a loop.
+    elNew._coreStop();
+    rafs.length = 0;
+    const rmWas = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: /reduce/.test(q), addEventListener() {}, removeEventListener() {} });
+    elNew._initCore();
+    const drawnOnce = calls.arc;
+    elNew._targetCoreState("reasoning");
+    checks.push(["avatar: with less motion it is drawn once per mood and does not loop",
+      elNew._reduceMotion === true && rafs.length === 0 && calls.arc > drawnOnce]);
+    window.matchMedia = rmWas;
+    elNew._coreStop();
+    elNew._reduceMotion = false;
+    coreCanvas.getContext = realGet;
+    global.requestAnimationFrame = realRafA;
+  }
+  {
+    const realRaf = global.requestAnimationFrame;
 
     // ── 8.51.0: Presenting. A card of real figures from the presentation
     // subscription turns the head towards it and replaces the hero copy.
@@ -859,9 +856,6 @@ if (require.main === module) setTimeout(async () => {
     const openDashboard = async () => {
       elNew._currentTab = "dashboard"; elNew._render();
       await tick();
-      global.requestAnimationFrame = () => 0;
-      elNew._initHologram(stage(fakeGl(true)));
-      global.requestAnimationFrame = realRaf;
       return _presSubs[_presSubs.length - 1];
     };
     const mkCard = (id, data, secs = 30) => ({ v: 1, kind: "energy", id, created: Date.now() / 1000 - (30 - secs),
@@ -895,8 +889,7 @@ if (require.main === module) setTimeout(async () => {
       card().textContent.includes("9.8")]);
     card().click();
     checks.push(["presenting: tapping the card goes back to idle and shows the hero copy",
-      !shown() && elNew._coreStateKey === elNew._holoTargets(elNew._coreState()).key
-      && elNew._coreStateKey === "idle"]);
+      !shown() && elNew._coreStateKey === elNew._coreState() && elNew._coreStateKey === "idle"]);
     sub.handler(mkCard("old", {}, -5));
     checks.push(["presenting: a card that has already expired is ignored", !shown() && elNew._coreStateKey === "idle"]);
     sub.handler(mkCard("c4", {}, 0.15));
@@ -954,17 +947,6 @@ if (require.main === module) setTimeout(async () => {
         return realWS(m);
       };
       elNew._presentCycleMs = 40; elNew._presentFirstMs = 120;
-      // A redraw (the panel does one when its language loads) builds a new
-      // head. In a browser that is the WebGL head again; here it would be
-      // the 2D one, which shows "presenting" as idle. So a redraw in this
-      // block gets the stand-in WebGL head back, as a browser would. CI
-      // failed this check at random when a redraw landed during the wait.
-      elNew._initCore = function () {
-        if (!this.shadowRoot.getElementById("core")) return;
-        global.requestAnimationFrame = () => 0;
-        this._initHologram(stage(fakeGl(true)));
-        global.requestAnimationFrame = realRaf;
-      };
       elNew._liveData.config = Object.assign({}, elNew._liveData.config, { hero_card_cycle: true });
       elNew._liveData.status.sleep = { state: "AWAKE" };
       await openDashboard();
@@ -1273,7 +1255,6 @@ if (require.main === module) setTimeout(async () => {
       elNew._presentCycleMs = 0; elNew._presentFirstMs = 0;
       delete elNew._presentKinds;
       delete elNew._presentGreetEvery;
-      delete elNew._initCore;
       elNew._hass.callWS = realWS;
     }
     elNew._liveData.status.sleep = sleepWas;
@@ -4488,12 +4469,12 @@ if (require.main === module) setTimeout(async () => {
   // never actually reaches requestAnimationFrame here — inject a fake
   // handle to exercise _render()'s cleanup guard directly instead of
   // relying on canvas support this environment doesn't have.
-  elNew._animHandle = 999999;
+  elNew._core = { raf: 999999, stopped: false };
   const dashTabBtn = Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "dashboard");
   dashTabBtn.click();
   await new Promise(r => setTimeout(r, 20));
   checks.push(["switching tabs cancels the previous core animation loop instead of leaking it",
-    _cafCalls >= 1]);
+    _cafCalls >= 1 && (elNew._core === null || elNew._core.raf !== 999999)]);
   checks.push(["command center: no Solar panel any more (it moved to the Energy tab)",
     !!elNew.shadowRoot.getElementById("areasGrid") && !elNew.shadowRoot.getElementById("solarPanel")]);
   global.cancelAnimationFrame = _realCaf;
@@ -6098,11 +6079,21 @@ if (require.main === module) setTimeout(async () => {
     checks.push([`orbit: Nova's latest line sits under the greeting (${R.getElementById("heroLatest")?.textContent.trim()})`,
       /23:02/.test(R.getElementById("heroLatest")?.textContent || "") && /motion in kitchen/.test(R.getElementById("heroLatest")?.textContent || "")]);
 
-    const lay = O._holoLayout({ W: 1000, H: 600, narrow: false });
+    const lay = O._coreLayout({ W: 1000, H: 600, narrow: false });
     const order = Array.from(stage.children).map(c => c.id || c.className).join(",");
     checks.push([`orbit: the head is in the middle, and a phone reads head, greeting, card, then the cards (${order})`,
       lay.hx === 500 && /^heroArcs,core,hero-copy,presentCard,orbit/.test(order.replace("hero-copy", "hero-copy"))]);
 
+    // 8.79.0: the arcs turn with Nova's mood: fast while thinking, slow asleep.
+    {
+      const fakeC = { clientWidth: 1000, clientHeight: 600, width: 0, height: 0, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 }) };
+      const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : /^create/.test(String(k)) ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+      const spin = mood => { O._targetCoreState(mood); O._arcsClock = 0; O._arcsLast = 0; let t = 1000; for (let i = 0; i < 21; i++) { O._arcsFrame(fakeC, ctx, t); t += 50; } return O._arcsClock; };
+      const idle = spin("idle"), busy = spin("reasoning"), sleep = spin("asleep");
+      checks.push([`orbit: the arcs turn with Nova's mood (idle ${idle.toFixed(2)}, thinking ${busy.toFixed(2)}, asleep ${sleep.toFixed(2)})`,
+        idle > 0 && busy > idle * 2 && sleep < idle]);
+      O._targetCoreState("idle");
+    }
     O._reduceMotion = true;
     O._arcsStop?.(); O._arcsStart?.();
     checks.push(["orbit: with less motion the arcs are drawn once and do not keep moving", typeof O._arcsStart === "function" && !O._arcsRaf]);

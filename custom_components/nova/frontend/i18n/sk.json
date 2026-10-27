@@ -383,7 +383,6 @@
   "since {date}": "od {date}",
   "{agree} of {n} verdicts agree": "{agree} z {n} verdiktov sa zhoduje",
   "Cards on the Command Center": "Karty vo veliteľskom centre",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Čas od času zobraziť vedľa hlavy kartu s aktuálnymi údajmi, kým dom nespí",
   "Arming": "Zapínanie",
   "Disarmed": "Vypnuté",
   "Triggered": "Spustené",
@@ -517,5 +516,6 @@
   "Plum Dusk": "Slivkový súmrak",
   "Cocoa Bark": "Kakaová kôra",
   "Forest Mint": "Lesná mäta",
-  "Slate Harbour": "Bridlicový prístav"
+  "Slate Harbour": "Bridlicový prístav",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Občas ukáže vedľa Novy kartu s aktuálnymi hodnotami, kým je dom hore"
 }

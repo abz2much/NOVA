@@ -15,10 +15,8 @@
   //   (open tab, buttons), on-accent the text on it, gold the accent as text
   //   (links, focus, "on"). dark-a and black are the dark panel (Energy),
   //   with on-dark text. c-* are the energy flow's four series.
-  //   head: ramp is the canvas head's four steps from dim to bright; main,
-  //   deep, pale and warm are the WebGL head's colours (0 to 1); eye is the
-  //   bright centre of the canvas head's eyes, and fade the colour its glow
-  //   fades out towards.
+  //   head: the avatar's colours (0 to 1): main is the accent, pale its
+  //   bright highlight and deep its shadow (core-rings.js).
   static THEME_DEFAULT = "deep_teal";
   static THEMES = this._themeTable({
     deep_teal: { label: "Deep Teal", style: "dark", base: "#03313A", accent: "#8FFFE0" },
@@ -86,11 +84,7 @@
       "orb-deep": toHex(mix(A, B, 0.6)), "media-bg": toHex(black), "glow-top": toHex(mix(B, W, 0.16)), "hero-end": toHex(mix(B, K, 0.2)),
     };
     const unit = c => c.map(v => +(v / 255).toFixed(3));
-    const head = {
-      ramp: [mix(A, B, 0.8), mix(A, B, 0.6), A, mix(A, W, 0.65)].map(c => c.map(Math.round)),
-      main: unit(A), deep: unit(mix(A, B, 0.6)), pale: unit(mix(A, W, 0.65)), warm: unit(mix(A, W, 0.35)),
-      eye: mix(A, W, 0.82).map(Math.round), fade: mix(B, K, 0.3).map(Math.round),
-    };
+    const head = { main: unit(A), deep: unit(mix(A, B, 0.6)), pale: unit(mix(A, W, 0.65)) };
     return { tokens, head };
   }
 
