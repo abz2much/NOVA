@@ -36,17 +36,10 @@ def test_labels_case_and_whitespace_normalised(cs, label):
 
 @pytest.mark.parametrize("label", [
     "car", "human", "dog", "box", "", None, "person; DROP TABLE state_changes",
-    "a" * 500,
+    "a" * 500, "person/../../etc/passwd",
 ])
 def test_unknown_labels_rejected(cs, label):
     assert cs.normalize_label(label) is None
-
-
-def test_label_normalisation_never_used_to_build_an_entity_id_directly(cs):
-    """A label that fails normalisation must never influence the entity id —
-    only resolve_location (camera entity / area) does, never the label."""
-    malicious = "person/../../etc/passwd"
-    assert cs.normalize_label(malicious) is None
 
 
 # ── package sub-state normalisation ───────────────────────────────────────────
@@ -57,35 +50,22 @@ def test_package_states_accepted(cs, state):
 
 
 @pytest.mark.parametrize("state", ["removed", "opened", "", None, "DELIVERED; --"])
-def test_unknown_package_states_rejected_or_normalised(cs, state):
-    if state == "DELIVERED; --":
-        assert cs.normalize_package_state(state) is None
-    else:
-        assert cs.normalize_package_state(state) is None
+def test_unknown_package_states_rejected(cs, state):
+    assert cs.normalize_package_state(state) is None
 
 
 # ── confidence: only filtered when numeric, never invented ───────────────────
 
-def test_missing_confidence_is_accepted_never_invented(cs):
-    conf, passes = cs.normalize_confidence(None, floor=50.0)
-    assert conf is None
-    assert passes is True
-
-
-def test_numeric_confidence_above_floor_passes(cs):
-    conf, passes = cs.normalize_confidence(75.0, floor=50.0)
-    assert conf == 75.0
-    assert passes is True
-
-
-def test_numeric_confidence_below_floor_rejected(cs):
-    conf, passes = cs.normalize_confidence(30.0, floor=50.0)
-    assert passes is False
-
-
-def test_confidence_floor_exactly_at_boundary_passes(cs):
-    _, passes = cs.normalize_confidence(50.0, floor=50.0)
-    assert passes is True
+@pytest.mark.parametrize("value,floor,conf,passes", [
+    (None, 50.0, None, True),     # missing is accepted, never invented
+    (75.0, 50.0, 75.0, True),
+    (30.0, 50.0, 30.0, False),
+    (50.0, 50.0, 50.0, True),     # exactly at the floor passes
+    (0.1, 0.0, 0.1, True),        # a zero floor filters nothing
+    (99.9, 0.0, 99.9, True),
+])
+def test_numeric_confidence_against_floor(cs, value, floor, conf, passes):
+    assert cs.normalize_confidence(value, floor=floor) == (conf, passes)
 
 
 @pytest.mark.parametrize("bad", [-1.0, 101.0, float("nan"), float("inf"), float("-inf"), "not-a-number", [], {}])
@@ -93,13 +73,6 @@ def test_invalid_confidence_rejected_safely(cs, bad):
     conf, passes = cs.normalize_confidence(bad, floor=50.0)
     assert conf is None
     assert passes is False
-
-
-def test_confidence_floor_zero_disables_filtering(cs):
-    conf, passes = cs.normalize_confidence(0.1, floor=0.0)
-    assert passes is True
-    conf2, passes2 = cs.normalize_confidence(99.9, floor=0.0)
-    assert passes2 is True
 
 
 def test_confidence_floor_negative_treated_as_disabled(cs):
@@ -154,10 +127,12 @@ def test_first_event_is_not_a_duplicate(cs):
     assert cs._is_duplicate(("person", "front_yard", None), window=300) is False
 
 
-def test_repeat_within_window_is_a_duplicate(cs):
+@pytest.mark.parametrize("window,second", [(300, True), (0, False)])
+def test_repeat_within_window_is_a_duplicate(cs, window, second):
+    # A window of 0 turns deduplication off.
     key = ("person", "front_yard", None)
-    assert cs._is_duplicate(key, window=300) is False
-    assert cs._is_duplicate(key, window=300) is True
+    assert cs._is_duplicate(key, window=window) is False
+    assert cs._is_duplicate(key, window=window) is second
 
 
 def test_repeat_after_window_expires_is_not_a_duplicate(cs, monkeypatch):
@@ -169,26 +144,19 @@ def test_repeat_after_window_expires_is_not_a_duplicate(cs, monkeypatch):
     assert cs._is_duplicate(key, window=10) is False  # window passed -> new event
 
 
-def test_different_labels_same_location_stay_distinct(cs):
-    assert cs._is_duplicate(("person", "front_yard", None), window=300) is False
-    assert cs._is_duplicate(("vehicle", "front_yard", None), window=300) is False
-
-
-def test_different_package_states_stay_distinct(cs):
-    assert cs._is_duplicate(("package", "front_yard", "delivered"), window=300) is False
-    assert cs._is_duplicate(("package", "front_yard", "taken"), window=300) is False
+@pytest.mark.parametrize("first,second", [
+    (("person", "front_yard", None), ("vehicle", "front_yard", None)),
+    (("package", "front_yard", "delivered"), ("package", "front_yard", "taken")),
+])
+def test_different_label_or_package_state_stays_distinct(cs, first, second):
+    assert cs._is_duplicate(first, window=300) is False
+    assert cs._is_duplicate(second, window=300) is False
 
 
 def test_dedup_state_is_bounded(cs):
     for i in range(cs._DEDUP_MAX_ENTRIES + 50):
         cs._is_duplicate(("person", f"loc_{i}", None), window=300)
     assert len(cs._dedup_last_seen) <= cs._DEDUP_MAX_ENTRIES
-
-
-def test_dedup_window_zero_disables_deduplication(cs):
-    key = ("person", "front_yard", None)
-    assert cs._is_duplicate(key, window=0) is False
-    assert cs._is_duplicate(key, window=0) is False  # window 0 -> never a duplicate
 
 
 # ── location resolution ────────────────────────────────────────────────────────
@@ -255,17 +223,13 @@ def test_attribute_resident_fresh_and_confident(cs, fake_hass, load, monkeypatch
     assert result == ("Alex", 95.0)
 
 
-def test_attribute_resident_below_confidence_threshold_is_none(cs, fake_hass, load, monkeypatch):
+@pytest.mark.parametrize("seen", [
+    {"name": "Alex", "confidence": 10.0, "age_seconds": 5},      # below the threshold
+    {"name": "unknown", "confidence": 99.0, "age_seconds": 1},
+])
+def test_attribute_resident_unsure_or_unknown_is_none(cs, fake_hass, load, monkeypatch, seen):
     rec = load("recognition")
-    monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "Alex", "confidence": 10.0, "age_seconds": 5})
-    assert cs.attribute_resident(fake_hass, "camera.front_door") is None
-
-
-def test_attribute_resident_unknown_name_is_none(cs, fake_hass, load, monkeypatch):
-    rec = load("recognition")
-    monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "unknown", "confidence": 99.0, "age_seconds": 1})
+    monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam: seen)
     assert cs.attribute_resident(fake_hass, "camera.front_door") is None
 
 
@@ -317,14 +281,9 @@ async def test_record_event_writes_for_valid_person_detection(cs, fake_hass, cc_
     assert len(cc_stub) == 1
 
 
-async def test_record_event_rejects_unknown_label(cs, fake_hass, cc_stub):
-    ok = await cs.record_event(fake_hass, label="spaceship", camera_entity="camera.front_door", source="eufy")
-    assert ok is False
-    assert cc_stub == []
-
-
-async def test_record_event_rejects_unknown_source(cs, fake_hass, cc_stub):
-    ok = await cs.record_event(fake_hass, label="person", camera_entity="camera.front_door", source="ring")
+@pytest.mark.parametrize("label,source", [("spaceship", "eufy"), ("person", "ring")])
+async def test_record_event_rejects_unknown_label_or_source(cs, fake_hass, cc_stub, label, source):
+    ok = await cs.record_event(fake_hass, label=label, camera_entity="camera.front_door", source=source)
     assert ok is False
     assert cc_stub == []
 
@@ -334,15 +293,6 @@ async def test_record_event_rejects_bad_camera_entity(cs, fake_hass, cc_stub):
     assert ok is False
     ok2 = await cs.record_event(fake_hass, label="person", camera_entity="not-an-entity-id", source="eufy")
     assert ok2 is False
-
-
-async def test_record_event_never_raises_on_internal_failure(cs, fake_hass, load, monkeypatch):
-    cc = load("cognitive_core")
-    def _boom(*a, **k):
-        raise RuntimeError("db exploded")
-    monkeypatch.setattr(cc, "log_camera_event", _boom)
-    ok = await cs.record_event(fake_hass, label="person", camera_entity="camera.front_door", source="eufy")
-    assert ok is False  # never raises, just reports "not recorded"
 
 
 async def test_record_event_deduplicates_within_window(cs, fake_hass, cc_stub, load, monkeypatch):

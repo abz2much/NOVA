@@ -565,19 +565,8 @@ def test_rerunning_from_seven_keeps_a_later_change(mig):
 
 # ── Runner: odd versions ────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("bad", [None, "3", "", [9]])
-def test_none_or_text_version_is_rejected_with_one_error(mig, caplog, bad):
-    # 8.49.11 raised TypeError comparing these with the current version.
-    options = {}
-    with caplog.at_level(logging.INFO, logger=mig._LOGGER.name):
-        _, out, result = mig.migrate_config({}, options, bad)
-    assert result is bad and out == {}
-    records = [r for r in caplog.records if r.name == mig._LOGGER.name]
-    assert len(records) == 1 and records[0].levelno == logging.ERROR
-    assert "invalid" in records[0].getMessage()
-
-
-@pytest.mark.parametrize("version", [0, -1, 1.5, float("nan")])
+# None and text: 8.49.11 raised TypeError comparing these with the current version.
+@pytest.mark.parametrize("version", [None, "3", "", [9], 0, -1, 1.5, float("nan")])
 def test_invalid_version_is_rejected_with_one_error(mig, caplog, version):
     options = {}
     with caplog.at_level(logging.INFO, logger=mig._LOGGER.name):
