@@ -989,7 +989,7 @@ if (require.main === module) setTimeout(async () => {
       elNew._hass.states = realStates;
       // The security card: a calm summary of locks, doors, alarm and lockdown.
       {
-        const hs = elNew._hass.states, saved = hs, lock = elNew._liveData.lockdown;
+        const hs = elNew._hass.states, saved = hs, lock = elNew._liveData.lockdown, savedCfg = elNew._liveData.config;
         const sec = (states, cfg = {}, lockdown = false) => {
           elNew._hass.states = states;
           elNew._liveData.config = Object.assign({}, elNew._liveData.config, cfg);
@@ -1017,9 +1017,18 @@ if (require.main === module) setTimeout(async () => {
           { security_alarm_entity: "" }, true));
         checks.push(["security: no locks leaves the big figure out; doors closed, alarm disarmed and lockdown on are shown",
           !html.includes("pc-big") && html.includes("Closed") && html.includes("Disarmed") && html.includes("Lockdown")]);
+        d = sec({ "lock.front": L("locked"), "lock.thermo": L("unlocked"), "alarm_control_panel.x": L("armed_home") },
+          { lockdown_exempt_locks: ["lock.thermo"], security_alarm_entity: "" });
+        checks.push(["security: a lock left out of lockdown (a thermostat's child lock) is not counted",
+          d.locks_total === 1 && d.locks_locked === 1]);
+        d = sec({ "lock.thermo": L("unlocked"), "alarm_control_panel.x": L("armed_home") },
+          { lockdown_exempt_locks: ["lock.thermo"], security_alarm_entity: "" });
+        checks.push(["security: with only exempt locks there is no lock figure, just the alarm",
+          d.locks_total === null && d.alarm === "armed_home"]);
+        elNew._liveData.config = Object.assign({}, savedCfg, { lockdown_exempt_locks: [] });
         checks.push(["security: with nothing set up there is no card to show",
           sec({ "calendar.family": L("off") }, { security_alarm_entity: "" }, false) === null]);
-        elNew._hass.states = saved; elNew._liveData.lockdown = lock;
+        elNew._hass.states = saved; elNew._liveData.lockdown = lock; elNew._liveData.config = savedCfg;
         // It takes its turn in the real rotation after energy.
         elNew._liveData.lockdown = { active: false };
         elNew._hass.states = { "lock.a": L("locked"), "lock.b": L("locked") };
