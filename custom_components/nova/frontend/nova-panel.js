@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.80.1
+ * v8.80.2
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.80.1 ",
+      console.log("%c Nova Panel %c v8.80.2 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -7976,15 +7976,19 @@ ${this._dockHtml()}`;
 
   // The security card is a calm summary from Home Assistant's live states,
   // counts only (no names): locks, doors, the alarm and lockdown. Null when
-  // there is nothing to summarise, so the rotation skips it.
+  // there is nothing to summarise, so the rotation skips it. Locks left out
+  // of lockdown (a thermostat's child lock, say) are not door locks, so they
+  // are not counted either.
   _presentSecurityData() {
     const states = this._hass?.states || {};
     const cfg = this._liveData?.config || {};
+    const exempt = new Set(this._exclArr(cfg.lockdown_exempt_locks));
     let locks = 0, locked = 0, doors = 0, open = 0;
     const alarms = [];
     for (const [id, st] of Object.entries(states)) {
       const s = st && st.state;
       if (id.startsWith("lock.")) {
+        if (exempt.has(id)) continue;
         if (s === "locked") { locks++; locked++; }
         else if (["unlocked", "unlocking", "locking", "jammed", "open", "opening"].includes(s)) locks++;
       } else if (id.startsWith("binary_sensor.")) {

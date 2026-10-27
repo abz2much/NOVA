@@ -1,3 +1,8 @@
+## [8.80.2] Security card counts door locks only
+
+### Fixed
+- **The Security card on the Command Center counted every lock in Home Assistant**, including a thermostat's child lock, so it could show "0/2" locked with every door shut and the alarm armed. It now leaves out the locks that lockdown leaves out (Settings, Security Alarm, locks left out of lockdown), the same list the briefing and lockdown use. With no door locks left, the card shows the alarm and doors instead.
+
 ## [8.80.1] Departure reminder at midnight
 
 ### Fixed

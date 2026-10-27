@@ -241,15 +241,19 @@
 
   // The security card is a calm summary from Home Assistant's live states,
   // counts only (no names): locks, doors, the alarm and lockdown. Null when
-  // there is nothing to summarise, so the rotation skips it.
+  // there is nothing to summarise, so the rotation skips it. Locks left out
+  // of lockdown (a thermostat's child lock, say) are not door locks, so they
+  // are not counted either.
   _presentSecurityData() {
     const states = this._hass?.states || {};
     const cfg = this._liveData?.config || {};
+    const exempt = new Set(this._exclArr(cfg.lockdown_exempt_locks));
     let locks = 0, locked = 0, doors = 0, open = 0;
     const alarms = [];
     for (const [id, st] of Object.entries(states)) {
       const s = st && st.state;
       if (id.startsWith("lock.")) {
+        if (exempt.has(id)) continue;
         if (s === "locked") { locks++; locked++; }
         else if (["unlocked", "unlocking", "locking", "jammed", "open", "opening"].includes(s)) locks++;
       } else if (id.startsWith("binary_sensor.")) {
