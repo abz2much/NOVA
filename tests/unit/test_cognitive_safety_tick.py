@@ -9,6 +9,7 @@ here (see "Found, not fixed" in the PR).
 """
 import sys
 import types
+from datetime import timedelta
 
 import pytest
 
@@ -127,7 +128,12 @@ async def test_setting_off_keeps_an_investigation_that_did_not_come_from_confine
 async def test_confinement_on_with_an_armed_alarm_keeps_watching_each_tick(
         make_safety, fake_hass, clock):
     safety = make_safety(intrusion_requires_confinement=True, security_alarm_entity=ALARM)
-    fake_hass.states.set(ALARM, "armed_away")
+    # Armed for the night, then a way in opened (armed away is left to the
+    # alarm itself, 8.81.0).
+    fake_hass.states.set(ALARM, "armed_night")
+    armed_at = fake_hass.states.get(ALARM).last_changed
+    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door",
+                         last_changed=armed_at + timedelta(seconds=1))
     motion(fake_hass)
     first = await _tick(safety, fake_hass)
     assert _types(intrusions(first)) == ["intrusion_investigating"]

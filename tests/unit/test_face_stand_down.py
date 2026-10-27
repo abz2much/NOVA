@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from datetime import timedelta
 
 import pytest
 from core_sources import core_text, core_tree
@@ -64,6 +65,15 @@ def env(load, cognitive_core, fake_hass, monkeypatch, tmp_path):
     fr._NAMES.clear()
 
 
+def _armed_night_then_door(hass):
+    """Armed for the night, then the front door opened: confinement's way
+    in (armed away is left to the alarm itself, 8.81.0)."""
+    hass.states.set(ALARM, "armed_night")
+    armed_at = hass.states.get(ALARM).last_changed
+    hass.states.set("binary_sensor.front_door", "on", device_class="door",
+                    last_changed=armed_at + timedelta(seconds=1))
+
+
 def _away_with_breach(hass):
     hass.states.set("person.username", "not_home")
     hass.states.set("binary_sensor.front_door", "on", device_class="door")
@@ -117,23 +127,22 @@ async def test_off_by_default_a_resident_face_changes_nothing(env):
     assert safety._investigation is not None and env.rows() == []
 
 
-async def test_off_the_armed_away_confinement_path_still_alerts(env):
+async def test_off_the_confinement_path_still_alerts(env):
     env.rec.remember_recognition("front", "Sam", 95.0)
     safety = env.make(intrusion_requires_confinement=True)
     env.hass.states.set("person.username", "not_home")
     env.hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
-    env.hass.states.set(ALARM, "armed_away")
-    intr = await env.tick(safety)
-    assert len(intr) == 1 and "no one is home" in intr[0]["message"]
+    _armed_night_then_door(env.hass)
+    assert len(await env.tick(safety)) == 1
     assert env.rows() == []
 
 
-async def test_off_confined_with_residents_home_and_armed_away_still_alerts(env):
+async def test_off_confined_with_residents_home_still_alerts(env):
     env.rec.remember_recognition("front", "Sam", 95.0)
     safety = env.make(intrusion_requires_confinement=True)
     env.hass.states.set("person.username", "home")
     env.hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
-    env.hass.states.set(ALARM, "armed_away")
+    _armed_night_then_door(env.hass)
     assert len(await env.tick(safety)) == 1 and env.rows() == []
 
 
@@ -411,7 +420,7 @@ async def test_stand_down_applies_to_a_new_confined_investigation(env):
     safety = env.make(face_stand_down=True, intrusion_requires_confinement=True)
     env.hass.states.set("person.username", "home")
     env.hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
-    env.hass.states.set(ALARM, "armed_away")
+    _armed_night_then_door(env.hass)
     assert await env.tick(safety) == [] and len(env.rows()) == 1
     env.rec._FACE_LOG.clear()
     assert len(await env.tick(safety)) == 1                          # no resident in view: it alerts

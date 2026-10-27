@@ -1,3 +1,10 @@
+## [8.81.0] Nova trusts your alarm when you're out
+
+### Changed
+- **While the alarm is armed away or on vacation, Nova leaves motion to the alarm.** Before, Nova ran its own check next to the alarm. A motion or presence sensor still on from you walking out (a presence sensor can stay on for minutes) looked like someone in an empty, armed house. On 25 Oct the kitchen presence sensor stayed on 3 minutes after the alarm armed. Now motion alone never starts Nova's own investigation while armed away, and Nova's general alerts don't announce it either. When the alarm goes off, Nova alerts as before.
+- Everything else is unchanged: armed home and night, the house asleep, everyone away with the alarm off, homes with no alarm, smoke, CO, leaks and the night sweep. An investigation already open before the alarm armed keeps running.
+- This assumes your alarm (for example Alarmo) watches the sensors you care about in away mode.
+
 ## [8.80.2] Security card counts door locks only
 
 ### Fixed

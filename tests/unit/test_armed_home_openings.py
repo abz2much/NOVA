@@ -132,14 +132,15 @@ async def test_ground_floor_window_opened_after_arming_is_a_breach(
     assert len(await _tick(safety, fake_hass)) == 1
 
 
-async def test_armed_away_is_unchanged(make_safety, fake_hass):
-    """Armed away is corroboration on its own, open windows or not."""
+async def test_armed_away_is_left_to_the_alarm(make_safety, fake_hass):
+    """Armed away the alarm watches the house (8.81.0): motion and an open
+    window open no investigation of Nova's own."""
     safety = make_safety(intrusion_requires_confinement=True)
     _home(fake_hass)
     _arm(fake_hass, "armed_away")
     _window(fake_hass, BEFORE)
     _motion(fake_hass)
-    assert len(await _tick(safety, fake_hass)) == 1
+    assert await _tick(safety, fake_hass) == []
 
 
 async def test_lockdown_while_disarmed_keeps_any_open_entry(

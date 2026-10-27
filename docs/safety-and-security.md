@@ -158,16 +158,22 @@ no person entities set up).
 "Someone is home" for household events comes from your people and the
 trackers linked to them. Intrusion, lockdown, offers and appliances still
 also count live motion when choosing speakers, so an intruder's movement
-while armed away is still spoken.
+after the alarm goes off is still spoken.
 
 ## How intrusion decides
 
-- Intrusion only runs when the residents are away, or their presence is
-  unknown and the alarm is armed away. Someone reading home always wins. It
-  never runs on the mere absence of motion.
+- While the alarm is **armed away or on vacation**, the alarm watches the
+  house and Nova trusts it. Motion alone never starts Nova's own
+  investigation, and Nova's general alerts don't announce it either. A
+  sensor still on from you walking out is not mistaken for someone inside.
+  When the alarm goes off, Nova alerts as before. This assumes your alarm
+  (for example Alarmo) watches the sensors you care about in away mode.
+- Otherwise intrusion only runs when the residents are away, or their
+  presence is unknown. Someone reading home always wins. It never runs on
+  the mere absence of motion.
 - Bare motion while away is not enough. Nova also needs an open door or
-  window, or an armed alarm, before it opens an investigation. Pets and robot
-  vacuums are the reason.
+  window, or an alarm armed for home, before it opens an investigation. Pets
+  and robot vacuums are the reason.
 - At night it needs a real breach: an exterior door or window open. If you
   set ground floor areas, only those count.
 - Outdoor motion never starts an indoor intrusion.
@@ -181,12 +187,11 @@ while armed away is still spoken.
 - When someone is home and the alarm is armed home, night or custom bypass,
   or the household is asleep, walking from room to room never confirms an
   intrusion. Only the alarm itself going off, or a person on camera that
-  Nova's vision check confirms, does. Armed away, vacation and everyone away
-  work as before.
+  Nova's vision check confirms, does. Everyone away works as before.
 - In that same case, the first "Motion at … while the house is secured"
   alert, and the later "couldn't reach you" notice, go to your phone only,
-  not the speakers. Armed away, vacation, everyone away and a confirmed
-  intrusion still use the speakers.
+  not the speakers. The alarm going off while you're out, everyone away and
+  a confirmed intrusion still use the speakers.
 
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion

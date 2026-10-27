@@ -47,7 +47,7 @@ async def _tick(m, hass, sleeping=False, anyone_home=False):
 
 def _away(hass):
     hass.states.set("person.abi", "not_home")
-    hass.states.set(ALARM, "armed_away")
+    hass.states.set(ALARM, "disarmed")
     hass.states.set("binary_sensor.front_door", "on", device_class="door")
 
 

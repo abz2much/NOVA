@@ -191,10 +191,12 @@ async def test_alarm_triggered_still_confirms_when_residents_are_home(
     assert len(conf) == 1 and "alarm has gone off" in conf[0]["message"]
 
 
-async def test_armed_away_still_confirms_on_motion(cc, clock, fake_hass):
+async def test_the_alarm_going_off_while_away_still_confirms_on_motion(cc, clock, fake_hass):
+    # Armed away Nova leaves motion to the alarm (8.81.0); once it goes off,
+    # motion through the house confirms as before.
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "triggered")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     seen = await _route(safety, fake_hass, clock, sleeping=False, anyone_home=False)
     assert len(_confirmed(seen)) == 1, seen

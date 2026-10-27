@@ -88,7 +88,11 @@ async def test_away_motion_needs_an_open_entry_or_an_armed_alarm_before_anything
     motion(fake_hass)
     assert await safety._check_intrusion(False, False) is None           # bare motion: a pet, a robot, a blind
     assert safety._investigation is None and safety._last_intrusion_alert == 0.0
+    # Armed away the alarm itself watches (8.81.0); armed for home with
+    # everyone out still corroborates.
     fake_hass.states.set(ALARM, "armed_away")
+    assert await safety._check_intrusion(False, False) is None
+    fake_hass.states.set(ALARM, "armed_home")
     assert (await safety._check_intrusion(False, False))["type"] == "intrusion_investigating"
 
 
@@ -201,7 +205,8 @@ async def test_armed_alarm_without_an_open_entry_says_the_alarm_is_armed(
         cc, fake_hass, clock, monkeypatch):
     monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM})
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set("person.username", "not_home")
+    fake_hass.states.set(ALARM, "armed_home")
     motion(fake_hass)
     action = await safety._check_intrusion(False, False)
     assert action["message"] == cc._notify_i18n().message(
@@ -1034,11 +1039,11 @@ async def _walk(safety, hass, home_clock):
     return seen
 
 
-async def test_a_tv_tracker_reading_home_does_not_stop_armed_away(cc, fake_hass, home_clock):
+async def test_a_tv_tracker_reading_home_does_not_stop_an_away_alert(cc, fake_hass, home_clock):
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM_hh})
     fake_hass.states.set("person.abi", "not_home")
     fake_hass.states.set("device_tracker.living_room_tv", "home")
-    fake_hass.states.set(ALARM_hh, "armed_away")
+    fake_hass.states.set(ALARM_hh, "disarmed")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
     seen = await _tick(safety, fake_hass)
@@ -1129,7 +1134,7 @@ async def test_the_unresolved_notice_when_away_still_speaks(cc, routed, fake_has
     pushes, spoken = routed
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM_hh})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM_hh, "armed_away")
+    fake_hass.states.set(ALARM_hh, "disarmed")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     # Motion lingers in one room: no route through the house, so after the
     # response timeout it is the unresolved notice, not a confirmation.

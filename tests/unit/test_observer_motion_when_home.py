@@ -4,7 +4,8 @@ These sensors change all day while people are in, and sending each change
 to the AI classifier used up the hourly budget (100 calls) on a real home.
 While the household is home they are kept as recent context but not
 classified. When everyone is away, or presence is unknown, they still are,
-and a local cognition anomaly still escalates.
+and a local cognition anomaly still escalates. While the alarm is armed away
+they are left to the alarm (8.81.0).
 
 Focused run:
     python -m pytest tests/unit/test_observer_motion_when_home.py -q
@@ -91,11 +92,13 @@ def test_motion_while_away_or_unknown_is_classified(obs, people, monkeypatch):
     assert len(hass.tasks) == 1
 
 
-def test_motion_while_armed_away_is_classified_even_if_a_person_reads_home(obs):
+def test_motion_while_armed_away_is_left_to_the_alarm(obs):
+    # Armed away the alarm watches the house (8.81.0): motion is context
+    # only, whoever reads home.
     o, hass, _, alarm = obs
     alarm["states"] = ["armed_away"]
     o._on_state_changed(_event("binary_sensor.hall_ms", "motion"))
-    assert len(hass.tasks) == 1
+    assert len(hass.tasks) == 0
 
 
 def test_a_door_while_home_is_still_classified(obs):
