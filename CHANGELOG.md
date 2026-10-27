@@ -1,3 +1,9 @@
+## [8.80.1] Departure reminder at midnight
+
+### Fixed
+- **A leave-time reminder could come twice around midnight.** Nova remembered "already reminded today", so for an event just after midnight the reminder given before midnight was given again once the date changed. It now remembers the event itself, so each event is reminded about once.
+- Some intrusion tests failed at random. The test stand-in for Home Assistant could give two state changes the same time, so a door opened after the alarm was armed looked as if it was open when it was armed. Its clock now always moves forward. Nova's own intrusion logic is unchanged.
+
 ## [8.80.0] Light themes
 
 ### Added

@@ -1063,7 +1063,9 @@ def _departure_followups(hass, now, now_dt, today):
                 continue
             stage["done"].add(idx)
             ledger = f"{key}:{idx}"
-            if _RECUR_ALERTED.get(ledger) == today:
+            # The key names the event and its start, so any entry means done:
+            # checking the day would repeat it once the date turns at midnight.
+            if ledger in _RECUR_ALERTED:
                 continue
             _RECUR_ALERTED[ledger] = today
             if not _still_home(stage["home"], _people_home(hass)):
@@ -1152,7 +1154,9 @@ async def predict_departure(hass, now: float = None) -> list:
                 break
             title = ev.get("title") or "an event"
             key = "depart:%s:%s" % (title, start_dt.strftime("%Y%m%d%H%M"))
-            if _RECUR_ALERTED.get(key) == today:
+            # One per event, not one per day: a 00:10 event alerted at 23:50
+            # must not alert again after midnight.
+            if key in _RECUR_ALERTED:
                 continue
             loc = ev.get("location")
             minutes, source, failure = await _departure_plan(

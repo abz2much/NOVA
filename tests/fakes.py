@@ -7,13 +7,23 @@ Assistant.
 from __future__ import annotations
 
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 _DEFAULT_REPLY = '{"speak": false, "reason": "routine"}'
+_last_stamp: datetime | None = None
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    """Now, but always after the previous stamp. Two states set one after
+    the other often land in the same microsecond, and then a door opened
+    after arming reads as open at arming, so intrusion tests failed at
+    random."""
+    global _last_stamp
+    now = datetime.now(timezone.utc)
+    if _last_stamp is not None and now <= _last_stamp:
+        now = _last_stamp + timedelta(microseconds=1)
+    _last_stamp = now
+    return now
 
 
 def _no_op() -> None:
