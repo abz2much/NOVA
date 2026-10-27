@@ -255,6 +255,18 @@ def _household_home() -> bool:
         return False
 
 
+def _alarm_watching() -> bool:
+    """The chosen alarm is armed away or on vacation, so it watches the house
+    itself and motion is left to it (8.81.0). Errors read as not watching,
+    so the event takes its normal path."""
+    try:
+        _people, alarms = _people_and_alarm(_STATE.hass)
+        return any(str(s or "").strip().lower() in cognitive_rules.AWAY_ALARM_STATES
+                   for s in alarms)
+    except Exception:
+        return False
+
+
 _STARTUP_STATES = ("unknown", "unavailable", "none")
 
 
@@ -513,9 +525,10 @@ def _on_state_changed(event: Event) -> None:
         return
 
     # Motion and presence with the household home is everyday life: keep it
-    # as context, do not spend a classifier call on it.
-    if (not critical and not lifted and frequent
-            and entity_id.startswith("binary_sensor.") and _household_home()):
+    # as context, do not spend a classifier call on it. Armed away the alarm
+    # watches the house, so even unusual motion is left to it.
+    if (not critical and frequent and entity_id.startswith("binary_sensor.")
+            and ((not lifted and _household_home()) or _alarm_watching())):
         _record_for_context(event)
         return
 

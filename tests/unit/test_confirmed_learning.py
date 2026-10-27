@@ -105,7 +105,7 @@ def test_a_label_never_overrides_a_verdict_already_given(intr, dr):
 async def _first_alert(cc, fake_hass):
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "disarmed")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
     actions = await safety.tick(sleeping=False, anyone_home=False)

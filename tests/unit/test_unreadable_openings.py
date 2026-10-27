@@ -91,10 +91,12 @@ async def test_motion_with_only_an_unreadable_door_raises_no_away_alert(cc, fake
     assert [a for a in actions if a["type"].startswith("intrusion")] == []
 
 
-async def test_armed_away_still_alerts_with_an_unreadable_door(cc, fake_hass, clock):
+async def test_an_armed_alarm_still_alerts_with_an_unreadable_door(cc, fake_hass, clock):
+    # Armed for home with everyone out (armed away is left to the alarm
+    # itself, 8.81.0).
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "armed_home")
     fake_hass.states.set("binary_sensor.back_door", "unavailable", device_class="door")
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
     actions = await safety.tick(sleeping=False, anyone_home=False)

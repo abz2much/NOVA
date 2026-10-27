@@ -716,6 +716,11 @@ class SafetyManager:
             return await self._investigate_step(now, away, sleeping)
         if now - self._last_intrusion_alert < _REPEAT_ALERT_GAP:
             return None
+        # Armed away or on vacation, the alarm itself watches the house and
+        # Nova trusts it: motion alone never opens an investigation here.
+        # When the alarm goes off it says so (triggered is not armed away).
+        if self._alarm_armed_away():
+            return None
         motion = self._qualifying_motion(sleeping)
         if not motion:
             return None

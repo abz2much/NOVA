@@ -189,7 +189,7 @@ async def test_intrusion_treats_an_open_garage_the_same_whatever_the_setting(cc,
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM,
                                           "garage_mode": mode})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "disarmed")
     fake_hass.states.set("cover.garage", "open", device_class="garage")
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
     assert safety._open_entry() == "cover.garage"

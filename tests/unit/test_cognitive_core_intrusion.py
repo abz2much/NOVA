@@ -149,12 +149,12 @@ async def test_with_backing_switched_off_bare_motion_alerts(make_safety, fake_ha
     assert [a["type"] for a in alerts] == ["intrusion_investigating"]
 
 
-async def test_armed_away_counts_as_away_with_no_trackers(safety, fake_hass):
+async def test_armed_away_with_no_trackers_is_left_to_the_alarm(safety, fake_hass):
+    # Armed away the alarm watches the house (8.81.0), trackers or not.
     safety.config["security_alarm_entity"] = ALARM
     fake_hass.states.set(ALARM, "armed_away")
     moving(fake_hass)
-    alerts = await run_tick(safety, fake_hass, home=False)
-    assert [a["type"] for a in alerts] == ["intrusion_investigating"]
+    assert await run_tick(safety, fake_hass, home=False) == []
 
 
 # ── repeats ─────────────────────────────────────────────────────────────────

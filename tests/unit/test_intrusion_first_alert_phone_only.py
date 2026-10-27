@@ -121,28 +121,18 @@ async def test_asleep_with_residents_home_is_phone_only(cc, routed, fake_hass):
 
 # ── unchanged: the speakers are still used ──────────────────────────────────
 
-async def test_armed_away_still_speaks(cc, routed, fake_hass):
+async def test_the_alarm_going_off_while_away_still_speaks(cc, routed, fake_hass):
+    # Armed away Nova leaves motion to the alarm (8.81.0); once the alarm
+    # goes off, the first alert is spoken as before.
     pushes, spoken = routed
     safety = _safety(cc, fake_hass)
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "triggered")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     first = await _first_alert(safety, fake_hass, sleeping=False, anyone_home=False)
     assert not first.get("phone_only")
     await _deliver(cc, fake_hass, first, sleeping=False)
     assert len(spoken) == 1 and pushes == ["intrusion_investigating"]
-
-
-async def test_armed_vacation_still_speaks(cc, routed, fake_hass):
-    pushes, spoken = routed
-    safety = _safety(cc, fake_hass)
-    fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_vacation")
-    fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
-    first = await _first_alert(safety, fake_hass, sleeping=False, anyone_home=False)
-    assert not first.get("phone_only")
-    await _deliver(cc, fake_hass, first, sleeping=False)
-    assert len(spoken) == 1
 
 
 async def test_everyone_away_still_speaks(cc, routed, fake_hass):

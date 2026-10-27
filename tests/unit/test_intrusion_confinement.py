@@ -3,7 +3,8 @@
 Off (the default) keeps the automatic away and asleep behaviour. On, intrusion
 monitoring runs only while a formal lockdown is engaged or the selected alarm
 is armed. With residents home and awake, the armed state alone is not enough:
-it takes an open entry, or an alarm armed away or on vacation.
+it takes an open entry. Armed away or on vacation the alarm itself watches the
+house and Nova opens no investigation of its own (8.81.0).
 
 All state here is fake. Nothing touches a real alarm or lock.
 """
@@ -108,14 +109,12 @@ async def test_on_but_not_confined_never_alerts_when_asleep(make_safety, fake_ha
 
 # ── setting on, confined, residents away ────────────────────────────────────
 
-async def test_armed_away_alarm_with_residents_away_alerts(make_safety, fake_hass):
+async def test_armed_away_with_residents_away_is_left_to_the_alarm(make_safety, fake_hass):
     safety = make_safety(intrusion_requires_confinement=True)
     _away(fake_hass)
     _motion(fake_hass)
     fake_hass.states.set(ALARM, "armed_away")
-    intr = await _tick(safety, fake_hass)
-    assert len(intr) == 1
-    assert "no one is home" in intr[0]["message"]
+    assert await _tick(safety, fake_hass) == []
 
 
 # ── setting on, confined, residents home and awake (option B) ───────────────
@@ -152,14 +151,13 @@ async def test_armed_home_with_open_entry_alerts_with_secured_wording(
     assert safety._investigation["trigger"] == "confined"
 
 
-async def test_armed_away_is_trusted_alone_even_if_a_resident_reads_home(
+async def test_armed_away_is_left_to_the_alarm_even_if_a_resident_reads_home(
         make_safety, fake_hass):
     safety = make_safety(intrusion_requires_confinement=True)
     _home(fake_hass)
     _motion(fake_hass)
     fake_hass.states.set(ALARM, "armed_away")
-    intr = await _tick(safety, fake_hass)
-    assert len(intr) == 1
+    assert await _tick(safety, fake_hass) == []
 
 
 async def test_lockdown_with_open_entry_alerts_at_home(

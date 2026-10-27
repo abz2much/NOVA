@@ -347,7 +347,7 @@ def flow(ob, load, monkeypatch, fake_hass):
     seen = {"tasks": [], "context": [], "calls": 0, "log": []}
     knobs = {"cognition": False, "escalate": False, "drop": False, "critical": False,
              "core": False, "recovery": False, "ignored": False, "group": False,
-             "debounce": False, "home": False, "rate": False}
+             "debounce": False, "home": False, "rate": False, "watching": False}
     monkeypatch.setattr(ob._STATE, "running", True)
     monkeypatch.setattr(ob, "_cognition_enabled", lambda: knobs["cognition"])
     monkeypatch.setattr(ob, "_should_pre_filter", lambda e: knobs["drop"])
@@ -359,6 +359,7 @@ def flow(ob, load, monkeypatch, fake_hass):
     monkeypatch.setattr(ob, "_debounced", lambda e, i=30.0: seen.setdefault("interval", i)
                         and knobs["debounce"])
     monkeypatch.setattr(ob, "_household_home", lambda: knobs["home"])
+    monkeypatch.setattr(ob, "_alarm_watching", lambda: knobs["watching"])
     monkeypatch.setattr(ob, "_classifier_rate_limited", lambda: knobs["rate"])
     monkeypatch.setattr(ob, "_record_classifier_call",
                         lambda: seen.__setitem__("calls", seen["calls"] + 1))
@@ -457,6 +458,42 @@ def test_motion_while_home_with_an_anomaly_is_classified(flow):
     knobs.update(home=True, cognition=True, escalate=True)
     ob._on_state_changed(MOTION)
     assert len(seen["tasks"]) == 1
+
+
+# Armed away the alarm watches the house (8.81.0): motion is context only,
+# even an unusual one, and never becomes "motion while no one is home".
+@pytest.mark.parametrize("anomaly", [False, True])
+def test_motion_while_the_alarm_is_armed_away_is_context_only(flow, anomaly):
+    ob, knobs, seen = flow
+    knobs.update(watching=True, cognition=anomaly, escalate=anomaly)
+    ob._on_state_changed(MOTION)
+    assert seen["tasks"] == [] and seen["context"] == [MOTION] and seen["calls"] == 0
+
+
+def test_a_door_while_the_alarm_is_armed_away_still_goes_through(flow):
+    ob, knobs, seen = flow
+    knobs["watching"] = True
+    ob._on_state_changed(DOOR)
+    assert len(seen["tasks"]) == 1
+
+
+@pytest.mark.parametrize("state,watching", [
+    ("armed_away", True), ("armed_vacation", True), ("armed_home", False),
+    ("armed_night", False), ("arming", False), ("triggered", False), ("disarmed", False),
+])
+def test_alarm_watching_reads_the_selected_alarm(ob, load, fake_hass, monkeypatch, state, watching):
+    monkeypatch.setattr(ob._STATE, "hass", fake_hass)
+    monkeypatch.setattr(load("alarm_source"), "states",
+                        lambda hass, cfg: [types.SimpleNamespace(state=state)])
+    assert ob._alarm_watching() is watching
+
+
+def test_alarm_watching_without_an_alarm_or_on_error_is_false(ob, load, fake_hass, monkeypatch):
+    monkeypatch.setattr(ob._STATE, "hass", fake_hass)
+    monkeypatch.setattr(load("alarm_source"), "states", lambda hass, cfg: [])
+    assert ob._alarm_watching() is False
+    monkeypatch.setattr(ob._STATE, "hass", None)
+    assert ob._alarm_watching() is False
 
 
 def test_rate_limit_warns_once_and_spares_arrivals(flow, caplog):

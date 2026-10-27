@@ -40,7 +40,7 @@ async def test_the_first_intrusion_alert(load, fake_hass, clock, records):
     cc = load("cognitive_core")
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "security_alarm_entity": ALARM})
     fake_hass.states.set("person.abi", "not_home")
-    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set(ALARM, "armed_home")   # armed away is left to the alarm (8.81.0)
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
     await safety.tick(sleeping=False, anyone_home=False)
@@ -48,7 +48,7 @@ async def test_the_first_intrusion_alert(load, fake_hass, clock, records):
     row = _one(records, "intrusion")
     obs = row["observation"]
     assert obs["source"] == "intrusion" and obs["residents"] == "away"
-    assert obs["posture"] == "away" and obs["trigger"] == "away"
+    assert obs["posture"] == "home" and obs["trigger"] == "away"
     assert obs["entity_id"] == "binary_sensor.hall_motion" and obs["alarm_armed"] is True
     assert row["decision"] == "raise initial intrusion alert and investigate silently"
 
