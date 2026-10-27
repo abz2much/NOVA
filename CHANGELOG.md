@@ -1,3 +1,13 @@
+## [8.80.0] Light themes
+
+### Added
+- **Oriel's six light themes:** Classic (warm stone and sage, Oriel's own look), Violet Mist, Berry Sky, Quantum Ice, Pine Mist and Ember. Cards are white frosted glass over a softly shaded page, with near-black text; the theme colour marks the open tab, "on" states, links and Nova's core and rings.
+- Every text and status colour stays readable in every theme (4.5:1 or better). The log colours, made for dark themes, are drawn darker in light ones.
+
+### Changed
+- Nova's dot in the top corner keeps a light highlight in every theme.
+- The README's theme picture shows all twelve.
+
 ## [8.79.0] Nova's core and rings
 
 ### Changed
