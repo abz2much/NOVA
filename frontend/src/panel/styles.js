@@ -77,8 +77,7 @@
       .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
       .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-body);font-size:var(--t-sm);color:var(--ink-dim)}
       .pc-row b{font-weight:500;color:var(--gold-pale)}
-      canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
-      canvas.core:active{cursor:grabbing}
+      canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
       .hero-copy{position:absolute;left:50%;bottom:5%;width:min(48%,540px);transform:translateX(-50%);pointer-events:none;
         display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
       .hero-word{font-family:var(--font-display);font-weight:700;font-size:clamp(36px,5cqw,56px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
@@ -91,7 +90,7 @@
       @container (max-width:819px){
         .hero-stage{height:auto;display:flex;flex-direction:column}
         canvas.hero-arcs{display:none}
-        canvas.core{position:relative;height:260px}
+        canvas.core{position:relative;height:220px}
         .present-card{position:relative;left:auto;right:auto;top:auto;width:auto;transform:none;margin:0 16px 14px;align-items:center;text-align:center}
         .pc-row{width:100%}
         .hero-copy{position:relative;left:auto;right:auto;bottom:auto;width:auto;transform:none;align-items:center;text-align:center;padding:0 16px 16px}

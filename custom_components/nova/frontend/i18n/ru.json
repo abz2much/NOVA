@@ -1212,7 +1212,6 @@
   "since {date}": "с {date}",
   "{agree} of {n} verdicts agree": "{agree} из {n} вердиктов совпадают",
   "Cards on the Command Center": "Карточки в Командном центре",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Время от времени показывать рядом с головой карточку с текущими данными, пока дом не спит",
   "Arming": "Постановка на охрану",
   "Disarmed": "Снято с охраны",
   "Triggered": "Тревога",
@@ -1354,5 +1353,6 @@
   "Plum Dusk": "Сливовые сумерки",
   "Cocoa Bark": "Кора какао",
   "Forest Mint": "Лесная мята",
-  "Slate Harbour": "Сланцевая гавань"
+  "Slate Harbour": "Сланцевая гавань",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Время от времени показывает рядом с Nova карточку с текущими показателями, пока дом не спит"
 }

@@ -383,7 +383,6 @@
   "since {date}": "din {date}",
   "{agree} of {n} verdicts agree": "{agree} din {n} verdicte sunt de acord",
   "Cards on the Command Center": "Carduri în Centrul de comandă",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Din când în când, arată lângă cap un card cu cifre în timp real cât timp casa este trează",
   "Arming": "Se armează",
   "Disarmed": "Dezarmat",
   "Triggered": "Declanșat",
@@ -517,5 +516,6 @@
   "Plum Dusk": "Amurg de prună",
   "Cocoa Bark": "Scoarță de cacao",
   "Forest Mint": "Mentă de pădure",
-  "Slate Harbour": "Port de ardezie"
+  "Slate Harbour": "Port de ardezie",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Din când în când, arată lângă Nova un card cu valori în timp real cât timp casa e trează"
 }

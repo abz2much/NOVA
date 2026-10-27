@@ -1212,7 +1212,6 @@
   "since {date}": "depuis le {date}",
   "{agree} of {n} verdicts agree": "{agree} verdicts sur {n} concordent",
   "Cards on the Command Center": "Cartes dans le Centre de commande",
-  "Now and then, show a card of live figures beside the head while the house is awake": "De temps en temps, affiche à côté de la tête une carte de chiffres en direct, tant que la maison est éveillée",
   "Arming": "Activation",
   "Disarmed": "Désarmée",
   "Triggered": "Déclenchée",
@@ -1354,5 +1353,6 @@
   "Plum Dusk": "Crépuscule prune",
   "Cocoa Bark": "Écorce de cacao",
   "Forest Mint": "Menthe des bois",
-  "Slate Harbour": "Port d’ardoise"
+  "Slate Harbour": "Port d’ardoise",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "De temps en temps, affiche à côté de Nova une carte de chiffres en direct, tant que la maison est éveillée"
 }

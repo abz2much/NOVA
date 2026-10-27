@@ -88,7 +88,7 @@ list is in [Safety and security](safety-and-security.md#how-alerts-reach-you).
   mutes.
 - Mutes survive a restart. The Command Center's **Muted** card lists them with
   an Unmute button. When the blanket shush is on, a banner with an Unshush
-  button is the first thing on the Command Center, above the head.
+  button is the first thing on the Command Center, above Nova.
 
 ## Limits
 
@@ -113,7 +113,7 @@ Panel, **Settings → General**:
 |---|---|
 | Announcements | Master switch for proactive speech. On by default. Your own reminders and briefings ignore it, and high alerts still go to your phone. |
 | Notifications only | Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. |
-| Cards on the Command Center | The rotating cards beside the hologram head. On by default. See [Getting started](getting-started.md#a-tour-of-the-panel). |
+| Cards on the Command Center | The rotating cards beside Nova's core. On by default. See [Getting started](getting-started.md#a-tour-of-the-panel). |
 | Sentinel | Doors, windows and locks left open. Garage settings and wording show only when your home has a garage; see Settings → Home & Extras → Home layout → Garage (Auto, Yes or No). |
 | Observer | AI event awareness. Off by default. |
 | Cognition | Local first look at events, deciding what deserves deeper reasoning. |

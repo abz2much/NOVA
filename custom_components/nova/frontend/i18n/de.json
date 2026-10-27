@@ -1212,7 +1212,6 @@
   "since {date}": "seit {date}",
   "{agree} of {n} verdicts agree": "{agree} von {n} Urteilen stimmen überein",
   "Cards on the Command Center": "Karten in der Kommandozentrale",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Zeigt hin und wieder eine Karte mit aktuellen Werten neben dem Kopf, solange das Haus wach ist",
   "Arming": "Wird scharfgeschaltet",
   "Disarmed": "Unscharf",
   "Triggered": "Ausgelöst",
@@ -1354,5 +1353,6 @@
   "Plum Dusk": "Pflaumendämmerung",
   "Cocoa Bark": "Kakaorinde",
   "Forest Mint": "Waldminze",
-  "Slate Harbour": "Schieferhafen"
+  "Slate Harbour": "Schieferhafen",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Zeigt hin und wieder eine Karte mit aktuellen Werten neben Nova, solange das Haus wach ist"
 }

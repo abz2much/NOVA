@@ -383,7 +383,6 @@
   "since {date}": "siden {date}",
   "{agree} of {n} verdicts agree": "{agree} av {n} avgjørelser er enige",
   "Cards on the Command Center": "Kort i kommandosentralen",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Vis av og til et kort med sanntidstall ved siden av hodet mens huset er våkent",
   "Arming": "Aktiverer",
   "Disarmed": "Deaktivert",
   "Triggered": "Utløst",
@@ -517,5 +516,6 @@
   "Plum Dusk": "Plommeskumring",
   "Cocoa Bark": "Kakaobark",
   "Forest Mint": "Skogsmynte",
-  "Slate Harbour": "Skiferhavn"
+  "Slate Harbour": "Skiferhavn",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Viser av og til et kort med sanntidstall ved siden av Nova mens huset er våkent"
 }

@@ -44,8 +44,7 @@ SOURCES = (
     "panel/settings-cards-more.js",
     "panel/live-data.js",            # live data patching, cameras, area tiles
     "panel/wiring.js",               # event wiring, settings save
-    "panel/core-hologram.js",        # hero hologram (WebGL 2)
-    "panel/core-animation.js",       # hero fallback head (canvas 2D)
+    "panel/core-rings.js",           # Nova's avatar: a core and rings (canvas 2D)
     "panel/presenting.js",           # Presenting: the energy card beside the head
     "panel/orbit.js",                # Command Center orbit: live cards, arcs, latest line
     "panel/dock.js",                 # Command Center dock, its panels and the Nova feed

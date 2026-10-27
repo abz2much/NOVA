@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.78.0
+ * v8.79.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -39,9 +39,7 @@ class NovaPanel extends HTMLElement {
     this._fetchInterval = null;
     this._lastActivitySig = null;
     this._flareUntil = 0;
-    this._animHandle = null;
-    this._holo = null;
-    this._particles = [];
+    this._core = null;
     this._current = { open: 1, wide: 0, brow: 0, smile: 0.45, mouth: 0, speed: 0.20, glow: 0.60, hot: 0.35, count: 60, sleep: 0 };
     this._heroTypeTimer = null;
     this._camOpen = false;
@@ -80,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.78.0 ",
+      console.log("%c Nova Panel %c v8.79.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -96,12 +94,10 @@ class NovaPanel extends HTMLElement {
       this._startIntervals();
     } else if (this._renderedOnce && this._currentTab === "energy") {
       this._startEnergyFlowPoll();
-    } else if (this._holoResume) {
-      // Leaving the page released the hologram's graphics context, and a
-      // canvas never gets a lost context back: start again on a fresh copy.
-      this._holoResume = false;
-      const old = this.shadowRoot.getElementById("core");
-      if (old) { old.replaceWith(old.cloneNode(false)); this._initCore(); }
+    } else if (this._coreResume) {
+      // Leaving the page stopped the avatar and the arcs: start them again.
+      this._coreResume = false;
+      this._initCore(); this._arcsStop(); this._arcsStart();
     }
     // Leaving the page closed the card subscription; start it again.
     if (this._renderedOnce && this._currentTab === "dashboard") this._presentStart();
@@ -111,11 +107,9 @@ class NovaPanel extends HTMLElement {
     if (this._fetchInterval) clearInterval(this._fetchInterval);
     if (this._sparklineInterval) clearInterval(this._sparklineInterval);
     if (this._cameraInterval) clearInterval(this._cameraInterval);
-    this._holoResume = !!this._holo;
-    this._holoStop();
+    this._coreResume = !!this._core;
+    this._coreStop();
     this._presentStop();
-    if (this._animHandle) cancelAnimationFrame(this._animHandle);
-    if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
     if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }
     this._stopEnergyFlowPoll();
     if (this._flowVisListener) {
@@ -223,16 +217,11 @@ class NovaPanel extends HTMLElement {
   _render() {
     // Tearing down and rebuilding the DOM (now happening on every tab
     // switch, not just once) orphans the previous canvas — its
-    // requestAnimationFrame loop and resize listener would otherwise keep
-    // running forever on a detached, invisible canvas, compounding every
-    // time someone switches tabs. Stop it before _initCore() starts a
-    // fresh one.
-    this._holoStop();
+    // requestAnimationFrame loop would otherwise keep running on a
+    // detached, invisible canvas, compounding every time someone switches
+    // tabs. Stop it before _initCore() starts a fresh one.
+    this._coreStop();
     this._presentStop();
-    if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
-    if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
-    this._ctx = null;
-    this._canvas = null;
 
     const root = this.shadowRoot;
     const focus = this._focusMark(root);
@@ -4370,7 +4359,7 @@ ${this._dockHtml()}`;
       </div>
       <div class="toggle-desc cfg-help">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</div>
       <div class="toggle-list">
-        ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside the head while the house is awake")}
+        ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside Nova while the house is awake")}
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak")}
         ${onOff("sentinel_enabled", "Sentinel", "Doors, windows and locks left open")}
@@ -7574,833 +7563,155 @@ ${this._dockHtml()}`;
       card.hidden = !(matchesGroup || matchesSearch);
     });
   }
-  // ─── Hologram: the hero's WebGL bust ────────────────────────────────────
-  // A head, neck and shoulders drawn as glowing contour lines of gold
-  // points, with a soft bloom. It needs WebGL 2; without it _initCore()
-  // falls back to the canvas 2D ember head in core-animation.js.
-  //
-  // States: idle, reasoning (thinking), asleep are driven by the panel
-  // today. listening, speaking and presenting are ready for when Nova sends
-  // the live voice state and data cards; until then nothing selects them.
+  // ─── Nova's avatar: a core and rings (8.79.0) ─────────────────────────
+  // A bright core inside turning broken rings, the same mark as the icon,
+  // drawn in plain canvas 2D in the theme's accent. It replaced the 3D
+  // head. The big outer arcs are drawn by orbit.js on their own canvas; this
+  // draws the core and the two rings round it, and sets how fast and how
+  // bright all of them are for Nova's mood (_coreMood, which _arcsFrame
+  // reads too). Moods:
+  //   idle        slow turning, a calm glow that breathes
+  //   listening   the rings draw in and brighten
+  //   reasoning   rings spin fast, the core pulses ("Thinking…")
+  //   speaking    ripples spread out from the core
+  //   presenting  the rings brighten on the side of the pop-up card
+  //   asleep      dim and slow, the core small
+  // With less motion it is drawn once for each change of mood.
+  static CORE_MOODS = {
+    idle:       { speed: 1,    glow: 0.8,  pulse: 0.35, pulseHz: 0.2, size: 1,    squeeze: 1,    ripple: 0, lean: 0 },
+    listening:  { speed: 0.7,  glow: 1,    pulse: 0.25, pulseHz: 0.6, size: 1.05, squeeze: 0.82, ripple: 0, lean: 0 },
+    reasoning:  { speed: 3.2,  glow: 1,    pulse: 1,    pulseHz: 1.6, size: 1,    squeeze: 1,    ripple: 0, lean: 0 },
+    speaking:   { speed: 1.4,  glow: 0.95, pulse: 0.6,  pulseHz: 2.4, size: 1.05, squeeze: 1,    ripple: 1, lean: 0 },
+    presenting: { speed: 0.6,  glow: 0.9,  pulse: 0.3,  pulseHz: 0.3, size: 0.95, squeeze: 1,    ripple: 0, lean: 1 },
+    asleep:     { speed: 0.25, glow: 0.35, pulse: 0.5,  pulseHz: 0.1, size: 0.78, squeeze: 1,    ripple: 0, lean: 0 },
+  };
 
-  _holoTargets(state) {
-    // glow, warm core, eyes open, lift (thinking sparks), scan, flow speed,
-    // speech waveform, pose bias, breathing, bloom
-    const T = {
-      idle:       { glow: 0.85, warm: 0.45, open: 1,    lift: 0, scan: 0,   flow: 0.35, wave: 0, yaw: 0,   pitch: 0,     roll: 0,    breath: 1,   bloom: 1.0 },
-      listening:  { glow: 1.0,  warm: 0.55, open: 1.12, lift: 0, scan: 0.7, flow: 0.55, wave: 0, yaw: 0,   pitch: -0.04, roll: 0.07, breath: 0.7, bloom: 1.15 },
-      reasoning:  { glow: 1.1,  warm: 1.0,  open: 1,    lift: 1, scan: 1.5, flow: 1.4,  wave: 0, yaw: 0,   pitch: 0.16,  roll: 0,    breath: 0.5, bloom: 1.35 },
-      speaking:   { glow: 1.0,  warm: 0.75, open: 1,    lift: 0, scan: 0,   flow: 0.7,  wave: 1, yaw: 0,   pitch: 0,     roll: 0,    breath: 0.6, bloom: 1.2 },
-      presenting: { glow: 0.9,  warm: 0.5,  open: 1,    lift: 0, scan: 0,   flow: 0.45, wave: 0, yaw: 0.3, pitch: 0.04,  roll: 0,    breath: 1,   bloom: 1.0 },
-      asleep:     { glow: 0.38, warm: 0.15, open: 0,    lift: 0, scan: 0,   flow: 0.08, wave: 0, yaw: 0,   pitch: 0.3,   roll: 0.05, breath: 1.6, bloom: 0.75 },
-    };
-    const key = T[state] ? state : "idle";
-    return { key, target: T[key], rate: { asleep: 0.5, listening: 3, speaking: 3, presenting: 2.2, reasoning: 2.6 }[key] || 2.4 };
-  }
-
-  // The particles, eight floats each: type, three shape values, seed, size,
-  // contour line, flag. Types: 0 head, 1 neck, 2 shoulders, 3 eyes, 4 lips,
-  // 5 drifting dust, 6 speech waveform.
-  _holoParticles(narrow) {
-    const out = [], rnd = Math.random, k = narrow ? 0.55 : 1;
-    const add = (type, a, b, c, size, line, flag) => out.push(type, a, b, c, rnd(), size, line, flag);
-    for (let i = 0; i < 160; i++) add(5, rnd(), rnd(), 0.3 + rnd(), 0.5 + rnd() * 1.5, 0, 0);
-    const waveN = Math.round(520 * k);
-    for (let i = 0; i < waveN; i++) add(6, i / waveN, 0, 0, 1.1, 0, 0);
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 170; i++) {
-        const r = Math.sqrt(rnd()), a = rnd() * 2 * Math.PI;
-        add(3, Math.cos(a) * r, Math.sin(a) * r, side, 0.8 + rnd() * 0.5, 0, 0);
-      }
-    }
-    for (let i = 0; i < 300; i++) add(4, rnd(), (rnd() + rnd() + rnd()) / 1.5 - 1, 0, 0.8 + rnd() * 0.4, 0, 0);
-    const headLines = 64, headPer = Math.round(270 * k);
-    for (let j = 0; j < headLines; j++) {
-      const ph = -1.35 + 2.75 * j / (headLines - 1);
-      for (let i = 0; i < headPer; i++) {
-        const th = -Math.PI + 2 * Math.PI * (i + rnd() * 0.5) / headPer;
-        add(0, th, ph, 0, 1, j, (ph > 0.55 && rnd() < 0.14) ? 1 : 0);
-      }
-    }
-    for (let i = 0, n = Math.round(4500 * k); i < n; i++) {
-      let th = (rnd() * 2 - 1) * Math.PI;
-      if (rnd() < 0.6) th *= 0.45;
-      add(0, th, Math.asin(rnd() * 2 - 1) * 0.985, 0, 0.7, -1, 0);
-    }
-    const neckPer = Math.round(120 * k);
-    for (let j = 0; j < 16; j++) for (let i = 0; i < neckPer; i++) add(1, 2 * Math.PI * (i + rnd() * 0.5) / neckPer, j / 15, 0, 1, j, 0);
-    const bodyLines = 46, bodyPer = Math.round(380 * k);
-    for (let j = 0; j < bodyLines; j++) for (let i = 0; i < bodyPer; i++) add(2, 2 * Math.PI * (i + rnd() * 0.5) / bodyPer, j / (bodyLines - 1), 0, 1, j, 0);
-    for (let i = 0, n = Math.round(3500 * k); i < n; i++) add(2, rnd() * 2 * Math.PI, rnd(), 0, 0.7, -1, 0);
-    return { data: new Float32Array(out), count: out.length / 8 };
-  }
-
-  _holoShaders() {
-    const points = `#version 300 es
-    precision highp float;
-    in vec4 aA; in vec4 aB;
-    uniform vec2 uRes, uC; uniform float uS, uDpr, uT, uFlow, uGlow, uWarm, uOpen, uMouth, uLift, uWave, uVoice, uBreathY, uScanY, uScanK, uSizeK, uDensity;
-    uniform vec3 uHead, uNeck, uBody, cA, cB, cC, cW;
-    out vec4 vCol; out float vSoft;
-    const vec3 L = normalize(vec3(-0.55, 0.55, 0.62));
-    float bump(float v, float m, float s) { float d = v - m; return exp(-d * d / (2. * s * s)); }
-    float lipLine(float x) { float q = x / 0.17; return -0.46 + 0.007 * min(1., q * q); }
-    // how far the face stands out from a plain egg: nose, eye sockets, brows, cheeks, lips, chin, jaw
-    float relief(float x, float y) {
-      float ax = abs(x), lip = lipLine(x), mo = uMouth;
-      return 0.27 * bump(x, 0., 0.055) * bump(y, -0.1, 0.14) + 0.07 * bump(x, 0., 0.08) * bump(y, -0.24, 0.055)
-        - 0.14 * bump(ax, 0.29, 0.1) * bump(y, 0.1, 0.075) + 0.11 * bump(y, 0.25, 0.05) * bump(ax, 0.28, 0.2)
-        + 0.05 * bump(ax, 0.38, 0.12) * bump(y, -0.12, 0.1) + 0.045 * bump(y, lip + 0.035, 0.03) * bump(x, 0., 0.14)
-        + 0.05 * bump(y, lip - 0.045 - mo * 0.08, 0.035) * bump(x, 0., 0.13)
-        - 0.1 * mo * bump(y, lip - mo * 0.04, 0.012 + mo * 0.03) * bump(x, 0., 0.11)
-        + 0.07 * bump(y, -0.8, 0.11) * bump(x, 0., 0.24) + 0.04 * bump(ax, 0.5, 0.09) * bump(y, -0.55, 0.13);
-    }
-    vec3 headAt(float th, float ph) {
-      float cp = cos(ph), dx = sin(th) * cp, dy = sin(ph), dz = cos(th) * cp;
-      float x = dx * 0.76, y = dy, z = dz * 0.86;
-      if (y < 0.) { float k = pow(-y, 1.6); x *= 1. - 0.22 * k; z *= 1. - 0.1 * k; }
-      if (z < 0.) z *= 1.1;
-      if (y > 0.) x *= 1. + 0.05 * y;
-      if (dz > 0.) z += pow(dz, 1.2) * relief(x, y);
-      return vec3(x, y, z);
-    }
-    float frontZ(float x, float y) {
-      float k = y < 0. ? pow(-y, 1.6) : 0.; float x0 = x / (1. - 0.22 * k);
-      float z0 = 0.86 * sqrt(max(0., 1. - (x0 / 0.76) * (x0 / 0.76) - y * y)) * (1. - 0.1 * k);
-      return z0 + pow(max(z0, 1e-4) / 0.86, 1.2) * relief(x, y);
-    }
-    vec3 turn(vec3 p, vec3 pose) {
-      float cy = cos(pose.x), sy = sin(pose.x), cp = cos(pose.y), sp = sin(pose.y), cr = cos(pose.z), sr = sin(pose.z);
-      float x = p.x * cy + p.z * sy, z = -p.x * sy + p.z * cy;
-      float y2 = p.y * cp - z * sp, z2 = p.y * sp + z * cp;
-      return vec3(x * cr - y2 * sr, x * sr + y2 * cr, z2);
-    }
-    vec3 turnAbout(vec3 p, vec3 pose, vec3 pivot) { return turn(p - pivot, pose) + pivot; }
-    void main() {
-      int type = int(aA.x + 0.5); float seed = aB.x, size = aB.y, soft = 0., al = 0.; vec3 col = cA; vec2 px;
-      float twinkle = 0.8 + 0.2 * sin(uT * 2.3 + seed * 6.283);
-      if (type == 5) {
-        px = vec2(fract(aA.y + uFlow * aA.w * 0.03) * uRes.x, aA.z * uRes.y + sin(uT * 0.5 + seed * 6.283) * 8.);
-        al = (0.08 + 0.25 * uGlow) * (0.6 + 0.4 * sin(uT * 1.7 + seed * 6.283)) * 0.7; col = mix(cA, cC, 0.4); soft = 0.6; size *= 1.2;
-      } else {
-        vec3 r, rn = vec3(0., 0., 1.), p = vec3(0.); bool body = false;
-        float warmK = 0., fade = 1., feature = 0., line = aB.z;
-        if (type == 0) {
-          float th = aA.y, ph = aA.z, e = 0.004;
-          p = headAt(th, ph);
-          vec3 n = normalize(cross(headAt(th + e, ph) - p, headAt(th, ph + e) - p));
-          r = turnAbout(p, uHead, vec3(0., -0.65, 0.)); rn = turn(n, uHead); body = true;
-          // light the features: where the surface bends away from the plain egg
-          if (cos(th) > 0.) feature = clamp((1. - dot(n, normalize(vec3(p.x / 0.58, p.y, p.z / 0.74)))) * 9., 0., 1.);
-          warmK = exp(-dot(p - vec3(0., -0.12, 0.72), p - vec3(0., -0.12, 0.72)) * 14.) * 0.6;
-          if (aB.w > 0.5 && uLift > 0.01) {
-            float k = fract(uT * (0.14 + 0.2 * fract(seed * 3.7)) + seed);
-            r.y += k * 1.6 * uLift; r.x += sin(k * 5. + seed * 20.) * 0.18 * k * uLift; fade = mix(1., (1. - k) * 1.4, uLift);
-          }
-        } else if (type == 1) {
-          float u = aA.y, v = aA.z;
-          p = vec3(0.33 * cos(u), -0.62 - v * 0.55, -0.06 + 0.3 * sin(u));
-          r = turnAbout(p, uNeck, vec3(0., -1., 0.)); rn = turn(normalize(vec3(cos(u), 0., sin(u))), uNeck); body = true;
-          warmK = exp(-pow(p.y + 0.95, 2.) * 20.) * 0.35 * step(0., sin(u));
-        } else if (type == 2) {
-          float u = aA.y, v = aA.z, cu = cos(u), su = sin(u);
-          float w = 0.32 + 1.0 * smoothstep(0.0, 0.6, v) * (1. - 0.05 * v), d = 0.27 + 0.22 * smoothstep(0.0, 0.5, v);
-          float x = w * sign(cu) * pow(abs(cu), 0.8), z = -0.1 + d * sign(su) * pow(abs(su), 0.8);
-          z += 0.05 * bump(abs(x), 0.35, 0.18) * bump(v, 0.55, 0.15) * step(0., su);
-          float drop = 0.32 * pow(clamp(abs(x) / 1.3, 0., 1.), 1.6) * (1. - smoothstep(0.35, 0.85, v));
-          p = vec3(x * (1. + uBreathY * 0.4), -1.08 - v * 1.25 - drop, z);
-          float ny = 0.9 * (1. - smoothstep(0.05, 0.45, v)) * abs(x) / w;
-          vec3 n = normalize(vec3(x / (w * w), ny, (z + 0.1) / (d * d)));
-          r = turnAbout(p, uBody, vec3(0., -1.4, 0.)); rn = turn(n, uBody); body = true;
-          fade = 1. - smoothstep(0.55, 1., v);
-          warmK = exp(-dot(p - vec3(0., -1.55, 0.3), p - vec3(0., -1.55, 0.3)) * 6.) * 0.45;
-        } else if (type == 3) {
-          float side = aA.w, u = aA.y, v = aA.z, op = uOpen;
-          float rx = 0.062, ry = rx * (0.08 + 0.92 * min(op, 1.) * 0.75) * (0.9 + 0.2 * max(0., op - 1.) * 5.);
-          float x = side * 0.285 + u * rx, y = 0.1 + v * ry - (1. - min(op, 1.)) * (1. - u * u) * 0.2 * rx;
-          p = vec3(x, y, frontZ(x, y) + 0.03);
-          r = turnAbout(p, uHead, vec3(0., -0.65, 0.));
-          float rr = length(vec2(u, v));
-          col = mix(cA, cC, clamp(1. - rr, 0., 1.));
-          al = (0.35 + 0.5 * uGlow) * (1. - 0.5 * rr) * 0.5 * mix(0.05, 1., min(op, 1.));
-        } else if (type == 4) {
-          float x = -0.15 + 0.3 * aA.y, y = lipLine(x) - uMouth * 0.04 + aA.z * (0.005 + uMouth * 0.04);
-          p = vec3(x, y, frontZ(x, y) + 0.02);
-          r = turnAbout(p, uHead, vec3(0., -0.65, 0.));
-          col = mix(cC, cA, 0.5);
-          al = (0.45 + uMouth * 0.9) * 0.4 * uGlow * smoothstep(0., 0.15, aA.y) * smoothstep(1., 0.85, aA.y);
-        } else {
-          float s = aA.y, env = sin(s * 3.14159);
-          float y = -2.12 + uWave * env * (0.13 * uVoice * sin(s * 34. + uT * 11.) + 0.05 * sin(s * 13. - uT * 6.));
-          r = vec3(-1.75 + 3.5 * s, y, 0.55);
-          col = mix(cA, cW, 0.35 + 0.4 * uVoice * env); al = uWave * 0.5 * env; size *= 1. + uVoice * env * 0.6;
-        }
-        if (body) {
-          float facing = clamp((r.z + 0.9) / 1.8, 0., 1.), diff = max(0., dot(rn, L));
-          float rim = pow(1. - max(0., rn.z), 2.5) * smoothstep(-0.3, 0.2, r.z);
-          float bands = 0.65 + 0.35 * sin(p.y * 24. - uFlow * 3.2 + line * 0.15);
-          float scan = exp(-pow(p.y - uScanY, 2.) * 35.) * uScanK;
-          al = (0.07 + 0.62 * facing * diff * diff + 0.8 * rim + 0.9 * feature * facing) * bands * uGlow + scan * 0.55 * facing;
-          if (line < -0.5) al *= 0.55;
-          if (r.z < -0.12) al *= 0.28;
-          al *= uDensity * twinkle * fade;
-          col = mix(mix(cB, cA, 0.35 + 0.65 * clamp(diff * 0.6 + rim, 0., 1.)), cC, clamp(rim * 0.45 + scan * 0.6, 0., 1.));
-          float wk = clamp(warmK * uWarm, 0., 0.95);
-          col = mix(col, cW, wk); al += wk * 0.85 * uDensity * fade;
-          float blur = clamp(0.05 - r.z, 0., 1.); soft = blur; size *= 1. + blur * 1.3; al *= 1. - 0.55 * blur;
-        }
-        float persp = 5. / (5. - r.z);
-        px = uC + vec2(r.x, -(r.y + uBreathY)) * persp * uS;
-        size *= persp;
-      }
-      vCol = vec4(col, al); vSoft = soft;
-      gl_Position = vec4(px.x / uRes.x * 2. - 1., 1. - px.y / uRes.y * 2., 0., 1.);
-      gl_PointSize = max(1., size * uSizeK * 2.2 * uDpr);
-    }`;
-    const dot = `#version 300 es
-    precision mediump float; in vec4 vCol; in float vSoft; out vec4 o;
-    void main() {
-      vec2 d = gl_PointCoord * 2. - 1.; float r2 = dot(d, d); if (r2 > 1.) discard;
-      float a = exp(-r2 * mix(5., 2.2, vSoft)) * vCol.a; o = vec4(vCol.rgb * a, a);
-    }`;
-    const quad = `#version 300 es
-    in vec2 p; out vec2 uv; void main() { uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0., 1.); }`;
-    const blur = `#version 300 es
-    precision mediump float; in vec2 uv; out vec4 o; uniform sampler2D t; uniform vec2 dir;
-    void main() {
-      vec3 c = texture(t, uv).rgb * 0.227027;
-      c += (texture(t, uv + dir).rgb + texture(t, uv - dir).rgb) * 0.1945946;
-      c += (texture(t, uv + dir * 2.).rgb + texture(t, uv - dir * 2.).rgb) * 0.1216216;
-      c += (texture(t, uv + dir * 3.).rgb + texture(t, uv - dir * 3.).rgb) * 0.054054;
-      c += (texture(t, uv + dir * 4.).rgb + texture(t, uv - dir * 4.).rgb) * 0.016216;
-      o = vec4(c, 1.);
-    }`;
-    // The canvas is transparent, so the hero's own background
-    // shows through; the light is written premultiplied.
-    const compose = `#version 300 es
-    precision highp float; in vec2 uv; out vec4 o;
-    uniform sampler2D scene, bloom; uniform vec2 uRes, uC, uF; uniform float uDpr, uR, uGlow, uWarm, uBloomK, uS; uniform vec3 cA, cW;
-    void main() {
-      vec2 css = vec2(gl_FragCoord.x, uRes.y * uDpr - gl_FragCoord.y) / uDpr;
-      vec3 c = cA * 0.10 * uGlow * pow(max(0., 1. - distance(css, uC) / uR), 1.8);
-      c += cW * 0.08 * uWarm * pow(max(0., 1. - distance(css, uF) / (uS * 0.6)), 2.);
-      c = min(c + texture(scene, uv).rgb + texture(bloom, uv).rgb * uBloomK, vec3(1.));
-      o = vec4(c, max(c.r, max(c.g, c.b)));
-    }`;
-    return { points, dot, quad, blur, compose };
-  }
-
-  _holoProgram(gl, vs, fs) {
-    const shader = (type, src) => {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) || "shader");
-      return s;
-    };
-    const prog = gl.createProgram();
-    gl.attachShader(prog, shader(gl.VERTEX_SHADER, vs));
-    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, fs));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || "link");
-    const u = {};
-    for (let i = 0, n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS); i < n; i++) {
-      const name = gl.getActiveUniform(prog, i).name;
-      u[name] = gl.getUniformLocation(prog, name);
-    }
-    return { prog, u };
-  }
-
-  _holoTarget(gl, w, h) {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
-      [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
-    const fb = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    return { tex, fb, w, h };
-  }
-
-  // Compile and link everything on the hologram's context. Throws when the
-  // browser cannot.
-  _holoSetupGL(h) {
-    const gl = h.canvas.getContext("webgl2", { antialias: false, alpha: true, premultipliedAlpha: true });
-    if (!gl) throw new Error("WebGL 2 is not available");
-    const src = this._holoShaders();
-    h.gl = gl;
-    h.points = this._holoProgram(gl, src.points, src.dot);
-    h.blur = this._holoProgram(gl, src.quad, src.blur);
-    h.compose = this._holoProgram(gl, src.quad, src.compose);
-    h.quad = gl.createVertexArray();
-    gl.bindVertexArray(h.quad);
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    for (const p of [h.blur.prog, h.compose.prog]) {
-      const loc = gl.getAttribLocation(p, "p");
-      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    }
-    h.vao = null; h.built = null; h.fbo = {};
-  }
-
-  _holoUpload(h) {
-    const gl = h.gl;
-    h.built = this._holoParticles(h.narrow);
-    if (h.vao) gl.deleteVertexArray(h.vao);
-    h.vao = gl.createVertexArray();
-    gl.bindVertexArray(h.vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, h.built.data, gl.STATIC_DRAW);
-    const la = gl.getAttribLocation(h.points.prog, "aA"), lb = gl.getAttribLocation(h.points.prog, "aB");
-    gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la, 4, gl.FLOAT, false, 32, 0);
-    gl.enableVertexAttribArray(lb); gl.vertexAttribPointer(lb, 4, gl.FLOAT, false, 32, 16);
-  }
-
-  _holoResize() {
-    const h = this._holo;
-    if (!h || !h.gl || h.stopped) return;
-    const rect = h.canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const wasNarrow = h.narrow;
-    h.W = rect.width; h.H = rect.height;
-    h.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    h.narrow = h.W < 820;   // the hero is one column below 820px
-    h.canvas.width = Math.round(h.W * h.dpr); h.canvas.height = Math.round(h.H * h.dpr);
-    if (!h.built || wasNarrow !== h.narrow) this._holoUpload(h);
-    const gl = h.gl;
-    for (const k of Object.keys(h.fbo)) { gl.deleteTexture(h.fbo[k].tex); gl.deleteFramebuffer(h.fbo[k].fb); }
-    h.fbo.scene = this._holoTarget(gl, h.canvas.width, h.canvas.height);
-    const bw = Math.max(1, h.canvas.width >> 1), bh = Math.max(1, h.canvas.height >> 1);
-    h.fbo.a = this._holoTarget(gl, bw, bh); h.fbo.b = this._holoTarget(gl, bw, bh);
-    if (this._reduceMotion) this._holoFrame(performance.now());
-  }
-
-  _holoLayout(h) {
-    if (h.narrow) { const S = h.H * 0.25; return { S, hx: h.W / 2, hy: h.H * 0.33 }; }
+  // Where the avatar sits and how big it is. S is the core's scale: the
+  // outer arcs in orbit.js are drawn at S × 1.55, 2.25 and 2.8.
+  _coreLayout(h) {
+    if (h.narrow) { const S = h.H * 0.3; return { S, hx: h.W / 2, hy: h.H * 0.5 }; }
     const S = h.H * 0.17;
     return { S, hx: h.W / 2, hy: h.H * 0.34 };   // in the middle of the orbit, clear of the greeting (8.76.0)
   }
 
-  // Try to start the hologram on this canvas. False when WebGL 2 is missing
-  // or fails, so the caller can fall back to the 2D head.
-  _initHologram(canvas) {
-    this._holoStop();
-    const h = {
-      canvas, narrow: false, W: 0, H: 0, dpr: 1, stopped: false, visible: true,
-      cur: Object.assign({}, this._holoTargets(this._coreStateKey).target),
-      face: { t: 0, blink: 1, blinkT: -1, nextBlink: 2, gx: 0, gy: 0, gazeT: 0, gTarget: [0, 0],
-        yaw: 0, pitch: 0, roll: 0, voice: 0, mouth: 0, lookText: 0, dragYaw: 0, dragging: false, dragX: 0 },
-      pointer: { inside: false, x: 0, y: 0 },
-      flow: 0, scanY: 1.2, clock: 0, last: 0,
-    };
-    try { this._holoSetupGL(h); } catch (_) {
-      // A canvas that gave a WebGL context can never give a 2D one, so the
-      // fallback head gets a fresh copy of it.
-      if (h.gl) canvas.replaceWith(canvas.cloneNode(false));
-      return false;
-    }
-    this._holo = h;
-    const fine = typeof window.matchMedia === "function" && window.matchMedia("(pointer: fine)").matches;
-    h.fine = fine;
-    canvas.addEventListener("pointermove", (e) => {
-      const r = canvas.getBoundingClientRect(), f = h.face;
-      h.pointer.x = e.clientX - r.left; h.pointer.y = e.clientY - r.top; h.pointer.inside = true;
-      if (f.dragging) {
-        f.dragYaw = Math.max(-1.2, Math.min(1.2, f.dragYaw + (e.clientX - f.dragX) * 0.012));
-        f.dragX = e.clientX;
-      }
-    });
-    canvas.addEventListener("pointerleave", () => { h.pointer.inside = false; });
-    canvas.addEventListener("pointerdown", (e) => {
-      h.face.dragging = true; h.face.dragX = e.clientX;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* not all browsers */ }
-    });
-    const endDrag = () => { h.face.dragging = false; };
-    canvas.addEventListener("pointerup", endDrag);
-    canvas.addEventListener("pointercancel", endDrag);
-    // A wall tablet can drop the graphics context; rebuild it when it comes back.
-    canvas.addEventListener("webglcontextlost", (e) => {
-      e.preventDefault();
-      if (h.stopped || this._holo !== h) return;
-      if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
-    });
-    canvas.addEventListener("webglcontextrestored", () => {
-      if (h.stopped || this._holo !== h) return;
-      try { this._holoSetupGL(h); } catch (_) { return; }
-      this._holoResize();
-      this._holoKick();
-    });
-    if (typeof ResizeObserver === "function") {
-      h.resizeObs = new ResizeObserver(() => this._holoResize());
-      h.resizeObs.observe(canvas);
-    } else {
-      h.onResize = () => this._holoResize();
-      window.addEventListener("resize", h.onResize);
-    }
-    if (typeof IntersectionObserver === "function") {
-      h.seenObs = new IntersectionObserver((entries) => {
-        h.visible = entries[entries.length - 1].isIntersecting;
-        this._holoKick();
-      });
-      h.seenObs.observe(canvas);
-    }
-    h.onVisibility = () => this._holoKick();
-    document.addEventListener("visibilitychange", h.onVisibility);
-    this._holoResize();
-    if (this._reduceMotion) this._holoFrame(performance.now()); else this._holoKick();
-    return true;
-  }
-
-  // Run the animation loop while the hologram is on screen and the tab is
-  // visible; it stops by itself otherwise and this starts it again.
-  _holoKick() {
-    const h = this._holo;
-    if (!h || h.stopped || this._reduceMotion || this._animHandle) return;
-    if (!h.visible || document.hidden) return;
-    h.last = 0;
-    const loop = (now) => {
-      this._animHandle = null;
-      if (this._holo !== h || h.stopped) return;
-      this._holoFrame(now);
-      if (h.visible && !document.hidden) this._animHandle = requestAnimationFrame(loop);
-    };
-    this._animHandle = requestAnimationFrame(loop);
-  }
-
-  // Release everything the hologram holds: observers, listeners and the
-  // graphics context (browsers allow only a few live ones).
-  _holoStop() {
-    const h = this._holo;
-    if (!h) return;
-    h.stopped = true;
-    this._holo = null;
-    if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
-    if (h.resizeObs) h.resizeObs.disconnect();
-    if (h.seenObs) h.seenObs.disconnect();
-    if (h.onVisibility) document.removeEventListener("visibilitychange", h.onVisibility);
-    if (h.onResize) window.removeEventListener("resize", h.onResize);
-    try { h.gl?.getExtension("WEBGL_lose_context")?.loseContext(); } catch (_) { /* already gone */ }
-  }
-
-  _holoSetState(state) {
-    const h = this._holo;
-    if (!h) return;
-    if (this._reduceMotion) {
-      Object.assign(h.cur, this._holoTargets(state).target);
-      this._holoFrame(performance.now());
-    }
-  }
-
-  _holoUpdateFace(h, dt, key) {
-    const f = h.face, cur = h.cur, lay = this._holoLayout(h);
-    f.t += dt;
-    if (f.blinkT < 0 && f.t > f.nextBlink) f.blinkT = 0;
-    if (f.blinkT >= 0) {
-      f.blinkT += dt;
-      const p = f.blinkT / 0.16;
-      f.blink = p < 1 ? Math.abs(1 - 2 * p) : 1;
-      if (p >= 1) { f.blinkT = -1; f.nextBlink = f.t + 2.8 + Math.random() * 3.5; }
-    }
-    f.lookText = Math.max(0, f.lookText - dt);
-    let tx = 0, ty = 0;
-    if (key === "asleep" || key === "presenting") { tx = 0; ty = 0; }
-    else if (f.lookText > 0 && !h.narrow) { tx = 0.95; ty = 0.05; }               // glance at the new word
-    else if (h.pointer.inside && h.fine && !f.dragging) {
-      tx = Math.max(-1, Math.min(1, (h.pointer.x - lay.hx) / (h.W * 0.4)));
-      ty = Math.max(-0.8, Math.min(0.8, (h.pointer.y - lay.hy) / (h.H * 0.6)));
-    } else if (key === "reasoning") { tx = Math.sin(f.t * 0.5) * 0.35; }
-    else if (key === "idle") {
-      if (f.t > f.gazeT) { f.gTarget = [(Math.random() * 2 - 1) * 0.6, (Math.random() * 2 - 1) * 0.25]; f.gazeT = f.t + 2.2 + Math.random() * 3; }
-      [tx, ty] = f.gTarget;
-    }
-    const k = Math.min(1, dt * 2.5);
-    f.gx += (tx - f.gx) * k; f.gy += (ty - f.gy) * k;
-    if (!f.dragging) f.dragYaw *= Math.pow(0.08, dt);
-    f.yaw = cur.yaw + f.gx * 0.5 + Math.sin(f.t * 0.3) * 0.05 * (1 - cur.lift) + f.dragYaw;
-    f.pitch = cur.pitch + f.gy * 0.25 + Math.sin(f.t * 0.7) * 0.01;
-    f.roll = cur.roll + Math.sin(f.t * 0.23) * 0.015;
-    // A made up voice envelope moves the mouth while speaking, until real
-    // audio levels are wired in.
-    const v = Math.max(0, Math.sin(f.t * 8.7) * Math.sin(f.t * 3.3 + 1) * 0.8 + 0.25 * Math.sin(f.t * 17) + 0.1);
-    const speaking = this._holoTargets(key).target.wave;
-    f.voice += (v * speaking - f.voice) * Math.min(1, dt * 14);
-    f.mouth += ((speaking ? Math.min(0.9, v * 0.9) : 0) - f.mouth) * Math.min(1, dt * 16);
-  }
-
-  _holoFrame(now) {
-    const h = this._holo;
-    if (!h || h.stopped || !h.gl || !h.W || !h.fbo.scene) return;
-    const gl = h.gl, reduce = this._reduceMotion, f = h.face, cur = h.cur;
-    const dt = reduce ? 0 : Math.min(0.05, (now - (h.last || now)) / 1000);
-    h.last = now; h.clock += dt;
-    const { key, target, rate } = this._holoTargets(this._coreStateKey);
-    if (h.key !== key) { if (h.key) f.lookText = 1.6; h.key = key; }
-    const kk = reduce ? 1 : Math.min(1, dt * rate);
-    for (const name of Object.keys(target)) cur[name] += (target[name] - cur[name]) * kk;
-    if (reduce) { f.yaw = cur.yaw + f.dragYaw; f.pitch = cur.pitch; f.roll = cur.roll; f.blink = 1; }
-    else this._holoUpdateFace(h, dt, key);
-    h.flow += dt * cur.flow;
-    h.scanY -= dt * cur.scan * 0.9; if (h.scanY < -2.4) h.scanY = 1.2;
-    const breathY = reduce ? 0 : Math.sin(h.clock * 2 * Math.PI / (key === "asleep" ? 7 : 5)) * 0.018 * cur.breath;
-    const lay = this._holoLayout(h), t = reduce ? 0 : h.clock;
-    const hd = this._theme().head, gold = hd.main, deep = hd.deep, pale = hd.pale, ember = hd.warm;
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, h.fbo.scene.fb); gl.viewport(0, 0, h.fbo.scene.w, h.fbo.scene.h);
-    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
-    const P = h.points.u;
-    gl.useProgram(h.points.prog); gl.bindVertexArray(h.vao);
-    gl.uniform2f(P.uRes, h.W, h.H); gl.uniform2f(P.uC, lay.hx, lay.hy); gl.uniform1f(P.uS, lay.S); gl.uniform1f(P.uDpr, h.dpr);
-    gl.uniform1f(P.uT, t); gl.uniform1f(P.uFlow, h.flow); gl.uniform1f(P.uGlow, cur.glow);
-    gl.uniform1f(P.uWarm, cur.warm * (1 + f.voice * 0.6)); gl.uniform1f(P.uOpen, Math.max(0, cur.open * f.blink));
-    gl.uniform1f(P.uMouth, f.mouth); gl.uniform1f(P.uLift, cur.lift); gl.uniform1f(P.uWave, cur.wave); gl.uniform1f(P.uVoice, f.voice);
-    gl.uniform1f(P.uBreathY, breathY); gl.uniform1f(P.uScanY, h.scanY); gl.uniform1f(P.uScanK, Math.min(1, cur.scan));
-    gl.uniform1f(P.uSizeK, Math.max(0.75, lay.S / 125)); gl.uniform1f(P.uDensity, h.narrow ? 0.6 : 0.42);
-    gl.uniform3f(P.uHead, f.yaw, f.pitch, f.roll);
-    gl.uniform3f(P.uNeck, f.yaw * 0.55, f.pitch * 0.4, f.roll * 0.5);
-    gl.uniform3f(P.uBody, f.yaw * 0.25, 0, f.roll * 0.2);
-    gl.uniform3f(P.cA, ...gold); gl.uniform3f(P.cB, ...deep); gl.uniform3f(P.cC, ...pale); gl.uniform3f(P.cW, ...ember);
-    gl.drawArrays(gl.POINTS, 0, h.built.count);
-    gl.disable(gl.BLEND);
-
-    // bloom: two blurs of the scene at half size
-    gl.useProgram(h.blur.prog); gl.bindVertexArray(h.quad); gl.activeTexture(gl.TEXTURE0); gl.uniform1i(h.blur.u.t, 0);
-    const pass = (from, to, dx, dy) => {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, to.fb); gl.viewport(0, 0, to.w, to.h);
-      gl.bindTexture(gl.TEXTURE_2D, from.tex); gl.uniform2f(h.blur.u.dir, dx / to.w, dy / to.h);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
-    pass(h.fbo.scene, h.fbo.a, 1, 0); pass(h.fbo.a, h.fbo.b, 0, 1); pass(h.fbo.b, h.fbo.a, 2.5, 0); pass(h.fbo.a, h.fbo.b, 0, 2.5);
-
-    const C = h.compose.u;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, h.canvas.width, h.canvas.height);
-    gl.useProgram(h.compose.prog);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, h.fbo.scene.tex); gl.uniform1i(C.scene, 0);
-    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, h.fbo.b.tex); gl.uniform1i(C.bloom, 1);
-    gl.uniform2f(C.uRes, h.W, h.H); gl.uniform2f(C.uC, lay.hx, lay.hy + lay.S * 0.6);
-    gl.uniform2f(C.uF, lay.hx + f.yaw * lay.S * 0.55, lay.hy + lay.S * 0.05); gl.uniform1f(C.uDpr, h.dpr);
-    gl.uniform1f(C.uR, Math.max(h.W, h.H) * 0.6); gl.uniform1f(C.uS, lay.S); gl.uniform1f(C.uGlow, cur.glow); gl.uniform1f(C.uWarm, cur.warm);
-    gl.uniform1f(C.uBloomK, cur.bloom * 1.5); gl.uniform3f(C.cA, ...gold); gl.uniform3f(C.cW, ...ember);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-  // ─── Ember head: the hero's 3D face ─────────────────────────────────────
-  // The fallback when the WebGL hologram (core-hologram.js) cannot start.
-  // A head built from gold sparks, projected in plain canvas 2D (no library,
-  // same idea as NOVA3D). It sits on the left of a full-width stage, turns
-  // and looks around, glances at the state word when it changes, and its
-  // eyes, brows and mouth follow the core state.
-
   _initCore() {
-    let canvas = this.shadowRoot.getElementById("core");
-    if (!canvas) return;
+    this._coreStop();
     this._reduceMotion = (typeof window.matchMedia === "function")
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (this._initHologram(canvas)) return;
-    canvas = this.shadowRoot.getElementById("core");
+    const canvas = this.shadowRoot?.getElementById("core");
     if (!canvas) return;
-    this._canvas = canvas;
-    // Defensive, not just a test accommodation: canvas 2D context creation
-    // can fail (exotic embedded webviews, jsdom in tests) and matchMedia
-    // isn't universally present — both degrade to a static hero instead of
-    // throwing and blanking the whole dashboard.
-    try { this._ctx = canvas.getContext("2d"); } catch (_) { this._ctx = null; }
-    if (!this._ctx) return;
-    this._makeHead();
-    this._resizeCore();
-    if (!this._resizeListener) {
-      this._resizeListener = () => { this._resizeCore(); if (this._reduceMotion) this._coreFrame(performance.now()); };
-      window.addEventListener("resize", this._resizeListener);
-    }
-    canvas.addEventListener("pointerdown", (e) => {
-      this._face.dragging = true; this._face.dragX = e.clientX;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* not all browsers */ }
-    });
-    canvas.addEventListener("pointermove", (e) => {
-      const f = this._face;
-      if (!f.dragging) return;
-      f.dragYaw = Math.max(-1.6, Math.min(1.6, f.dragYaw + (e.clientX - f.dragX) * 0.012));
-      f.dragX = e.clientX;
-      if (this._reduceMotion) this._coreFrame(performance.now());
-    });
-    const endDrag = () => { this._face.dragging = false; };
-    canvas.addEventListener("pointerup", endDrag);
-    canvas.addEventListener("pointercancel", endDrag);
-    this._t0 = performance.now();
-    const loop = (now) => {
-      this._coreFrame(now);
-      if (!this._reduceMotion) this._animHandle = requestAnimationFrame(loop);
+    // canvas 2D can fail (some embedded webviews, jsdom in tests): the hero
+    // then simply has no avatar, and the rest of the page still draws.
+    let ctx = null;
+    try { ctx = canvas.getContext("2d"); } catch (_) { ctx = null; }
+    if (!ctx) return;
+    const c = { canvas, ctx, last: 0, clock: 0, cur: Object.assign({}, this._coreMood()), stopped: false };
+    this._core = c;
+    const frame = now => {
+      c.raf = null;
+      if (c.stopped || !canvas.isConnected || this._currentTab !== "dashboard") { this._coreStop(); return; }
+      if (!document.hidden) this._coreFrame(now);
+      if (this._reduceMotion) return;
+      c.raf = requestAnimationFrame(frame);
     };
-    this._animHandle = requestAnimationFrame(loop);
+    frame(performance.now());
   }
 
-  _resizeCore() {
-    if (!this._canvas || !this._ctx) return;
-    const rect = this._canvas.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this._canvas.width = rect.width * dpr;
-    this._canvas.height = rect.height * dpr;
-    this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this._coreW = rect.width; this._coreH = rect.height;
+  _coreStop() {
+    const c = this._core;
+    if (!c) return;
+    c.stopped = true;
+    if (c.raf) cancelAnimationFrame(c.raf);
+    this._core = null;
   }
 
-  _makeHead() {
-    const rnd = Math.random;
-    // New particles have no surface points yet. Forget the cached expression
-    // key so the next frame rebuilds them; otherwise coming back to the
-    // Command Center after another tab left every particle without geometry
-    // and each animation frame threw.
-    this._headGeoKey = null;
-    this._particles = [];                       // sparks on the head's surface, biased toward the face
-    for (let i = 0; i < 3000; i++) {
-      let th = (rnd() * 2 - 1) * Math.PI; if (rnd() < 0.6) th *= 0.45;
-      this._particles.push({ th, ph: Math.asin(rnd() * 2 - 1) * 0.985, tw: rnd() * 6.28, s: 0.6 + rnd() * 0.9 });
-    }
-    this._orbit = [];                           // cloud orbiting the head
-    for (let i = 0; i < 110; i++) {
-      this._orbit.push({ a: rnd() * 6.28, r: 1.15 + rnd() * 0.75, y: (rnd() * 2 - 1) * 0.9, sp: 0.6 + rnd() * 0.8, s: 0.8 + rnd() * 1.4, ph: rnd() * 6.28 });
-    }
-    this._dust = [];                            // sparks drifting across the whole stage
-    for (let i = 0; i < 110; i++) {
-      this._dust.push({ x: rnd(), y: rnd(), s: 0.5 + rnd() * 1.6, v: 0.3 + rnd(), ph: rnd() * 6.28 });
-    }
-    this._face = {
-      t: 0, blink: 1, blinkT: -1, nextBlink: 2, gx: 0, gy: 0, gazeT: 0, gTarget: [0, 0], talk: 0,
-      yaw: 0, pitch: 0, roll: 0, dragYaw: 0, dragging: false, dragX: 0, lookText: 0,
-    };
+  // The look for the current mood (an unknown mood is idle).
+  _coreMood(state = this._coreStateKey) {
+    return NovaPanel.CORE_MOODS[state] || NovaPanel.CORE_MOODS.idle;
   }
 
   _targetCoreState(state) {
-    const STATES = {
-      idle: { open: 1, wide: 0, brow: 0, smile: 0.45, mouth: 0, speed: 0.20, glow: 0.60, hot: 0.35, count: 60, sleep: 0 },
-      reasoning: { open: 1, wide: 1, brow: 0.8, smile: 0, mouth: 0.35, speed: 0.62, glow: 1.0, hot: 0.85, count: 110, sleep: 0 },
-      asleep: { open: 0, wide: 0, brow: 0, smile: 0.2, mouth: 0, speed: 0.07, glow: 0.30, hot: 0.10, count: 30, sleep: 1 },
-    };
-    // The hologram knows more states (listening, speaking, presenting) than
-    // the fallback head, which shows those as idle.
-    const next = this._holo ? this._holoTargets(state).key : (STATES[state] ? state : "idle");
-    if (this._coreStateKey !== next && this._face) this._face.lookText = 1.6;
-    this._coreStateKey = next;
-    this._targetState = STATES[next] || STATES.idle;
-    if (this._holo) { this._holoSetState(next); return; }
-    if (this._reduceMotion && this._ctx) {
-      Object.assign(this._current, this._targetState);
-      this._coreFrame(performance.now());
-    }
-  }
-
-  _lerp(a, b, t) { return a + (b - a) * t; }
-
-  _colorForHeat(t) {
-    const stops = this._theme().head.ramp;
-    t = Math.max(0, Math.min(1, t));
-    const seg = t * (stops.length - 1);
-    const i = Math.min(stops.length - 2, Math.floor(seg));
-    const f = seg - i;
-    const c0 = stops[i], c1 = stops[i + 1];
-    return [Math.round(this._lerp(c0[0], c1[0], f)), Math.round(this._lerp(c0[1], c1[1], f)), Math.round(this._lerp(c0[2], c1[2], f))];
-  }
-
-  // ── head geometry: ~2 units tall, the face looks down +z, y is up ──
-
-  _lipY(x, E) { return -0.46 + E.smile * 0.07 * Math.min(1, (x / 0.17) * (x / 0.17)); }
-
-  _headDisp(x, y, E) {
-    const g = (v, m, s) => Math.exp(-((v - m) * (v - m)) / (2 * s * s));
-    const ax = Math.abs(x), mo = E.mo, ly = this._lipY(x, E);
-    const browY = 0.27 + E.wide * 0.05 + Math.max(0, E.brow) * 0.03;
-    return 0.2 * g(x, 0, 0.05) * g(y, -0.1, 0.13) + 0.06 * g(x, 0, 0.07) * g(y, -0.23, 0.055)   // nose
-      - 0.1 * g(ax, 0.29, 0.1) * g(y, 0.11, 0.075)                                            // eye sockets
-      + 0.06 * g(y, browY, 0.045) * g(ax, 0.3, 0.17)                                          // brows
-      + 0.05 * g(ax, 0.37, 0.12) * g(y, -0.14, 0.1)                                           // cheeks
-      + 0.055 * g(y, ly + 0.035, 0.03) * g(x, 0, 0.13)                                        // upper lip
-      + 0.06 * g(y, ly - 0.045 - mo * 0.08, 0.035) * g(x, 0, 0.12)                            // lower lip
-      - 0.1 * mo * g(y, ly - mo * 0.04, 0.012 + mo * 0.03) * g(x, 0, 0.11)                    // open mouth
-      + 0.05 * g(y, -0.8, 0.1) * g(x, 0, 0.18);                                               // chin
-  }
-
-  _headPoint(th, ph, E) {
-    const cp = Math.cos(ph), dx = Math.sin(th) * cp, dy = Math.sin(ph), dz = Math.cos(th) * cp;
-    let x = dx * 0.74, y = dy * 0.98, z = dz * 0.84;
-    if (y < 0) { const k = Math.pow(-y / 0.98, 1.6); x *= 1 - 0.3 * k; z *= 1 - 0.12 * k; }
-    if (z < 0) z *= 1.08;
-    if (y > 0) x *= 1 + 0.07 * (y / 0.98);
-    if (dz > 0) z += Math.pow(dz, 1.2) * this._headDisp(x, y, E);
-    return [x, y, z];
-  }
-
-  _faceZ(x, y, E) {
-    const k = y < 0 ? Math.pow(-y / 0.98, 1.6) : 0, x0 = x / (1 - 0.3 * k);
-    const z0 = 0.84 * Math.sqrt(Math.max(0, 1 - (x0 / 0.74) ** 2 - (y / 0.98) ** 2)) * (1 - 0.12 * k);
-    return z0 + Math.pow(z0 / 0.84, 1.2) * this._headDisp(x, y, E);
-  }
-
-  // ── motion: blinks, gaze, head pose ──
-
-  _updateFace(dt, narrow) {
-    const f = this._face, c = this._current, key = this._coreStateKey || "idle";
-    f.t += dt;
-    if (f.blinkT < 0 && f.t > f.nextBlink) f.blinkT = 0;
-    if (f.blinkT >= 0) {
-      f.blinkT += dt;
-      const p = f.blinkT / 0.17;
-      f.blink = p < 1 ? Math.abs(1 - 2 * p) : 1;
-      if (p >= 1) { f.blinkT = -1; f.nextBlink = f.t + 2.5 + Math.random() * 3.5; }
-    }
-    f.lookText = Math.max(0, f.lookText - dt);
-    let tx, ty;
-    if (f.lookText > 0 && key !== "asleep" && !narrow) { tx = 0.95; ty = 0.05; }   // glance at the word
-    else if (key === "reasoning") { tx = Math.sin(f.t * 0.6) * 0.2; ty = 0.8; }      // look down at the feed
-    else if (key === "asleep") { tx = 0; ty = 0; }
-    else {
-      if (f.t > f.gazeT) { f.gTarget = [(Math.random() * 2 - 1) * 0.8, (Math.random() * 2 - 1) * 0.35]; f.gazeT = f.t + 1.8 + Math.random() * 2.5; }
-      [tx, ty] = f.gTarget;
-    }
-    const k = Math.min(1, dt * 3);
-    f.gx += (tx - f.gx) * k; f.gy += (ty - f.gy) * k;
-    if (!f.dragging) f.dragYaw *= Math.pow(0.08, dt);
-    f.yaw = f.gx * 0.42 + Math.sin(f.t * 0.35) * 0.07 * (1 - c.sleep) + f.dragYaw;
-    f.pitch = f.gy * 0.28 + c.sleep * 0.3 + Math.sin(f.t * 0.9) * 0.015 * c.sleep;
-    f.roll = c.sleep * 0.14 + Math.sin(f.t * 0.27) * 0.02;
+    this._coreStateKey = NovaPanel.CORE_MOODS[state] ? state : "idle";
+    // With less motion nothing animates, so draw the new mood at once.
+    if (this._reduceMotion && this._core) this._coreFrame(performance.now());
+    if (this._reduceMotion && this._arcsCtx) this._arcsStop(), this._arcsStart();
   }
 
   _coreFrame(now) {
-    if (!this._ctx || !this._targetState || !this._face) return;
-    const reduce = this._reduceMotion;
-    const dt = reduce ? 0 : Math.min(0.05, (now - (this._t0 || now)) / 1000);
-    this._t0 = now;
-    const c = this._current, t = this._targetState, k = reduce ? 1 : Math.min(1, dt * 2.4);
-    for (const key of Object.keys(t)) c[key] = this._lerp(c[key] ?? t[key], t[key], k);
-
-    const ctx = this._ctx, W = this._coreW, H = this._coreH;
-    if (!W || !H) { this._resizeCore(); return; }
-    const narrow = W < 820;   // the hero is one column below 820px
-    const f = this._face;
-    if (reduce) {
-      f.blink = 1; f.gx = 0; f.gy = this._coreStateKey === "reasoning" ? 0.8 : 0;
-      f.yaw = f.dragYaw; f.pitch = f.gy * 0.28 + c.sleep * 0.3; f.roll = c.sleep * 0.14;
-    } else this._updateFace(dt, narrow);
-    const secs = reduce ? 0 : now / 1000;
-    const rgba = (col, a) => `rgba(${col[0]},${col[1]},${col[2]},${a})`;
+    const c = this._core;
+    if (!c) return;
+    const { canvas, ctx } = c;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    if (!W || !H) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
-    // stage: wide glow behind the head, sparks drifting across the panel
-    const size = narrow ? Math.min(W, H) : H * 0.76;
-    const hx = W / 2, hy = narrow ? H / 2 : H * 0.36;   // in the middle of the orbit (8.76.0)
-    const hc = this._colorForHeat(Math.min(1, c.hot * 0.8 + 0.2));
-    const wide = ctx.createRadialGradient(hx, hy, 0, hx, hy, Math.max(W, H) * 0.75);
-    wide.addColorStop(0, rgba(hc, 0.16 * c.glow)); wide.addColorStop(1, rgba(this._theme().head.fade, 0));
-    ctx.fillStyle = wide; ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = "lighter";
-    const dustN = Math.round(this._dust.length * Math.max(0.3, Math.min(1, c.count / 110)));
-    const dustC = this._colorForHeat(0.55 + c.hot * 0.3);
-    for (let i = 0; i < dustN; i++) {
-      const d = this._dust[i];
-      d.x += dt * c.speed * d.v * 0.05; if (d.x > 1.02) d.x -= 1.04;
-      ctx.fillStyle = rgba(dustC, (0.1 + 0.35 * c.glow) * (0.6 + 0.4 * Math.sin(secs * 1.7 + d.ph)));
-      ctx.beginPath(); ctx.arc(d.x * W, d.y * H + Math.sin(secs * 0.6 + d.ph) * 8, d.s, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalCompositeOperation = "source-over";
+    // Ease every value towards the mood, so changes glide.
+    const dt = c.last ? Math.min(0.1, (now - c.last) / 1000) : 0;
+    c.last = now;
+    const target = this._coreMood();
+    const k = this._reduceMotion ? 1 : 1 - Math.exp(-dt * 2.5);
+    for (const key of Object.keys(target)) c.cur[key] += (target[key] - c.cur[key]) * k;
+    const m = c.cur;
+    c.clock += dt * m.speed;
+    const t = this._reduceMotion ? 0 : c.clock, wall = this._reduceMotion ? 0 : now / 1000;
 
-    // camera
-    const S = size * 0.32, D = 4.2, ox = hx, oy = hy + S * 0.06;
-    const cyw = Math.cos(f.yaw), syw = Math.sin(f.yaw), cpt = Math.cos(f.pitch), spt = Math.sin(f.pitch), crl = Math.cos(f.roll), srl = Math.sin(f.roll);
-    const rot = (p) => {
-      const x = p[0] * cyw + p[2] * syw, z = -p[0] * syw + p[2] * cyw;
-      const y2 = p[1] * cpt - z * spt, z2 = p[1] * spt + z * cpt;
-      return [x * crl - y2 * srl, x * srl + y2 * crl, z2];
-    };
-    const proj = (r) => { const s = D / (D - r[2]); return [ox + r[0] * s * S, oy - r[1] * s * S, s]; };
-    const E = { open: Math.max(0, c.open * f.blink), wide: c.wide, brow: c.brow, smile: c.smile, mo: Math.min(1, c.mouth) };
+    const { S, hx, hy } = this._coreLayout({ W, H, narrow: W < 820 });
+    const head = this._theme().head;
+    const rgb = (v, a) => `rgba(${v.map(x => Math.round(x * 255)).join(",")},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+    const main = head.main, pale = head.pale, deep = head.deep;
+    const beat = 1 + m.pulse * 0.08 * Math.sin(wall * Math.PI * 2 * m.pulseHz);
+    const R = S * 0.5 * m.size * beat;
 
-    const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, size * 0.52);
-    halo.addColorStop(0, rgba(hc, 0.5 * c.glow)); halo.addColorStop(1, rgba(this._theme().head.fade, 0));
-    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(hx, hy, size * 0.52, 0, Math.PI * 2); ctx.fill();
+    // A soft glow behind everything.
+    const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, S * 1.4);
+    halo.addColorStop(0, rgb(main, 0.28 * m.glow)); halo.addColorStop(1, rgb(main, 0));
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(hx, hy, S * 1.4, 0, Math.PI * 2); ctx.fill();
 
-    ctx.globalCompositeOperation = "lighter";
-    const orbitN = Math.min(this._orbit.length, Math.round(c.count * 0.8));
-    const orbitC = this._colorForHeat(c.hot * 0.7 + 0.25);
-    const drawOrbit = (front) => {
-      for (let i = 0; i < orbitN; i++) {
-        const p = this._orbit[i];
-        if (!front) p.a += c.speed * p.sp * dt * 1.4;
-        const r = p.r + Math.sin(secs * 1.3 + p.ph) * 0.05, z = Math.sin(p.a) * r;
-        if ((z > 0) !== front) continue;
-        const q = proj([Math.cos(p.a) * r, p.y * 0.8, z]), dep = (z + 2) / 4;
-        ctx.fillStyle = rgba(orbitC, (0.25 + 0.55 * c.glow) * (0.4 + 0.6 * dep) * (front ? 0.9 : 0.8));
-        ctx.beginPath(); ctx.arc(q[0], q[1], p.s * (0.6 + 0.6 * dep), 0, Math.PI * 2); ctx.fill();
-      }
-    };
-    drawOrbit(false);
-
-    // surface sparks, lit from the upper left
-    // Surface points and normals only depend on the expression (not on the
-    // pose or blinks), so they are rebuilt only when the expression moves.
-    const geoKey = [E.wide, E.brow, E.smile, E.mo].map(v => v.toFixed(3)).join("|");
-    if (geoKey !== this._headGeoKey) {
-      this._headGeoKey = geoKey;
-      const e = 0.004;
-      for (const p of this._particles) {
-        const a = this._headPoint(p.th, p.ph, E), b = this._headPoint(p.th + e, p.ph, E), cc = this._headPoint(p.th, p.ph + e, E);
-        const u0 = b[0] - a[0], u1 = b[1] - a[1], u2 = b[2] - a[2], v0 = cc[0] - a[0], v1 = cc[1] - a[1], v2 = cc[2] - a[2];
-        const n0 = u1 * v2 - u2 * v1, n1 = u2 * v0 - u0 * v2, n2 = u0 * v1 - u1 * v0, nl = Math.hypot(n0, n1, n2) || 1;
-        p.lp = a; p.ln = [n0 / nl, n1 / nl, n2 / nl];
+    // Speaking: ripples spread out from the core and fade.
+    if (m.ripple > 0.02) {
+      for (let i = 0; i < 3; i++) {
+        const p = ((wall * 0.9) + i / 3) % 1;
+        ctx.strokeStyle = rgb(main, (1 - p) * 0.5 * m.ripple); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(hx, hy, R * (1.05 + p * 1.6), 0, Math.PI * 2); ctx.stroke();
       }
     }
-    const L = [-0.7385, 0.4431, 0.4924];
-    for (const p of this._particles) {
-      const ra = rot(p.lp), rn = rot(p.ln), sg = rn[2] < 0 ? -1 : 1;
-      const n0 = rn[0] * sg, n1 = rn[1] * sg, n2 = rn[2] * sg;
-      const q = proj(ra);
-      const facing = Math.max(0, Math.min(1, (ra[2] + 0.9) / 1.8));
-      const diff = Math.max(0, n0 * L[0] + n1 * L[1] + n2 * L[2]);
-      const tw = 0.75 + 0.25 * Math.sin(secs * (2 + c.speed * 4) + p.tw);
-      const al = Math.min(1, (0.02 + 0.95 * facing * facing * diff * diff) * (0.5 + 0.6 * c.glow) * tw);
-      if (al < 0.01) continue;
-      const sz = p.s * 1.15 * (0.6 + 0.6 * facing) * Math.max(0.7, size / 420);
-      ctx.fillStyle = rgba(this._colorForHeat(0.35 + diff * 0.55 + c.hot * 0.2), al.toFixed(3));
-      ctx.fillRect(q[0] - sz / 2, q[1] - sz / 2, sz, sz);
-    }
 
-    // mouth: a glowing seam between the lips
-    const mouthC = this._colorForHeat(0.75 + c.hot * 0.25);
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.strokeStyle = rgba(mouthC, Math.min(0.9, 0.25 + E.mo * 1.2));
-    ctx.lineWidth = Math.max(1, S * (0.008 + E.mo * 0.05));
-    ctx.beginPath();
-    for (let i = 0; i <= 12; i++) {
-      const x = -0.15 + 0.3 * i / 12, y = this._lipY(x, E) - E.mo * 0.04;
-      const q = proj(rot([x, y, this._faceZ(x, y, E) + 0.02]));
-      if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]);
-    }
-    ctx.stroke();
-    ctx.globalCompositeOperation = "source-over";
-
-    // eyes: glowing, squash shut to a soft arc, lids open wide on events
-    const eyeC = this._colorForHeat(0.8 + c.hot * 0.2);
-    for (const side of [-1, 1]) {
-      const ex = side * 0.29, ey = 0.115;
-      const q = proj(rot([ex, ey, this._faceZ(ex, ey, E) + 0.05]));
-      const rx = 0.105 * S * q[2] * (1 + E.wide * 0.2) * 0.8, ry = rx * (0.07 + 0.93 * E.open) * (1 + E.wide * 0.25);
-      ctx.save(); ctx.translate(q[0], q[1]); ctx.rotate(f.roll);
-      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * 2.4);
-      glow.addColorStop(0, rgba(eyeC, 0.35 * c.glow * (0.3 + 0.7 * E.open))); glow.addColorStop(1, rgba(eyeC, 0));
-      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, rx * 2.4, 0, Math.PI * 2); ctx.fill();
-      if (E.open > 0.12) {
-        ctx.scale(1, ry / rx);
-        const core = ctx.createRadialGradient(f.gx * rx * 0.2, f.gy * rx * 0.25, 0, 0, 0, rx);
-        core.addColorStop(0, rgba(this._theme().head.eye, 0.95 * c.glow + 0.05));
-        core.addColorStop(0.35, rgba(eyeC, 0.95)); core.addColorStop(1, rgba(eyeC, 0.15));
-        ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
+    // Two rings round the core: one broken, one dotted, turning opposite ways.
+    // Presenting brightens the side the card is on (the right).
+    ctx.lineCap = "round";
+    const rings = [
+      [0.92, 1, [[0, 1.3], [1.9, 2.5], [3.2, 4.9], [5.4, 5.9]], 3, 0.85],
+      [0.72, -1.6, null, 2, 0.6],
+    ];
+    for (const [rk, dir, pieces, w, alpha] of rings) {
+      const r = S * rk * m.squeeze, rot = t * 0.5 * dir;
+      if (pieces) {
+        for (const [a0, a1] of pieces) {
+          const mid = (a0 + a1) / 2 + rot;
+          const face = 0.5 + 0.5 * Math.cos(mid);          // 1 on the right side
+          const lit = alpha * m.glow * (1 + m.lean * (face - 0.5) * 1.1);
+          ctx.strokeStyle = rgb(main, lit); ctx.lineWidth = w;
+          ctx.beginPath(); ctx.arc(hx, hy, r, a0 + rot, a1 + rot); ctx.stroke();
+        }
       } else {
-        ctx.strokeStyle = rgba(eyeC, 0.55 + 0.35 * c.glow); ctx.lineWidth = Math.max(1.2, rx * 0.18); ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(-rx * 0.9, 0); ctx.quadraticCurveTo(0, rx * 0.55, rx * 0.9, 0); ctx.stroke();
+        ctx.setLineDash([2, 7]); ctx.strokeStyle = rgb(pale, alpha * m.glow); ctx.lineWidth = w;
+        ctx.beginPath(); ctx.arc(hx, hy, r, rot, rot + Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
       }
-      ctx.restore();
     }
 
-    ctx.globalCompositeOperation = "lighter";
-    drawOrbit(true);
-    ctx.globalCompositeOperation = "source-over";
+    // The core: a glossy ball, lit from the top left.
+    const core = ctx.createRadialGradient(hx - R * 0.3, hy - R * 0.35, R * 0.05, hx, hy, R);
+    core.addColorStop(0, rgb(pale, 0.95 * (0.5 + 0.5 * m.glow)));
+    core.addColorStop(0.45, rgb(main, 0.95 * (0.45 + 0.55 * m.glow)));
+    core.addColorStop(1, rgb(deep, 0.9));
+    ctx.fillStyle = core; ctx.beginPath(); ctx.arc(hx, hy, R, 0, Math.PI * 2); ctx.fill();
+    const rim = ctx.createRadialGradient(hx, hy, R * 0.9, hx, hy, R * 1.5);
+    rim.addColorStop(0, rgb(main, 0.45 * m.glow)); rim.addColorStop(1, rgb(main, 0));
+    ctx.fillStyle = rim; ctx.beginPath(); ctx.arc(hx, hy, R * 1.5, 0, Math.PI * 2); ctx.fill();
   }
 
   // ── state word: types itself out when the state changes ──
@@ -9002,8 +8313,8 @@ ${this._dockHtml()}`;
     el.classList.add("hero-latest-in");
   }
 
-  // ── The arcs behind the head ──
-  // Three broken arcs turn round the head, the middle one the other way,
+  // ── The arcs round the avatar ──
+  // Three broken arcs turn round Nova's core, the middle one the other way,
   // and fade out behind the greeting. With less motion they are drawn once.
   _arcsStart() {
     const canvas = this.shadowRoot?.getElementById("heroArcs");
@@ -9040,8 +8351,14 @@ ${this._dockHtml()}`;
     if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    const { hx, hy, S } = this._holoLayout({ W, H, narrow: W < 820 });
-    const t = this._reduceMotion ? 0 : now / 1000;
+    const { hx, hy, S } = this._coreLayout({ W, H, narrow: W < 820 });
+    // The arcs turn and glow with Nova's mood (core-rings.js): fast while
+    // thinking, slow and dim asleep.
+    const dt = this._arcsLast ? Math.min(0.1, (now - this._arcsLast) / 1000) : 0;
+    this._arcsLast = now;
+    const mood = this._core?.cur || this._coreMood();
+    this._arcsClock = (this._arcsClock || 0) + dt * mood.speed;
+    const t = this._reduceMotion ? 0 : this._arcsClock, lit = 0.4 + 0.6 * mood.glow;
     const a = this._theme().head.main.map(v => Math.round(v * 255));
     const col = alpha => `rgba(${a[0]},${a[1]},${a[2]},${alpha})`;
     ctx.lineCap = "round";
@@ -9050,7 +8367,7 @@ ${this._dockHtml()}`;
      [2.25, -0.22, [[0.4, 1.9], [2.6, 3.0], [3.6, 5.2]], 1.5, 0.35],
      [2.8, 0.12, [[0, 0.5], [1.2, 2.8], [4.0, 4.4], [4.9, 6.0]], 1, 0.22]].forEach(([k, speed, pieces, w, alpha]) => {
       const r = S * k, rot = t * speed;
-      ctx.lineWidth = w; ctx.strokeStyle = col(alpha);
+      ctx.lineWidth = w; ctx.strokeStyle = col(alpha * lit);
       for (const [a0, a1] of pieces) {
         ctx.beginPath(); ctx.arc(hx, hy, r, a0 + rot, a1 + rot); ctx.stroke();
         const ex = hx + Math.cos(a1 + rot) * r, ey = hy + Math.sin(a1 + rot) * r;
@@ -10932,10 +10249,8 @@ ${this._dockHtml()}`;
   //   (open tab, buttons), on-accent the text on it, gold the accent as text
   //   (links, focus, "on"). dark-a and black are the dark panel (Energy),
   //   with on-dark text. c-* are the energy flow's four series.
-  //   head: ramp is the canvas head's four steps from dim to bright; main,
-  //   deep, pale and warm are the WebGL head's colours (0 to 1); eye is the
-  //   bright centre of the canvas head's eyes, and fade the colour its glow
-  //   fades out towards.
+  //   head: the avatar's colours (0 to 1): main is the accent, pale its
+  //   bright highlight and deep its shadow (core-rings.js).
   static THEME_DEFAULT = "deep_teal";
   static THEMES = this._themeTable({
     deep_teal: { label: "Deep Teal", style: "dark", base: "#03313A", accent: "#8FFFE0" },
@@ -11003,11 +10318,7 @@ ${this._dockHtml()}`;
       "orb-deep": toHex(mix(A, B, 0.6)), "media-bg": toHex(black), "glow-top": toHex(mix(B, W, 0.16)), "hero-end": toHex(mix(B, K, 0.2)),
     };
     const unit = c => c.map(v => +(v / 255).toFixed(3));
-    const head = {
-      ramp: [mix(A, B, 0.8), mix(A, B, 0.6), A, mix(A, W, 0.65)].map(c => c.map(Math.round)),
-      main: unit(A), deep: unit(mix(A, B, 0.6)), pale: unit(mix(A, W, 0.65)), warm: unit(mix(A, W, 0.35)),
-      eye: mix(A, W, 0.82).map(Math.round), fade: mix(B, K, 0.3).map(Math.round),
-    };
+    const head = { main: unit(A), deep: unit(mix(A, B, 0.6)), pale: unit(mix(A, W, 0.65)) };
     return { tokens, head };
   }
 
@@ -11111,8 +10422,7 @@ ${this._dockHtml()}`;
       .pc-rows{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line-soft);padding-top:8px}
       .pc-row{display:flex;justify-content:space-between;gap:12px;font-family:var(--font-body);font-size:var(--t-sm);color:var(--ink-dim)}
       .pc-row b{font-weight:500;color:var(--gold-pale)}
-      canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
-      canvas.core:active{cursor:grabbing}
+      canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
       .hero-copy{position:absolute;left:50%;bottom:5%;width:min(48%,540px);transform:translateX(-50%);pointer-events:none;
         display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
       .hero-word{font-family:var(--font-display);font-weight:700;font-size:clamp(36px,5cqw,56px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
@@ -11125,7 +10435,7 @@ ${this._dockHtml()}`;
       @container (max-width:819px){
         .hero-stage{height:auto;display:flex;flex-direction:column}
         canvas.hero-arcs{display:none}
-        canvas.core{position:relative;height:260px}
+        canvas.core{position:relative;height:220px}
         .present-card{position:relative;left:auto;right:auto;top:auto;width:auto;transform:none;margin:0 16px 14px;align-items:center;text-align:center}
         .pc-row{width:100%}
         .hero-copy{position:relative;left:auto;right:auto;bottom:auto;width:auto;transform:none;align-items:center;text-align:center;padding:0 16px 16px}

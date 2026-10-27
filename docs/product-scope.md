@@ -16,7 +16,7 @@ need nothing else.
 | --- | --- |
 | Conversation, voice and text | Needs an AI provider. |
 | Chat tab | Typed conversation from the panel, one thread per user. Unlock, open and disarm need a tap on your phone. |
-| Command Center | The hologram head and rotating cards. Turn the cards off under Settings, General. |
+| Command Center | Nova's core and rings, and rotating cards. Turn the cards off under Settings, General. |
 | Local commands and status answers | These work offline through the Local Mind. |
 | Confirmations and "repeat that" | |
 | Voice phrases | These do nothing until you save a phrase. |

@@ -85,7 +85,7 @@ A few advanced settings have no control in either place and are only set in
 
 ## A tour of the panel
 
-- **Command Center.** The hologram head with live cards round it, and a bar
+- **Command Center.** Nova's core and rings with live cards round it, and a bar
   of five buttons at the bottom: Home, Nova (what Nova did, and Ask Nova),
   Areas, Goals and More (Operational Mode, Quick Actions, Cognitive Core,
   camera snapshots and the Muted list).
@@ -114,18 +114,19 @@ A few advanced settings have no control in either place and are only set in
   Person Routines.
 - **Energy.** See [Energy](energy.md).
 
-The Command Center is Nova's only dashboard. Its hologram head, a head, neck
-and shoulders drawn in glowing lines in the theme's colour, shows what Nova is
-doing (idle, thinking or asleep), so it looks the same whether you have no
-cameras or twelve. It breathes, blinks, follows the mouse and can be turned by
-dragging. A browser without WebGL 2 shows a simpler head instead.
+The Command Center is Nova's only dashboard. In the middle is Nova itself: a
+glowing core inside turning broken rings, in the theme's colour, the same mark
+as the icon. It shows what Nova is doing. At rest it turns slowly and
+breathes; while Nova is thinking the rings spin fast and the core pulses;
+when it speaks, ripples spread from the core; when a card pops up, the rings
+brighten on that side; and when the house is asleep it goes dim and slow.
 
-The head sits in the middle, with broken arcs turning slowly round it and
+Bigger broken arcs turn round it, at the same pace as its mood, with
 five live cards: Security (locks, the alarm or doors), Who's home, Energy
 (solar now and the battery), Indoor (temperature and humidity) and Weather.
-Tap one to see more beside the head. Under the greeting is Nova's latest
+Tap one to see more beside Nova. Under the greeting is Nova's latest
 line, the newest of the sentences in the Nova panel (below). On a phone or a narrow window
-the five cards sit under the head in two columns, without the arcs. With
+the five cards sit under Nova in two columns, without the arcs. With
 "reduce motion" turned on in your device, the arcs and cards stay still.
 
 While the house is awake, a card of live figures also comes round beside the

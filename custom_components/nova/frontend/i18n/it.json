@@ -383,7 +383,6 @@
   "since {date}": "dal {date}",
   "{agree} of {n} verdicts agree": "{agree} verdetti su {n} concordano",
   "Cards on the Command Center": "Schede nel Centro di Comando",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Ogni tanto mostra accanto alla testa una scheda con dati in tempo reale mentre la casa è sveglia",
   "Arming": "Inserimento",
   "Disarmed": "Disinserito",
   "Triggered": "Scattato",
@@ -517,5 +516,6 @@
   "Plum Dusk": "Crepuscolo prugna",
   "Cocoa Bark": "Corteccia di cacao",
   "Forest Mint": "Menta di bosco",
-  "Slate Harbour": "Porto d’ardesia"
+  "Slate Harbour": "Porto d’ardesia",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Ogni tanto mostra accanto a Nova una scheda con i valori in tempo reale, finché la casa è sveglia"
 }

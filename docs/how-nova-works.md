@@ -116,9 +116,9 @@ intrusion need a tap on your phone, as for voice. A message is limited to
 
 ### Command Center cards
 
-The panel's hologram head is drawn with WebGL 2, with the older head as a
-fallback. Cards of live figures come round beside it: about 15 seconds after
-the page opens, then a new one every 20 seconds, each shown for 15. The
+Nova's core and rings on the Command Center are drawn with plain canvas 2D,
+so they need no graphics card features. Cards of live figures come round beside it: about 15 seconds after
+the page opens, then a new one every 9 seconds, each shown for 8. The
 kinds are energy, security, clock, who is home, next event, reminders,
 weather and indoor. A kind with nothing to show is skipped. Most are built in
 the panel from readings it already has. Two commands feed it:

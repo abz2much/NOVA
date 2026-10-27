@@ -3,16 +3,11 @@
   _render() {
     // Tearing down and rebuilding the DOM (now happening on every tab
     // switch, not just once) orphans the previous canvas — its
-    // requestAnimationFrame loop and resize listener would otherwise keep
-    // running forever on a detached, invisible canvas, compounding every
-    // time someone switches tabs. Stop it before _initCore() starts a
-    // fresh one.
-    this._holoStop();
+    // requestAnimationFrame loop would otherwise keep running on a
+    // detached, invisible canvas, compounding every time someone switches
+    // tabs. Stop it before _initCore() starts a fresh one.
+    this._coreStop();
     this._presentStop();
-    if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
-    if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
-    this._ctx = null;
-    this._canvas = null;
 
     const root = this.shadowRoot;
     const focus = this._focusMark(root);

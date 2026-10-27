@@ -1212,7 +1212,6 @@
   "since {date}": "sinds {date}",
   "{agree} of {n} verdicts agree": "{agree} van {n} oordelen zijn eens",
   "Cards on the Command Center": "Kaarten in het commandocentrum",
-  "Now and then, show a card of live figures beside the head while the house is awake": "Toon af en toe een kaart met actuele cijfers naast het hoofd zolang het huis wakker is",
   "Arming": "Inschakelen",
   "Disarmed": "Uitgeschakeld",
   "Triggered": "Afgegaan",
@@ -1354,5 +1353,6 @@
   "Plum Dusk": "Pruimenschemer",
   "Cocoa Bark": "Cacaobast",
   "Forest Mint": "Bosmunt",
-  "Slate Harbour": "Leisteenhaven"
+  "Slate Harbour": "Leisteenhaven",
+  "Now and then, show a card of live figures beside Nova while the house is awake": "Toont af en toe naast Nova een kaart met actuele cijfers zolang het huis wakker is"
 }
