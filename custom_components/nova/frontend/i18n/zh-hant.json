@@ -1271,10 +1271,6 @@
   "Second thing": "第二件事",
   "Theme": "主題",
   "Deep Teal": "深青",
-  "Twilight Denim": "暮色丹寧",
-  "Pine Mist": "松林薄霧",
-  "Smoked Lilac": "煙燻丁香",
-  "Classic": "經典",
   "Add goal": "新增目標",
   "Add resident": "新增住戶",
   "Agree": "一致",
@@ -1348,5 +1344,10 @@
   "I worked on your goal “{title}”: {result}": "我處理了你的目標「{title}」：{result}",
   "More": "更多",
   "Open chat": "開啟聊天",
-  "See everything": "查看全部"
+  "See everything": "查看全部",
+  "Midnight Signal": "午夜訊號",
+  "Plum Dusk": "梅子暮色",
+  "Cocoa Bark": "可可樹皮",
+  "Forest Mint": "森林薄荷",
+  "Slate Harbour": "石板港灣"
 }

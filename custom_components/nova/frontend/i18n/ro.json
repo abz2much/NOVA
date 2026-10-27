@@ -439,10 +439,6 @@
   "Second thing": "Al doilea lucru",
   "Theme": "Temă",
   "Deep Teal": "Turcoaz închis",
-  "Twilight Denim": "Denim de amurg",
-  "Pine Mist": "Ceață de pin",
-  "Smoked Lilac": "Liliac fumuriu",
-  "Classic": "Clasic",
   "Add goal": "Adaugă obiectiv",
   "Add resident": "Adaugă rezident",
   "Agree": "De acord",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Am lucrat la obiectivul tău „{title}”: {result}",
   "More": "Mai mult",
   "Open chat": "Deschide chatul",
-  "See everything": "Vezi tot"
+  "See everything": "Vezi tot",
+  "Midnight Signal": "Semnal de miezul nopții",
+  "Plum Dusk": "Amurg de prună",
+  "Cocoa Bark": "Scoarță de cacao",
+  "Forest Mint": "Mentă de pădure",
+  "Slate Harbour": "Port de ardezie"
 }

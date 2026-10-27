@@ -439,10 +439,6 @@
   "Second thing": "Druhá vec",
   "Theme": "Motív",
   "Deep Teal": "Hlboká modrozelená",
-  "Twilight Denim": "Večerná džínsová",
-  "Pine Mist": "Borovicová hmla",
-  "Smoked Lilac": "Dymová orgovánová",
-  "Classic": "Klasický",
   "Add goal": "Pridať cieľ",
   "Add resident": "Pridať obyvateľa",
   "Agree": "Zhoda",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Pracovala som na vašom cieli „{title}“: {result}",
   "More": "Viac",
   "Open chat": "Otvoriť chat",
-  "See everything": "Zobraziť všetko"
+  "See everything": "Zobraziť všetko",
+  "Midnight Signal": "Polnočný signál",
+  "Plum Dusk": "Slivkový súmrak",
+  "Cocoa Bark": "Kakaová kôra",
+  "Forest Mint": "Lesná mäta",
+  "Slate Harbour": "Bridlicový prístav"
 }

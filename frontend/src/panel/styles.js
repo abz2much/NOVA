@@ -23,9 +23,8 @@
         .new-pl-chip > button,.new-mem-forget,.new-doclib-del,.fpn-ent-del{min-width:44px}
         .vp-link{min-height:0}
       }
-      .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
-        padding:20px 16px 40px;min-height:100vh;
-        background-image:radial-gradient(ellipse 900px 500px at 50% -8%, color-mix(in srgb,var(--glow-top) 50%,transparent) 0%, transparent 60%);}
+      .wrap{background:var(--page);background-color:var(--bg);color:var(--ink);font-family:var(--font-body);
+        padding:20px 16px 40px;min-height:100vh}
       .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
@@ -33,18 +32,23 @@
         box-shadow:0 0 14px 1px color-mix(in srgb,var(--ember) 33%,transparent);}
       .brand-name{font-family:var(--font-display);font-size:var(--t-title);font-weight:600}
       .brand-tag{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint);letter-spacing:.06em;text-transform:uppercase}
-      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--hero-end) 87%,transparent));
-        border:1px solid var(--line-soft);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
+      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 18%,transparent),color-mix(in srgb,var(--glass) 6%,transparent));
+        border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 36%,transparent),0 18px 44px color-mix(in srgb,var(--shadow) 45%,transparent);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(520px,54cqw,620px)}
       /* The orbit (8.76.0): arcs behind the head, five cards round it. */
       canvas.hero-arcs{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
       .orbit{position:absolute;inset:0;pointer-events:none}
       .orbit-tile{position:absolute;width:200px;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
-        padding:14px 16px;border-radius:var(--r-tile);border:1px solid var(--line-soft);background:color-mix(in srgb,var(--surface) 82%,transparent);
+        padding:14px 16px;border-radius:var(--r-tile);border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);
+        background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 10%,transparent));
+        box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 10px 26px color-mix(in srgb,var(--shadow) 40%,transparent);
         color:var(--ink);font-family:var(--font-body);text-align:left;cursor:pointer;transition:border-color .6s,box-shadow .6s;animation:orbit-drift 9s ease-in-out infinite}
       .orbit-tile:nth-child(even){animation-duration:11s;animation-delay:-3s}
       .orbit-tile[data-orbit="security"]{left:3%;top:6%}.orbit-tile[data-orbit="home"]{left:1%;top:37%}.orbit-tile[data-orbit="energy"]{left:4%;top:68%}
+      /* Energy sits on a dark panel, as in Oriel. */
+      .orbit-tile[data-orbit="energy"]{background:linear-gradient(180deg,var(--dark-a),var(--black));color:var(--on-dark);border-color:color-mix(in srgb,var(--on-dark) 10%,transparent)}
+      .orbit-tile[data-orbit="energy"] .orbit-cap,.orbit-tile[data-orbit="energy"] .orbit-sub{color:color-mix(in srgb,var(--on-dark) 72%,var(--black))}
       .orbit-tile[data-orbit="climate"]{right:3%;top:6%}.orbit-tile[data-orbit="weather"]{right:1%;top:68%}
       .orbit-cap{font-size:var(--t-cap);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
       .orbit-v{font-size:var(--t-h);font-weight:700;line-height:1.15}
@@ -78,7 +82,7 @@
       .hero-copy{position:absolute;left:50%;bottom:5%;width:min(48%,540px);transform:translateX(-50%);pointer-events:none;
         display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
       .hero-word{font-family:var(--font-display);font-weight:700;font-size:clamp(36px,5cqw,56px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
-        background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
+        background:linear-gradient(100deg,var(--ink),color-mix(in srgb,var(--ink) 78%,var(--ink-dim)));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
       .hero-word.dim{filter:brightness(.62)}
       .hero-caret{display:inline-block;width:.06em;height:.8em;margin-left:.06em;background:var(--gold);vertical-align:-.04em;animation:hero-caret 1s steps(1) infinite}
       @keyframes hero-caret{50%{opacity:0}}
@@ -148,7 +152,9 @@
       .chip.warn .dot{background:var(--warn)}
       .chip b{color:var(--ink);font-weight:600}
       .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
-      .panel{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-card);padding:16px 16px 14px}
+      .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 12%,transparent));background-color:color-mix(in srgb,var(--bg) 40%,transparent);
+        border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);border-radius:var(--r-card);padding:16px 16px 14px;
+        box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 12px 30px color-mix(in srgb,var(--shadow) 38%,transparent)}
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:var(--t-body);font-weight:600}
       .panel-meta{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint)}
@@ -345,10 +351,10 @@
       }
 
       /* Top nav (v7.94.0) */
-      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-tile);padding:4px;flex-basis:100%;order:3}
+      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:color-mix(in srgb,var(--glass) 14%,transparent);border:1px solid color-mix(in srgb,var(--glass) 22%,transparent);border-radius:var(--r-tile);padding:4px;flex-basis:100%;order:3}
       .nav-tab{font-family:var(--font-body);font-size:var(--t-sm);font-weight:600;padding:7px 14px;border-radius:var(--r-ctl);
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
-      .nav-tab.active{background:var(--ember);color:var(--on-accent)}
+      .nav-tab.active{background:var(--ember);background-image:linear-gradient(180deg,color-mix(in srgb,var(--ember) 78%,var(--gold-pale)),var(--ember));color:var(--on-accent);box-shadow:0 4px 14px color-mix(in srgb,var(--ember) 30%,transparent)}
       .nav-tab:not(.active):hover{color:var(--ink)}
       /* A phone shows the tabs as one row that scrolls sideways; the open tab
          is scrolled into view on every draw. */

@@ -1,3 +1,15 @@
+## [8.78.0] Oriel's themes
+
+### Changed
+- **The themes are Oriel's six dark ones:** Deep Teal (still the default), Midnight Signal, Plum Dusk, Cocoa Bark, Forest Mint and Slate Harbour. Each is built from a base and an accent colour by the same rules as Oriel, so both look like one family.
+- **Cards are frosted glass** over a softly lit page, with shadows, instead of flat blocks of one colour.
+- **Text is neutral.** It is no longer tinted with the theme colour, and the greeting is no longer painted in it. The accent now marks only what matters: the open tab, "on" states, links and focus, the arcs and the head.
+- **Energy sits on a dark panel** on the Command Center. Solar and home keep their own colours in every theme; the battery takes the theme colour.
+- The README's theme picture shows the new six.
+
+### Removed
+- **Twilight Denim, Pine Mist, Smoked Lilac and the old orange Classic.** If one of them was picked, the panel shows Deep Teal. Oriel's Classic and its light themes come in a later release.
+
 ## [8.77.1] New icon and README pictures
 
 ### Changed

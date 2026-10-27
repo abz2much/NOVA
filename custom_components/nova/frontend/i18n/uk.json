@@ -439,10 +439,6 @@
   "Second thing": "Друге",
   "Theme": "Тема",
   "Deep Teal": "Глибокий бірюзовий",
-  "Twilight Denim": "Сутінковий денім",
-  "Pine Mist": "Соснова імла",
-  "Smoked Lilac": "Димчастий бузок",
-  "Classic": "Класична",
   "Add goal": "Додати мету",
   "Add resident": "Додати мешканця",
   "Agree": "Збігається",
@@ -516,5 +512,10 @@
   "I worked on your goal “{title}”: {result}": "Я попрацювала над вашою ціллю «{title}»: {result}",
   "More": "Більше",
   "Open chat": "Відкрити чат",
-  "See everything": "Показати все"
+  "See everything": "Показати все",
+  "Midnight Signal": "Опівнічний сигнал",
+  "Plum Dusk": "Сливові сутінки",
+  "Cocoa Bark": "Кора какао",
+  "Forest Mint": "Лісова м’ята",
+  "Slate Harbour": "Сланцева гавань"
 }

@@ -5881,22 +5881,28 @@ if (require.main === module) setTimeout(async () => {
   }
 
   // Themes (8.74.0): every colour comes from the theme table in themes.js.
+  // 8.78.0: Oriel's dark themes, each built from two seeds (a base and an
+  // accent) by the same rules as Oriel: glass over a lit page, neutral text,
+  // the accent only where it means something, fixed data colours.
   {
     const NP = window.customElements.get("nova-panel");
     const THEMES = NP.THEMES || {}, SHARED = NP.THEME_SHARED || {};
     const keys = Object.keys(THEMES);
-    checks.push([`themes: the short list, with Deep Teal first and the default (${keys.join(", ")})`,
-      keys.join() === "deep_teal,twilight_denim,pine_mist,smoked_lilac,classic" && NP.THEME_DEFAULT === "deep_teal"]);
+    const ORIEL = { deep_teal: ["#03313A", "#8FFFE0"], midnight_signal: ["#0B132B", "#39FF88"], plum_dusk: ["#1A0B2E", "#FFB7A5"],
+      cocoa_bark: ["#382A28", "#C1A094"], forest_mint: ["#18251D", "#B7FF72"], slate_harbour: ["#11212D", "#9BA8AB"] };
+    checks.push([`themes: Oriel's dark themes, with Deep Teal first and the default (${keys.join(", ")})`,
+      keys.join() === Object.keys(ORIEL).join() && NP.THEME_DEFAULT === "deep_teal"
+      && keys.every(k => THEMES[k].style === "dark" && THEMES[k].base === ORIEL[k][0] && THEMES[k].accent === ORIEL[k][1])]);
 
-    // Classic is today's look: the same values the stylesheet had before themes.
-    const before = { bg: "#15110d", surface: "#1e1712", "surface-2": "#2a2119", "line-soft": "#33291f", ink: "#f3ece1", "ink-dim": "#b6a897",
-      "ink-faint": "#988a78", ember: "#e2542f", gold: "#f4b860", "gold-pale": "#ffe3ad", warn: "#e8b23d" };
-    const classic = (THEMES.classic || {}).tokens || {};
-    const classicHead = (THEMES.classic || {}).head || {};
-    checks.push(["themes: Classic keeps today's colours, the head included",
-      Object.entries(before).every(([k, v]) => classic[k] === v)
-      && JSON.stringify(classicHead.ramp) === "[[126,36,18],[226,84,47],[244,184,96],[255,231,189]]"
-      && JSON.stringify(classicHead.main) === "[0.957,0.722,0.376]"]);
+    const hexRgb = h => h.replace("#", "").match(/../g).map(x => parseInt(x, 16));
+    const spread = h => { const c = hexRgb(h); return Math.max(...c) - Math.min(...c); };
+    const tok = k => (THEMES[k] || {}).tokens || {};
+    checks.push([`themes: text is neutral, not the accent (${keys.map(k => `${k} ${tok(k).ink}`).join(", ")})`,
+      keys.length === 6 && keys.every(k => spread(tok(k).ink || "#00ff00") <= 24 && tok(k).ink !== tok(k).gold
+        && tok(k).ember?.toLowerCase() === THEMES[k].accent.toLowerCase())]);
+    checks.push(["themes: solar and home keep their colours in every theme; the battery takes the accent",
+      keys.length === 6 && new Set(keys.map(k => tok(k)["c-solar"])).size === 1 && new Set(keys.map(k => tok(k)["c-house"])).size === 1
+      && keys.every(k => tok(k)["c-battery"]?.toLowerCase() === THEMES[k].accent.toLowerCase())]);
 
     // Every theme's text and status colours reach 4.5:1 where they are drawn.
     const lum = h => { const c = h.replace("#", "").match(/../g).map(x => parseInt(x, 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
@@ -5907,11 +5913,24 @@ if (require.main === module) setTimeout(async () => {
       const t = th.tokens || {};
       const pairs = [["ink", "surface-2"], ["ink-dim", "surface-2"], ["ink-faint", "surface-2"], ["gold", "surface"], ["warn", "surface"],
         ["good", "surface"], ["good-ink", "surface"], ["bad", "surface"], ["bad-ink", "surface"], ["info", "surface"],
-        ["on-accent", "ember"], ["alarm-ink", "alarm-bg"]];
+        ["on-accent", "ember"], ["alarm-ink", "alarm-bg"], ["on-dark", "black"], ["on-dark", "dark-a"]];
       for (const [fg, bg] of pairs) if (!t[fg] || !t[bg] || ratio(t[fg], t[bg]) < 4.5) low.push(`${name} ${fg}`);
       for (const [k, v] of Object.entries(SHARED)) if (k.startsWith("log-") && ratio(v, t.surface || "#000000") < 4.5) low.push(`${name} ${k}`);
     }
-    checks.push([`themes: text and status colours reach 4.5:1 in every theme (${low.slice(0, 6).join(", ") || "all"})`, keys.length === 5 && low.length === 0]);
+    checks.push([`themes: text and status colours reach 4.5:1 in every theme (${low.slice(0, 6).join(", ") || "all"})`, keys.length === 6 && low.length === 0]);
+
+    // Glass over a lit page, with shadows; the greeting is not painted in the accent.
+    {
+      const P0 = document.createElement("nova-panel");
+      const css0 = P0._css ? P0._css() : "";
+      checks.push(["themes: cards are glass over a lit page, with shadows, and the greeting is not in the accent",
+        /\.wrap\{[^}]*background:var\(--page\)/.test(css0)
+        && /\.panel\{[^}]*background:linear-gradient\(180deg,color-mix\(in srgb,var\(--glass\)/.test(css0)
+        && /\.panel\{[^}]*box-shadow:[^}]*var\(--shadow\)/.test(css0)
+        && /\.hero\{[^}]*var\(--glass\)/.test(css0)
+        && !/\.hero-word[^{]*\{[^}]*var\(--gold\)/.test(css0)
+        && /\.orbit-tile\[data-orbit="energy"\]\{[^}]*var\(--black\)/.test(css0)]);
+    }
 
     // No colour is written anywhere else in the panel.
     const srcDir = path.resolve(__dirname, "..", "frontend", "src", "panel");
@@ -5935,13 +5954,17 @@ if (require.main === module) setTimeout(async () => {
     const startsTeal = styleText().includes(`--bg:${THEMES.deep_teal?.tokens?.bg}`);
     const pick = T.shadowRoot.getElementById("uiTheme");
     const options = Array.from(pick?.options || []).map(o => o.value).join();
-    if (pick) { pick.value = "classic"; pick.dispatchEvent(new window.Event("change", { bubbles: true })); }
+    if (pick) { pick.value = "plum_dusk"; pick.dispatchEvent(new window.Event("change", { bubbles: true })); }
     await new Promise(r => setTimeout(r, 80));
+    const plumMain = hexRgb("#FFB7A5").map(v => +(v / 255).toFixed(3)).join();
     checks.push([`themes: Settings has a theme picker that saves and recolours at once (${options})`,
-      startsTeal && options === "deep_teal,twilight_denim,pine_mist,smoked_lilac,classic"
-      && sent.some(m => m.key === "ui_theme" && m.value === "classic")
-      && styleText().includes("--bg:#15110d") && T._theme().head.main.join() === "0.957,0.722,0.376"
+      startsTeal && options === Object.keys(ORIEL).join()
+      && sent.some(m => m.key === "ui_theme" && m.value === "plum_dusk")
+      && styleText().includes(`--bg:${THEMES.plum_dusk?.tokens?.bg}`) && T._theme().head.main.join() === plumMain
       && pick.closest(".cfg-row")?.querySelector("label")?.textContent.trim() === "Theme"]);
+    // A theme saved before 8.78.0 that no longer exists falls back to Deep Teal.
+    T._liveData.config.ui_theme = "twilight_denim";
+    checks.push(["themes: a removed theme falls back to Deep Teal", T._themeKey() === "deep_teal"]);
     T.remove();
   }
 

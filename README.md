@@ -84,7 +84,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | Use the panel with a keyboard or screen reader | Every button and field says what it is and whether it is on, panel titles are headings, focus stays where you were after a save, and a visible ring shows where you are | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 | Draw the house on a phone, a tablet or by keyboard | The floor plan editor works with a finger or a pen: drag with one finger, pinch to zoom, move two fingers to pan. Or pick an item and move, resize or delete it with buttons or the arrow keys, no dragging needed | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
 | See what Nova did, in plain words | A bar at the bottom of the Command Center opens Nova, Areas, Goals and More in panels that slide up. Nova's panel lists what it told you, sent to your phone or kept quiet about in plain sentences written without AI calls, with a box to ask Nova a question | [Getting started](docs/getting-started.md#a-tour-of-the-panel) |
-| Choose the panel's colours | Pick Deep Teal, Twilight Denim, Pine Mist, Smoked Lilac or Classic in Settings. The whole panel and the hologram head change at once, and every theme keeps text easy to read | [Settings reference](docs/settings-reference.md) |
+| Choose the panel's colours | Pick one of six dark themes in Settings, the same as Oriel's: Deep Teal, Midnight Signal, Plum Dusk, Cocoa Bark, Forest Mint or Slate Harbour. Cards are frosted glass with neutral text, and the theme colour marks only what matters. Every theme keeps text easy to read | [Settings reference](docs/settings-reference.md) |
 
 Nova also shows its reasoning. The Logs tab lists every decision it made, why, and how confident it was. You can tell it when a decision was helpful or unnecessary.
 
@@ -92,11 +92,11 @@ Nova also shows its reasoning. The Logs tab lists every decision it made, why, a
 <table border="0">
 <tr>
 <td width="50%"><img src="docs/media/nova-panel.webp" alt="The Nova panel open over the Command Center, listing what Nova did in plain sentences, with a box to ask Nova a question and its answer" width="100%"></td>
-<td width="50%"><img src="docs/media/themes.webp" alt="The Command Center in the five colour themes: Deep Teal, Twilight Denim, Pine Mist, Smoked Lilac and Classic" width="100%"></td>
+<td width="50%"><img src="docs/media/themes.webp" alt="The Command Center in the six colour themes: Deep Teal, Midnight Signal, Plum Dusk, Cocoa Bark, Forest Mint and Slate Harbour" width="100%"></td>
 </tr>
 <tr>
 <td align="center"><em>What Nova did, in plain words, and a box to ask it.</em></td>
-<td align="center"><em>Five colour themes, picked in Settings.</em></td>
+<td align="center"><em>Six colour themes, picked in Settings.</em></td>
 </tr>
 </table>
 </div>
