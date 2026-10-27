@@ -5195,6 +5195,28 @@ if (require.main === module) setTimeout(async () => {
     dashP.remove();
   }
 
+  // The circles start even when Home Assistant gives the panel its data
+  // before attaching it to the page (8.83.1). The first draw then ran on a
+  // canvas not yet on the page, both loops stopped, and nothing restarted
+  // them until a tab switch.
+  {
+    const proto = window.HTMLCanvasElement.prototype, realGet = proto.getContext;
+    const fake = new Proxy({}, { get: (t, k) => (k in t ? t[k] : /^create/.test(String(k))
+      ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+    proto.getContext = function (kind) { return kind === "2d" ? fake : null; };
+    const realRaf = global.requestAnimationFrame;
+    global.requestAnimationFrame = () => 1;
+    const early = document.createElement("nova-panel");
+    early.hass = { ...hass };                       // data first, not on the page yet
+    const stoppedBefore = early._core === null && !early._arcsRaf;
+    document.body.appendChild(early);               // now attached
+    checks.push(["circles: they start once the panel is attached, even when the data came first",
+      stoppedBefore && !!early._core && !!early._arcsRaf]);
+    early.remove();
+    proto.getContext = realGet;
+    global.requestAnimationFrame = realRaf;
+  }
+
   // Screen reader structure (8.71.0). Names and states a screen reader needs,
   // checked on fresh panels.
   {

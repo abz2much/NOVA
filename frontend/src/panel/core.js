@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.83.0
+ * v8.83.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -76,7 +76,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.83.0 ",
+      console.log("%c Nova Panel %c v8.83.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -92,8 +92,12 @@ class NovaPanel extends HTMLElement {
       this._startIntervals();
     } else if (this._renderedOnce && this._currentTab === "energy") {
       this._startEnergyFlowPoll();
-    } else if (this._coreResume) {
-      // Leaving the page stopped the avatar and the arcs: start them again.
+    } else if (this._renderedOnce && this._currentTab === "dashboard"
+               && (this._coreResume || !this._core || !this._arcsRaf)) {
+      // Leaving the page stopped the avatar and the arcs, or Home Assistant
+      // gave the panel its data before attaching it, so the first draw ran
+      // on a canvas not yet on the page and both loops stopped (8.83.1):
+      // start them again.
       this._coreResume = false;
       this._initCore(); this._arcsStop(); this._arcsStart();
     }
