@@ -201,14 +201,14 @@ async def test_lock_anything_else(clf, llm, new):
 
 # ── Rule 9: alarm panels ───────────────────────────────────────────────────
 
-@pytest.mark.parametrize("new", ["triggered", "pending"])
-async def test_alarm_triggered(clf, llm, new):
-    out = await _run(clf, "alarm_control_panel.house", "armed_away", new)
+async def test_alarm_triggered(clf, llm):
+    out = await _run(clf, "alarm_control_panel.house", "armed_away", "triggered")
     assert out == {"worth_considering": True, "urgency": "critical",
                    "category": "security", "rule": "alarm"}
 
 
-@pytest.mark.parametrize("new", ["disarmed", "armed_home", "arming"])
+# "pending" is the entry countdown as someone comes home, not an alarm (8.83.0).
+@pytest.mark.parametrize("new", ["disarmed", "armed_home", "arming", "pending"])
 async def test_alarm_other_change(clf, llm, new):
     out = await _run(clf, "alarm_control_panel.house", "armed_away", new)
     assert out == {"worth_considering": True, "urgency": "low",

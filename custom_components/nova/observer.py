@@ -267,6 +267,18 @@ def _alarm_watching() -> bool:
         return False
 
 
+def _alarm_left_to_core(entity_id: str) -> bool:
+    """An alarm panel event the observer leaves alone (8.83.0): with a
+    security alarm chosen and the core running, the core announces that
+    alarm going off with what tripped it (core_alarm.py), and any other
+    panel (a camera hub kept in sync) only mirrors it."""
+    try:
+        from . import alarm_source
+        return _core_running() and bool(alarm_source.entity_ids(_STATE.hass, _STATE.config))
+    except Exception:
+        return False
+
+
 _STARTUP_STATES = ("unknown", "unavailable", "none")
 
 
@@ -511,6 +523,9 @@ def _on_state_changed(event: Event) -> None:
     critical = _critical_hazard(event)
     if critical and _core_running():
         return          # the cognitive core announces hazards
+    if entity_id.startswith("alarm_control_panel.") and _alarm_left_to_core(entity_id):
+        _record_for_context(event)
+        return
     if not critical:
         if _entry_state_recovery(event) or _ignored_by_core(entity_id):
             return

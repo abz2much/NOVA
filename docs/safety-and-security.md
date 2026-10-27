@@ -166,8 +166,17 @@ after the alarm goes off is still spoken.
   house and Nova trusts it. Motion alone never starts Nova's own
   investigation, and Nova's general alerts don't announce it either. A
   sensor still on from you walking out is not mistaken for someone inside.
-  When the alarm goes off, Nova alerts as before. This assumes your alarm
-  (for example Alarmo) watches the sensors you care about in away mode.
+  This assumes your alarm (for example Alarmo) watches the sensors you care
+  about in away mode.
+- **When your alarm goes off**, Nova sends one critical alert, spoken in the
+  house and pushed to every phone. It says which sensor tripped (Alarmo's
+  `open_sensors`) and, if a camera covers that room on your floor plan,
+  what Nova's vision check sees there: a person, no one, or that it couldn't
+  tell. The snapshot comes with it. The camera check waits a few seconds at
+  most, and a broken camera never stops the alert.
+- The alarm's entry countdown (`pending`) as you come home is not an alarm,
+  so Nova says nothing. Other alarm panels, such as camera hubs kept in sync
+  with your chosen alarm, are not announced separately.
 - Otherwise intrusion only runs when the residents are away, or their
   presence is unknown. Someone reading home always wins. It never runs on
   the mere absence of motion.

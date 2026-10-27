@@ -21,6 +21,7 @@ from typing import Optional
 
 from homeassistant.core import Event, HomeAssistant
 
+from . import core_alarm as _m_alarm
 from . import core_common as _m_common
 from . import core_delivery as _m_delivery
 from . import core_hazards as _m_hazards
@@ -168,6 +169,9 @@ def _on_state_changed(event: Event) -> None:
         return
     # Smoke, CO, gas and leak alarms are announced before any ignore rule.
     if _m_hazards.on_state_changed(core.hass, core.config, event):
+        return
+    # So is the chosen alarm going off (8.83.0).
+    if _m_alarm.on_state_changed(core.hass, core.config, event):
         return
     if core.ignore_mgr and core.ignore_mgr.is_ignored(entity_id):
         return

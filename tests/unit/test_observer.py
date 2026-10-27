@@ -347,7 +347,8 @@ def flow(ob, load, monkeypatch, fake_hass):
     seen = {"tasks": [], "context": [], "calls": 0, "log": []}
     knobs = {"cognition": False, "escalate": False, "drop": False, "critical": False,
              "core": False, "recovery": False, "ignored": False, "group": False,
-             "debounce": False, "home": False, "rate": False, "watching": False}
+             "debounce": False, "home": False, "rate": False, "watching": False,
+             "alarm_core": False}
     monkeypatch.setattr(ob._STATE, "running", True)
     monkeypatch.setattr(ob, "_cognition_enabled", lambda: knobs["cognition"])
     monkeypatch.setattr(ob, "_should_pre_filter", lambda e: knobs["drop"])
@@ -360,6 +361,7 @@ def flow(ob, load, monkeypatch, fake_hass):
                         and knobs["debounce"])
     monkeypatch.setattr(ob, "_household_home", lambda: knobs["home"])
     monkeypatch.setattr(ob, "_alarm_watching", lambda: knobs["watching"])
+    monkeypatch.setattr(ob, "_alarm_left_to_core", lambda eid: knobs["alarm_core"])
     monkeypatch.setattr(ob, "_classifier_rate_limited", lambda: knobs["rate"])
     monkeypatch.setattr(ob, "_record_classifier_call",
                         lambda: seen.__setitem__("calls", seen["calls"] + 1))
@@ -475,6 +477,35 @@ def test_a_door_while_the_alarm_is_armed_away_still_goes_through(flow):
     knobs["watching"] = True
     ob._on_state_changed(DOOR)
     assert len(seen["tasks"]) == 1
+
+
+ALARM_GOES_OFF = _ev("alarm_control_panel.home_security", "armed_away", "triggered", None)
+
+
+def test_an_alarm_the_core_handles_is_context_only(flow):
+    ob, knobs, seen = flow
+    knobs["alarm_core"] = True
+    ob._on_state_changed(ALARM_GOES_OFF)
+    assert seen["tasks"] == [] and seen["context"] == [ALARM_GOES_OFF]
+
+
+def test_an_alarm_without_the_core_still_goes_through(flow):
+    ob, knobs, seen = flow
+    ob._on_state_changed(ALARM_GOES_OFF)
+    assert len(seen["tasks"]) == 1
+
+
+@pytest.mark.parametrize("eid,selected,running,left", [
+    ("alarm_control_panel.home_security", ["alarm_control_panel.home_security"], True, True),
+    ("alarm_control_panel.back_homebase", ["alarm_control_panel.home_security"], True, True),
+    ("alarm_control_panel.home_security", ["alarm_control_panel.home_security"], False, False),
+    ("alarm_control_panel.back_homebase", [], True, False),       # no chosen alarm: as before
+])
+def test_alarm_left_to_core(ob, load, fake_hass, monkeypatch, eid, selected, running, left):
+    monkeypatch.setattr(ob._STATE, "hass", fake_hass)
+    monkeypatch.setattr(load("alarm_source"), "entity_ids", lambda hass, cfg=None: tuple(selected))
+    monkeypatch.setattr(ob, "_core_running", lambda: running)
+    assert ob._alarm_left_to_core(eid) is left
 
 
 @pytest.mark.parametrize("state,watching", [

@@ -1,3 +1,12 @@
+## [8.83.0] When the alarm goes off
+
+### Changed
+- **When your chosen alarm goes off, Nova says where and what the camera sees.** One critical alert, spoken and pushed to every phone: which sensor tripped (from Alarmo's `open_sensors`), and, if a camera covers that room on the floor plan, what Nova's vision check sees there (a person, no one, or that it couldn't tell), with the snapshot. The camera check waits at most 8 seconds, and a slow or broken camera never stops the alert. Before, Nova only said "a security alert has been triggered. Immediate attention required."
+- With a security alarm chosen, other alarm panels (such as camera hubs kept in sync with it) are no longer announced separately, so one alarm is one alert.
+
+### Fixed
+- **Coming home no longer sounds like an emergency.** Nova treated the alarm's entry countdown (`pending`) as the alarm going off and announced it at critical level every time someone came home to an armed house.
+
 ## [8.82.0] Nova reads your labels
 
 ### Changed
