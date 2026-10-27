@@ -810,6 +810,22 @@ class SafetyManager:
 
     # ── intrusion: one step of an open investigation ────────────────────────
 
+    async def camera_answer(self, entity_id: str) -> dict:
+        """What the camera for this sensor's room shows, for the alarm going
+        off (core_alarm.py, 8.83.0): {"camera", "vision", "snapshot_url",
+        "snapshot_path"}, or {} with no camera for that room. vision is True
+        (a person), False (nobody) or None (could not tell)."""
+        camera = self._camera_for({"breach_area": self._breach_area(entity_id)})
+        if not camera:
+            return {}
+        vision = await self._confirm_person_with_vision(camera)
+        snap = await self._snapshot(camera)
+        holder: dict = {}
+        await self._attach_snapshot(holder, snap)
+        return {"camera": camera, "vision": vision,
+                "snapshot_url": holder.get("snapshot_url"),
+                "snapshot_path": holder.get("snapshot_path")}
+
     async def _investigate_step(self, now: float, away: bool, sleeping: bool) -> Optional[dict]:
         """One tick of an open investigation: confirm, clear, or keep watching
         quietly. It escalates only when activity forms a route inward from the

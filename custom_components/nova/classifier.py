@@ -109,7 +109,9 @@ def _rule_classify(entity_id, old_state, new_state, friendly_name,
             return _flag("medium", "security", "unlocked")
         return _skip("locked")
     if eid.startswith("alarm_control_panel."):
-        if new_state in ("triggered", "pending"):
+        # Pending is the entry countdown as someone comes home, not an alarm
+        # (8.83.0).
+        if new_state == "triggered":
             return _flag("critical", "security", "alarm")
         return _flag("low", "security", "alarm_change")
     for domain in _ROUTINE_DOMAINS:
