@@ -118,6 +118,21 @@ async def test_one_alert_per_event_per_day(trip):
     assert len(trip.decisions) == 1
 
 
+async def test_one_alert_per_event_across_midnight(trip):
+    # A 00:10 event alerts at 23:50; the date changing at midnight must not
+    # make the same event alert again.
+    midnight = datetime.datetime(2026, 3, 11, 0, 0)
+    start = midnight + datetime.timedelta(minutes=10)
+    trip.events.append({"calendar": "calendar.family", "title": "Pickup", "start": start,
+                        "end": start + datetime.timedelta(hours=1), "all_day": False,
+                        "location": PLACE, "active": False})
+    before = (midnight - datetime.timedelta(minutes=10)).timestamp()
+    assert len(await trip.cog.predict_departure(trip.hass, before)) == 1
+    for after in (11 * 60, 12 * 60, 15 * 60):
+        assert await trip.cog.predict_departure(trip.hass, before + after) == []
+    assert len(trip.decisions) == 1
+
+
 @pytest.mark.parametrize("settings", [
     {"departure_alerts_enabled": False},
     {"departure_alerts_enabled": None},
