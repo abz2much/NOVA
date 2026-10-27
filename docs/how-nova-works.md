@@ -295,6 +295,14 @@ each message goes to the activity log. A few of the rules:
   going off or a person confirmed on camera. Appliance doors, such as a
   fridge, never count as a way in. At night, an alert needs a real breach,
   such as a ground floor door or window open, not ordinary movement.
+- While the alarm is armed away or on vacation, Nova trusts it: motion never
+  starts Nova's own intrusion check and is not announced. When the alarm
+  goes off, Nova sends one alert with the sensor that tripped and what the
+  camera for that room sees. The entry countdown as you come home is not an
+  alarm.
+- Your own Home Assistant labels, on the entity or its device, beat any
+  guess from a name: Appliance is never a way in, Entry Point always is, and
+  a Group sensor never counts, so one person is never two rooms.
 - There is one answer to "who is home" for intrusion, lockdown, packages,
   briefings and offers: people, plus device trackers linked to a person. A
   TV or hub tracker can't switch off away detection, and a person reading
