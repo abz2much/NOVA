@@ -5869,20 +5869,23 @@ if (require.main === module) setTimeout(async () => {
     const NP = window.customElements.get("nova-panel");
     const THEMES = NP.THEMES || {}, SHARED = NP.THEME_SHARED || {};
     const keys = Object.keys(THEMES);
-    const ORIEL = { deep_teal: ["#03313A", "#8FFFE0"], midnight_signal: ["#0B132B", "#39FF88"], plum_dusk: ["#1A0B2E", "#FFB7A5"],
-      cocoa_bark: ["#382A28", "#C1A094"], forest_mint: ["#18251D", "#B7FF72"], slate_harbour: ["#11212D", "#9BA8AB"] };
-    checks.push([`themes: Oriel's dark themes, with Deep Teal first and the default (${keys.join(", ")})`,
+    // 8.80.0: and Oriel's light themes, with Oriel's Classic.
+    const ORIEL = { deep_teal: ["dark", "#03313A", "#8FFFE0"], midnight_signal: ["dark", "#0B132B", "#39FF88"], plum_dusk: ["dark", "#1A0B2E", "#FFB7A5"],
+      cocoa_bark: ["dark", "#382A28", "#C1A094"], forest_mint: ["dark", "#18251D", "#B7FF72"], slate_harbour: ["dark", "#11212D", "#9BA8AB"],
+      classic: ["light", "#A99A8C", "#B9DC8A"], violet_mist: ["light", "#F0F2F5", "#7A35FF"], berry_sky: ["light", "#E0F2FE", "#C2185B"],
+      quantum_ice: ["light", "#DFF7FF", "#2457FF"], pine_mist: ["light", "#DAF1DE", "#235347"], ember: ["light", "#FFFCF4", "#FF6115"] };
+    checks.push([`themes: Oriel's dark and light themes, with Deep Teal first and the default (${keys.join(", ")})`,
       keys.join() === Object.keys(ORIEL).join() && NP.THEME_DEFAULT === "deep_teal"
-      && keys.every(k => THEMES[k].style === "dark" && THEMES[k].base === ORIEL[k][0] && THEMES[k].accent === ORIEL[k][1])]);
+      && keys.every(k => THEMES[k].style === ORIEL[k][0] && THEMES[k].base === ORIEL[k][1] && THEMES[k].accent === ORIEL[k][2])]);
 
     const hexRgb = h => h.replace("#", "").match(/../g).map(x => parseInt(x, 16));
     const spread = h => { const c = hexRgb(h); return Math.max(...c) - Math.min(...c); };
     const tok = k => (THEMES[k] || {}).tokens || {};
     checks.push([`themes: text is neutral, not the accent (${keys.map(k => `${k} ${tok(k).ink}`).join(", ")})`,
-      keys.length === 6 && keys.every(k => spread(tok(k).ink || "#00ff00") <= 24 && tok(k).ink !== tok(k).gold
+      keys.length === 12 && keys.every(k => spread(tok(k).ink || "#00ff00") <= 24 && tok(k).ink !== tok(k).gold
         && tok(k).ember?.toLowerCase() === THEMES[k].accent.toLowerCase())]);
     checks.push(["themes: solar and home keep their colours in every theme; the battery takes the accent",
-      keys.length === 6 && new Set(keys.map(k => tok(k)["c-solar"])).size === 1 && new Set(keys.map(k => tok(k)["c-house"])).size === 1
+      keys.length === 12 && new Set(keys.map(k => tok(k)["c-solar"])).size === 1 && new Set(keys.map(k => tok(k)["c-house"])).size === 1
       && keys.every(k => tok(k)["c-battery"]?.toLowerCase() === THEMES[k].accent.toLowerCase())]);
 
     // Every theme's text and status colours reach 4.5:1 where they are drawn.
@@ -5896,9 +5899,17 @@ if (require.main === module) setTimeout(async () => {
         ["good", "surface"], ["good-ink", "surface"], ["bad", "surface"], ["bad-ink", "surface"], ["info", "surface"],
         ["on-accent", "ember"], ["alarm-ink", "alarm-bg"], ["on-dark", "black"], ["on-dark", "dark-a"]];
       for (const [fg, bg] of pairs) if (!t[fg] || !t[bg] || ratio(t[fg], t[bg]) < 4.5) low.push(`${name} ${fg}`);
-      for (const [k, v] of Object.entries(SHARED)) if (k.startsWith("log-") && ratio(v, t.surface || "#000000") < 4.5) low.push(`${name} ${k}`);
+      // The log colours are text too; light themes darken them (8.80.0).
+      const logs = Object.keys(t).filter(k => k.startsWith("log-"));
+      if (logs.length < 15 || Object.keys(SHARED).some(k => k.startsWith("log-"))) low.push(`${name} log colours`);
+      for (const k of logs) if (ratio(t[k], t.surface) < 4.5 || ratio(t[k], t["surface-2"]) < 4.5) low.push(`${name} ${k}`);
     }
-    checks.push([`themes: text and status colours reach 4.5:1 in every theme (${low.slice(0, 6).join(", ") || "all"})`, keys.length === 6 && low.length === 0]);
+    checks.push([`themes: text and status colours reach 4.5:1 in every theme (${low.slice(0, 6).join(", ") || "all"})`, keys.length === 12 && low.length === 0]);
+    // A light theme has white glass and dark text; a dark one the other way round.
+    checks.push(["themes: light themes have white glass and dark text, dark themes light text",
+      keys.length === 12 && keys.every(k => THEMES[k].style === "light"
+        ? lum(tok(k).ink) < 0.05 && tok(k).glass === "#ffffff" && lum(tok(k).surface) > 0.3
+        : lum(tok(k).ink) > 0.7)]);
 
     // Glass over a lit page, with shadows; the greeting is not painted in the accent.
     {

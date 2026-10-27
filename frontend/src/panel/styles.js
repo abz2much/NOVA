@@ -28,11 +28,11 @@
       .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
-        background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, var(--orb-deep) 100%);
+        background:radial-gradient(circle at 34% 30%, color-mix(in srgb,var(--ember) 45%,var(--on-dark)), var(--ember) 48%, var(--orb-deep) 100%);
         box-shadow:0 0 14px 1px color-mix(in srgb,var(--ember) 33%,transparent);}
       .brand-name{font-family:var(--font-display);font-size:var(--t-title);font-weight:600}
       .brand-tag{font-family:var(--font-body);font-size:var(--t-cap);color:var(--ink-faint);letter-spacing:.06em;text-transform:uppercase}
-      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 18%,transparent),color-mix(in srgb,var(--glass) 6%,transparent));
+      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,color-mix(in srgb,var(--glass) var(--glass-hi),transparent),color-mix(in srgb,var(--glass) var(--glass-lo),transparent));
         border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 36%,transparent),0 18px 44px color-mix(in srgb,var(--shadow) 45%,transparent);border-radius:var(--r-card);overflow:hidden;container-type:inline-size;
         display:flex;flex-direction:column;align-items:stretch}
       .hero-stage{position:relative;height:clamp(520px,54cqw,620px)}
@@ -41,7 +41,7 @@
       .orbit{position:absolute;inset:0;pointer-events:none}
       .orbit-tile{position:absolute;width:200px;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
         padding:14px 16px;border-radius:var(--r-tile);border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);
-        background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 10%,transparent));
+        background:linear-gradient(180deg,color-mix(in srgb,var(--glass) var(--glass-hi),transparent),color-mix(in srgb,var(--glass) var(--glass-lo),transparent));
         box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 10px 26px color-mix(in srgb,var(--shadow) 40%,transparent);
         color:var(--ink);font-family:var(--font-body);text-align:left;cursor:pointer;transition:border-color .6s,box-shadow .6s;animation:orbit-drift 9s ease-in-out infinite}
       .orbit-tile:nth-child(even){animation-duration:11s;animation-delay:-3s}
@@ -151,7 +151,7 @@
       .chip.warn .dot{background:var(--warn)}
       .chip b{color:var(--ink);font-weight:600}
       .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
-      .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--glass) 22%,transparent),color-mix(in srgb,var(--glass) 12%,transparent));background-color:color-mix(in srgb,var(--bg) 40%,transparent);
+      .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--glass) var(--glass-hi),transparent),color-mix(in srgb,var(--glass) var(--glass-lo),transparent));
         border:1px solid color-mix(in srgb,var(--glass) 26%,transparent);border-radius:var(--r-card);padding:16px 16px 14px;
         box-shadow:inset 0 1px 0 color-mix(in srgb,var(--glass) 34%,transparent),0 12px 30px color-mix(in srgb,var(--shadow) 38%,transparent)}
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
