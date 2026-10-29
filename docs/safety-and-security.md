@@ -314,10 +314,9 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 - Engage lockdown unless you turned on **Automatic lockdown**.
 - Silence a critical alert. Mutes, the blanket shush and quiet hours never
   apply to one.
-- Stop mentioning a lock, a cover (garage door, gate, door or blind), the
-  alarm, a package, the doorbell or a camera, a door, window or security
-  sensor, or a door, window or garage door left open, because it came up
-  three days running. Other repeats go quiet after three days; these never do.
+- Stop mentioning a lock, a cover (garage door, gate, door or blind) or the
+  alarm because it came up three days running. Other repeats go quiet after
+  three days; these never do.
 - Keep camera pictures. The one exception is up to 40 pictures from confirmed
   intrusions, stored privately for the Intrusion tab.
 
