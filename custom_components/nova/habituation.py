@@ -5,7 +5,7 @@ how this home runs (a nightly backup, a light that switches itself), not news.
 The third one carries a short line saying Nova will stop mentioning it, and
 from then on that notification stays quiet. A missed day starts the count
 again. Emergencies never go quiet: critical urgency (smoke, CO, gas, leaks,
-glass break), break-in and lockdown alerts, freeze alerts, and anything about
+glass break), break-in and lockdown alerts, freeze alerts, package alerts, and anything about
 a lock, a cover (garage doors, gates, doors, blinds) or an alarm panel
 (covers since 8.24.0).
 
@@ -40,7 +40,7 @@ def _state_file() -> str:
 QUIET_AFTER_DAYS = 3
 QUIET_NOTE = "This has come up three days running, so I'll stop mentioning it."
 
-_EXEMPT_TYPE_PREFIXES = ("intrusion", "lockdown", "freeze")
+_EXEMPT_TYPE_PREFIXES = ("intrusion", "lockdown", "freeze", "package")
 _EXEMPT_DOMAINS = ("lock", "cover", "alarm_control_panel")
 
 _state: Optional[dict] = None
