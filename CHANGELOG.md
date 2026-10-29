@@ -1,3 +1,9 @@
+## [8.84.1] Alerts that never go quiet
+
+### Fixed
+- **Nova no longer stops telling you about a package.** After the same alert came up three days running, Nova said "I'll stop mentioning it" and went quiet. That also silenced the alert for a package removed while you're away, since delivered and removed share one camera.
+- **The same now holds for the doorbell, camera alerts, door, window and security sensor alerts, and doors, windows and garage doors left open.** Before, only locks, covers, alarms and emergencies were safe. Any of these that had already gone quiet come back.
+
 ## [8.83.1] The circles always show
 
 ### Fixed
