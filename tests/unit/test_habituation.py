@@ -72,6 +72,15 @@ def test_forget_brings_it_back(hab):
     {"kind": "freeze_warning", "urgency": "high"},
     {"entity_id": "lock.back_door"},
     {"entity_id": "alarm_control_panel.home"},
+    {"kind": "package_delivered", "entity_id": "camera.front_door"},
+    {"kind": "package_removed", "entity_id": "camera.front_door"},
+    {"kind": "doorbell", "entity_id": "camera.doorbell"},
+    {"kind": "camera", "entity_id": "camera.driveway"},
+    {"kind": "door_left_open", "entity_id": "binary_sensor.back_door"},
+    {"kind": "window_left_open", "entity_id": "binary_sensor.bedroom_window"},
+    {"kind": "garage_left_open", "entity_id": "binary_sensor.garage_door"},
+    {"kind": "doors_windows", "urgency": "high", "entity_id": "binary_sensor.patio"},
+    {"kind": "security", "urgency": "medium", "entity_id": "binary_sensor.hall_motion"},
 ])
 def test_emergencies_are_exempt(hab, kw):
     assert hab.exempt(**kw)
@@ -80,6 +89,44 @@ def test_emergencies_are_exempt(hab, kw):
 def test_ordinary_alerts_are_not_exempt(hab):
     assert not hab.exempt(urgency="high", kind="problem", entity_id="binary_sensor.disk")
     assert not hab.exempt(urgency="low", kind="anticipation_routine", entity_id="switch.x")
+
+
+@pytest.mark.parametrize("category,entity_id", [
+    ("package_delivered", "camera.front_door"),
+    ("package_removed", "camera.front_door"),
+    ("doorbell", "camera.doorbell"),
+    ("camera", "camera.driveway"),
+    ("door_left_open", "binary_sensor.back_door"),
+    ("doors_windows", "binary_sensor.patio"),
+    ("security", "binary_sensor.hall_motion"),
+])
+def test_output_gate_never_quietens_these(hab, load, monkeypatch, category, entity_id):
+    og = load("output_gate")
+    og._STATE.history.clear()
+    og._STATE.recent_messages.clear()
+    for day in (1, 2, 3, 4):
+        monkeypatch.setattr(og, "_now", lambda d=day: _ts(d))
+        monkeypatch.setattr(hab.time, "time", lambda d=day: _ts(d))
+        ok, _ = og.can_announce(entity_id=entity_id, category=category,
+                                urgency="medium", message=f"Alert {day}")
+        assert ok
+        msg = og.habit_note(entity_id=entity_id, category=category,
+                            urgency="medium", message="Alert.")
+        assert hab.QUIET_NOTE not in msg
+        og.record_announcement(entity_id=entity_id, category=category,
+                               urgency="medium", message=msg, was_spoken=True)
+        og._STATE.recent_messages.clear()
+    assert not hab.is_quiet(entity_id)
+
+
+def test_a_package_alert_already_quiet_comes_back(hab, load):
+    og = load("output_gate")
+    for day in (1, 2, 3):
+        hab.record("camera.front_door", "camera.front_door", _ts(day))
+    assert hab.is_quiet("camera.front_door")
+    ok, _ = og.can_announce(entity_id="camera.front_door", category="package_delivered",
+                            urgency="medium", message="A package has been delivered.")
+    assert ok
 
 
 def test_output_gate_goes_quiet_after_three_spoken_days(hab, load, monkeypatch):
