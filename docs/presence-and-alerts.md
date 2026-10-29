@@ -63,8 +63,8 @@ list is in [Safety and security](safety-and-security.md#how-alerts-reach-you).
 
 - **Habituation.** If the same notification comes up three days running,
   Nova says "This has come up three days running, so I'll stop mentioning
-  it." and then stays quiet about it. Intrusion, lockdown, freeze, package,
-  lock and alarm alerts are never quietened this way.
+  it." and then stays quiet about it. Intrusion, lockdown, freeze, lock and
+  alarm alerts are never quietened this way.
 - **Adaptive awareness**, if you turn it on. Routine alerts get Helpful and
   Not helpful buttons on your phone. Nova changes its timing only from your
   taps, and only after 5 alerts are rated. Muting or silence never counts.

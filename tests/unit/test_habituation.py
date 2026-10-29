@@ -72,8 +72,6 @@ def test_forget_brings_it_back(hab):
     {"kind": "freeze_warning", "urgency": "high"},
     {"entity_id": "lock.back_door"},
     {"entity_id": "alarm_control_panel.home"},
-    {"kind": "package_delivered", "entity_id": "camera.front_door"},
-    {"kind": "package_removed", "entity_id": "camera.front_door"},
 ])
 def test_emergencies_are_exempt(hab, kw):
     assert hab.exempt(**kw)
