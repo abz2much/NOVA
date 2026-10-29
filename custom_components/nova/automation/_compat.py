@@ -51,6 +51,23 @@ class _CompatModule(types.ModuleType):
         super().__delattr__(name)
 
 
+def _live_property(name: str) -> property:
+    """A data descriptor for a live name. pytest 9.2 reads a patched name's
+    old value from the instance ``__dict__`` unless the class has a data
+    descriptor for it; a live name is never stored there, so it would record
+    "absent" and delete the package's attribute on undo."""
+    def fget(self):
+        return getattr(self.__dict__["_compat_live"][name], name)
+
+    def fset(self, value) -> None:
+        setattr(self.__dict__["_compat_live"][name], name, value)
+
+    def fdel(self) -> None:
+        delattr(self.__dict__["_compat_live"][name], name)
+
+    return property(fget, fset, fdel)
+
+
 def _owner(name: str, value, sources: Iterable[types.ModuleType]):
     """The package module that defines ``name`` (or, for constants, the
     first source that holds the identical object)."""
@@ -84,4 +101,5 @@ def install(module_name: str, sources: Iterable[types.ModuleType],
         module.__dict__.pop(name, None)
     module.__dict__["_compat_owners"] = owners
     module.__dict__["_compat_live"] = dict(live or {})
-    module.__class__ = _CompatModule
+    module.__class__ = type(
+        "_CompatModule", (_CompatModule,), {n: _live_property(n) for n in (live or {})})

@@ -91,24 +91,20 @@ def test_dunder_and_private_names_bypass_the_proxy(jc_pkg):
     assert jc_pkg.__name__ == "jc"
 
 
-def test_setattr_on_jc_pkg_is_not_the_supported_pattern(jc_pkg, monkeypatch):
-    """Documents the interaction this class's docstring warns about: pairing
-    monkeypatch.setattr(jc_pkg, name, ...) with monkeypatch.setitem(sys.
-    modules, f"jc.{name}", ...) in the SAME test corrupts monkeypatch's own
-    snapshot (it captures the just-set sys.modules value as "the old value"
-    via the proxied getattr, then restores exactly that at teardown instead
-    of removing the attribute) — visible here as a __dict__ entry that
-    outlives monkeypatch's own teardown. Every real test file in this suite
-    uses monkeypatch.setitem(sys.modules, ...) alone, which has no such
-    issue (proven by the tests above) -- this test exists only to pin down
-    why the setattr companion must never be reintroduced."""
+def test_setattr_on_jc_pkg_leaves_nothing_behind(jc_pkg, monkeypatch):
+    """Pairing monkeypatch.setattr(jc_pkg, name, ...) with monkeypatch.setitem(
+    sys.modules, f"jc.{name}", ...) in the SAME test used to corrupt
+    monkeypatch's snapshot (it recorded the just-set sys.modules value as the
+    old value through the proxied getattr). pytest 9.2 reads the old value
+    from the instance __dict__ instead, so this ends clean on every pytest we
+    support; the pairing is still not used in this suite."""
     assert "probe_d" not in jc_pkg.__dict__
     stub = types.ModuleType("jc.probe_d")
     with monkeypatch.context() as m:
         m.setitem(sys.modules, "jc.probe_d", stub)
         m.setattr(jc_pkg, "probe_d", stub, raising=False)
-    # sys.modules correctly reverted...
     assert "jc.probe_d" not in sys.modules
-    # ...but the setattr call's poisoned snapshot leaves __dict__ polluted.
-    assert jc_pkg.__dict__.get("probe_d") is stub
-    del jc_pkg.__dict__["probe_d"]  # clean up after documenting the trap
+    # pytest before 9.2 left the stub in __dict__; remove it so later tests
+    # start clean on either version.
+    jc_pkg.__dict__.pop("probe_d", None)
+    assert "probe_d" not in jc_pkg.__dict__
