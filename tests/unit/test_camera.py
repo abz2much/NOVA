@@ -913,6 +913,21 @@ async def test_analyse_captures_clip_when_asked(cam, env, monkeypatch):
     assert res["error"] == "no_image" and asked == {"count": 4, "interval": 1.2}
 
 
+@pytest.mark.parametrize("images", [[b"A" * 10], [b"A", b"B", b"C"]], ids=["one frame", "a clip"])
+async def test_the_vision_prompt_warns_about_night_and_infrared_pictures(
+        cam, env, monkeypatch, images):
+    """At night shadows, insects, webs and glare look like people, and a person
+    described by mistake is spoken aloud as one."""
+    monkeypatch.setattr(cam, "_make_contact_sheet", lambda frames: b"SHEET")
+    env.chat.replies[:] = ["x", env.judge()]
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [],
+                                   force_images=images)
+    system = env.chat.calls[0]["messages"][0]["content"]
+    assert "infrared" in system
+    assert "only if you can clearly see a person" in system
+    env.hass.close_pending()
+
+
 async def test_analyse_recognition_hint(cam, env, monkeypatch):
     seen = {"name": "Sam", "confidence": 91.4, "age_seconds": 5, "is_confident": True}
     monkeypatch.setattr(cam, "last_seen_at", lambda hass, eid: dict(seen))
