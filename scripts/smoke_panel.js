@@ -4724,21 +4724,38 @@ if (require.main === module) setTimeout(async () => {
     const crypto = require("crypto");
     const PINS = {
       geometry: "a836aa626ac3def0",
-      floorHelpers: "bafb91527e2df228",   // 8.74.0: an open lock pin takes the theme's red
-      editorMarkup: "85b5ad23c70d7778",   // 8.75.0: plan labels in the main font, sizes and corners on the scale
-      memoryMarkup: "5ef3b1d8c97c19bf",   // 8.75.1: button labels in normal case
-      intrusionMarkup: "2b3a31485d01f218",   // 8.75.1: button labels in normal case
+      floorHelpers: "923ab6caa41608ad",   // 8.74.0: an open lock pin takes the theme's red (8.85.2: structural fingerprint)
+      editorMarkup: "bcc04281b3147567",   // 8.75.0: plan labels in the main font, sizes and corners on the scale (8.85.2: structural)
+      memoryMarkup: "c45830d8a216729e",   // 8.75.1: button labels in normal case (8.85.2: structural)
+      intrusionMarkup: "3b0b68bfbdbb2fc3",   // 8.75.1: button labels in normal case (8.85.2: structural)
       editorDrag: "eb48d5e0572a8041",   // 8.73.0: a press under 4px is a tap; zoom limits keep the plan's shape
     };
     // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
     // drawing order, so the number is left out of the fingerprint.
-    // parse5 8.1 (Nov 2026) escapes < and > inside attribute values, as the
-    // HTML standard now says; older versions don't. Undo that inside
-    // attributes so a pin depends on Nova's markup, not the serializer.
-    const attrsAsBefore = s => s.replace(/="([^"]*)"/g, (_, v) => `="${v.replace(/&lt;/g, "<").replace(/&gt;/g, ">")}"`);
-    const flat = s => attrsAsBefore(String(s)).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
+    const flat = s => String(s).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
+    // A pin fingerprints what the markup MEANS, not how a library wrote it:
+    // every HTML string is read back into elements (tag, attributes sorted
+    // by name, children) and text, and that structure is hashed. parse5 8.1
+    // (Nov 2026) began writing < and > in attributes as &lt; and &gt;, which
+    // broke text pins with no change to the panel; this can't.
+    const shape = node => {
+      if (node.nodeType === 3) return node.data;
+      if (node.nodeType !== 1) return null;
+      const attrs = Array.from(node.attributes).map(a => [a.name, a.value]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+      return [node.localName, attrs, Array.from(node.childNodes).map(shape).filter(x => x !== null)];
+    };
+    const canon = value => {
+      if (typeof value === "string" && /<[a-zA-Z!\/]/.test(value)) {
+        const tpl = dom.window.document.createElement("template");
+        tpl.innerHTML = value;
+        return { html: Array.from(tpl.content.childNodes).map(shape).filter(x => x !== null) };
+      }
+      if (Array.isArray(value)) return value.map(canon);
+      if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).map(k => [k, canon(value[k])]));
+      return value;
+    };
     const pin = (name, value) => {
-      const got = crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+      const got = crypto.createHash("sha256").update(JSON.stringify(canon(value))).digest("hex").slice(0, 16);
       checks.push([`pinned results: ${name} are unchanged` + (got === PINS[name] ? "" : ` (got ${got})`), got === PINS[name]]);
     };
     const saved = {
