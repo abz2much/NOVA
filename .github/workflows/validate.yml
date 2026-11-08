@@ -23,7 +23,7 @@ jobs:
         with: { persist-credentials: false }
       - name: Check the manifest with hassfest
         # Pinned to a commit; bump it deliberately.
-        uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb
+        uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361
 
   hacs:
     runs-on: ubuntu-latest
