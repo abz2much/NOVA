@@ -245,6 +245,7 @@ async def test_the_nighttime_sweep_reports_a_skipped_lock(load, fake_hass, door_
     mgr = lockdown.LockdownManager.__new__(lockdown.LockdownManager)
     mgr.hass, mgr.config, mgr.exempt_locks, mgr._automatic_generation = fake_hass, {}, set(), 0
     mgr.since, mgr.auto = 0.0, False
+    mgr._lock_attempts, mgr._sent_at = {}, {}
     recorded = []
 
     async def _record(decision, reason, **kw):
