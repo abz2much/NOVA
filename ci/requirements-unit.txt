@@ -5,7 +5,7 @@ pytest-asyncio
 pyflakes
 pyyaml
 voluptuous
-mypy==2.3.1
+mypy==2.4.1
 pytest-cov==7.1.0
 # The version Home Assistant's own wyoming integration uses; Nova's Voice ID
 # client and its tests need it. Dependabot leaves it alone (it follows HA).
