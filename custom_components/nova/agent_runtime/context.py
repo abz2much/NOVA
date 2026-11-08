@@ -120,7 +120,10 @@ def _build_home_context(hass: HomeAssistant) -> str:
     aliases = _memory._load_learned().get("alias", {})
     if aliases:
         pairs = list(aliases.items())[:_ALIASES_SHOWN]
-        lines.append("Learned aliases: " + "; ".join(f"'{k}' = {v}" for k, v in pairs))
+        # Taught from conversation, so as much someone else's text as a device
+        # name is: one line each, cut short.
+        lines.append("Learned aliases: " + "; ".join(
+            f"'{_one_line(k)}' = {_one_line(v)}" for k, v in pairs))
     return "\n".join(lines)
 
 
