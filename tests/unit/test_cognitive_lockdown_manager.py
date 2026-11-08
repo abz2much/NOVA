@@ -12,6 +12,7 @@ changed here (see "Found, not fixed" in the PR).
 """
 import json
 import types
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -151,7 +152,7 @@ async def test_secure_entity_sends_the_right_service_and_reports_failure(cc, fak
 
 # ── _lock_all ───────────────────────────────────────────────────────────────
 
-async def test_lock_all_logs_one_request_and_marks_each_outcome(cc, fake_hass, al):
+async def test_lock_all_logs_one_request_and_marks_each_outcome(cc, fake_hass, al, waits):
     fake_hass.states.set("lock.a", "unlocked", friendly_name="A")
     fake_hass.states.set("lock.b", "unlocked", friendly_name="B")
     real = fake_hass.services.async_call
@@ -264,7 +265,7 @@ def _fail_locks(fake_hass, *entities):
 
 
 async def test_a_lock_that_fails_to_lock_is_named_and_never_called_already_secured(
-        cc, fake_hass, monkeypatch):
+        cc, fake_hass, monkeypatch, waits):
     """Before 8.7.16 a failing lock command was only logged, so with nothing
     else to do the announcement said the home was already fully secured."""
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
@@ -283,7 +284,7 @@ async def test_a_lock_that_fails_to_lock_is_named_and_never_called_already_secur
 
 
 async def test_a_failed_lock_is_reported_alongside_the_ones_that_were_sent(
-        cc, fake_hass, monkeypatch):
+        cc, fake_hass, monkeypatch, waits):
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
     fake_hass.states.set("cover.garage", "open", device_class="garage", friendly_name="Garage")
@@ -300,7 +301,7 @@ async def test_a_failed_lock_is_reported_alongside_the_ones_that_were_sent(
         gap=i18n.message("lockdown_secure_failed", "en", names="Back"))
 
 
-async def test_a_failed_lock_and_an_open_window_are_both_named(cc, fake_hass, monkeypatch):
+async def test_a_failed_lock_and_an_open_window_are_both_named(cc, fake_hass, monkeypatch, waits):
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     fake_hass.states.set("binary_sensor.window", "on", device_class="window", friendly_name="Window")
     _fail_locks(fake_hass, "lock.front")
@@ -701,6 +702,162 @@ async def test_verify_never_raises(cc, fake_hass, slept, monkeypatch):
         raise RuntimeError("announce broke")
     monkeypatch.setattr(cc, "_emit_action", boom)
     await mgr._verify_secured("lock.front", "lock", "Front")
+
+
+# ── lock retries (8.85.11) ──────────────────────────────────────────────────
+# Fake locks only. A lock command can be lost on the way (a radio lock), so
+# engage tries each lock up to three times. Nova still never fights a person:
+# a lock that changed state after the command is not sent it again.
+
+def _script_locks(hass, behave):
+    """Run lock.lock through ``behave(entity_id, attempt)``, which returns
+    "fail" (the call raises), "latch" (it works and the lock reads locked) or
+    "ignore" (the call is accepted and nothing happens). Returns the log of
+    ("call", entity_id) and, with sleeps added by the test, the order of events."""
+    log, counts = [], {}
+    real = hass.services.async_call
+
+    async def call(domain, service, data=None, blocking=False, **kw):
+        if (domain, service) != ("lock", "lock"):
+            return await real(domain, service, data, blocking=blocking, **kw)
+        eid = data["entity_id"]
+        counts[eid] = counts.get(eid, 0) + 1
+        log.append(("call", eid))
+        action = behave(eid, counts[eid])
+        if action == "fail":
+            raise RuntimeError("lock offline")
+        await real(domain, service, data, blocking=blocking, **kw)
+        if action == "latch":
+            hass.states.set(eid, "locked", friendly_name=data.get("friendly", eid))
+    hass.services.async_call = call
+    return log
+
+
+@pytest.fixture
+def _lockdown(load):
+    return load("core_lockdown")
+
+
+@pytest.fixture
+def waits(cc, monkeypatch):
+    """asyncio.sleep without waiting; the log of every wait, in order."""
+    log = []
+
+    async def fake_sleep(secs):
+        log.append(("sleep", secs))
+    monkeypatch.setattr(cc.asyncio, "sleep", fake_sleep)
+    return log
+
+
+def _earlier(seconds=5):
+    return datetime.now(timezone.utc) - timedelta(seconds=seconds)
+
+
+async def test_a_lock_command_that_fails_is_tried_again_and_the_lock_ends_up_locked(
+        cc, fake_hass, waits, emitted, monkeypatch, _lockdown):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "fail" if n < 3 else "latch")
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    mgr = _mgr(cc, fake_hass)
+    action = await mgr.engage("x")
+    fake_hass.close_pending()
+    assert [eid for _k, eid in log] == ["lock.front"] * 3
+    assert waits == [("sleep", _lockdown._LOCK_RETRY_DELAY)] * 2
+    i18n = cc._notify_i18n()
+    assert i18n.message("lockdown_secure_failed", "en", names="Front") not in action["message"]
+    assert emitted == []
+
+
+async def test_a_lock_that_never_takes_the_command_is_tried_three_times_then_reported(
+        cc, fake_hass, waits, monkeypatch):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "fail")
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    action = await _mgr(cc, fake_hass).engage("x")
+    fake_hass.close_pending()
+    assert len(log) == 3
+    i18n = cc._notify_i18n()
+    assert i18n.message("lockdown_secure_failed", "en", names="Front") in action["message"]
+
+
+async def test_one_failing_lock_does_not_hold_up_the_others(cc, fake_hass, waits, monkeypatch):
+    fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "fail" if eid == "lock.back" else "latch")
+    order = []
+
+    async def fake_sleep(secs):
+        order.append("sleep")
+    monkeypatch.setattr(cc.asyncio, "sleep", fake_sleep)
+    real = fake_hass.services.async_call
+
+    async def tracked(domain, service, data=None, blocking=False, **kw):
+        order.append(data["entity_id"] if domain == "lock" else domain)
+        return await real(domain, service, data, blocking=blocking, **kw)
+    fake_hass.services.async_call = tracked
+    await _mgr(cc, fake_hass).engage("x")
+    fake_hass.close_pending()
+    assert order.index("lock.front") < order.index("sleep")      # the good lock first, then the waiting
+    assert [eid for _k, eid in log].count("lock.back") == 3
+
+
+async def test_a_lock_that_still_reads_unlocked_is_sent_the_command_again_before_any_alert(
+        cc, fake_hass, waits, emitted):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "latch")
+    mgr = _mgr(cc, fake_hass)
+    mgr.active = True
+    mgr._sent_at, mgr._lock_attempts = {"lock.front": datetime.now(timezone.utc)}, {"lock.front": 1}
+    await mgr._verify_secured("lock.front", "lock", "Front")
+    assert [eid for _k, eid in log] == ["lock.front"]
+    assert waits == [("sleep", cc.LOCKDOWN_SECURE_VERIFY_DELAY)] * 2
+    assert emitted == []
+
+
+async def test_a_lock_that_never_latches_gets_three_tries_then_one_critical_alert(
+        cc, fake_hass, waits, emitted, monkeypatch):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "ignore")
+    mgr = _mgr(cc, fake_hass)
+    mgr.active = True
+    mgr._sent_at, mgr._lock_attempts = {"lock.front": datetime.now(timezone.utc)}, {"lock.front": 1}
+    await mgr._verify_secured("lock.front", "lock", "Front")
+    assert len(log) == 2                                       # the first try was engage's own
+    assert waits == [("sleep", cc.LOCKDOWN_SECURE_VERIFY_DELAY)] * 3
+    ((alert, _),) = emitted
+    assert alert["urgency"] == "critical"
+    assert alert["message"] == ("Sir, I tried to secure Front 3 times during lockdown "
+                                "but it's still unlocked.")
+
+
+async def test_a_lock_that_changed_since_the_command_is_not_sent_it_again(
+        cc, fake_hass, waits, emitted, monkeypatch):
+    """Someone unlocked it after Nova locked it: Nova does not fight them."""
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "latch")
+    mgr = _mgr(cc, fake_hass)
+    mgr.active = True
+    mgr._sent_at, mgr._lock_attempts = {"lock.front": _earlier()}, {"lock.front": 1}
+    await mgr._verify_secured("lock.front", "lock", "Front")
+    assert log == []
+    ((alert, _),) = emitted
+    assert alert["message"] == "Sir, I tried to secure Front during lockdown but it's still unlocked."
+
+
+async def test_engage_then_the_background_checks_retry_a_lock_that_never_latches(
+        cc, fake_hass, waits, emitted, monkeypatch):
+    """The whole path: engage sends the command, the check finds it still
+    unlocked, sends it twice more, and only then raises the critical alert."""
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    log = _script_locks(fake_hass, lambda eid, n: "ignore")
+    await _mgr(cc, fake_hass).engage("x")
+    await fake_hass.drain()
+    assert len(log) == 3
+    ((alert, _),) = emitted
+    assert alert["urgency"] == "critical" and "3 times" in alert["message"]
 
 
 # ── the state file ──────────────────────────────────────────────────────────

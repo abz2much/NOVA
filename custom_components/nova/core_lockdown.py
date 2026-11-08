@@ -12,6 +12,7 @@ import contextlib
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,12 @@ _UNREADABLE = {"unknown", "unavailable", "none", ""}
 # (on its way) and unlocked (it sends the command). Any other reading, such
 # as jammed, open or offline, leaves the lock not secured.
 _LOCK_STATES_HANDLED = {"locked", "locking", "unlocked"}
+
+# A lock command can be lost on the way (a radio lock), so each lock is tried
+# this many times in all, and a failed command is sent again after this many
+# seconds. Only locks: a retried close could shut a door or gate on someone.
+_LOCK_ATTEMPTS = 3
+_LOCK_RETRY_DELAY = 5
 
 
 def _is_unreadable(state) -> bool:
@@ -220,6 +227,11 @@ class LockdownManager:
         # (entity_id, friendly name) of each lock the last _lock_all() could
         # not lock.
         self._lock_failures: list = []
+        # Per lock in this lockdown: how many lock commands were tried, and
+        # when the last one was sent. A retry only goes to a lock whose state
+        # has not changed since that moment, so Nova never fights a person.
+        self._lock_attempts: dict = {}
+        self._sent_at: dict = {}
         # Set when someone lifts lockdown while the alarm is still armed, so
         # it does not re-engage until the alarm is disarmed and armed again.
         self._auto_suppressed = False
@@ -414,11 +426,47 @@ class LockdownManager:
             await self.hass.async_add_executor_job(
                 lambda: action_log.set_execution(row_id, outcome, reason_code=reason_code))
 
+    async def _lock_once(self, eid: str, name: str, row_id, generation) -> str:
+        """One attempt to lock ``eid``. Returns "sent" (the command went out),
+        "already_secure" (it reads locked now, nothing was sent), "failed" (the
+        command itself failed), "skipped" (the live check refused it: door open
+        or unreadable) or "stale" (an automatic run was cancelled)."""
+        self._lock_attempts[eid] = self._lock_attempts.get(eid, 0) + 1
+        try:
+            result = await secure_device(self.hass, eid, "lock")
+        except Exception as exc:
+            # The live check skipped it (door open, or unreadable) or the
+            # command failed: either way it is named as not locked.
+            skipped = isinstance(exc, NotSecured)
+            _LOGGER.warning("Lockdown: %s %s: %s",
+                            "skipped" if skipped else "failed to lock", eid, exc)
+            if skipped:
+                await self._record("not locked", exc.note, entity_id=eid,
+                                   assessment=exc.code)
+                await self._set_row(row_id, "blocked", exc.code)
+                return "skipped"
+            await self._set_row(row_id, "failed", "service_call_failed")
+            return "failed"
+        if not self._automatic_operation_current(generation):
+            return "stale"
+        if result == "already_secure":
+            # Locked since the list was made; nothing was sent.
+            await self._set_row(row_id, "blocked", "already_secure")
+            return "already_secure"
+        self._sent_at[eid] = datetime.now(timezone.utc)
+        _LOGGER.info("Lockdown: locked %s", eid)
+        await self._set_row(row_id, "accepted")
+        return "sent"
+
     async def _lock_all(self, request_id: Optional[str] = None,
                         automatic_generation: Optional[int] = None) -> list:
         """Lock every unlocked lock. Returns (entity_id, friendly name) for
         each one the command was sent to, so engage() can check each later.
         Locks that could not be locked go to self._lock_failures.
+
+        A lock whose command failed is tried again, up to
+        _LOCK_ATTEMPTS in all, in a second pass after every lock has
+        had its first try, so one stubborn lock never holds up the rest.
 
         With a ``request_id`` (engage's own), every lock is logged as a
         target of that one lockdown request.
@@ -431,37 +479,43 @@ class LockdownManager:
                  "entity_id": st.entity_id} for st in candidates])
         sent = []
         self._lock_failures = []
+        retry: dict = {}            # entity id -> (name, row id), command failed
         for state in candidates:
             if not self._automatic_operation_current(automatic_generation):
                 break
             eid = state.entity_id
             name = state.attributes.get("friendly_name", eid)
             row_id = rows.get(eid)
-            try:
-                result = await secure_device(self.hass, eid, "lock")
-            except Exception as exc:
-                # The live check skipped it (door open, or unreadable) or the
-                # command failed: either way it is named as not locked.
-                skipped = isinstance(exc, NotSecured)
-                _LOGGER.warning("Lockdown: %s %s: %s",
-                                "skipped" if skipped else "failed to lock", eid, exc)
-                self._lock_failures.append((eid, name))
-                if skipped:
-                    await self._record("not locked", exc.note, entity_id=eid,
-                                       assessment=exc.code)
-                    await self._set_row(row_id, "blocked", exc.code)
-                else:
-                    await self._set_row(row_id, "failed", "service_call_failed")
-                continue
-            if not self._automatic_operation_current(automatic_generation):
+            result = await self._lock_once(eid, name, row_id, automatic_generation)
+            if result == "stale":
                 break
-            if result == "already_secure":
-                # Locked since the list was made; nothing was sent.
-                await self._set_row(row_id, "blocked", "already_secure")
-                continue
-            sent.append((eid, name))
-            _LOGGER.info("Lockdown: locked %s", eid)
-            await self._set_row(row_id, "accepted")
+            if result in ("failed", "skipped"):
+                self._lock_failures.append((eid, name))
+                if result == "failed":
+                    retry[eid] = (name, row_id)
+            elif result == "sent":
+                sent.append((eid, name))
+        for attempt in range(2, _LOCK_ATTEMPTS + 1):
+            if not retry or not self._automatic_operation_current(automatic_generation):
+                break
+            await asyncio.sleep(_LOCK_RETRY_DELAY)
+            for eid in list(retry):
+                if not self._automatic_operation_current(automatic_generation):
+                    return sent
+                name, row_id = retry[eid]
+                await self._record("retrying lock", f"attempt {attempt} of {_LOCK_ATTEMPTS}",
+                                   entity_id=eid, assessment="the lock command failed",
+                                   request_ids=[request_id] if request_id else None)
+                result = await self._lock_once(eid, name, row_id, automatic_generation)
+                if result == "stale":
+                    return sent
+                if result == "failed":
+                    continue
+                del retry[eid]
+                if result in ("sent", "already_secure"):
+                    self._lock_failures = [p for p in self._lock_failures if p[0] != eid]
+                if result == "sent":
+                    sent.append((eid, name))
         return sent
 
     def _check_later(self, eid: str, dom: str, name: str) -> None:
@@ -515,6 +569,7 @@ class LockdownManager:
         self.active, self.since, self.reason, self.auto = True, time.time(), reason, auto
         _state_changed()
         self._secured_by_us, self._alerted, self._silent = set(), set(), set()
+        self._lock_attempts, self._sent_at = {}, {}
         self._last_breach_alert = 0.0
         honorific = _m_common._live_honorific(self.hass)
 
@@ -716,25 +771,53 @@ class LockdownManager:
         return self._breach("critical", honorific,
                             f"{name} opened during lockdown and I couldn't secure it.")
 
+    async def _lock_again(self, eid: str, state) -> bool:
+        """After the check found a lock still unlocked: send the lock command
+        again if it has tries left and the lock has not changed since Nova's
+        last command. A lock that locked and was unlocked again is a person's
+        doing, and Nova does not fight them. True when a try was used."""
+        if self._lock_attempts.get(eid, 1) >= _LOCK_ATTEMPTS:
+            return False
+        sent_at = self._sent_at.get(eid)
+        changed = getattr(state, "last_changed", None)
+        if sent_at is None or changed is None or str(state.state).lower() != "unlocked":
+            return False
+        if changed.tzinfo is None:
+            changed = changed.replace(tzinfo=timezone.utc)
+        if changed > sent_at:
+            return False
+        attempt = self._lock_attempts.get(eid, 1) + 1
+        await self._record("retrying lock", f"attempt {attempt} of {_LOCK_ATTEMPTS}",
+                           entity_id=eid, assessment="still unlocked after the command",
+                           request_ids=self._engage_ids())
+        result = await self._lock_once(eid, self._friendly(eid), None, None)
+        return result != "skipped"
+
     async def _verify_secured(self, eid: str, dom: str, name: str) -> None:
-        """After a lock or close, wait, then make sure it took."""
+        """After a lock or close, wait, then make sure it took. A lock still
+        unlocked is sent the command again (see _lock_again), waiting again
+        each time, before the critical alert."""
         try:
-            await asyncio.sleep(LOCKDOWN_SECURE_VERIFY_DELAY)
-            if not self.active or eid in self.exempt_windows:
-                return
-            state = self.hass.states.get(eid)
-            if state is None:
-                # No reading means unverified, never secured. Recorded only:
-                # a missing reading raises no alarm.
-                await self._record("could not check", "no reading after the command",
-                                   entity_id=eid, assessment="unverified",
-                                   request_ids=self._engage_ids())
-                return
-            if self._is_secure(dom, state.state):
-                await self._record("checked, secured", "read secure after the command",
-                                   entity_id=eid, assessment="verified",
-                                   request_ids=self._engage_ids())
-                return
+            while True:
+                await asyncio.sleep(LOCKDOWN_SECURE_VERIFY_DELAY)
+                if not self.active or eid in self.exempt_windows:
+                    return
+                state = self.hass.states.get(eid)
+                if state is None:
+                    # No reading means unverified, never secured. Recorded only:
+                    # a missing reading raises no alarm.
+                    await self._record("could not check", "no reading after the command",
+                                       entity_id=eid, assessment="unverified",
+                                       request_ids=self._engage_ids())
+                    return
+                if self._is_secure(dom, state.state):
+                    await self._record("checked, secured", "read secure after the command",
+                                       entity_id=eid, assessment="verified",
+                                       request_ids=self._engage_ids())
+                    return
+                if dom == "lock" and await self._lock_again(eid, state):
+                    continue
+                break
             if eid in self._alerted:
                 return
             self._alerted.add(eid)
@@ -742,9 +825,11 @@ class LockdownManager:
                                entity_id=eid, assessment="secure check failed",
                                request_ids=self._engage_ids())
             still = "unlocked" if dom == "lock" else "open"
+            tries = self._lock_attempts.get(eid, 1) if dom == "lock" else 1
+            times = f" {tries} times" if tries > 1 else ""
             alert = self._breach(
                 "critical", _m_common._live_honorific(self.hass),
-                f"I tried to secure {name} during lockdown but it's still {still}.")
+                f"I tried to secure {name}{times} during lockdown but it's still {still}.")
             await _emit_action(self.hass, self.config, alert, False)
         except Exception as exc:
             _LOGGER.debug("lockdown secure-verify error: %s", exc)

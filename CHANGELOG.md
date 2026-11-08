@@ -1,3 +1,9 @@
+## [8.85.11] A lock that misses its command is tried again
+
+### Fixed
+- **During a lockdown, a lock that does not take the lock command is now tried again.** Radio and battery locks sometimes miss a command, and Nova sent it once and gave up. Each lock is now tried up to 3 times. If the command itself fails, it is sent again after 5 seconds, after every other lock has had its first try, so one stubborn lock never holds up the rest. If the command was accepted but the lock still reads unlocked at the 25 second check, it is sent again up to twice more, and only then do you get the critical alert, which now says how many times Nova tried.
+- **Nova still never fights a person.** A lock is sent the command again only if it has not changed state since Nova's last command. A lock that locked and was then unlocked again is someone's doing, and the existing critical alert applies as before. A door, garage door or gate is never retried, because a repeated close could shut it on someone.
+
 ## [8.85.10] Smoke, CO, gas and leak alarms no longer go quiet
 
 ### Fixed
