@@ -1,0 +1,39 @@
+# A preview against the next Home Assistant: the newest beta (or release)
+# installed on top of the newest PHACC. It reports and does not block: a
+# beta can need a PHACC that is not out yet (HA 2026.11 changed how httpx
+# loads, and no PHACC supported it during its beta). When it can run, it
+# warns of a coming break a week before the release.
+name: HA beta preview
+
+on:
+  schedule:
+    - cron: "0 7 * * 1,4"   # Mondays and Thursdays; HA betas land on Wednesdays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    name: Integration tests on the next Home Assistant
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install PHACC, then the newest Home Assistant beta on top
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade pytest-homeassistant-custom-component
+          pip install --upgrade 'groq>=0.9.0' 'openai>=1.0.0' 'anthropic>=0.39.0' 'pypdf>=4.0.0' 'wyoming==1.10.2'
+          pip install --upgrade --pre homeassistant
+          python scripts/ha_component_requirements.py > ha-component-requirements.txt
+          pip install -r ha-component-requirements.txt
+      - name: Versions under test
+        run: |
+          python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
+          pip list 2>/dev/null | grep -iE '^(pytest-homeassistant-custom-component|homeassistant|anthropic|openai|groq) '
+      - name: Integration tests
+        run: python -m pytest tests/integration/ -v

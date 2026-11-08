@@ -21,6 +21,9 @@ from homeassistant.setup import async_setup_component
 async def _assist_api(hass, device_id=None):
     assert await async_setup_component(hass, "homeassistant", {})
     assert await async_setup_component(hass, "intent", {})
+    # Newer HA (2026.10+) registers the Assist API in its own "llm"
+    # component; in a real install conversation depends on it.
+    assert await async_setup_component(hass, "llm", {})
     hass.states.async_set("lock.front_door", "locked", {"friendly_name": "Front door"})
     hass.states.async_set("light.kitchen", "off", {"friendly_name": "Kitchen"})
     hass.states.async_set("cover.garage_door", "closed", {"friendly_name": "Garage door"})

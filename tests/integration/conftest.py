@@ -121,6 +121,21 @@ def _isolated_situations(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_ollama_network(monkeypatch):
+    """Nova's default provider is a local Ollama server. A test that runs the
+    agent without its own fake provider would try a real connection; newer
+    Home Assistant test runs fail any test that opens a socket. The call
+    fails here at once, as it did when the socket was refused."""
+    _enable_custom_components()
+    from custom_components.nova.providers import ollama
+
+    def _no_network(request, timeout):
+        raise ConnectionRefusedError("no network in tests")
+    monkeypatch.setattr(ollama, "_urlopen", _no_network)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_cognitive_loop(monkeypatch):
     """The cognitive core starts on every install since 8.41.0, and its
     30 second loop never returns. A test that waits for background tasks

@@ -430,26 +430,27 @@ async def test_listener_subscribes_by_source(rec, mqtt, source, choice, topics):
     source["value"] = choice
     unsubs = await rec.register_recognition_listener(_Hass())
     assert [t for t, _ in mqtt.subs] == topics
-    assert unsubs == [f"unsub:{t}" for t in topics]
+    # 8.85.x: stopping the pending log save always comes first.
+    assert unsubs == [rec.stop_saving] + [f"unsub:{t}" for t in topics]
 
 
 async def test_listener_needs_mqtt_service(rec, mqtt, source):
     source["value"] = "both"
-    assert await rec.register_recognition_listener(_Hass(mqtt=False)) == []
+    assert await rec.register_recognition_listener(_Hass(mqtt=False)) == [rec.stop_saving]
     assert mqtt.subs == []
 
 
 async def test_listener_without_mqtt_component(rec, monkeypatch, source):
     monkeypatch.setitem(sys.modules, "homeassistant.components.mqtt", None)
     monkeypatch.delattr(sys.modules["homeassistant.components"], "mqtt", raising=False)
-    assert await rec.register_recognition_listener(_Hass()) == []
+    assert await rec.register_recognition_listener(_Hass()) == [rec.stop_saving]
 
 
 async def test_listener_survives_failed_subscriptions(rec, mqtt, source):
     source["value"] = "both"
     mqtt.fail = {"double-take/matches", "frigate/events"}
     unsubs = await rec.register_recognition_listener(_Hass())
-    assert unsubs == ["unsub:frigate/tracked_object_update"]
+    assert unsubs == [rec.stop_saving, "unsub:frigate/tracked_object_update"]
 
 
 async def test_listener_config_failure_means_off(rec, mqtt, load, monkeypatch):

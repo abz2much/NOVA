@@ -1,3 +1,12 @@
+## [8.85.1] Nothing left running
+
+### Fixed
+- **Nova no longer leaves timers running after it unloads.** The reminder checker, the door and window watcher and Nova's other background work are now also stopped by Home Assistant itself when Nova unloads or reloads. Before, if Nova's internal state was lost, a reload could start a second reminder checker, so a reminder could be announced twice.
+- **The recent faces log is saved straight away when Nova unloads**, instead of by a timer that could fire after Nova had gone.
+
+### Behind the scenes
+- Nova's tests now run against the newest Home Assistant and the newest Anthropic, OpenAI and Groq libraries on every change. There are new tests for a leak alarm being announced in a real Home Assistant, and for each AI library answering, calling a tool and taking an image. Both kinds would have caught the HA 2026.11 problems fixed in 8.85.0 before they reached a home. A twice-weekly preview also runs the tests against the next Home Assistant beta.
+
 ## [8.85.0] Working again on Home Assistant 2026.11
 
 ### Fixed

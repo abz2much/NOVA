@@ -70,31 +70,33 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    name: Integration tests (PHACC)
+    name: Integration tests (real HA, newest AI libraries)
     # Its own job on purpose: PHACC installs the real homeassistant package,
-    # which clashes with the stand-ins the unit tests use.
+    # which clashes with the stand-ins the unit tests use. Nothing here is
+    # pinned by hand: the newest PHACC brings the newest Home Assistant it
+    # supports, HA's own components say which versions they need, and the
+    # AI libraries are the newest releases. A new release that breaks Nova
+    # fails here, including tests/integration/test_real_ai_libraries.py.
     steps:
       - uses: actions/checkout@v5
         with: { persist-credentials: false }
       - uses: actions/setup-python@v6
         with:
-          # Checked against 3.13 only (homeassistant 2026.2.3 through PHACC).
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install PHACC and Nova's requirements
         run: |
           python -m pip install --upgrade pip
-          pip install pytest-homeassistant-custom-component==0.13.316
-          # Nova's own requirements from manifest.json.
-          pip install 'groq>=0.9.0' 'openai>=1.0.0' 'anthropic>=0.39.0' 'pypdf>=4.0.0' 'wyoming==1.10.2'
-          # Components Nova's setup loads (camera, frontend, panel_custom,
-          # conversation) that PHACC does not bring with it.
-          pip install PyTurboJPEG home-assistant-frontend
-          # The exact versions conversation's manifest asks for; newer hassil
-          # releases lack a module this Home Assistant version imports.
-          pip install 'hassil==3.5.0' 'home-assistant-intents==2026.1.28'
-          # Optional imports of assist_pipeline (through tts and wake_word),
-          # loaded by the Setup Doctor tests.
-          pip install mutagen ha-ffmpeg pymicro-vad pyspeex-noise
+          pip install --upgrade pytest-homeassistant-custom-component
+          # Nova's own requirements from manifest.json, newest that match.
+          pip install --upgrade 'groq>=0.9.0' 'openai>=1.0.0' 'anthropic>=0.39.0' 'pypdf>=4.0.0' 'wyoming==1.10.2'
+          # The exact versions the installed HA's components (conversation,
+          # camera, frontend, assist pipeline...) ask for.
+          python scripts/ha_component_requirements.py > ha-component-requirements.txt
+          pip install -r ha-component-requirements.txt
+      - name: Versions under test
+        run: |
+          python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
+          pip list 2>/dev/null | grep -iE '^(pytest-homeassistant-custom-component|anthropic|openai|groq) '
       - name: Integration tests
         run: python -m pytest tests/integration/ -v
 

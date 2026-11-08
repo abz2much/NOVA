@@ -556,7 +556,9 @@ async def test_setup_builds_the_runtime_and_wires_everything(env, caplog):
     assert rt.automation_contexts.inventory is rt.automation_inventory
     assert w.calls("forward") == [((["binary_sensor", "conversation", "sensor", "stt"],), {})]
     assert env.entry.update_listener is env.nova._async_update_listener
-    assert env.entry.on_unload == ["update-unsub"]
+    # 8.85.x: HA itself also stops these on unload, even with no runtime.
+    assert env.entry.on_unload == ["update-unsub", rt.reminder_watcher.async_stop,
+                                   rt.sentinel.async_stop, rt.resources.async_close_all]
     assert set(env.hass.listeners) == {"nest_event", "frigate_event", "automation_triggered"}
     assert "Nova online. Good day, sir." in caplog.text
     assert "Nova Observer mode disabled. Enable via addon config → observer_enabled=true" \
