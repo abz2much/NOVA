@@ -299,6 +299,20 @@ async def test_a_safety_tick_error_is_logged_and_the_gathered_actions_and_the_re
     assert "Cognitive safety tick error: safety broke" in caplog.text
 
 
+async def test_a_hazard_alarm_already_on_is_announced_by_the_tick(cc, env, fake_hass):
+    """Smoke, CO, gas and leak alarms are only announced when they turn on, so
+    one that is already on when Nova starts would otherwise never be heard."""
+    fake_hass.states.set("binary_sensor.kitchen_smoke", "on", device_class="smoke",
+                         friendly_name="Kitchen smoke")
+    await cc._tick()
+    hazards = [a for a, _ in env.emitted if a["type"] == "critical_hazard"]
+    assert [h["entity_id"] for h in hazards] == ["binary_sensor.kitchen_smoke"]
+    assert hazards[0]["urgency"] == "critical"
+    env.emitted.clear()
+    await cc._tick()
+    assert [a for a, _ in env.emitted if a["type"] == "critical_hazard"] == []
+
+
 async def test_a_missing_safety_manager_does_not_stop_the_tick(cc, env):
     cc._CORE.safety_mgr = None
     cc._CORE.lockdown_mgr = _Lockdown([{"type": "lockdown_engaged"}])

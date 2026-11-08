@@ -111,6 +111,8 @@ def test_forget_brings_it_back(hab):
     {"kind": "garage_left_open", "entity_id": "binary_sensor.garage_door"},
     {"kind": "doors_windows", "urgency": "high", "entity_id": "binary_sensor.patio"},
     {"kind": "security", "urgency": "medium", "entity_id": "binary_sensor.hall_motion"},
+    # The all clear after a smoke, CO, gas or leak alarm, which is never held back.
+    {"kind": "hazard_cleared", "urgency": "high", "entity_id": "binary_sensor.kitchen_smoke"},
 ])
 def test_emergencies_are_exempt(hab, kw):
     assert hab.exempt(**kw)

@@ -451,6 +451,14 @@ async def _tick():
         anyone_home = house.anyone_home
         actions: list = []
 
+        # Smoke, CO, gas and leak sensors: one already on at start, one that
+        # stays on, and the all clear (core_hazards.follow_up). First, so it
+        # is delivered before anything else this tick has to say.
+        try:
+            actions += _m_hazards.follow_up(hass, config)
+        except Exception as exc:
+            _LOGGER.warning("Hazard follow-up error: %s", exc)
+
         # Lockdown first, so the night sweep can defer to it.
         if core.lockdown_mgr:
             try:
@@ -941,6 +949,9 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
 
 async def _bring_up(core, hass: HomeAssistant, config: dict) -> None:
     """The steps of start() that can fail once the core has begun to change."""
+    # A fresh start: an alarm still on is announced again (core_hazards).
+    _m_hazards.reset()
+
     # Files are read in the executor: ignore rules, lockdown state,
     # autonomy grants and the pattern store.
     core.ignore_mgr = await hass.async_add_executor_job(_m_ignore.IgnoreManager)
