@@ -100,7 +100,7 @@ class _Fakes:
         self.reply_targets_calls: list = []
         self.reply_target_result = None
         self.reply_targets_result: list = []
-        self.announce = AsyncMock(return_value=None)
+        self.announce = AsyncMock(return_value=True)      # a speaker took it
         monkeypatch.setattr(local_engine, "try_local", self.try_local)
         monkeypatch.setattr(connectivity, "allow_request", lambda: True)
         monkeypatch.setattr(agent, "run_agent", self.run_agent)
@@ -383,12 +383,30 @@ async def test_paired_speaker_gets_the_reply(hass, fakes):
         "sat1": "media_player.kitchen"}
     hass.states.async_set("media_player.kitchen", "idle")
     fakes.reply_target_result = "media_player.kitchen"
-    await _converse(hass, entry, _text(), device_id="sat1")
+    result = await _converse(hass, entry, _text(), device_id="sat1")
     await hass.async_block_till_done()
     assert fakes.reply_target_calls == [{"sat1": "media_player.kitchen"}]
     fakes.announce.assert_awaited_once()
     args = fakes.announce.await_args.args
     assert args[2:] == ("tts.fake_engine", ["media_player.kitchen"])
+    assert _speech(result) == ""                    # the speaker has it, so the satellite is quiet
+
+
+@pytest.mark.parametrize("failure", [False, RuntimeError("speaker down")], ids=["took_nothing", "raised"])
+async def test_a_reply_no_speaker_took_is_spoken_by_the_satellite(hass, fakes, failure):
+    """Otherwise the satellite stays quiet for a reply nobody heard."""
+    entry = await _setup(hass)
+    entry.runtime_data.runtime_config["satellite_pairings"] = {
+        "sat1": "media_player.kitchen"}
+    hass.states.async_set("media_player.kitchen", "idle")
+    fakes.reply_target_result = "media_player.kitchen"
+    if isinstance(failure, Exception):
+        fakes.announce.side_effect = failure
+    else:
+        fakes.announce.return_value = failure
+    result = await _converse(hass, entry, _text(), device_id="sat1")
+    await hass.async_block_till_done()
+    assert _speech(result) == "Here is your poem."
 
 
 # ── Loaded entry that lost its runtime ──────────────────────────────────────

@@ -5,6 +5,7 @@
   2. A 30 minute speech cooldown per (camera, kind). Only speech is gated.
   3. Porch motion and mailbox sensors can bring a check forward.
 """
+import asyncio
 import sys
 import types
 
@@ -18,10 +19,11 @@ def pm(load, monkeypatch):
     if "aiohttp" not in sys.modules:
         monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
     mod = load("package_monitor")
-    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST):
+    # The locks belong to the event loop they were used in; each test has its own.
+    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST, mod._LOCKS):
         d.clear()
     yield mod
-    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST):
+    for d in (mod._STATE, mod._LAST_SPOKEN, mod._TRIGGER_LAST, mod._LOCKS):
         d.clear()
 
 
@@ -184,6 +186,37 @@ async def test_mail_is_gated_separately_from_packages(pm, fake_hass, env, clock)
     assert len([m for m in env["spoken"] if "mail" in m]) == 1
     await _eval(pm, fake_hass, cam, _det(package=True))           # still speaks
     assert any("package has been delivered" in m for m in env["spoken"])
+
+
+async def test_two_checks_of_one_camera_at_once_announce_a_delivery_once(
+        pm, fake_hass, env, load, monkeypatch):
+    """A doorbell check and an Eufy "delivered" event close together both see
+    the package arrive, so without a lock both announce it."""
+    async def slow_announce(hass, msg, *a, **k):
+        await asyncio.sleep(0.01)             # a speaker takes real time
+        env["spoken"].append(msg)
+        return True
+    monkeypatch.setattr(load("tts_helper"), "async_announce", slow_announce)
+    cam = "camera.front_door"
+    results = await asyncio.gather(
+        _eval(pm, fake_hass, cam, _det(package=True), "doorbell"),
+        _eval(pm, fake_hass, cam, _det(package=True), "eufy"))
+    assert len(env["spoken"]) == 1
+    assert sorted(results) == [False, True]
+
+
+async def test_two_cameras_are_still_checked_at_the_same_time(
+        pm, fake_hass, env, load, monkeypatch):
+    """The lock is per camera: one slow camera never holds up another."""
+    async def slow_announce(hass, msg, *a, **k):
+        await asyncio.sleep(0.01)
+        env["spoken"].append(msg)
+        return True
+    monkeypatch.setattr(load("tts_helper"), "async_announce", slow_announce)
+    results = await asyncio.gather(
+        _eval(pm, fake_hass, "camera.front_door", _det(package=True)),
+        _eval(pm, fake_hass, "camera.porch", _det(package=True)))
+    assert results == [True, True] and len(env["spoken"]) == 2
 
 
 async def test_cooldown_is_per_camera(pm, fake_hass, env, clock):

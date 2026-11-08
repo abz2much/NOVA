@@ -186,6 +186,37 @@ def test_repeats(og):
         (False, "duplicate of recent message")
 
 
+def test_a_reserved_announcement_holds_back_a_repeat_until_it_is_released(og, monkeypatch):
+    """Two senders can pass the check at the same moment, before either has
+    recorded what it said. The first reserves its place; the second sees it."""
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    token = og.reserve(entity_id="cover.garage", category="security", urgency="medium",
+                       message="The garage door is open")
+    assert _ask(og) == (False, "duplicate of recent message")
+    og.release(token)
+    assert _ask(og) == (True, "ok")
+
+
+def test_a_reservation_counts_toward_the_hourly_cap(og, monkeypatch):
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    for n in range(2):
+        og.reserve(entity_id=f"sensor.s{n}", category="info", urgency="low",
+                   message=f"message {n}")
+    assert _ask(og, message="a third", entity_id="sensor.s3", max_per_hour=2) == (
+        False, "rate limit (2/2/hour)")
+
+
+def test_a_reservation_nobody_released_expires(og, monkeypatch):
+    """Otherwise a delivery that died would hold back that message for good."""
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    og.reserve(entity_id="cover.garage", category="security", urgency="medium",
+               message="The garage door is open")
+    og.clock["now"] += 59
+    assert _ask(og)[0] is False
+    og.clock["now"] += 2
+    assert _ask(og) == (True, "ok")
+
+
 def test_suppressed_messages_do_not_count_as_repeats(og):
     _said(og, "The garage door has been left open", spoken=False, dedup_key="g")
     assert _ask(og, message="The garage door has been left open", dedup_key="g") == (True, "ok")

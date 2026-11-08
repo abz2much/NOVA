@@ -260,7 +260,7 @@ async def test_the_mic_reopens_on_a_without_handoff_when_the_reply_plays_elsewhe
     monkeypatch.setattr(nova_conv, "resolve_tts_entity", lambda hass, eng: "tts.nova")
 
     async def announce(*a, **k):
-        return None
+        return True                  # the speaker took the reply
     monkeypatch.setattr(nova_conv, "async_announce", announce)
     hass.states.async_set("media_player.living", "idle")
     agent = _Agent()
@@ -347,7 +347,7 @@ async def _cast_setup(hass, monkeypatch, a_sat):
     monkeypatch.setattr(nova_conv.NovaAgent, "_in_quiet_hours", lambda self: False)
 
     async def announce(*a, **k):
-        return None
+        return True                  # the speaker took the reply
     monkeypatch.setattr(nova_conv, "async_announce", announce)
     hass.states.async_set("media_player.living", "idle")
     return continued_conversation

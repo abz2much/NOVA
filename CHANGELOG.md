@@ -1,3 +1,10 @@
+## [8.85.8] No more doubled or lost announcements
+
+### Fixed
+- **Two alerts at the same moment are no longer both spoken.** Nova checks that it has not just said something, then takes seconds to reach the speakers, and only afterwards notes what it said. A second alert checking in that gap passed the same check, so the same thing was said twice. An alert now holds its place while it is being delivered. A place nobody gives up is dropped after a minute.
+- **A reply to a speaker that fails is no longer lost.** When a voice satellite's reply was sent to a paired speaker, Nova told the satellite to stay quiet without checking that the speaker played it. If every speaker failed, nobody heard the reply. The satellite now speaks it instead. Replies sent to a speaker may take a moment longer to finish, because Nova waits to hear whether it played.
+- **A doorbell check and an Eufy "delivered" event close together no longer both announce the same package.** Checks of one camera now run one at a time, so the second sees what the first recorded.
+
 ## [8.85.7] Who can search chats and test cameras
 
 ### Fixed
