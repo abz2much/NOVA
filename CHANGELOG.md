@@ -1,3 +1,8 @@
+## [8.85.3] Nova's learning history no longer grows forever
+
+### Fixed
+- **Nova's record of what happens in your home is now trimmed.** It kept every state change and every command for ever, so `patterns.db` only ever grew. The daily clean-up now removes anything older than 90 days, which is as far back as anything Nova learns from looks. **After updating:** the first clean-up deletes everything older than 90 days in one go. Conversations are still kept for 30 days.
+
 ## [8.85.2] No more endless waiting on an AI provider
 
 ### Fixed

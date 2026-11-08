@@ -9,6 +9,7 @@ test_cognitive_core_tick.py.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -41,6 +42,27 @@ def store(cc, tmp_path):
 
 
 # ── the logger itself ───────────────────────────────────────────────────────
+
+
+def test_purge_drops_old_state_changes_and_commands_and_keeps_recent_ones(store):
+    """Without it patterns.db only ever grows."""
+    old = (datetime.now() - timedelta(days=100)).isoformat()
+    recent = (datetime.now() - timedelta(days=10)).isoformat()
+    with sqlite3.connect(store._db_path) as conn:
+        for stamp, name in ((old, "old"), (recent, "recent")):
+            conn.execute("INSERT INTO state_changes (timestamp, entity_id, domain, "
+                         "new_state) VALUES (?, ?, 'light', 'on')", (stamp, f"light.{name}"))
+            conn.execute("INSERT INTO commands (timestamp, text) VALUES (?, ?)",
+                         (stamp, name))
+
+    removed = store.purge_older_than(90)
+
+    with sqlite3.connect(store._db_path) as conn:
+        kept_changes = [r[0] for r in conn.execute("SELECT entity_id FROM state_changes")]
+        kept_commands = [r[0] for r in conn.execute("SELECT text FROM commands")]
+    assert (kept_changes, kept_commands) == (["light.recent"], ["recent"])
+    assert removed == 2
+
 
 def test_a_new_store_has_every_person_column(store):
     assert PERSON_COLUMNS <= columns(store._db_path)
