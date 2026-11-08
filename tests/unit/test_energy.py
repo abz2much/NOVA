@@ -288,3 +288,53 @@ def test_agent_exposes_energy_status(load):
 def test_fallback_meter_by_friendly_name(energy, fake_hass, entity, attrs, found):
     fake_hass.states.set(entity, "512.3", **attrs)
     assert energy._fallback_meter(fake_hass) == (entity if found else None)
+
+
+# ── a home load sensor the user picked (8.85.0) ─────────────────────────────
+# On EcoFlow PowerOcean cloud the sensor named "Home Consumption" reads 0 W
+# all night, while the right one is named "House consumption". A name guess
+# cannot tell them apart, so the user picks.
+
+def _two_meters(fake_hass):
+    fake_hass.states.set("sensor.home_consumption", "500", device_class="power",
+                         unit_of_measurement="W", friendly_name="Home Consumption")
+    fake_hass.states.set("sensor.house_load", "700", device_class="power",
+                         unit_of_measurement="W", friendly_name="House consumption")
+
+
+def test_a_picked_meter_is_used_over_a_guess(energy, monkeypatch, fake_hass):
+    _two_meters(fake_hass)
+    _settings(energy, monkeypatch, energy_home_meter_entity="sensor.house_load")
+    status = energy.power_status(fake_hass)
+    assert (status["watts"], status["meter"], status["meter_source"]) == (
+        700, "sensor.house_load", "picked")
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown", None])
+def test_a_picked_meter_that_gives_no_number_is_unavailable(energy, monkeypatch, fake_hass,
+                                                            state):
+    _two_meters(fake_hass)
+    if state is not None:
+        fake_hass.states.set("sensor.picked", state, device_class="power",
+                             unit_of_measurement="W")
+    _settings(energy, monkeypatch, energy_home_meter_entity="sensor.picked")
+    status = energy.power_status(fake_hass)
+    assert (status["watts"], status["meter"], status["meter_source"]) == (
+        None, "sensor.picked", "picked")
+
+
+def test_a_picked_meter_in_kw_is_read_in_watts(energy, monkeypatch, fake_hass):
+    fake_hass.states.set("sensor.picked", "0.8", unit_of_measurement="kW")
+    _settings(energy, monkeypatch, energy_home_meter_entity="sensor.picked")
+    assert energy.power_status(fake_hass)["watts"] == 800
+
+
+@pytest.mark.parametrize("states, source", [(True, "guessed"), (False, "none")])
+def test_with_no_pick_the_meter_is_guessed_by_name(energy, monkeypatch, fake_hass,
+                                                   states, source):
+    if states:
+        _two_meters(fake_hass)
+    _settings(energy, monkeypatch, energy_home_meter_entity="")
+    status = energy.power_status(fake_hass)
+    assert status["meter_source"] == source
+    assert status["meter"] == ("sensor.home_consumption" if states else "")

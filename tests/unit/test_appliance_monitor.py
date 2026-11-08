@@ -1035,6 +1035,28 @@ def test_live_settings_come_from_the_owner_runtime(am, fake_hass):
 
 # ── start / stop / status ───────────────────────────────────────────────────
 
+@pytest.mark.parametrize("reading, baseline", [("700", 700.0), ("unavailable", 0.0)])
+def test_a_picked_meter_is_the_whole_home_meter(am, fake_hass, reading, baseline):
+    # 8.85.0: the user's pick wins over the name guess, even while it is silent.
+    fake_hass.states.set("sensor.home_consumption", "500", device_class="power",
+                         unit_of_measurement="W", friendly_name="Home Consumption")
+    fake_hass.states.set("sensor.house_load", reading, device_class="power",
+                         unit_of_measurement="W", friendly_name="House consumption")
+    tracker = am._discover_whole_home_meter(fake_hass, "sensor.house_load")
+    assert (tracker.entity_id, tracker.baseline_w) == ("sensor.house_load", baseline)
+
+
+async def test_start_follows_the_picked_meter(am, fake_hass, timers, listens, no_persisted):
+    fake_hass.states.set("sensor.home_consumption", "500", device_class="power",
+                         unit_of_measurement="W", friendly_name="Home Consumption")
+    fake_hass.states.set("sensor.house_load", "700", device_class="power",
+                         unit_of_measurement="W", friendly_name="House consumption")
+    await am.start(fake_hass, {"energy_home_meter_entity": "sensor.house_load"})
+    assert am._MON.delta.entity_id == "sensor.house_load"
+    assert "sensor.house_load" not in am._MON.sensors
+    await am.stop()
+
+
 async def test_start_with_nothing_to_watch_does_not_run(am, fake_hass, timers, listens, no_persisted):
     await am.start(fake_hass, {"appliance_profile": [{"name": "Kettle", "watts": 2000}]})
     assert am.is_running() is False and listens == [] and timers == []

@@ -242,6 +242,7 @@ _ALL = (
     # Energy and appliances
     _t("energy_agency", "advisory"),
     _n("energy_peak_watts", 8000.0),
+    _t("energy_home_meter_entity", ""),
     _j("energy_mode_bump", []),
     _t("energy_cost_today_entity", ""),
     _t("energy_cost_net_entity", ""),
