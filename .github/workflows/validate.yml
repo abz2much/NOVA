@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Hassfest (integration manifest)
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - name: Check the manifest with hassfest
         # Pinned to a commit; bump it deliberately.
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     name: HACS validation
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - name: Check the repository with HACS
         # v22.5.0, pinned to a commit.
@@ -49,7 +49,7 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - uses: actions/setup-python@v6
         with: { python-version: "${{ matrix.python-version }}" }
@@ -77,7 +77,7 @@ jobs:
     # AI libraries are the newest releases. A new release that breaks Nova
     # fails here, including tests/integration/test_real_ai_libraries.py.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - uses: actions/setup-python@v6
         with:
@@ -105,7 +105,7 @@ jobs:
     env:
       NODE_PATH: /tmp/jsdomtest/node_modules
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
