@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Tools for the panel checks in CI. Dependabot keeps them current.",
+  "devDependencies": {
+    "jsdom": "29.1.1"
+  }
+}

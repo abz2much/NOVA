@@ -54,11 +54,10 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: "${{ matrix.python-version }}" }
       - name: Install the test tools
-        # wyoming is pinned to the version Home Assistant's own wyoming
-        # integration uses; Nova's Voice ID client and its tests need it.
-        run: >-
-          python -m pip install --upgrade pip pytest pytest-asyncio pyflakes pyyaml
-          mypy==2.3.1 pytest-cov==7.1.0 voluptuous wyoming==1.10.2
+        # Listed in ci/requirements-unit.txt so Dependabot can keep them current.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade -r ci/requirements-unit.txt
       - name: Audit (compile, imports, names, architecture)
         run: python scripts/audit.py
       - name: Types
@@ -111,9 +110,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Install jsdom for the panel checks
-        # Outside the repository, and pinned, so a new jsdom release cannot
-        # change the result. Install errors are shown, not hidden.
-        run: npm install --prefix /tmp/jsdomtest --no-save --no-audit --no-fund jsdom@29.1.1
+        # The version is in ci/package.json, which Dependabot keeps current.
+        # Installed outside the repository so the repo's own node_modules
+        # can't mix in. Install errors are shown, not hidden.
+        run: |
+          mkdir -p /tmp/jsdomtest
+          cp ci/package.json /tmp/jsdomtest/
+          npm install --prefix /tmp/jsdomtest --no-audit --no-fund
       - name: The built panel matches frontend/src
         run: python3 scripts/build_panel.py --check
       - name: The built panel parses

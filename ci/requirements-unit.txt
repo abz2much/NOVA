@@ -1,0 +1,12 @@
+# Test tools for the unit test job. Dependabot keeps the pinned ones
+# current (a pull request per new version); the rest are always the newest.
+pytest
+pytest-asyncio
+pyflakes
+pyyaml
+voluptuous
+mypy==2.3.1
+pytest-cov==7.1.0
+# The version Home Assistant's own wyoming integration uses; Nova's Voice ID
+# client and its tests need it. Dependabot leaves it alone (it follows HA).
+wyoming==1.10.2
