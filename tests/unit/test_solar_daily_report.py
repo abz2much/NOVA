@@ -142,8 +142,8 @@ async def test_cost_today_prefers_configured_entity(solar, fake_hass, monkeypatc
                          {"energy_cost_today_entity": "sensor.electricity_cost_today",
                           "energy_cost_net_entity": "sensor.net_electricity_cost_today"}
                          .get(key, default))
-    fake_hass.states.set("sensor.electricity_cost_today", "1.94")
-    fake_hass.states.set("sensor.net_electricity_cost_today", "-3.19")
+    fake_hass.states.set("sensor.electricity_cost_today", "1.94", unit_of_measurement="€")
+    fake_hass.states.set("sensor.net_electricity_cost_today", "-3.19", unit_of_measurement="€")
 
     cost, source = await solar._cost_today(fake_hass, imported_kwh=10.0, exported_kwh=5.0)
     assert source == "configured_entity"
@@ -168,6 +168,37 @@ async def test_cost_today_falls_back_to_estimate(solar, fake_hass, monkeypatch, 
     assert source == "estimate"
     assert cost["today"] == pytest.approx(2.5)
     assert cost["net_today"] == pytest.approx(2.5 - 4 * 0.29)
+
+
+# 8.85.0: a cost setting pointed at a price per kWh read 0.40 €/kWh as
+# "€0.40 spent today". Only a sensor in a currency counts as a cost.
+@pytest.mark.parametrize("unit, device_class, is_cost", [
+    ("€", None, True), ("EUR", None, True), ("£", None, True), ("USD", None, True),
+    (None, "monetary", True),
+    ("€/kWh", None, False), ("EUR/kWh", None, False), ("c/kWh", None, False),
+    ("W", None, False), ("kWh", None, False), (None, None, False),
+])
+def test_only_a_currency_sensor_counts_as_a_cost(solar, fake_hass, unit, device_class, is_cost):
+    attrs = {k: v for k, v in (("unit_of_measurement", unit), ("device_class", device_class)) if v}
+    state = fake_hass.states.set("sensor.x", "1.5", **attrs)
+    assert solar.is_currency_sensor(state) is is_cost
+    assert solar.is_currency_sensor(None) is False
+
+
+async def test_a_saved_price_entity_falls_back_to_the_estimate(solar, fake_hass, monkeypatch, load):
+    fake_hass.config_entries = types.SimpleNamespace(async_entries=lambda domain: [])
+    nova_config = load("nova_config")
+    monkeypatch.setattr(nova_config, "runtime_get", lambda hass, entry, key, default="":
+                        {"energy_cost_today_entity": "input_number.price"}.get(key, default))
+
+    async def _fake_prefs(hass):
+        return {"energy_sources": [{"type": "grid", "entity_energy_price": "input_number.price",
+                                    "number_energy_price_export": 0.29}]}
+    monkeypatch.setattr(solar, "_read_prefs", _fake_prefs)
+    fake_hass.states.set("input_number.price", "0.25", unit_of_measurement="€/kWh")
+    cost, source = await solar._cost_today(fake_hass, imported_kwh=10.0, exported_kwh=4.0)
+    assert source == "estimate"
+    assert cost["today"] == pytest.approx(2.5)
 
 
 async def test_cost_today_unavailable_without_import_or_price(solar, fake_hass, monkeypatch, load):

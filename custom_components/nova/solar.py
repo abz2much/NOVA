@@ -477,6 +477,30 @@ def _resolve_price(hass, entity_field: Optional[str], number_field) -> Optional[
     return None
 
 
+# Currency symbols HA sensors use as a unit. A 3 letter ISO code (EUR, GBP,
+# USD...) also counts. Mirrored in the panel (energy.js _isCurrencySensor).
+_CURRENCY_SYMBOLS = frozenset({
+    "€", "$", "£", "¥", "₹", "₩", "₽", "₺", "₪", "₦", "₱", "₫", "₴", "₵", "₸",
+    "R", "kr", "zł", "Kč", "Ft", "lei",
+})
+
+
+def is_currency_sensor(state) -> bool:
+    """True for a cost in money: device_class monetary, or a unit that is a
+    currency on its own. A price per unit (€/kWh, c/kWh) is not a cost
+    (8.85.0)."""
+    if state is None:
+        return False
+    attrs = getattr(state, "attributes", {}) or {}
+    if attrs.get("device_class") == "monetary":
+        return True
+    unit = str(attrs.get("unit_of_measurement") or "").strip()
+    if not unit or "/" in unit:
+        return False
+    return unit in _CURRENCY_SYMBOLS or (len(unit) == 3 and unit.isascii()
+                                         and unit.isalpha() and unit.isupper())
+
+
 async def _cost_today(hass, imported_kwh: Optional[float], exported_kwh: Optional[float]
                        ) -> tuple[Optional[dict], str]:
     """Today's cost, and where it came from. Prefers a user-declared cost
@@ -500,6 +524,12 @@ async def _cost_today(hass, imported_kwh: Optional[float], exported_kwh: Optiona
     except Exception:
         today_eid = net_eid = ""
 
+    # A configured sensor counts only when it is a cost in a currency; a
+    # price per kWh saved there is ignored and the estimate is used.
+    if not is_currency_sensor(hass.states.get(today_eid) if today_eid else None):
+        today_eid = ""
+    if not is_currency_sensor(hass.states.get(net_eid) if net_eid else None):
+        net_eid = ""
     if today_eid:
         today_val = _live_pct(hass, today_eid)
         if today_val is not None:
