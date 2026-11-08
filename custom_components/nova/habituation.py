@@ -43,7 +43,7 @@ QUIET_FOR_DAYS = 30       # then it speaks again, and the count starts over
 QUIET_NOTE = "This has come up three days running, so I'll stop mentioning it."
 
 _EXEMPT_TYPE_PREFIXES = ("intrusion", "lockdown", "freeze", "package", "doorbell",
-                         "camera", "doors_windows", "security")
+                         "camera", "doors_windows", "security", "hazard_cleared")
 _EXEMPT_TYPE_SUFFIXES = ("left_open",)
 _EXEMPT_DOMAINS = ("lock", "cover", "alarm_control_panel")
 

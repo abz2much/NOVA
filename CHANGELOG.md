@@ -1,3 +1,12 @@
+## [8.85.10] Smoke, CO, gas and leak alarms no longer go quiet
+
+### Fixed
+- **An alarm that is already on when Nova starts is now announced.** Nova announced a smoke, carbon monoxide, gas or leak alarm only at the moment the sensor turned on, so one already on when Nova started or restarted was never mentioned. It is now announced once, as a critical alert, saying it is still active.
+- **An alarm that stays on is repeated.** Every 5 minutes while the sensor stays on, up to 6 times (about 30 minutes), as critical alerts, then Nova stops. Before, it spoke once and never again.
+- **Nova says when an alarm has cleared.** When the sensor goes back to a normal reading after being on for at least a minute, you get one message, pushed to your phones and spoken unless the house is asleep. A sensor that goes unavailable is dropped quietly, because a dead battery is not an all clear. Your own entity exclusions still apply.
+
+**Good to know:** a faulty detector stuck on will speak once at start, up to 6 more times in the first half hour, and once more after each restart or reload of Nova.
+
 ## [8.85.9] Safer backups, and fewer phantom people at night
 
 ### Fixed

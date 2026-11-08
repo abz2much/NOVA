@@ -128,3 +128,104 @@ def test_the_core_listener_announces_before_ignore_rules(load, monkeypatch):
     monkeypatch.setattr(load("core_common"), "_live_honorific", lambda h: "")
     rt._on_state_changed(_event("binary_sensor.x", "smoke", "off", "on"))
     assert len(hass.tasks) == 1
+
+
+# ── still on, repeats and all clear (8.85.10) ───────────────────────────────
+
+class _House(_Hass):
+    """A house whose sensors a test can change between ticks."""
+    def __init__(self):
+        super().__init__()
+        self.sensors = {}
+        self.states = SimpleNamespace(async_all=lambda domain=None: list(self.sensors.values()))
+
+    def set(self, entity_id="binary_sensor.kitchen_smoke", state="on", dc="smoke",
+            name="Kitchen smoke"):
+        self.sensors[entity_id] = SimpleNamespace(
+            entity_id=entity_id, state=state,
+            attributes={"device_class": dc, "friendly_name": name})
+
+
+@pytest.fixture
+def follow(hz, monkeypatch):
+    """follow_up() against a house and a clock the test moves."""
+    monkeypatch.setattr(hz, "_active", {}, raising=False)
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(hz, "_now", lambda: clock["now"], raising=False)
+    house = _House()
+
+    def tick(advance=0):
+        clock["now"] += advance
+        return hz.follow_up(house, {})
+    return types.SimpleNamespace(house=house, tick=tick, clock=clock)
+
+
+import types  # noqa: E402
+
+
+def test_an_alarm_already_on_when_nova_starts_is_announced_once(follow):
+    follow.house.set()
+    (action,) = follow.tick()
+    assert action["type"] == "critical_hazard" and action["urgency"] == "critical"
+    assert action["entity_id"] == "binary_sensor.kitchen_smoke"
+    assert "Kitchen smoke" in action["message"] and "still active" in action["message"]
+    assert follow.tick(10) == []            # not again straight away
+
+
+def test_an_alarm_that_was_just_announced_is_not_announced_again_by_the_next_tick(hz, follow):
+    follow.house.set(state="on")
+    event = _event("binary_sensor.kitchen_smoke", "smoke", "off", "on", name="Kitchen smoke")
+    assert hz.on_state_changed(follow.house, {}, event)
+    assert follow.tick(5) == []
+
+
+def test_an_alarm_that_stays_on_repeats_every_five_minutes_up_to_six_times(follow):
+    follow.house.set()
+    follow.tick()                                   # the start announcement
+    assert follow.tick(299) == []                   # not yet five minutes
+    told = follow.tick(1)                           # five minutes: the first repeat
+    for _ in range(7):
+        told += follow.tick(300)
+    assert len(told) == 6                           # six repeats, then it stops
+    assert all(a["urgency"] == "critical" for a in told)
+    assert "5 minutes" in told[0]["message"] and "30 minutes" in told[-1]["message"]
+
+
+def test_a_cleared_alarm_is_announced_once_when_it_had_been_on_for_a_minute(follow):
+    follow.house.set()
+    follow.tick()
+    follow.house.set(state="off")
+    (action,) = follow.tick(61)
+    assert action["type"] == "hazard_cleared" and action["urgency"] == "high"
+    assert "Kitchen smoke" in action["message"] and "normal" in action["message"]
+    assert follow.tick(30) == []
+
+
+def test_a_blip_shorter_than_a_minute_has_no_cleared_message(follow):
+    follow.house.set()
+    follow.tick()
+    follow.house.set(state="off")
+    assert follow.tick(30) == []
+
+
+@pytest.mark.parametrize("gone", ["unavailable", "unknown"])
+def test_an_alarm_that_goes_unavailable_is_dropped_without_a_cleared_message(follow, gone):
+    """A dead battery is not an all clear."""
+    follow.house.set()
+    follow.tick()
+    follow.house.set(state=gone)
+    assert follow.tick(120) == []
+    follow.house.set(state="off")
+    assert follow.tick(120) == []
+
+
+def test_the_users_exclusion_is_respected_by_the_follow_up(follow, load, monkeypatch):
+    monkeypatch.setattr(load("entity_filter"), "is_excluded", lambda h, e, *a: True)
+    follow.house.set()
+    assert follow.tick() == []
+
+
+@pytest.mark.parametrize("dc", ["door", "motion", "tamper"])
+def test_only_smoke_co_gas_and_leak_sensors_are_followed(follow, dc):
+    follow.house.set(entity_id="binary_sensor.x", dc=dc)
+    assert follow.tick() == []
