@@ -78,7 +78,9 @@ async def test_installation_is_confirmed_by_home_assistant(hass, monkeypatch):
     monkeypatch.setattr(action_log, "start", lambda *a, **k: 1)
     monkeypatch.setattr(action_log, "set_execution", lambda *a, **k: None)
     legacy = [{"id": "legacy", "alias": "Legacy",
-               "triggers": [{"trigger": "sun", "event": "sunset"}],
+               # A state trigger: a sun trigger leaves HA's sunset timer
+               # running after the test, which newer HA test runs reject.
+               "triggers": [{"trigger": "state", "entity_id": "input_boolean.legacy"}],
                "actions": [{"action": "light.turn_on", "entity_id": "light.hall"}]}]
     await _setup(hass, legacy)
     path = hass.config.path("automations.yaml")
@@ -107,3 +109,7 @@ async def test_installation_is_confirmed_by_home_assistant(hass, monkeypatch):
     assert "already exists" in again["error"]
     with open(path, "rb") as fh:
         assert fh.read() == before
+    # HA does not tear automations down when a test ends; switching them off
+    # removes their trigger timers, which newer HA test runs reject.
+    await hass.services.async_call("automation", "turn_off", {"entity_id": "all"},
+                                   blocking=True)

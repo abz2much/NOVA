@@ -26,7 +26,9 @@ async def test_panel_and_static_path_register_and_reload_is_safe(hass, caplog):
     custom = panel.config["_panel_custom"]
     assert custom["name"] == "nova-panel"
     assert custom["embed_iframe"] is False and custom["trust_external"] is False
-    assert set(custom) == {"name", "embed_iframe", "trust_external", "module_url"}
+    # Nova sets exactly these; newer HA adds its own defaults beside them
+    # (handle_safe_area in 2026.10), so check Nova's keys, not the whole set.
+    assert {"name", "embed_iframe", "trust_external", "module_url"} <= set(custom)
     assert custom["module_url"].startswith("/nova_panel_static/nova-panel.js?v=")
     assert set(panel.config) == {"_panel_custom"}
 
