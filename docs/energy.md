@@ -126,6 +126,8 @@ cheapest time to run the dishwasher?"
 | "No solar forecast is set up, so advice that needs the sun is off." | No forecast integration was found. | Install Forecast.Solar, Open-Meteo Solar Forecast or Solcast, and link it in the Energy dashboard. |
 | "Battery size is not known, so battery advice is off." | The battery has no capacity in the Energy dashboard. | Fill in the battery's capacity (Home Assistant 2026.8 or newer). |
 | "Couldn't read energy data." | Reading the recorder failed. | Check the Recorder integration is running, then reopen the tab. |
+| Current draw reads 0 kW at night, or the wrong sensor is "In use". | The name guess picked the wrong sensor. Some systems (EcoFlow PowerOcean cloud, for one) have a "Home Consumption" sensor that only updates while the panels make power. | Pick the right sensor under Home load sensor. |
+| "Nova can't use this sensor as a cost, so it uses its own estimate." | The cost field holds a price per kWh, or a sensor that is gone. | Pick a sensor in a currency, or leave it on "Use Nova's estimate". |
 
 The Outlook card is hidden when the Energy dashboard has no grid source with a
 price.
@@ -138,5 +140,6 @@ All on the Energy tab, in Energy Management, unless noted.
 | --- | --- |
 | `energy_agency` | How much say Nova has over high draw loads: advisory (the default), opt in or autonomous. It does not affect the Outlook, which only ever advises. |
 | `energy_peak_watts` | The whole home peak, shown in kW and saved in watts. |
-| `energy_cost_today_entity` / `energy_cost_net_entity` | Optional sensors of your own for today's cost and net cost. Without them, the daily report estimates cost from the Energy dashboard's price. |
+| `energy_home_meter_entity` | **Home load sensor**: the sensor that shows your whole home's power use (W or kW). Left on "Guess from sensor names", Nova looks for one named like "Home Consumption" or "Mains Power". Pick one when you have more than one, or when the guess is wrong. The status line under Current draw says which sensor is in use and whether it was picked or guessed. A picked sensor that stops reporting shows as no reading; Nova never falls back to a guess. |
+| `energy_cost_today_entity` / `energy_cost_net_entity` | Optional sensors of your own for today's cost and net cost, picked from the sensors in a currency (€, EUR, £ and so on, or `monetary`). A price per kWh is not a cost: if one is saved here, Nova ignores it, shows a warning, and uses its own estimate. Without them, the daily report estimates cost from the Energy dashboard's price. |
 | `energy_mode_bump` | Modes that raise `energy_agency` one step while they are active. Empty by default. Set in `/config/nova/config.json`; there is no panel control. |
