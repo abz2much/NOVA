@@ -4732,7 +4732,11 @@ if (require.main === module) setTimeout(async () => {
     };
     // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
     // drawing order, so the number is left out of the fingerprint.
-    const flat = s => String(s).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
+    // parse5 8.1 (Nov 2026) escapes < and > inside attribute values, as the
+    // HTML standard now says; older versions don't. Undo that inside
+    // attributes so a pin depends on Nova's markup, not the serializer.
+    const attrsAsBefore = s => s.replace(/="([^"]*)"/g, (_, v) => `="${v.replace(/&lt;/g, "<").replace(/&gt;/g, ">")}"`);
+    const flat = s => attrsAsBefore(String(s)).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
     const pin = (name, value) => {
       const got = crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
       checks.push([`pinned results: ${name} are unchanged` + (got === PINS[name] ? "" : ` (got ${got})`), got === PINS[name]]);
