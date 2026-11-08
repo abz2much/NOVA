@@ -122,6 +122,19 @@ def test_exception_classes_map_to_kinds(pk, exc, kind):
     assert pk.errors.normalize_error(exc, "openai").kind.value == kind
 
 
+@pytest.mark.parametrize(("exc", "kind"), [
+    # 8.85.0: anthropic 2.x refused an argument locally and all Nova logged
+    # was "malformed response". The type points straight at the cause.
+    (TypeError(f"Messages.create() got an unexpected keyword {SECRET}"), "malformed_response"),
+    (RuntimeError(f"something odd {SECRET}"), "unknown"),
+])
+def test_a_local_error_names_its_type_but_not_its_text(pk, exc, kind):
+    error = pk.errors.normalize_error(exc, "anthropic")
+    assert error.kind.value == kind
+    assert type(exc).__name__ in str(error)
+    assert SECRET not in str(error) and "unexpected keyword" not in str(error)
+
+
 def test_error_messages_never_expose_secrets_headers_or_bodies(pk):
     original = _StatusError(
         401, f"Error code: 401 - Authorization: Bearer {SECRET} body={{'prompt': 'private'}}",
