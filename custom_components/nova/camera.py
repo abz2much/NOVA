@@ -820,8 +820,19 @@ def _recognition_hint(hass: HomeAssistant, entity_id: str) -> str:
         return ""
 
 
+# Added to every camera task. At night, and in infrared (black and white)
+# pictures, shadows, insects close to the lens, spider webs and glare are
+# often taken for people, and a person described by mistake is spoken aloud.
+_NIGHT_CAUTION = (
+    " Be careful at night and with infrared (black and white) pictures: "
+    "shadows, insects close to the lens, spider webs, reflections and headlights "
+    "often look like people. Say there is a person only if you can clearly see a "
+    "person's shape; if you are not sure, say something is unclear instead.")
+
+
 def _vision_task(camera_name: str, clip_count: int, sheet: bool, interval: float,
                  hint: str) -> str:
+    hint = _NIGHT_CAUTION + hint
     if not clip_count:
         return (f"You are analysing the camera feed '{camera_name}'. Describe what you "
                 "see clearly and concisely — as Nova would. Note specific details: "

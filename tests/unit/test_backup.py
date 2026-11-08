@@ -4,6 +4,7 @@ extraction safety and the documented quirks)."""
 import importlib.util
 import io
 import os
+import sqlite3
 import stat
 import tarfile
 import time
@@ -230,6 +231,84 @@ def test_state_path_may_be_file_or_directory(bk, tmp_path, fixed_stamp):
     _write(tmp_path / "nova.db" / "inner", "i")
     names = _names(bk.create_backup(str(tmp_path)))
     assert names == ["nova", "nova.db", "nova.db/inner"]
+
+
+# ── live SQLite databases ────────────────────────────────────────────────────
+
+def _live_database(path: Path, rows: int = 50) -> sqlite3.Connection:
+    """A database in write-ahead mode that is still open, with its rows only
+    in the -wal file, as Nova's databases are while it runs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    conn.executemany("INSERT INTO t VALUES (?)", [(n,) for n in range(rows)])
+    conn.commit()
+    return conn
+
+
+def _rows_in(archive: str, member: str, tmp_path: Path) -> int:
+    with tarfile.open(archive, "r:gz") as tar:
+        data = tar.extractfile(member).read()
+    copy = tmp_path / "extracted.db"
+    copy.write_bytes(data)
+    with sqlite3.connect(copy) as conn:
+        return conn.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+
+
+def test_a_live_database_is_backed_up_as_one_consistent_file(bk, tmp_path, fixed_stamp):
+    """A raw copy of a database that is being written can be torn, and its
+    -wal and -shm files are copied at other moments than the database."""
+    conn = _live_database(tmp_path / "nova" / "patterns.db")
+    try:
+        out = bk.create_backup(str(tmp_path))
+    finally:
+        conn.close()
+    names = _names(out)
+    assert "nova/patterns.db" in names
+    assert not [n for n in names if n.endswith(("-wal", "-shm"))]
+    assert _rows_in(out, "nova/patterns.db", tmp_path) == 50
+
+
+def test_a_state_path_that_is_a_database_is_backed_up_the_same_way(bk, tmp_path, fixed_stamp):
+    conn = _live_database(tmp_path / "nova.db", rows=7)
+    try:
+        out = bk.create_backup(str(tmp_path))
+    finally:
+        conn.close()
+    assert _names(out) == ["nova.db"]
+    assert _rows_in(out, "nova.db", tmp_path) == 7
+
+
+@pytest.mark.parametrize("content", [b"not a database at all", b"K", b""],
+                         ids=["text", "one byte", "empty"])
+def test_a_file_that_is_not_a_database_is_still_copied_as_it_is(
+        bk, tmp_path, fixed_stamp, content):
+    """SQLite would turn a file of one byte, or none, into a blank database."""
+    (tmp_path / "nova").mkdir()
+    (tmp_path / "nova" / "odd.db").write_bytes(content)
+    out = bk.create_backup(str(tmp_path))
+    with tarfile.open(out, "r:gz") as tar:
+        assert tar.extractfile("nova/odd.db").read() == content
+
+
+def test_restore_clears_a_stale_wal_before_the_restored_database(bk, tmp_path, fixed_stamp):
+    """A leftover -wal from the database being replaced must not be applied to
+    the restored one."""
+    conn = _live_database(tmp_path / "nova" / "patterns.db", rows=3)
+    try:
+        bk.create_backup(str(tmp_path))
+    finally:
+        conn.close()
+    (tmp_path / "nova" / "patterns.db").unlink()
+    _write(tmp_path / "nova" / "patterns.db-wal", "STALE WAL FROM ANOTHER DATABASE")
+    _write(tmp_path / "nova" / "patterns.db-shm", "STALE SHM")
+    bk.restore_backup(str(tmp_path))
+    assert not (tmp_path / "nova" / "patterns.db-wal").exists()
+    assert not (tmp_path / "nova" / "patterns.db-shm").exists()
+    with sqlite3.connect(tmp_path / "nova" / "patterns.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 3
 
 
 def test_top_level_symlink_is_backed_up_as_its_target(bk, tmp_path, fixed_stamp):

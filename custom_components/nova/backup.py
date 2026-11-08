@@ -7,10 +7,13 @@ directory. Both are blocking and meant to run in an executor."""
 
 from __future__ import annotations
 
+import contextlib
 import glob
 import logging
 import os
 import posixpath
+import sqlite3
+import stat
 import tarfile
 import tempfile
 import threading
@@ -59,8 +62,65 @@ def _linked_state(config_dir: str) -> dict[str, str]:
     return linked
 
 
+# Files SQLite keeps beside a database in write-ahead mode.
+_DB_SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _is_sqlite(path: str) -> bool:
+    """Whether the file starts with SQLite's own header. SQLite would treat a
+    file of one byte, or none, as an empty database and quietly rewrite it, so
+    only a file with the real header is snapshotted."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(len(_SQLITE_MAGIC)) == _SQLITE_MAGIC
+    except OSError:
+        return False
+
+
+def _database_snapshots(root: str, arcroot: str, snap_dir: str) -> dict[str, tuple[str, str]]:
+    """{archive name: (snapshot, original)} for each SQLite database under
+    ``root``, copied with SQLite's own backup so each is whole and in one
+    piece. A raw copy of a database being written can be torn, and its -wal
+    and -shm files are copied at other moments. A ``.db`` file SQLite cannot
+    read is left out, and is archived as it is."""
+    if os.path.isfile(root) and not os.path.islink(root):
+        candidates = [(root, arcroot)]
+    else:
+        candidates = []
+        for folder, _dirs, files in os.walk(root):
+            for filename in sorted(files):
+                path = os.path.join(folder, filename)
+                rel = os.path.relpath(path, root)
+                candidates.append((path, posixpath.join(arcroot, *rel.split(os.sep))))
+    # Opened through the one helper every Nova database uses, with its pragmas
+    # off so a backup never changes a database's journal mode. Imported here
+    # because this module also loads without the rest of Nova.
+    from .persistence import sqlite as _store
+    plain = dict(busy_timeout_ms=None, wal=False, row_factory=False, mkdir=False)
+    found: dict[str, tuple[str, str]] = {}
+    for source, arcname in candidates:
+        if not source.endswith(".db") or os.path.islink(source) or not _is_sqlite(source):
+            continue
+        target = os.path.join(snap_dir, f"{len(found)}.db")
+        try:
+            with contextlib.closing(_store.connect(source, timeout=10, **plain)) as src, \
+                    contextlib.closing(_store.connect(target, **plain)) as dst:
+                src.backup(dst)
+        except (sqlite3.Error, OSError) as exc:
+            _LOGGER.warning("Backup copied %s as it is: SQLite could not snapshot it (%s)",
+                            arcname, exc)
+            with contextlib.suppress(OSError):
+                os.unlink(target)
+            continue
+        found[arcname] = (target, source)
+    return found
+
+
 def create_backup(config_dir: str) -> str:
-    """Write a gzip tarball of the present state paths and return its path."""
+    """Write a gzip tarball of the present state paths and return its path.
+    SQLite databases go in as consistent snapshots, without their -wal and
+    -shm files."""
     backup_dir = os.path.join(config_dir, _BACKUP_SUBDIR)
     os.makedirs(backup_dir, exist_ok=True)
 
@@ -83,14 +143,30 @@ def create_backup(config_dir: str) -> str:
     # matched by the restore glob), then moved into place only on success.
     fd, tmp = tempfile.mkstemp(prefix=".nova-state-", suffix=".tmp", dir=backup_dir)
     try:
-        with os.fdopen(fd, "wb") as fh, tarfile.open(fileobj=fh, mode="w:gz") as tar:
+        with os.fdopen(fd, "wb") as fh, tarfile.open(fileobj=fh, mode="w:gz") as tar, \
+                tempfile.TemporaryDirectory(prefix=".nova-snap-", dir=backup_dir) as snap_dir:
             linked = _linked_state(config_dir)
             for name in _STATE_PATHS:
                 source = os.path.join(config_dir, name)
                 if os.path.exists(source):
                     # A state path that is a link is backed up as what it
                     # points to, not as the link.
-                    tar.add(linked.get(name, source), arcname=name, filter=skip_outside_links)
+                    real = linked.get(name, source)
+                    snapshots = _database_snapshots(real, name, snap_dir)
+                    left_out = set(snapshots) | {a + sfx for a in snapshots
+                                                 for sfx in _DB_SIDE_SUFFIXES}
+
+                    def keep(info: tarfile.TarInfo, _left_out=left_out):
+                        return None if info.name in _left_out else skip_outside_links(info)
+
+                    tar.add(real, arcname=name, filter=keep)
+                    for arcname, (snapshot, original) in snapshots.items():
+                        # The snapshot under the original's name, mode and date.
+                        info = tar.gettarinfo(snapshot, arcname=arcname)
+                        status = os.stat(original)
+                        info.mode, info.mtime = stat.S_IMODE(status.st_mode), status.st_mtime
+                        with open(snapshot, "rb") as snap_file:
+                            tar.addfile(info, snap_file)
 
         with _NAME_LOCK:
             path = os.path.join(backup_dir, f"nova-state-{stamp}.tar.gz")
@@ -124,6 +200,7 @@ def restore_backup(config_dir: str, archive: str = "") -> str:
 
     linked = _linked_state(config_dir)
     with tarfile.open(path, "r:gz") as tar:
+        _clear_stale_side_files(config_dir, linked, tar.getmembers())
         if not linked:
             tar.extractall(config_dir, filter="data")
             return path
@@ -145,6 +222,25 @@ def restore_backup(config_dir: str, archive: str = "") -> str:
             if moved:
                 tar.extractall(dest, filter="data", members=moved)
     return path
+
+
+def _clear_stale_side_files(config_dir: str, linked: dict[str, str], members) -> None:
+    """Delete the -wal, -shm and -journal files beside each database the
+    archive is about to replace. A leftover one belongs to the old database
+    and must not be applied to the restored one. Done before extracting, so an
+    older archive that carries its own side files keeps them."""
+    for member in members:
+        if not (member.isfile() and member.name.endswith(".db")):
+            continue
+        top = _top(member.name)
+        if top in linked:
+            rest = member.name.split("/")[1:]
+            final = os.path.join(linked[top], *rest) if rest else linked[top]
+        else:
+            final = os.path.join(config_dir, member.name)
+        for suffix in _DB_SIDE_SUFFIXES:
+            with contextlib.suppress(OSError):
+                os.unlink(final + suffix)
 
 
 def _top(member_name: str) -> str:

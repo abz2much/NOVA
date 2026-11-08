@@ -1,3 +1,10 @@
+## [8.85.9] Safer backups, and fewer phantom people at night
+
+### Fixed
+- **A backup no longer copies Nova's databases while they may be changing.** Nova's databases use write-ahead logging, and a backup that copied the files as they stood could catch one half written, and copied the `-wal` and `-shm` files at different moments from the database itself. Each database now goes into the backup as a consistent snapshot taken with SQLite's own backup, without those side files. Anything that is not a real SQLite database is copied as it is.
+- **Restoring a backup clears the leftover `-wal` and `-shm` files next to a database it replaces.** A leftover one belongs to the old database and must not be applied to the restored one.
+- **Camera descriptions are told to be careful at night.** At night, and in infrared (black and white) pictures, shadows, insects close to the lens, spider webs and glare often look like people, and a person described by mistake was spoken aloud as one. Every camera description now says a person is present only when a person's shape is clearly visible, and says something is unclear when it is not sure. Whether Nova is right is still up to the model, so a wrong call can still happen.
+
 ## [8.85.8] No more doubled or lost announcements
 
 ### Fixed
