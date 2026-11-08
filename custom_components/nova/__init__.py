@@ -989,6 +989,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         await sentinel.async_start()
         await reminder_watcher.async_start()
+        # Also stopped by Home Assistant itself on unload, so no timer or
+        # listener can outlive the entry, even when the runtime is gone.
+        # Each is safe to run twice: unload already ran them when it could.
+        entry.async_on_unload(reminder_watcher.async_stop)
+        entry.async_on_unload(sentinel.async_stop)
+        entry.async_on_unload(resources.async_close_all)
     except Exception:
         # Home Assistant does not unload an entry whose setup raised, so
         # every listener and sweep above would outlive it. Unload copes with

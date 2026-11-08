@@ -298,6 +298,23 @@ def _schedule_save() -> None:
         pass
 
 
+def stop_saving() -> None:
+    """On unload: cancel the pending save, write what is unsaved now, and
+    schedule nothing more until the next restore. Never raises."""
+    global _SAVE_HANDLE, _HASS
+    handle, _SAVE_HANDLE = _SAVE_HANDLE, None
+    hass, _HASS = _HASS, None
+    if handle is None:
+        return
+    try:
+        handle.cancel()
+        if hass is not None:
+            rows = [_stamp_out(e) for e in list(_FACE_LOG)[-SAVE_KEEP:]]
+            hass.async_add_executor_job(_write_log, rows)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("recognition: final save failed: %s", exc)
+
+
 async def restore(hass) -> None:
     """Load the saved sightings into the log (older than anything new), then
     start saving. Never raises."""
@@ -558,7 +575,8 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
     """Subscribe to the identity feeds ``recognition_source`` allows, plus
     Frigate person detection. Returns the unsubscribe callables, none when
     MQTT is missing or not set up."""
-    unsubs: list = []
+    # Stopping the pending log save is always the first clean-up step.
+    unsubs: list = [stop_saving]
     await restore(hass)
     try:
         from homeassistant.components import mqtt

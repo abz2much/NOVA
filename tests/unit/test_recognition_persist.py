@@ -84,3 +84,27 @@ def test_the_file_holds_no_image_fields(rec, tmp_path):
     _save(rec)
     row = json.loads((tmp_path / "recent_faces.json").read_text())["faces"][0]
     assert set(row) == {"camera_entity", "name", "confidence", "source", "ts"}
+
+
+def test_stopping_cancels_a_pending_save_and_writes_now(rec, monkeypatch):
+    # The save waits SAVE_EVERY_S on HA's loop; on unload that timer was
+    # left running (seen as a lingering timer on newer HA test runs).
+    import asyncio
+    written = []
+    loop = asyncio.new_event_loop()
+    try:
+        hass = type("H", (), {"loop": loop,
+                              "async_add_executor_job": lambda self, fn, *a: written.append(a)})()
+        monkeypatch.setattr(rec, "_HASS", hass)
+        monkeypatch.setattr(rec, "_SAVE_HANDLE", None)
+        rec.remember_recognition("hall", "Sam", 80.0)
+        rec._arm()
+        handle = rec._SAVE_HANDLE
+        assert handle is not None and not handle.cancelled()
+        rec.stop_saving()
+        assert handle.cancelled() and rec._SAVE_HANDLE is None and rec._HASS is None
+        assert [row["name"] for row in written[-1][0]] == ["Sam"]
+        rec.remember_recognition("hall", "Ana", 80.0)
+        assert rec._SAVE_HANDLE is None      # nothing new is scheduled after stop
+    finally:
+        loop.close()
