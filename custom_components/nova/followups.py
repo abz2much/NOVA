@@ -143,6 +143,18 @@ def mark(followup_id: int, status: str, result: str = "", *,
         _LOGGER.debug("Nova follow-ups: mark %s failed: %s", followup_id, exc)
 
 
+def _failed_action(instruction: str) -> dict:
+    """What is said when a follow-up could not run, so a request the person
+    made, or Nova made for them, does not simply disappear. The reason stays
+    in the follow-up's own record."""
+    return {
+        "type": "followup_failed",
+        "urgency": "medium",
+        "message": f"I couldn't run the follow-up you scheduled: {instruction[:100]}.",
+        "auto_act": True,
+    }
+
+
 async def async_process_due(
     hass: Any,
     config: dict,
@@ -151,7 +163,8 @@ async def async_process_due(
     now: Optional[datetime] = None,
     db_path: Optional[str] = None,
 ) -> list[dict]:
-    """Run every due follow-up and return the proactive actions they produce."""
+    """Run every due follow-up and return the proactive actions they produce,
+    a short notice for each one that could not run included."""
     try:
         due = await hass.async_add_executor_job(
             lambda: pending(now=now, due_only=True, db_path=db_path)
@@ -167,7 +180,7 @@ async def async_process_due(
                 lambda fid=row["id"]: mark(fid, "failed", "no runner available",
                                            db_path=db_path)
             )
-        return []
+        return [_failed_action(row["instruction"]) for row in due]
 
     actions: list[dict] = []
     for row in due:
@@ -184,6 +197,7 @@ async def async_process_due(
             await hass.async_add_executor_job(
                 lambda f=fid, e=str(exc): mark(f, "failed", e, db_path=db_path)
             )
+            actions.append(_failed_action(instruction))
             continue
 
         actions.append({
