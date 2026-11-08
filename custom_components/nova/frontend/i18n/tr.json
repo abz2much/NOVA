@@ -530,5 +530,7 @@
   "{entity} (not found)": "{entity} (bulunamadı)",
   "No home load sensor found. Pick one below.": "Ev tüketim sensörü bulunamadı. Aşağıdan birini seçin.",
   "In use: {meter} (picked in Settings)": "Kullanılan: {meter} (Ayarlar'da seçildi)",
-  "In use: {meter} (guessed from its name)": "Kullanılan: {meter} (adından tahmin edildi)"
+  "In use: {meter} (guessed from its name)": "Kullanılan: {meter} (adından tahmin edildi)",
+  "Use Nova's estimate": "Nova'nın tahminini kullan",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova bu sensörü maliyet olarak kullanamaz, bu yüzden kendi tahminini kullanır."
 }

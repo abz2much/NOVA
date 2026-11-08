@@ -530,5 +530,7 @@
   "{entity} (not found)": "{entity} (nenájdené)",
   "No home load sensor found. Pick one below.": "Senzor spotreby domu sa nenašiel. Vyberte ho nižšie.",
   "In use: {meter} (picked in Settings)": "Používa sa: {meter} (vybraté v Nastaveniach)",
-  "In use: {meter} (guessed from its name)": "Používa sa: {meter} (odhadnuté podľa názvu)"
+  "In use: {meter} (guessed from its name)": "Používa sa: {meter} (odhadnuté podľa názvu)",
+  "Use Nova's estimate": "Použiť odhad Novy",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova nemôže tento senzor použiť ako náklady, preto použije vlastný odhad."
 }

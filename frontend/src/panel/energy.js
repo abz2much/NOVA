@@ -121,14 +121,8 @@
             <select class="cfg-field" id="energyHomeMeter" data-cfg-key="energy_home_meter_entity">${this._optSelect(this._homeMeterOptions(cfg.energy_home_meter_entity || ""), cfg.energy_home_meter_entity || "")}</select>
           </div>
           <div class="stub-body">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
-          <div class="cfg-row">
-            <label>Cost today entity</label>
-            <input class="cfg-field" type="text" data-cfg-key="energy_cost_today_entity" value="${this._esc(cfg.energy_cost_today_entity || "")}" placeholder="sensor.electricity_cost_today">
-          </div>
-          <div class="cfg-row">
-            <label>Net cost today entity (optional)</label>
-            <input class="cfg-field" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(cfg.energy_cost_net_entity || "")}" placeholder="sensor.net_electricity_cost_today">
-          </div>
+          ${this._costFieldHtml("Cost today entity", "energy_cost_today_entity", cfg.energy_cost_today_entity || "")}
+          ${this._costFieldHtml("Net cost today entity (optional)", "energy_cost_net_entity", cfg.energy_cost_net_entity || "")}
         </div>
 
         <div class="panel">
@@ -155,6 +149,41 @@
     });
     if (selected && !states[selected]) pairs.unshift([selected, this._t("{entity} (not found)", { entity: selected })]);
     return [["", this._tx("Guess from sensor names")], ...pairs];
+  }
+
+  // A cost in money: device_class monetary, or a unit that is a currency on
+  // its own. A price per unit (€/kWh) is not a cost. Mirrors
+  // solar.is_currency_sensor (8.85.0).
+  _isCurrencySensor(state) {
+    const a = (state && state.attributes) || {};
+    if (a.device_class === "monetary") return true;
+    const unit = String(a.unit_of_measurement || "").trim();
+    if (!unit || unit.includes("/")) return false;
+    const symbols = ["€", "$", "£", "¥", "₹", "₩", "₽", "₺", "₪", "₦", "₱", "₫", "₴", "₵", "₸",
+      "R", "kr", "zł", "Kč", "Ft", "lei"];
+    return symbols.includes(unit) || /^[A-Z]{3}$/.test(unit);
+  }
+
+  // One cost field: Nova's estimate first, then every currency sensor. A
+  // saved value Nova can't use stays selected, with a warning under it.
+  _costFieldHtml(label, key, saved) {
+    const states = this._hass?.states || {};
+    const pairs = Object.keys(states).filter(eid => this._isCurrencySensor(states[eid])).sort().map(eid => {
+      const name = (states[eid].attributes || {}).friendly_name;
+      return [eid, name ? `${name} (${eid})` : eid];
+    });
+    const usable = !saved || this._isCurrencySensor(states[saved]);
+    if (saved && !pairs.some(([v]) => v === saved)) {
+      const name = states[saved] ? ((states[saved].attributes || {}).friendly_name || saved)
+        : this._t("{entity} (not found)", { entity: saved });
+      pairs.unshift([saved, name]);
+    }
+    const options = this._optSelect([["", this._tx("Use Nova's estimate")], ...pairs], saved);
+    return `<div class="cfg-row">
+            <label>${label}</label>
+            <select class="cfg-field" data-cfg-key="${key}">${options}</select>
+          </div>${usable ? "" : `
+          <div class="stub-body diag-warn">${this._tHtml("Nova can't use this sensor as a cost, so it uses its own estimate.")}</div>`}`;
   }
 
   _homeMeterLine(e) {
@@ -349,6 +378,12 @@
         this._fail(err, "save the home load sensor");
       }
       await this._fetchEnergyStatus();
+    });
+    // The cost fields (8.85.0) save like the Settings tab's selects.
+    root.querySelectorAll('select.cfg-field[data-cfg-key^="energy_cost_"]').forEach(sel => {
+      sel.addEventListener("change", async () => {
+        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
     });
     // Same autosave as _wireSettings: number inputs save as a Number or null.
     root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {

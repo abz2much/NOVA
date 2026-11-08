@@ -1362,5 +1362,7 @@
   "{entity} (not found)": "{entity}（找不到）",
   "No home load sensor found. Pick one below.": "找不到全屋負載感測器。請在下方選擇一個。",
   "In use: {meter} (picked in Settings)": "使用中：{meter}（在設定中選擇）",
-  "In use: {meter} (guessed from its name)": "使用中：{meter}（依名稱猜測）"
+  "In use: {meter} (guessed from its name)": "使用中：{meter}（依名稱猜測）",
+  "Use Nova's estimate": "使用 Nova 的估算",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova 無法將此感測器作為費用使用，因此會使用自己的估算。"
 }

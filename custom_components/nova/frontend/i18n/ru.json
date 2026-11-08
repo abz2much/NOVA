@@ -1367,5 +1367,7 @@
   "{entity} (not found)": "{entity} (не найден)",
   "No home load sensor found. Pick one below.": "Датчик потребления дома не найден. Выберите его ниже.",
   "In use: {meter} (picked in Settings)": "Используется: {meter} (выбран в Настройках)",
-  "In use: {meter} (guessed from its name)": "Используется: {meter} (угадан по названию)"
+  "In use: {meter} (guessed from its name)": "Используется: {meter} (угадан по названию)",
+  "Use Nova's estimate": "Использовать оценку Nova",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova не может использовать этот датчик как стоимость, поэтому использует собственную оценку."
 }

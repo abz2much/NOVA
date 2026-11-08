@@ -530,5 +530,7 @@
   "{entity} (not found)": "{entity} (ikke funnet)",
   "No home load sensor found. Pick one below.": "Fant ingen sensor for husets forbruk. Velg en nedenfor.",
   "In use: {meter} (picked in Settings)": "I bruk: {meter} (valgt i Innstillinger)",
-  "In use: {meter} (guessed from its name)": "I bruk: {meter} (gjettet ut fra navnet)"
+  "In use: {meter} (guessed from its name)": "I bruk: {meter} (gjettet ut fra navnet)",
+  "Use Nova's estimate": "Bruk Novas anslag",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova kan ikke bruke denne sensoren som en kostnad, så den bruker sitt eget anslag."
 }

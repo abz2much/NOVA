@@ -530,5 +530,7 @@
   "{entity} (not found)": "{entity} (não encontrado)",
   "No home load sensor found. Pick one below.": "Nenhum sensor de consumo da casa encontrado. Escolha um abaixo.",
   "In use: {meter} (picked in Settings)": "Em uso: {meter} (escolhido nas Definições)",
-  "In use: {meter} (guessed from its name)": "Em uso: {meter} (adivinhado pelo nome)"
+  "In use: {meter} (guessed from its name)": "Em uso: {meter} (adivinhado pelo nome)",
+  "Use Nova's estimate": "Usar a estimativa da Nova",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "A Nova não pode usar este sensor como custo, por isso usa a sua própria estimativa."
 }
