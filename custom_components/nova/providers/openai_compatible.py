@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, Optional
 
 from .base import LLMProvider
-from .capabilities import SDK_CLIENT_POLICY, ProviderCapabilities, openai_compatible_vision
+from .capabilities import SDK_CLIENT_OPTIONS, SDK_CLIENT_POLICY, ProviderCapabilities, openai_compatible_vision
 from .destinations import check_url
 from .errors import ProviderConfigurationError, ProviderErrorKind
 from .models import ChatRequest, ChatResponse
@@ -35,7 +35,8 @@ class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         super().__init__(api_key, model, base_url)
         OpenAI = _import_openai()
-        kwargs: dict[str, Any] = {"api_key": api_key or "not-required"}
+        kwargs: dict[str, Any] = {"api_key": api_key or "not-required",
+                                  **SDK_CLIENT_OPTIONS}
         if base_url:
             kwargs["base_url"] = base_url
         kwargs.update(self._client_options())

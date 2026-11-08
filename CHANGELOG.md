@@ -1,3 +1,8 @@
+## [8.85.2] No more endless waiting on an AI provider
+
+### Fixed
+- **A stalled AI provider no longer freezes Nova.** Calls to Groq, OpenAI, Claude and a custom endpoint had no time limit, so a provider that stopped answering could hold up chat or the reasoning loop for minutes, with two silent retries on top. Each call now gives up after 60 seconds and retries once at most. Gemini and Ollama already had limits.
+
 ## [8.85.1] Nothing left running
 
 ### Fixed

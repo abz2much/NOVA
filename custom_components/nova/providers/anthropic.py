@@ -5,7 +5,7 @@ import json
 from typing import Any, ClassVar, Optional
 
 from .base import LLMProvider
-from .capabilities import SDK_CLIENT_POLICY, ProviderCapabilities, anthropic_vision
+from .capabilities import SDK_CLIENT_OPTIONS, SDK_CLIENT_POLICY, ProviderCapabilities, anthropic_vision
 from .errors import ProviderConfigurationError, ProviderErrorKind, error_text
 from .models import ChatRequest, ChatResponse, ToolCall, Usage
 from .reasoning import visible_text
@@ -113,7 +113,7 @@ class AnthropicProvider(LLMProvider):
             raise ProviderConfigurationError(
                 ProviderErrorKind.PROVIDER_UNAVAILABLE, self.name,
                 detail="the anthropic package is not installed") from exc
-        options = {"api_key": api_key}
+        options = {"api_key": api_key, **SDK_CLIENT_OPTIONS}
         if base_url:
             options["base_url"] = base_url
         self._client = Anthropic(**options)

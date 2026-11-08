@@ -86,15 +86,17 @@ def sdk(monkeypatch):
 
 def test_the_client_is_built_from_the_key_alone(mod, sdk):
     provider = mod.AnthropicProvider("sk-1", "claude-x")
-    assert sdk == [{"api_key": "sk-1"}]
+    assert [{k: o[k] for k in o if k in ("api_key", "base_url")} for o in sdk] == [
+        {"api_key": "sk-1"}]
     assert (provider.api_key, provider.model, provider.base_url) == ("sk-1", "claude-x", None)
 
 
 def test_a_base_url_is_passed_on_when_given(mod, sdk):
     mod.AnthropicProvider("sk-1", "claude-x", base_url="http://proxy.test")
     mod.AnthropicProvider("sk-2", "claude-x", base_url="")
-    assert sdk == [{"api_key": "sk-1", "base_url": "http://proxy.test"},
-                   {"api_key": "sk-2"}]
+    assert [{k: o[k] for k in o if k in ("api_key", "base_url")} for o in sdk] == [
+        {"api_key": "sk-1", "base_url": "http://proxy.test"},
+        {"api_key": "sk-2"}]
 
 
 def test_a_missing_sdk_is_a_configuration_error(mod, errors, monkeypatch):
