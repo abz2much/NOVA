@@ -147,7 +147,13 @@
       const name = (states[eid].attributes || {}).friendly_name;
       return [eid, name ? `${name} (${eid})` : eid];
     });
-    if (selected && !states[selected]) pairs.unshift([selected, this._t("{entity} (not found)", { entity: selected })]);
+    // A saved pick is always listed and selected: marked not found when it
+    // is gone, by its name when it exists but isn't power-like.
+    if (selected && !pairs.some(([v]) => v === selected)) {
+      const name = states[selected] ? ((states[selected].attributes || {}).friendly_name || selected)
+        : this._t("{entity} (not found)", { entity: selected });
+      pairs.unshift([selected, name]);
+    }
     return [["", this._tx("Guess from sensor names")], ...pairs];
   }
 
@@ -156,9 +162,11 @@
   // solar.is_currency_sensor (8.85.0).
   _isCurrencySensor(state) {
     const a = (state && state.attributes) || {};
-    if (a.device_class === "monetary") return true;
     const unit = String(a.unit_of_measurement || "").trim();
-    if (!unit || unit.includes("/")) return false;
+    // A rate tagged monetary (GBP/kWh) is still a price, so "/" goes first.
+    if (unit.includes("/")) return false;
+    if (a.device_class === "monetary") return true;
+    if (!unit) return false;
     const symbols = ["€", "$", "£", "¥", "₹", "₩", "₽", "₺", "₪", "₦", "₱", "₫", "₴", "₵", "₸",
       "R", "kr", "zł", "Kč", "Ft", "lei"];
     return symbols.includes(unit) || /^[A-Z]{3}$/.test(unit);

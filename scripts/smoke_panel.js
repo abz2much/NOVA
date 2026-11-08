@@ -2867,6 +2867,29 @@ if (require.main === module) setTimeout(async () => {
     sRoot = elNew.shadowRoot;
   }
 
+  // Review fix: a saved home sensor that exists but isn't power-like (its
+  // unit changed, say) stays selected too, never shown as "guess".
+  for (const saved of ["sensor.daily_kwh"]) {
+    const el = window.document.createElement("nova-panel");
+    window.document.body.appendChild(el);
+    el.hass = Object.assign({}, hass, {
+      states: { "sensor.daily_kwh": { state: "3", attributes: { device_class: "energy", unit_of_measurement: "kWh" } } },
+      callWS: async (m) => {
+        if (m.type === "nova/get_panel_data") {
+          const data = await hass.callWS(m);
+          return Object.assign({}, data, { config: Object.assign({}, data.config, { energy_home_meter_entity: saved }) });
+        }
+        return hass.callWS(m);
+      } });
+    await new Promise(r => setTimeout(r, 150));
+    el.shadowRoot.querySelector('.nav-tab[data-tab="energy"]').click();
+    await new Promise(r => setTimeout(r, 150));
+    const pick = el.shadowRoot.querySelector('select[data-cfg-key="energy_home_meter_entity"]');
+    checks.push(["energy tab: a saved home load sensor that isn't power-like stays selected",
+      pick?.value === saved]);
+    el.remove();
+  }
+
   // 8.85.0: the home load sensor is picked from a list of power sensors. A
   // saved pick that no longer exists stays selected, marked "not found",
   // and the status line says which sensor is in use and how it was chosen.
@@ -2929,6 +2952,7 @@ if (require.main === module) setTimeout(async () => {
       "sensor.cost_cloud": { state: "3.0", attributes: { unit_of_measurement: "€", friendly_name: "Net cost cloud" } },
       "sensor.grid_cost": { state: "2.0", attributes: { device_class: "monetary", unit_of_measurement: "EUR" } },
       "input_number.price": { state: "0.40", attributes: { unit_of_measurement: "€/kWh", friendly_name: "Price" } },
+      "sensor.rate": { state: "0.25", attributes: { device_class: "monetary", unit_of_measurement: "GBP/kWh" } },
       "sensor.house_load": { state: "700", attributes: { device_class: "power", unit_of_measurement: "W" } },
     };
     const ws = async (m) => {
@@ -2952,7 +2976,8 @@ if (require.main === module) setTimeout(async () => {
     checks.push(["energy tab: both cost fields list only sensors in a currency, with Nova's estimate first",
       !!today && !!net && vals(net).join(",") === ",sensor.cost_cloud,sensor.grid_cost"
       && vals(today).includes("sensor.cost_cloud") && vals(today).includes("sensor.grid_cost")
-      && !vals(today).includes("sensor.house_load") && vals(today)[0] === ""]);
+      && !vals(today).includes("sensor.house_load") && !vals(today).includes("sensor.rate")
+      && vals(today)[0] === ""]);
     const warn = sel => sel?.closest(".cfg-row")?.nextElementSibling;
     checks.push(["energy tab: a saved price per kWh stays selected, with a warning that Nova uses its estimate",
       today?.value === "input_number.price"

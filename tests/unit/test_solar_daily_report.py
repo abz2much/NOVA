@@ -176,6 +176,7 @@ async def test_cost_today_falls_back_to_estimate(solar, fake_hass, monkeypatch, 
     ("€", None, True), ("EUR", None, True), ("£", None, True), ("USD", None, True),
     (None, "monetary", True),
     ("€/kWh", None, False), ("EUR/kWh", None, False), ("c/kWh", None, False),
+    ("GBP/kWh", "monetary", False),   # a tariff rate tagged monetary is still a price
     ("W", None, False), ("kWh", None, False), (None, None, False),
 ])
 def test_only_a_currency_sensor_counts_as_a_cost(solar, fake_hass, unit, device_class, is_cost):

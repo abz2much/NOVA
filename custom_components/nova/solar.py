@@ -492,10 +492,13 @@ def is_currency_sensor(state) -> bool:
     if state is None:
         return False
     attrs = getattr(state, "attributes", {}) or {}
+    unit = str(attrs.get("unit_of_measurement") or "").strip()
+    # A rate tagged monetary (GBP/kWh) is still a price, so "/" goes first.
+    if "/" in unit:
+        return False
     if attrs.get("device_class") == "monetary":
         return True
-    unit = str(attrs.get("unit_of_measurement") or "").strip()
-    if not unit or "/" in unit:
+    if not unit:
         return False
     return unit in _CURRENCY_SYMBOLS or (len(unit) == 3 and unit.isascii()
                                          and unit.isalpha() and unit.isupper())
