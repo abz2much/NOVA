@@ -55,6 +55,7 @@ def rn(load, monkeypatch):
     monkeypatch.setattr(module, "_state", {"active": False, "detail": None, "cleared_once": False})
     monkeypatch.setattr(module, "_cred_state", {"active": False})
     monkeypatch.setattr(module, "_retired_seen", set())
+    monkeypatch.setattr(module, "_safety_failed", {}, raising=False)
     return module
 
 
@@ -240,10 +241,46 @@ def test_registry_failure_never_reaches_the_caller(rn, reg, call):
     assert reg.log == []
 
 
+# ── safety monitoring not running ────────────────────────────────────────
+
+def test_a_failed_safety_part_raises_one_error_naming_it_and_the_reason(rn, reg):
+    rn.note_safety_failure(HASS, "core", "store locked")
+    [(issue_id, kw)] = reg.created()
+    assert issue_id == "safety_monitoring_down"
+    assert kw["translation_key"] == "safety_monitoring_down"
+    assert kw["severity"] == "error" and kw["is_fixable"] is False
+    assert kw["translation_placeholders"] == {
+        "failed": "the cognitive core (store locked)"}
+
+
+def test_a_second_failed_part_is_added_to_the_same_notice(rn, reg):
+    rn.note_safety_failure(HASS, "core", "store locked")
+    rn.note_safety_failure(HASS, "lockdown", "no alarm")
+    assert reg.created()[-1][1]["translation_placeholders"] == {
+        "failed": "the cognitive core (store locked); alarm lockdown wiring (no alarm)"}
+
+
+def test_the_notice_goes_only_when_every_failed_part_has_recovered(rn, reg):
+    rn.note_safety_failure(HASS, "core", "store locked")
+    rn.note_safety_failure(HASS, "lockdown", "no alarm")
+    rn.clear_safety_failure(HASS, "core")
+    assert reg.deleted() == []
+    assert reg.created()[-1][1]["translation_placeholders"] == {
+        "failed": "alarm lockdown wiring (no alarm)"}
+    rn.clear_safety_failure(HASS, "lockdown")
+    assert reg.deleted() == ["safety_monitoring_down"]
+
+
+def test_clearing_a_part_that_never_failed_touches_nothing(rn, reg):
+    rn.clear_safety_failure(HASS, "core")
+    assert reg.log == []
+
+
 # ── the text each notice points at ───────────────────────────────────────
 
 @pytest.mark.parametrize("key, placeholder", [
     ("llm_unavailable", "{detail}"),
+    ("safety_monitoring_down", "{failed}"),
     ("voice_setup_step_addons", "{step}"),
     ("voice_setup_step_wyoming", "{step}"),
     ("voice_setup_step_pipeline", "{step}"),

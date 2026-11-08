@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} zostanie wycofana",
       "description": "Coś w Home Assistant, zwykle automatyzacja lub skrypt, wywołało {service}. Funkcja, która za nią stała, została usunięta, więc wywołanie nic nie robi, a sama usługa zostanie usunięta w jednej z kolejnych wersji Novy. Usuń wywołanie z automatyzacji lub skryptu.\n\nTo powiadomienie znika po ponownym uruchomieniu Home Assistant i wraca tylko wtedy, gdy usługa zostanie wywołana ponownie."
+    },
+    "safety_monitoring_down": {
+      "title": "Monitorowanie bezpieczeństwa Nova nie działa",
+      "description": "Część monitorowania bezpieczeństwa Nova nie uruchomiła się, więc alerty o dymie, tlenku węgla, wycieku i włamaniu lub połączenie między alarmem a blokadą mogą nie działać. Co się nie powiodło: {failed}.\n\nPrzyczynę znajdziesz w Ustawienia → System → Logi. Następnie przeładuj Nova w Ustawienia → Urządzenia i usługi. To powiadomienie zniknie samo, gdy wszystko uruchomi się poprawnie."
     }
   },
   "exceptions": {

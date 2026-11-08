@@ -110,6 +110,46 @@ def clear_credential_migration_ambiguous(hass: HomeAssistant) -> None:
 # live pipeline check) succeeds. Each step has its own translation key so the
 # whole notice is translated, not just its frame.
 
+# Smoke, CO, leak and intrusion monitoring, and the alarm to lockdown link,
+# fail without stopping setup. This notice says which part is down and why,
+# and goes when the last failed part starts cleanly.
+_SAFETY_ISSUE = "safety_monitoring_down"
+_SAFETY_PARTS = {"core": "the cognitive core", "lockdown": "alarm lockdown wiring"}
+_safety_failed: dict[str, str] = {}
+
+
+def _show_safety_failures(hass: HomeAssistant) -> None:
+    failed = "; ".join(f"{_SAFETY_PARTS.get(part, part)} ({detail})"
+                       for part, detail in _safety_failed.items())
+    ir.async_create_issue(hass, DOMAIN, _SAFETY_ISSUE, is_fixable=False,
+                          severity=ir.IssueSeverity.ERROR, translation_key=_SAFETY_ISSUE,
+                          translation_placeholders={"failed": failed})
+
+
+def note_safety_failure(hass: HomeAssistant, part: str, detail: str) -> None:
+    """Show, or update, the "safety monitoring is not running" notice.
+    ``part`` is "core" or "lockdown". Event loop safe; never raises."""
+    _safety_failed[part] = (detail or "unknown error").strip()[:_DETAIL_LIMIT]
+    try:
+        _show_safety_failures(hass)
+    except Exception as exc:  # registry not there, or shutting down
+        _LOGGER.debug("could not create safety repair issue: %s", exc)
+
+
+def clear_safety_failure(hass: HomeAssistant, part: str) -> None:
+    """``part`` started cleanly. The notice goes when no failed part is left.
+    Touches nothing when ``part`` never failed. Never raises."""
+    if _safety_failed.pop(part, None) is None:
+        return
+    try:
+        if _safety_failed:
+            _show_safety_failures(hass)
+        else:
+            ir.async_delete_issue(hass, DOMAIN, _SAFETY_ISSUE)
+    except Exception as exc:
+        _LOGGER.debug("could not update safety repair issue: %s", exc)
+
+
 _VOICE_PROGRESS_ISSUE = "voice_setup_in_progress"
 _VOICE_INCOMPLETE_ISSUE = "voice_setup_incomplete"
 VOICE_STEPS = ("addons", "wyoming", "pipeline")

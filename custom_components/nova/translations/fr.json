@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova : {service} va être retiré",
       "description": "Un élément de Home Assistant, en général une automatisation ou un script, a appelé {service}. La fonction correspondante a été supprimée, l'appel ne fait donc rien, et le service lui-même sera supprimé dans une prochaine version de Nova. Retirez l'appel de votre automatisation ou de votre script.\n\nCet avis disparaît au redémarrage de Home Assistant et ne revient que si le service est de nouveau appelé."
+    },
+    "safety_monitoring_down": {
+      "title": "La surveillance de sécurité de Nova ne fonctionne pas",
+      "description": "Une partie de la surveillance de sécurité de Nova n'a pas pu démarrer. Les alertes de fumée, de monoxyde de carbone, de fuite et d'intrusion, ou le lien entre votre alarme et le verrouillage, peuvent donc ne pas fonctionner. Ce qui a échoué : {failed}.\n\nConsultez Paramètres → Système → Journaux pour trouver la cause. Rechargez ensuite Nova dans Paramètres → Appareils et services. Cet avis disparaît tout seul dès que tout démarre correctement."
     }
   },
   "exceptions": {

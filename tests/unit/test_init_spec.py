@@ -314,6 +314,9 @@ def _install(monkeypatch, load, world: World):
                                    lambda days: world.purged_history),
             start=asyn("core.start"), stop=asyn("core.stop"),
             release_runtime=sync("core.release")),
+        "repair_notices": _mod(
+            "repair_notices", note_safety_failure=sync("note_safety_failure"),
+            clear_safety_failure=sync("clear_safety_failure")),
         "bootstrap": _mod("bootstrap", schedule_bootstrap=sync(
             "schedule_bootstrap", lambda hass: "bootstrap-handle")),
         "voice_recognition": _mod("voice_recognition",
@@ -756,6 +759,26 @@ async def test_core_failure_is_an_error_not_fatal(env, caplog):
     assert any(r.levelno == logging.ERROR and
                r.getMessage() == "Nova cognitive core failed to start: core"
                for r in caplog.records)
+
+
+async def test_a_core_that_fails_to_start_raises_a_repair_notice(env):
+    env.world.fail["core.start"] = RuntimeError("core")
+    await _setup(env)
+    [(args, _k)] = env.world.calls("note_safety_failure")
+    assert args[1:] == ("core", "core")
+
+
+async def test_lockdown_wiring_that_fails_raises_a_repair_notice(env):
+    env.world.fail["ensure_lockdown"] = RuntimeError("lk")
+    await _setup(env)
+    [(args, _k)] = env.world.calls("note_safety_failure")
+    assert args[1:] == ("lockdown", "lk")
+
+
+async def test_a_clean_start_clears_both_safety_notices(env):
+    await _setup(env)
+    assert env.world.calls("note_safety_failure") == []
+    assert [a[1] for a, _k in env.world.calls("clear_safety_failure")] == ["lockdown", "core"]
 
 
 # ── Unload ──────────────────────────────────────────────────────────────────

@@ -262,16 +262,18 @@ async def test_cognitive_core_takes_contexts_from_its_owner(load, rt, monkeypatc
     contexts = object()
     entry = _install_nova_runtime(hass, automation_contexts=contexts)
     hass.data = {"nova": {"e1": {"automation_contexts": object()}}}
-    # Stop right after ownership is resolved: nothing else runs.
-    monkeypatch.setattr(core, "IgnoreManager", lambda: (_ for _ in ()).throw(RuntimeError("stop")))
+    # Stop right after ownership is resolved: nothing else runs. What the core
+    # holds is read at that moment, because a failed start now cleans up.
+    seen = {}
+
+    def stop_here():
+        seen["contexts"], seen["entry"] = core._CORE.automation_contexts, core._CORE.entry
+        raise RuntimeError("stop")
+    monkeypatch.setattr(core, "IgnoreManager", stop_here)
     monkeypatch.setattr(core._CORE, "running", False)
     with pytest.raises(RuntimeError, match="stop"):
         await core.start(hass, {}, entry=entry)
-    try:
-        assert core._CORE.automation_contexts is contexts
-        assert core._CORE.entry is entry
-    finally:
-        await core.stop()
+    assert seen == {"contexts": contexts, "entry": entry}
     assert core._CORE.entry is None and core._CORE.automation_contexts is None
 
 

@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} is being retired",
       "description": "Something in Home Assistant, usually an automation or a script, called {service}. The feature behind it has been removed, so the call does nothing, and the service itself will be removed in a later Nova release. Remove the call from your automation or script.\n\nThis notice clears when Home Assistant restarts and comes back only if the service is called again."
+    },
+    "safety_monitoring_down": {
+      "title": "Nova's safety monitoring is not running",
+      "description": "Part of Nova's safety monitoring failed to start, so smoke, carbon monoxide, leak and intrusion alerts, or the link between your alarm and lockdown, may not work. What failed: {failed}.\n\nCheck Settings → System → Logs for the cause. Then reload Nova under Settings → Devices & services. This notice clears itself once everything starts cleanly."
     }
   },
   "exceptions": {

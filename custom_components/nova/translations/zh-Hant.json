@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova：{service} 即將停用",
       "description": "Home Assistant 中的某項內容（通常是自動化或腳本）呼叫了 {service}。它背後的功能已經移除，所以這次呼叫不會產生任何效果，該服務本身也將在 Nova 之後的版本中移除。請從自動化或腳本中刪除這次呼叫。\n\nHome Assistant 重新啟動後此通知會消失，只有再次呼叫該服務時才會重新出現。"
+    },
+    "safety_monitoring_down": {
+      "title": "Nova 的安全監控未執行",
+      "description": "Nova 安全監控的一部分未能啟動，因此煙霧、一氧化碳、漏水和入侵警報，或警報器與鎖定之間的連動，可能無法運作。失敗的部分：{failed}。\n\n請在 設定 → 系統 → 記錄 中查看原因，然後在 設定 → 裝置與服務 中重新載入 Nova。一切正常啟動後，此通知會自動消失。"
     }
   },
   "exceptions": {

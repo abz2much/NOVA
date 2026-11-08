@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} wordt uitgefaseerd",
       "description": "Iets in Home Assistant, meestal een automatisering of een script, heeft {service} aangeroepen. De functie erachter is verwijderd, dus de aanroep doet niets, en de dienst zelf wordt in een latere versie van Nova verwijderd. Haal de aanroep uit je automatisering of script.\n\nDeze melding verdwijnt als Home Assistant opnieuw start en komt alleen terug als de dienst weer wordt aangeroepen."
+    },
+    "safety_monitoring_down": {
+      "title": "De veiligheidsbewaking van Nova draait niet",
+      "description": "Een deel van de veiligheidsbewaking van Nova kon niet starten. Meldingen over rook, koolmonoxide, lekkage en inbraak, of de koppeling tussen je alarm en de vergrendeling, werken mogelijk niet. Wat mislukte: {failed}.\n\nBekijk Instellingen → Systeem → Logboeken voor de oorzaak. Laad Nova daarna opnieuw onder Instellingen → Apparaten en services. Deze melding verdwijnt vanzelf zodra alles goed start."
     }
   },
   "exceptions": {

@@ -1,3 +1,9 @@
+## [8.85.4] Nova tells you when its safety monitoring is down
+
+### Fixed
+- **A failed start of Nova's safety monitoring is no longer silent.** If the part that watches for smoke, carbon monoxide, leaks and intruders failed to start, or the link between your alarm and lockdown failed, Nova only wrote a line in the log and carried on as if all was well. Now Settings, Repairs shows "Nova's safety monitoring is not running", names what failed and why, and removes the notice by itself once it starts cleanly. After fixing the cause, reload Nova.
+- **A half-started safety monitor no longer reports that it is running.** If its start failed partway, Nova still counted it as running with nothing behind it. It is now stopped cleanly.
+
 ## [8.85.3] Nova's learning history no longer grows forever
 
 ### Fixed

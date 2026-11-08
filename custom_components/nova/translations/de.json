@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} wird eingestellt",
       "description": "Etwas in Home Assistant, meist eine Automation oder ein Skript, hat {service} aufgerufen. Die Funktion dahinter wurde entfernt, der Aufruf bewirkt also nichts, und der Dienst selbst wird in einer späteren Nova-Version entfernt. Entferne den Aufruf aus deiner Automation oder deinem Skript.\n\nDieser Hinweis verschwindet beim Neustart von Home Assistant und erscheint nur wieder, wenn der Dienst erneut aufgerufen wird."
+    },
+    "safety_monitoring_down": {
+      "title": "Die Sicherheitsüberwachung von Nova läuft nicht",
+      "description": "Ein Teil der Sicherheitsüberwachung von Nova konnte nicht starten. Warnungen bei Rauch, Kohlenmonoxid, Wasserlecks und Einbruch oder die Verbindung zwischen Alarmanlage und Sperrung funktionieren daher eventuell nicht. Fehlgeschlagen: {failed}.\n\nDie Ursache finden Sie unter Einstellungen → System → Protokolle. Laden Sie Nova danach unter Einstellungen → Geräte & Dienste neu. Dieser Hinweis verschwindet von selbst, sobald alles sauber startet."
     }
   },
   "exceptions": {
