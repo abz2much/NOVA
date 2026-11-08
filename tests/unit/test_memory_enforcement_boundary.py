@@ -8,7 +8,7 @@ alert repeated regardless.
 
 Fix: every tool result that could plausibly be mistaken for "this changed
 runtime behaviour" now carries an explicit, structured `enforced` field —
-False for remember/confirm_pending_fact, True for a successful
+False for remember, True for a successful
 ignore_entity — so a claim of enforcement can be checked against real tool
 output instead of the model's own prose.
 """
@@ -73,15 +73,6 @@ async def test_remember_preference_result_is_explicitly_not_enforced(
 async def test_remember_routine_result_is_also_not_enforced(agent, hass, knowledge):
     out = json.loads(await agent._exec_remember(
         hass, {"key": "routine", "name": "movie night", "value": "dim lights"}))
-    assert out["enforced"] is False
-
-
-async def test_confirm_pending_fact_result_stays_not_enforced(agent, hass, knowledge):
-    staged = json.loads(await agent._exec_remember(
-        hass, {"key": "routine", "name": "movie night", "value": "dim lights"}))
-    out = json.loads(await agent._exec_confirm_pending_fact(
-        hass, {"fact_id": staged["fact_id"]}))
-    assert out["success"] is True
     assert out["enforced"] is False
 
 

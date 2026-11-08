@@ -63,7 +63,6 @@ EXECUTORS = {
     },
     "memory": {
         "remember": "_exec_remember",
-        "confirm_pending_fact": "_exec_confirm_pending_fact",
         "reject_pending_fact": "_exec_reject_pending_fact",
         "propose_relation": "_exec_propose_relation",
         "reject_pending_relation": "_exec_reject_pending_relation",
@@ -113,7 +112,6 @@ RULES = {
     },
     "memory": {
         "remember": (False, True, False, False),
-        "confirm_pending_fact": (False, True, False, False),
         "reject_pending_fact": (False, True, False, False),
         "propose_relation": (False, True, False, False),
         "reject_pending_relation": (False, True, False, False),
@@ -194,7 +192,7 @@ def test_each_tool_runs_the_function_from_its_capability_module(reg):
 
 def test_the_dispatch_table_holds_exactly_these_tools(reg):
     assert set(reg._TOOL_MAP) == set(_flat(EXECUTORS))
-    assert len(reg._TOOL_MAP) == 55
+    assert len(reg._TOOL_MAP) == 54
     assert "delegate_task" not in reg._TOOL_MAP
 
 

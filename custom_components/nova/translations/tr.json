@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Nova'nın güvenlik izlemesi çalışmıyor",
       "description": "Nova'nın güvenlik izlemesinin bir bölümü başlatılamadı; bu yüzden duman, karbonmonoksit, sızıntı ve izinsiz giriş uyarıları ya da alarmınız ile kilitleme arasındaki bağlantı çalışmayabilir. Başarısız olan: {failed}.\n\nNedeni Ayarlar → Sistem → Günlükler bölümünde görebilirsiniz. Ardından Nova'yı Ayarlar → Cihazlar ve hizmetler bölümünden yeniden yükleyin. Her şey düzgün başladığında bu bildirim kendiliğinden kalkar."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova'nın ev alarmınızı seçmenize ihtiyacı var",
+      "description": "Nova birden fazla alarm paneli buldu: {panels}. Hangisinin ev alarmınız olduğunu seçene kadar Nova alarm çaldığında duyuru yapmaz ve otomatik kilitleme yapmaz.\n\nNova panelinde Ayarlar → Güvenlik alarmı bölümünü açıp seçin. Bunu yaptığınızda bu bildirim kendiliğinden kalkar."
     }
   },
   "exceptions": {

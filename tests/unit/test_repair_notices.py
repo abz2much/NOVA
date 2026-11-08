@@ -56,6 +56,7 @@ def rn(load, monkeypatch):
     monkeypatch.setattr(module, "_cred_state", {"active": False})
     monkeypatch.setattr(module, "_retired_seen", set())
     monkeypatch.setattr(module, "_safety_failed", {}, raising=False)
+    monkeypatch.setattr(module, "_alarm_choice", {"panels": ()}, raising=False)
     return module
 
 
@@ -276,11 +277,41 @@ def test_clearing_a_part_that_never_failed_touches_nothing(rn, reg):
     assert reg.log == []
 
 
+# ── several alarm panels, none chosen ────────────────────────────────────
+
+def test_the_panels_are_named_in_a_warning(rn, reg):
+    rn.note_alarm_choice_needed(HASS, ("alarm_control_panel.down", "alarm_control_panel.up"))
+    [(issue_id, kw)] = reg.created()
+    assert issue_id == "alarm_choice_needed"
+    assert kw["translation_key"] == "alarm_choice_needed"
+    assert kw["severity"] == "warning" and kw["is_fixable"] is False
+    assert kw["translation_placeholders"] == {
+        "panels": "alarm_control_panel.down, alarm_control_panel.up"}
+
+
+def test_the_same_panels_do_not_rewrite_the_warning(rn, reg):
+    for _ in range(3):
+        rn.note_alarm_choice_needed(HASS, ("alarm_control_panel.up",))
+    assert len(reg.created()) == 1
+
+
+def test_the_warning_goes_once_a_panel_is_chosen(rn, reg):
+    rn.note_alarm_choice_needed(HASS, ("alarm_control_panel.up",))
+    rn.clear_alarm_choice_needed(HASS)
+    assert reg.deleted() == ["alarm_choice_needed"]
+
+
+def test_clearing_with_nothing_shown_touches_nothing(rn, reg):
+    rn.clear_alarm_choice_needed(HASS)
+    assert reg.log == []
+
+
 # ── the text each notice points at ───────────────────────────────────────
 
 @pytest.mark.parametrize("key, placeholder", [
     ("llm_unavailable", "{detail}"),
     ("safety_monitoring_down", "{failed}"),
+    ("alarm_choice_needed", "{panels}"),
     ("voice_setup_step_addons", "{step}"),
     ("voice_setup_step_wyoming", "{step}"),
     ("voice_setup_step_pipeline", "{step}"),

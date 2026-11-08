@@ -684,8 +684,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         _LOGGER.info("nova.forget: removed %d fact(s)", removed)
 
     async def _create_automation(call: ServiceCall) -> None:
-        """Create a Home Assistant automation from the call data."""
+        """Create a Home Assistant automation from the call data. Admins only,
+        like the suggestion services: it can write lock and cover actions."""
         entry, runtime = async_resolve_loaded(hass)
+        from . import nova_state
+        await nova_state.async_check_admin(hass, call)
         from .automation_creator import create_automation
         data = call.data
         result = await create_automation(

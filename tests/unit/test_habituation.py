@@ -16,6 +16,9 @@ def hab(load, tmp_path, monkeypatch):
     h = load("habituation")
     monkeypatch.setattr(h, "STATE_FILE", str(tmp_path / "habituation.json"))
     monkeypatch.setattr(h, "_state", None)
+    # The tests use days in October 2026, so "now" is held there: quiet lasts
+    # 30 days, and the real date would make every one of them expire.
+    monkeypatch.setattr(h.time, "time", lambda: _ts(10))
     return h
 
 
@@ -45,6 +48,33 @@ def test_a_missed_day_starts_the_count_again(hab):
     assert not hab.is_quiet(key)
     assert hab.with_note(key, "x", _ts(6)).endswith(hab.QUIET_NOTE)
     hab.record(key, key, _ts(6))
+    assert hab.is_quiet(key)
+
+
+@pytest.mark.parametrize("days_later, quiet", [(29, True), (31, False)])
+def test_quiet_lasts_thirty_days(hab, monkeypatch, days_later, quiet):
+    """Otherwise a real fault weeks later is silent for good."""
+    key = "binary_sensor.disk"
+    for day in (1, 2, 3):
+        hab.record(key, key, _ts(day))
+    assert hab.is_quiet(key)
+    monkeypatch.setattr(hab.time, "time", lambda: _ts(3) + days_later * 86400)
+    assert hab.is_quiet(key) is quiet
+    assert bool(hab.quiet_list()) is quiet
+
+
+def test_after_thirty_quiet_days_the_count_starts_again(hab, monkeypatch):
+    key = "binary_sensor.disk"
+    for day in (1, 2, 3):
+        hab.record(key, key, _ts(day))
+    later = _ts(3) + 31 * 86400
+    for n in (0, 1):
+        monkeypatch.setattr(hab.time, "time", lambda n=n: later + n * 86400)
+        hab.record(key, key, later + n * 86400)
+        assert not hab.is_quiet(key)
+    monkeypatch.setattr(hab.time, "time", lambda: later + 2 * 86400)
+    assert hab.with_note(key, "x", later + 2 * 86400).endswith(hab.QUIET_NOTE)
+    hab.record(key, key, later + 2 * 86400)
     assert hab.is_quiet(key)
 
 
@@ -240,12 +270,12 @@ def days(load, hab, fake_hass, monkeypatch):
     monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
     fake_hass.states.set("media_player.hall", "idle")
 
-    async def run(action, n=4):
+    async def run(action, n=4, asleep=False):
         delivered = []
         for _ in range(n):
             out.clear()
             await cc._emit_action(fake_hass, {"broadcast_group": "media_player.hall"},
-                                  dict(action), False)
+                                  dict(action), asleep)
             delivered.append(list(out))
             clock["now"] += DAY
         return delivered
@@ -313,6 +343,19 @@ async def test_other_alerts_still_go_quiet_after_three_days(days):
     assert delivered[0] and delivered[1]
     assert "stop mentioning" in " ".join(delivered[2])
     assert delivered[3] == []
+
+
+async def test_days_an_alert_was_held_do_not_count_toward_going_quiet(days):
+    """A held alert that nobody heard must not use up the three days, or it
+    goes quiet for good without ever being heard."""
+    action = {"type": "anticipation_routine", "urgency": "medium",
+              "message": "The porch light is on.",
+              "pattern_key": "anticipate:light.porch",
+              "entity_id": "light.porch", "offer": False}
+    held = await days(action, n=3, asleep=True)
+    assert held == [[], [], []]
+    heard = await days(action, n=1)
+    assert heard == [["The porch light is on."]]
 
 
 def test_exempt_covers_every_cover(load):

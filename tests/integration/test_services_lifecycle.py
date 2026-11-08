@@ -497,6 +497,48 @@ async def test_loaded_entry_without_runtime_raises_runtime_unavailable(hass):
     assert delegates == []
 
 
+# ── Admin only ──────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("caller, allowed", [
+    ("non_admin", False),
+    ("admin", True),
+    ("automation", True),        # no user on the call, as Home Assistant's own admin services allow
+])
+async def test_create_automation_is_for_admins(hass, monkeypatch, caller, allowed):
+    """It writes actions, lock and cover ones included, into automations.yaml,
+    so a user who is not an admin must be refused before anything is written."""
+    from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
+    from homeassistant.core import Context
+    from homeassistant.exceptions import Unauthorized
+    from custom_components.nova import automation_creator
+
+    created = []
+
+    async def fake_create(*args, **kwargs):
+        created.append(kwargs.get("alias"))
+        return {"success": False, "error": "stubbed"}
+    monkeypatch.setattr(automation_creator, "create_automation", fake_create)
+    await _setup(hass)
+    context = None
+    if caller != "automation":
+        # The first user Home Assistant creates is its owner, and an owner is
+        # an admin, so a throwaway owner goes first.
+        await hass.auth.async_create_user("owner", group_ids=[GROUP_ID_ADMIN])
+        group = GROUP_ID_ADMIN if caller == "admin" else GROUP_ID_USER
+        user = await hass.auth.async_create_user(caller, group_ids=[group])
+        context = Context(user_id=user.id)
+    call = hass.services.async_call(
+        DOMAIN, "create_automation", {"alias": "porch", "trigger": [], "action": []},
+        blocking=True, context=context)
+
+    if allowed:
+        await call
+    else:
+        with pytest.raises(Unauthorized):
+            await call
+    assert created == (["porch"] if allowed else [])
+
+
 # ── Return values and events ────────────────────────────────────────────────
 
 async def test_services_return_none_and_keep_their_events(hass):

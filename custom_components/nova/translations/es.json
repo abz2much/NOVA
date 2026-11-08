@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "La vigilancia de seguridad de Nova no está en marcha",
       "description": "Una parte de la vigilancia de seguridad de Nova no pudo iniciarse, así que las alertas de humo, monóxido de carbono, fugas e intrusión, o el vínculo entre tu alarma y el bloqueo, pueden no funcionar. Lo que falló: {failed}.\n\nConsulta Ajustes → Sistema → Registros para ver la causa. Después recarga Nova en Ajustes → Dispositivos y servicios. Este aviso desaparece solo cuando todo arranca correctamente."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova necesita que elijas tu alarma",
+      "description": "Nova encontró más de un panel de alarma: {panels}. Hasta que elijas cuál es la alarma de tu casa, Nova no avisará cuando suene y no bloqueará automáticamente.\n\nEn el panel de Nova, abre Ajustes → Alarma de seguridad y elígela. Este aviso desaparece solo cuando lo hagas."
     }
   },
   "exceptions": {

@@ -381,10 +381,12 @@ async def test_emergencies_are_exempt_from_habituation_even_when_quiet(
 
 
 async def test_the_habit_key_is_habit_key_then_pattern_key_then_offer_key(cc, fake_hass, out, habit):
-    await _emit(cc, fake_hass, _act(habit_key="h", pattern_key="p", offer_key="o"))
-    await _emit(cc, fake_hass, _act(pattern_key="p", offer_key="o"))
-    await _emit(cc, fake_hass, _act(offer_key="o"))
-    await _emit(cc, fake_hass, _act())
+    # Each has its own text: only a delivered alert counts as a day, and the
+    # output gate drops an identical repeat.
+    await _emit(cc, fake_hass, _act(habit_key="h", pattern_key="p", offer_key="o", message="one"))
+    await _emit(cc, fake_hass, _act(pattern_key="p", offer_key="o", message="two"))
+    await _emit(cc, fake_hass, _act(offer_key="o", message="three"))
+    await _emit(cc, fake_hass, _act(message="four"))
     assert [k for k, _ in habit.recorded] == ["h", "p", "o"]
 
 

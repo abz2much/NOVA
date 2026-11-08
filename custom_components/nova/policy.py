@@ -71,6 +71,7 @@ _SWITCH_OFF_SERVICES = ("turn_off", "toggle")
 # unlocks a door inside itself is not seen here (see _INDIRECTION_DOMAINS).
 _VOICE_BLOCKED_OPENING = _COVER_OPENING | {
     ("lock", "unlock"),
+    ("lock", "open"),                 # releases the latch, so it lets someone in
     # 8.24.0: an imitated voice must not switch the alarm off either.
     ("alarm_control_panel", "alarm_disarm"),
 }

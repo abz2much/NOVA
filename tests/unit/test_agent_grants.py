@@ -67,7 +67,7 @@ EXPECTED_DENIED = {
     "approve_suggestion", "dismiss_suggestion", "review_suggestions",
     "manage_autonomy",
     # stores
-    "remember", "ingest_documents", "confirm_pending_fact", "reject_pending_fact",
+    "remember", "ingest_documents", "reject_pending_fact",
     "propose_relation", "reject_pending_relation",
     # cameras, which can announce
     "look_at_camera", "where_last_seen", "what_changed",
@@ -81,7 +81,7 @@ EXPECTED_DENIED = {
 
 def test_the_sub_agent_deny_list_is_exactly_this(g):
     assert g._SUBAGENT_DENY == EXPECTED_DENIED
-    assert len(g._SUBAGENT_DENY) == 34
+    assert len(g._SUBAGENT_DENY) == 33
 
 
 def test_the_mutating_tools_are_all_denied_to_sub_agents(g):

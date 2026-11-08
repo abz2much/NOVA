@@ -39,6 +39,7 @@ def _state_file() -> str:
 
 
 QUIET_AFTER_DAYS = 3
+QUIET_FOR_DAYS = 30       # then it speaks again, and the count starts over
 QUIET_NOTE = "This has come up three days running, so I'll stop mentioning it."
 
 _EXEMPT_TYPE_PREFIXES = ("intrusion", "lockdown", "freeze", "package", "doorbell",
@@ -118,9 +119,15 @@ def exempt(*, urgency: str = "", kind: str = "", entity_id: str = "") -> bool:
     return str(entity_id or "").split(".", 1)[0] in _EXEMPT_DOMAINS
 
 
+def _still_quiet(rec: dict, now: float) -> bool:
+    """A record that went quiet less than QUIET_FOR_DAYS ago."""
+    return bool(rec.get("quiet")) and (
+        now - float(rec.get("quiet_since") or 0) < QUIET_FOR_DAYS * 86400)
+
+
 def is_quiet(key: str) -> bool:
-    """Whether this notification has gone quiet."""
-    return bool(key) and bool(_load().get(key, {}).get("quiet"))
+    """Whether this notification has gone quiet, and not yet for 30 days."""
+    return bool(key) and _still_quiet(_load().get(key, {}), time.time())
 
 
 def will_go_quiet(key: str, now: Optional[float] = None) -> bool:
@@ -153,7 +160,9 @@ def record(key: str, entity_id: str = "", now: Optional[float] = None) -> None:
     state = _load()
     rec = state.get(key) or {}
     if rec.get("quiet"):
-        return
+        if _still_quiet(rec, now):
+            return
+        rec = {}          # quiet for long enough: count from the start again
     last = int(rec.get("last_day") or 0)
     if last == today:
         return
@@ -186,7 +195,8 @@ def forget(pattern: str) -> list[str]:
 
 
 def quiet_list() -> list[dict]:
-    """The notifications that have gone quiet, for the agent's context."""
+    """The notifications that are quiet now, for the agent's context."""
+    now = time.time()
     return [{"key": k, "entity_id": r.get("entity_id", ""),
              "quiet_since": r.get("quiet_since", 0)}
-            for k, r in _load().items() if r.get("quiet")]
+            for k, r in _load().items() if _still_quiet(r, now)]

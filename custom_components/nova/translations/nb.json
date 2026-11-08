@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Novas sikkerhetsovervåking kjører ikke",
       "description": "En del av Novas sikkerhetsovervåking kunne ikke starte, så varsler om røyk, karbonmonoksid, lekkasje og innbrudd, eller koblingen mellom alarmen og låsingen, fungerer kanskje ikke. Det som feilet: {failed}.\n\nÅrsaken finner du under Innstillinger → System → Logger. Last deretter Nova på nytt under Innstillinger → Enheter og tjenester. Dette varselet forsvinner av seg selv når alt starter som det skal."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova trenger at du velger hjemmealarmen din",
+      "description": "Nova fant mer enn ett alarmpanel: {panels}. Til du velger hvilket som er hjemmealarmen din, varsler ikke Nova når alarmen går, og låser ikke automatisk.\n\nÅpne Innstillinger → Sikkerhetsalarm i Nova-panelet og velg den. Dette varselet forsvinner av seg selv når du har gjort det."
     }
   },
   "exceptions": {

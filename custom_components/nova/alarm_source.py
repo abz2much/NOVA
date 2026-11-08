@@ -62,6 +62,16 @@ def entity_ids(hass, config: dict | None = None) -> tuple[str, ...]:
     return alarmo
 
 
+def unchosen_panels(hass, config: dict | None = None) -> tuple[str, ...]:
+    """The Alarmo panels waiting for the user to choose one: more than one
+    exists and none is chosen. Empty otherwise. In that state ``entity_ids``
+    is empty, so the alarm alert and the automatic lockdown stay off."""
+    if _configured(hass, config):
+        return ()
+    alarmo = _alarmo_entities(hass)
+    return alarmo if len(alarmo) > 1 else ()
+
+
 def states(hass, config: dict | None = None) -> list:
     return [state for eid in entity_ids(hass, config)
             if (state := hass.states.get(eid)) is not None]

@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "De veiligheidsbewaking van Nova draait niet",
       "description": "Een deel van de veiligheidsbewaking van Nova kon niet starten. Meldingen over rook, koolmonoxide, lekkage en inbraak, of de koppeling tussen je alarm en de vergrendeling, werken mogelijk niet. Wat mislukte: {failed}.\n\nBekijk Instellingen → Systeem → Logboeken voor de oorzaak. Laad Nova daarna opnieuw onder Instellingen → Apparaten en services. Deze melding verdwijnt vanzelf zodra alles goed start."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova wil dat je je huisalarm kiest",
+      "description": "Nova heeft meer dan één alarmpaneel gevonden: {panels}. Zolang je niet kiest welk paneel je huisalarm is, meldt Nova niet wanneer het alarm afgaat en vergrendelt het niet automatisch.\n\nOpen in het Nova-paneel Instellingen → Beveiligingsalarm en kies het. Deze melding verdwijnt vanzelf zodra je dat hebt gedaan."
     }
   },
   "exceptions": {

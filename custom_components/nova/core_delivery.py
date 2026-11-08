@@ -77,6 +77,7 @@ async def _emit_action(hass, config, action, sleeping, *, reading=None) -> tuple
     # Given three days running, it's normal for this home: the third says so,
     # later ones stay quiet (habituation.py). Emergencies are exempt.
     habit = habit_key(action)
+    counts_as_a_day = False
     try:
         from . import habituation
         if habit and not habituation.exempt(
@@ -86,7 +87,7 @@ async def _emit_action(hass, config, action, sleeping, *, reading=None) -> tuple
                              action_type, message[:100])
                 return False, "normal for this home (given three days running)"
             message = habituation.with_note(habit, message)
-            habituation.record(habit, action.get("entity_id", ""))
+            counts_as_a_day = True      # counted below, once it is delivered
     except Exception as exc:
         _LOGGER.debug("habituation check failed: %s", exc)
 
@@ -137,6 +138,13 @@ async def _emit_action(hass, config, action, sleeping, *, reading=None) -> tuple
         except Exception as exc:
             _LOGGER.debug("rating prompt failed: %s", exc)
     delivered = bool(out.spoken or out.pushed)
+    if delivered and counts_as_a_day:
+        # Only an alert someone could hear uses up one of the three days.
+        try:
+            from . import habituation
+            habituation.record(habit, action.get("entity_id", ""))
+        except Exception as exc:
+            _LOGGER.debug("habituation record failed: %s", exc)
     return delivered, out.decision.reason or ("spoken" if out.spoken else
                                               "pushed" if out.pushed else "not delivered")
 

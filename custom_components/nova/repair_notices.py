@@ -150,6 +150,42 @@ def clear_safety_failure(hass: HomeAssistant, part: str) -> None:
         _LOGGER.debug("could not update safety repair issue: %s", exc)
 
 
+# With several Alarmo panels and none chosen Nova cannot tell which one is the
+# home alarm, so it announces no alarm and does no automatic lockdown. This
+# warning says so and goes once a panel is chosen.
+_ALARM_CHOICE_ISSUE = "alarm_choice_needed"
+_alarm_choice: dict[str, tuple] = {"panels": ()}
+
+
+def note_alarm_choice_needed(hass: HomeAssistant, panels) -> None:
+    """Show the "choose your alarm" warning naming ``panels``. Left alone
+    while the same panels wait. Event loop safe; never raises."""
+    panels = tuple(panels)
+    if _alarm_choice["panels"] == panels:
+        return
+    try:
+        ir.async_create_issue(hass, DOMAIN, _ALARM_CHOICE_ISSUE, is_fixable=False,
+                              severity=ir.IssueSeverity.WARNING,
+                              translation_key=_ALARM_CHOICE_ISSUE,
+                              translation_placeholders={"panels": ", ".join(panels)})
+    except Exception as exc:  # registry not there, or shutting down
+        _LOGGER.debug("could not create alarm choice issue: %s", exc)
+        return
+    _alarm_choice["panels"] = panels
+
+
+def clear_alarm_choice_needed(hass: HomeAssistant) -> None:
+    """A panel is chosen, or only one exists. Touches nothing when the
+    warning was never shown. Never raises."""
+    if not _alarm_choice["panels"]:
+        return
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _ALARM_CHOICE_ISSUE)
+    except Exception as exc:
+        _LOGGER.debug("could not clear alarm choice issue: %s", exc)
+    _alarm_choice["panels"] = ()
+
+
 _VOICE_PROGRESS_ISSUE = "voice_setup_in_progress"
 _VOICE_INCOMPLETE_ISSUE = "voice_setup_incomplete"
 VOICE_STEPS = ("addons", "wyoming", "pipeline")

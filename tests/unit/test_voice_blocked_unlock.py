@@ -121,14 +121,15 @@ def test_voice_satellite_request_true_for_paired_device(pol, vc, monkeypatch):
     assert pol._voice_satellite_request(_Hass(), "") is False
 
 
-async def test_confirm_gate_blocks_voice_unlock_until_phone_confirmed(pol, vc, monkeypatch):
+@pytest.mark.parametrize("service", ["unlock", "open"])
+async def test_confirm_gate_blocks_voice_unlock_until_phone_confirmed(pol, vc, monkeypatch, service):
     monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
 
     async def deny(hass, question, timeout=None):
         return "rejected"
     monkeypatch.setattr(vc, "confirm_via_phone_only_typed", deny)
 
-    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
+    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", service, "lock.front_door",
                                       "unlock", device_id="dev-sat-1")
     assert ok is False
     assert "voice" in note.lower()

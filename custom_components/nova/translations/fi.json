@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Novan turvallisuusvalvonta ei ole käynnissä",
       "description": "Osa Novan turvallisuusvalvonnasta ei käynnistynyt, joten savu-, hiilimonoksidi-, vuoto- ja murtohälytykset tai hälytysjärjestelmän ja lukituksen välinen yhteys eivät välttämättä toimi. Mikä epäonnistui: {failed}.\n\nSyyn näet kohdasta Asetukset → Järjestelmä → Lokit. Lataa sitten Nova uudelleen kohdassa Asetukset → Laitteet ja palvelut. Tämä ilmoitus poistuu itsestään, kun kaikki käynnistyy oikein."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova tarvitsee kotihälytysjärjestelmäsi valinnan",
+      "description": "Nova löysi useamman kuin yhden hälytyspaneelin: {panels}. Kunnes valitset, mikä niistä on kotisi hälytysjärjestelmä, Nova ei ilmoita hälytyksestä eikä lukitse automaattisesti.\n\nAvaa Nova-paneelissa Asetukset → Turvahälytin ja valitse se. Tämä ilmoitus poistuu itsestään, kun olet tehnyt sen."
     }
   },
   "exceptions": {

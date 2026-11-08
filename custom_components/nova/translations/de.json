@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Die Sicherheitsüberwachung von Nova läuft nicht",
       "description": "Ein Teil der Sicherheitsüberwachung von Nova konnte nicht starten. Warnungen bei Rauch, Kohlenmonoxid, Wasserlecks und Einbruch oder die Verbindung zwischen Alarmanlage und Sperrung funktionieren daher eventuell nicht. Fehlgeschlagen: {failed}.\n\nDie Ursache finden Sie unter Einstellungen → System → Protokolle. Laden Sie Nova danach unter Einstellungen → Geräte & Dienste neu. Dieser Hinweis verschwindet von selbst, sobald alles sauber startet."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova braucht Ihre Wahl der Alarmanlage",
+      "description": "Nova hat mehr als ein Alarmpanel gefunden: {panels}. Solange Sie nicht festlegen, welches Ihre Alarmanlage ist, meldet Nova einen Alarm nicht und sperrt auch nicht automatisch.\n\nÖffnen Sie im Nova-Panel Einstellungen → Sicherheitsalarm und wählen Sie sie aus. Dieser Hinweis verschwindet von selbst, sobald Sie das getan haben."
     }
   },
   "exceptions": {

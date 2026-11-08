@@ -32,6 +32,10 @@ _LOGGER = logging.getLogger(__name__)
 DB_PATH: Optional[Path] = None
 
 _TICK = timedelta(seconds=30)
+# A reminder that reached no speaker and no phone is tried again, not on every
+# tick, and given up on a day after it was due.
+_RETRY_AFTER = timedelta(minutes=5)
+_GIVE_UP_AFTER = timedelta(hours=24)
 _STEPS = {
     "daily": timedelta(days=1),
     "weekly": timedelta(days=7),
@@ -200,6 +204,7 @@ class ReminderWatcher:
         self._speakers_getter = speakers_getter
         self._tts_getter = tts_getter
         self._honorific_getter = honorific_getter
+        self._last_attempt: dict = {}      # reminder id -> when it was last tried
         self.hass = hass
 
     async def async_start(self) -> None:
@@ -227,14 +232,20 @@ class ReminderWatcher:
 
         from . import delivery
 
+        now = _now_local()
         for reminder in due:
             respect_quiet = reminder.get("respect_quiet")
             if respect_quiet and delivery.in_quiet_hours(hass):
                 _LOGGER.debug("Reminder %s held for quiet hours", reminder.get("id"))
                 continue
-            if reminder.get("require_home") and not presence.get("anyone_home"):
-                _LOGGER.debug("Reminder %s held until someone is home", reminder.get("id"))
+            rid = reminder["id"]
+            last = self._last_attempt.get(rid)
+            if last is not None and now - last < _RETRY_AFTER:
                 continue
+            # With nobody home the speakers have no one to tell, so it goes to
+            # the phone instead of waiting for someone to come in.
+            nobody_home = bool(reminder.get("require_home")
+                               and not presence.get("anyone_home"))
             request = delivery.DeliveryRequest(
                 source="reminder",
                 message=_reminder_text(honorific, reminder["label"]),
@@ -244,10 +255,28 @@ class ReminderWatcher:
                 speakers=tuple(speakers or ()),
                 tts_entity=tts_entity or "",
                 tts_context="reminder",
+                phone_only=nobody_home,
             )
-            await delivery.async_deliver(hass, request)
-            await hass.async_add_executor_job(mark_fired, reminder["id"])
+            out = await delivery.async_deliver(hass, request)
+            if not (out.spoken or out.pushed):
+                if not _overdue(reminder, now):
+                    self._last_attempt[rid] = now      # try again later
+                    continue
+                _LOGGER.warning("Reminder %s (%s) reached nobody for a day; gave up",
+                                rid, reminder["label"])
+            self._last_attempt.pop(rid, None)
+            await hass.async_add_executor_job(mark_fired, rid)
             await hass.async_add_executor_job(_advance_repeating, reminder)
+
+
+def _overdue(reminder: dict, now: datetime) -> bool:
+    """Due for more than _GIVE_UP_AFTER."""
+    try:
+        at = datetime.fromisoformat(reminder["trigger_at"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    ref = now if at.tzinfo is None else dt_util.utcnow()
+    return ref - at > _GIVE_UP_AFTER
 
 
 # ── service ──────────────────────────────────────────────────────────────────

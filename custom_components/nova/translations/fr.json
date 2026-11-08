@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "La surveillance de sécurité de Nova ne fonctionne pas",
       "description": "Une partie de la surveillance de sécurité de Nova n'a pas pu démarrer. Les alertes de fumée, de monoxyde de carbone, de fuite et d'intrusion, ou le lien entre votre alarme et le verrouillage, peuvent donc ne pas fonctionner. Ce qui a échoué : {failed}.\n\nConsultez Paramètres → Système → Journaux pour trouver la cause. Rechargez ensuite Nova dans Paramètres → Appareils et services. Cet avis disparaît tout seul dès que tout démarre correctement."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova a besoin que vous choisissiez votre alarme",
+      "description": "Nova a trouvé plus d'un panneau d'alarme : {panels}. Tant que vous n'avez pas choisi lequel est l'alarme de la maison, Nova n'annoncera pas son déclenchement et ne verrouillera pas automatiquement.\n\nDans le panneau Nova, ouvrez Réglages → Alarme de sécurité et choisissez-la. Cet avis disparaît tout seul dès que c'est fait."
     }
   },
   "exceptions": {

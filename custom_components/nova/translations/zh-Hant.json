@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Nova 的安全監控未執行",
       "description": "Nova 安全監控的一部分未能啟動，因此煙霧、一氧化碳、漏水和入侵警報，或警報器與鎖定之間的連動，可能無法運作。失敗的部分：{failed}。\n\n請在 設定 → 系統 → 記錄 中查看原因，然後在 設定 → 裝置與服務 中重新載入 Nova。一切正常啟動後，此通知會自動消失。"
+    },
+    "alarm_choice_needed": {
+      "title": "Nova 需要你選擇家庭警報器",
+      "description": "Nova 找到了不只一個警報面板：{panels}。在你選擇哪一個是家庭警報器之前，Nova 不會在警報觸發時播報，也不會自動鎖定。\n\n在 Nova 面板中開啟 設定 → 安防警報器 並選擇它。完成後，此通知會自動消失。"
     }
   },
   "exceptions": {

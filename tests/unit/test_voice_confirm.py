@@ -132,6 +132,7 @@ def test_the_feature_starts_switched_off(vc, settings):
 
 @pytest.mark.parametrize("domain, service, entity, protected", [
     ("lock", "unlock", "lock.front", True),
+    ("lock", "open", "lock.front", True),          # the latch release
     ("lock", "lock", "lock.front", False),
     ("cover", "open", "cover.garage", True),
     ("cover", "open_cover", "cover.garage", True),

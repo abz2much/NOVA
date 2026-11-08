@@ -197,10 +197,12 @@ def test_a_row_with_unreadable_metadata_is_still_a_hit_when_unscoped(mem):
     assert mem.search_memory("kettle", subject="alex") == []
 
 
-def test_a_malformed_match_query_is_a_quiet_empty_list(mem, caplog):
+def test_a_malformed_match_query_is_a_quiet_empty_list(mem, caplog, monkeypatch):
+    # Real queries are quoted now and cannot be malformed, so force one.
+    monkeypatch.setattr(mem, "_fts_query", lambda query: '"unterminated')
     mem.store_memory("the kettle is old")
     with caplog.at_level(logging.DEBUG, logger=mem._LOGGER.name):
-        assert mem.search_memory('"unterminated') == []
+        assert mem.search_memory("kettle") == []
     assert [r.getMessage().split(":")[0] for r in caplog.records] == ["FTS5 search failed"]
 
 

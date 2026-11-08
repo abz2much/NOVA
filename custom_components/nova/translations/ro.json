@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Monitorizarea de siguranță Nova nu rulează",
       "description": "O parte din monitorizarea de siguranță Nova nu a putut porni, așa că alertele de fum, monoxid de carbon, scurgeri și intruziune, sau legătura dintre alarmă și blocare, ar putea să nu funcționeze. Ce a eșuat: {failed}.\n\nVerificați cauza în Setări → Sistem → Jurnale. Apoi reîncărcați Nova în Setări → Dispozitive și servicii. Această notificare dispare singură când totul pornește corect."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova are nevoie să alegeți alarma casei",
+      "description": "Nova a găsit mai multe panouri de alarmă: {panels}. Până alegeți care este alarma casei, Nova nu va anunța când se declanșează alarma și nu va bloca automat.\n\nÎn panoul Nova, deschideți Setări → Alarmă de securitate și alegeți-o. Această notificare dispare singură după ce ați făcut asta."
     }
   },
   "exceptions": {

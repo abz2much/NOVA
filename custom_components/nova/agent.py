@@ -91,7 +91,6 @@ from .agent_runtime.capabilities.home import (
 )
 from .agent_runtime.capabilities.memory import (
     _LEARN_FILE,
-    _exec_confirm_pending_fact,
     _exec_ignore,
     _exec_ingest_documents,
     _exec_reject_pending_fact,
@@ -232,7 +231,6 @@ __all__ = [
     '_exec_bulk_control',
     '_exec_calendar_agenda',
     '_exec_cognitive_status',
-    '_exec_confirm_pending_fact',
     '_exec_connectivity_status',
     '_exec_control_device',
     '_exec_create_goal',
@@ -343,7 +341,6 @@ _OWNERS = {
     '_exec_bulk_control': _m_capabilities_control,
     '_exec_calendar_agenda': _m_capabilities_communications,
     '_exec_cognitive_status': _m_capabilities_diagnostics,
-    '_exec_confirm_pending_fact': _m_capabilities_memory,
     '_exec_connectivity_status': _m_capabilities_diagnostics,
     '_exec_control_device': _m_capabilities_control,
     '_exec_create_goal': _m_capabilities_planning,
