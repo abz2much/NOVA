@@ -1360,5 +1360,14 @@
   "Berry Sky": "Jagodowe niebo",
   "Quantum Ice": "Kwantowy lód",
   "Pine Mist": "Sosnowa mgła",
-  "Ember": "Żar"
+  "Ember": "Żar",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Wybierz czujnik, który pokazuje zużycie prądu całego domu. Przy zgadywaniu Nova szuka go po nazwie.",
+  "Home load sensor": "Czujnik zużycia domu",
+  "Guess from sensor names": "Zgadnij po nazwach czujników",
+  "{entity} (not found)": "{entity} (nie znaleziono)",
+  "No home load sensor found. Pick one below.": "Nie znaleziono czujnika zużycia domu. Wybierz go poniżej.",
+  "In use: {meter} (picked in Settings)": "W użyciu: {meter} (wybrany w Ustawieniach)",
+  "In use: {meter} (guessed from its name)": "W użyciu: {meter} (zgadnięty po nazwie)",
+  "Use Nova's estimate": "Użyj szacunku Novy",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova nie może użyć tego czujnika jako kosztu, więc korzysta z własnego szacunku."
 }

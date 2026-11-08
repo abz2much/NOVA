@@ -67,7 +67,9 @@ def _states(hass):
     for eid, state in (("tts.runtime_voice", "unknown"), ("tts.bridge_voice", "unknown"),
                        ("media_player.speaker", "idle"), ("media_player.projector", "idle"),
                        ("sensor.cost_runtime", "1.25"), ("sensor.cost_bridge", "9.99")):
-        hass.states.async_set(eid, state)
+        # Cost sensors need a currency unit since 8.85.0.
+        attrs = {"unit_of_measurement": "€"} if eid.startswith("sensor.cost_") else {}
+        hass.states.async_set(eid, state, attrs)
 
 
 def _probes(hass, entry):

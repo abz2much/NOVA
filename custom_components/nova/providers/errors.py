@@ -62,6 +62,7 @@ RETRYABLE_KINDS = frozenset({
 })
 
 _SAFE_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+_SAFE_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _SAFE_PROVIDER = re.compile(r"^[a-z0-9_\-]{1,32}$")
 
 
@@ -82,6 +83,7 @@ class ProviderError(RuntimeError):
         status: Optional[int] = None,
         code: Optional[str] = None,
         detail: Optional[str] = None,
+        cause_type: Optional[str] = None,
     ):
         self.kind = ProviderErrorKind(kind)
         provider = str(provider or "").strip().lower()
@@ -91,6 +93,9 @@ class ProviderError(RuntimeError):
         # `detail` is only ever a fixed phrase chosen by Nova's own code
         # (never provider or user text).
         self.detail = detail
+        # The class name of a local failure (e.g. TypeError), never its text.
+        self.cause_type = cause_type if (
+            isinstance(cause_type, str) and _SAFE_TYPE.match(cause_type)) else None
         super().__init__(self._message())
 
     def _message(self) -> str:
@@ -100,6 +105,8 @@ class ProviderError(RuntimeError):
             extras.append(f"HTTP {self.status}")
         if self.code:
             extras.append(f"code {self.code}")
+        if self.cause_type:
+            extras.append(self.cause_type)
         return f"{self.provider}: {phrase} ({', '.join(extras)})"
 
     def __repr__(self) -> str:
@@ -262,7 +269,9 @@ def normalize_error(exc: BaseException, provider: str = "") -> ProviderError:
         kind = ProviderErrorKind.CONNECTION_FAILED
     else:
         kind = ProviderErrorKind.UNKNOWN
-    error = ProviderError(kind, provider, status=status, code=code)
+    local = kind in (ProviderErrorKind.MALFORMED_RESPONSE, ProviderErrorKind.UNKNOWN)
+    error = ProviderError(kind, provider, status=status, code=code,
+                          cause_type=name if local else None)
     error.__cause__ = exc
     return error
 

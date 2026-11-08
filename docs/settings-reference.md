@@ -104,7 +104,7 @@ and the locks left out of lockdown, are described in
 
 | Setting | Where | What it does |
 | --- | --- | --- |
-| `energy_agency`, `energy_peak_watts`, `energy_cost_today_entity`, `energy_cost_net_entity` | Energy tab → Energy Management | How much say Nova has over high power devices (advice only by default), the whole home peak in watts, and your own sensors for today's cost and net cost. Without those sensors, the daily report estimates the cost from the Energy dashboard's price. |
+| `energy_agency`, `energy_peak_watts`, `energy_home_meter_entity`, `energy_cost_today_entity`, `energy_cost_net_entity` | Energy tab → Energy Management | How much say Nova has over high power devices (advice only by default), the whole home peak in watts, the home load sensor (picked, or guessed by name when empty), and your own sensors in a currency for today's cost and net cost. A price per kWh is not accepted as a cost. Without those sensors, the daily report estimates the cost from the Energy dashboard's price. |
 
 ## Host health
 

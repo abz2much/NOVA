@@ -92,5 +92,5 @@ def on_state_changed(hass: HomeAssistant, config: dict, event: Event) -> bool:
     if action is None:
         return False
     _LOGGER.warning("Nova: %s alarm from %s", ACTION_TYPE, action["entity_id"])
-    hass.async_create_task(async_announce(hass, config, action))
-    return True
+    return _m_common.run_on_loop(
+        hass, lambda: async_announce(hass, config, action), "nova_hazard_announce")

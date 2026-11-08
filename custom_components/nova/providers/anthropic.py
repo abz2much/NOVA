@@ -102,6 +102,8 @@ class AnthropicProvider(LLMProvider):
     name: ClassVar[str] = "anthropic"
     concurrency = SDK_CLIENT_POLICY
     requires_credential = True
+    # Turned off for this client once `temperature` is refused (see _create).
+    _send_temperature: bool = True
 
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         super().__init__(api_key, model, base_url)
@@ -175,8 +177,9 @@ class AnthropicProvider(LLMProvider):
             "system": system,
             "messages": turns,
             "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
         }
+        if self._send_temperature:
+            body["temperature"] = request.temperature
         if request.tools:
             body["tools"] = [
                 {"name": tool.name, "description": tool.description,
@@ -188,20 +191,24 @@ class AnthropicProvider(LLMProvider):
     # ── Running it ──────────────────────────────────────────────────────────
 
     def _create(self, body: dict[str, Any]):
-        """Send the request. If the model refuses `temperature` as deprecated,
-        send it once more without it.
+        """Send the request. If `temperature` is refused, send it once more
+        without it, and leave it out of this client's later calls.
 
         Newer Claude generations answer 400 to a temperature setting where
         older ones ignored it, and they changed one model at a time, so the
-        retry reacts to the error text instead of listing model ids."""
+        retry reacts to the error text instead of listing model ids. The
+        anthropic 2.x SDK (HA 2026.11) refuses the argument itself, before
+        any request, with "unexpected keyword argument 'temperature'"."""
         try:
             return self._client.messages.create(**body)
         except Exception as exc:
             text = error_text(exc).lower()
-            refused = "temperature" in text and "deprecated" in text
+            refused = "temperature" in text and (
+                "deprecated" in text or "unexpected keyword" in text)
             if "temperature" not in body or not refused:
                 raise
             body.pop("temperature")
+            self._send_temperature = False
             return self._client.messages.create(**body)
 
     def complete(self, request: ChatRequest) -> ChatResponse:

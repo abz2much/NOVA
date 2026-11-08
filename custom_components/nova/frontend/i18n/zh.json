@@ -1355,5 +1355,14 @@
   "Berry Sky": "莓果天空",
   "Quantum Ice": "量子冰",
   "Pine Mist": "松林薄雾",
-  "Ember": "余烬"
+  "Ember": "余烬",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "选择显示全屋用电量的传感器。若保留猜测，Nova 会按名称查找。",
+  "Home load sensor": "全屋负载传感器",
+  "Guess from sensor names": "按传感器名称猜测",
+  "{entity} (not found)": "{entity}（未找到）",
+  "No home load sensor found. Pick one below.": "未找到全屋负载传感器。请在下方选择一个。",
+  "In use: {meter} (picked in Settings)": "使用中：{meter}（在设置中选择）",
+  "In use: {meter} (guessed from its name)": "使用中：{meter}（按名称猜测）",
+  "Use Nova's estimate": "使用 Nova 的估算",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova 无法将此传感器用作费用，因此会使用自己的估算。"
 }

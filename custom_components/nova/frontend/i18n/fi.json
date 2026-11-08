@@ -523,5 +523,14 @@
   "Berry Sky": "Marjataivas",
   "Quantum Ice": "Kvanttijää",
   "Pine Mist": "Männyn usva",
-  "Ember": "Hiillos"
+  "Ember": "Hiillos",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Valitse anturi, joka näyttää koko kodin sähkönkulutuksen. Jos jätät arvauksen, Nova etsii sellaisen nimen perusteella.",
+  "Home load sensor": "Kodin kulutusanturi",
+  "Guess from sensor names": "Arvaa anturien nimistä",
+  "{entity} (not found)": "{entity} (ei löydy)",
+  "No home load sensor found. Pick one below.": "Kodin kulutusanturia ei löytynyt. Valitse se alta.",
+  "In use: {meter} (picked in Settings)": "Käytössä: {meter} (valittu asetuksissa)",
+  "In use: {meter} (guessed from its name)": "Käytössä: {meter} (arvattu nimen perusteella)",
+  "Use Nova's estimate": "Käytä Novan arviota",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova ei voi käyttää tätä anturia kustannuksena, joten se käyttää omaa arviotaan."
 }

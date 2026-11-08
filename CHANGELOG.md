@@ -1,3 +1,14 @@
+## [8.85.0] Working again on Home Assistant 2026.11
+
+### Fixed
+- **Nova talks to Claude again on Home Assistant 2026.11.** HA 2026.11 moved to version 2 of the Anthropic library, which refuses the `temperature` setting before anything is sent. Every Anthropic call failed (chat, cameras, package checks, classifier, briefings), and chat only said "I'm experiencing connectivity issues with my reasoning systems". Nova now retries once without `temperature` and stops sending it on that connection.
+- **Leak, smoke, carbon monoxide and gas alarms, and your alarm going off, are announced again.** HA 2026.11 refuses to start a task from a background thread, and Nova started these announcements from one, so they were silently dropped. They now go through Home Assistant's event loop.
+- **Logs now say what kind of local error a provider call hit** (for example "malformed_response, TypeError"), so a library problem is easy to spot. The error's own text is still never logged.
+
+### Changed
+- **Pick your home load sensor.** Energy tab, Energy Management, Home load sensor. Nova used the first sensor named like "Home Consumption"; on some systems (EcoFlow PowerOcean cloud) that one reads 0 W all night. When you pick one, the energy status, its advice, the over peak offer and the appliance monitor all use it, and a picked sensor that stops reporting shows as no reading instead of a guess. The status line says which sensor is in use and whether it was picked or guessed.
+- **The cost fields list only sensors in a currency.** A price per kWh saved there was read as today's cost (0.40 €/kWh became "€0.40 today"). Now it is ignored with a warning, and Nova uses its own estimate. A cost sensor counts when its unit is a currency on its own (€, EUR, £...) or it is `monetary` without a "per" unit. **After updating:** a cost sensor with no unit, or with a rate unit such as `GBP/kWh`, is no longer used, so the daily report switches to Nova's estimate. Check the warning under the cost fields on the Energy tab.
+
 ## [8.84.1] Alerts that never go quiet
 
 ### Fixed

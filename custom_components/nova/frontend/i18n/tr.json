@@ -523,5 +523,14 @@
   "Berry Sky": "Böğürtlen gökyüzü",
   "Quantum Ice": "Kuantum buzu",
   "Pine Mist": "Çam sisi",
-  "Ember": "Kor"
+  "Ember": "Kor",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Tüm evin elektrik tüketimini gösteren sensörü seçin. Tahminde bırakırsanız Nova adına göre bir tane bulur.",
+  "Home load sensor": "Ev tüketim sensörü",
+  "Guess from sensor names": "Sensör adlarından tahmin et",
+  "{entity} (not found)": "{entity} (bulunamadı)",
+  "No home load sensor found. Pick one below.": "Ev tüketim sensörü bulunamadı. Aşağıdan birini seçin.",
+  "In use: {meter} (picked in Settings)": "Kullanılan: {meter} (Ayarlar'da seçildi)",
+  "In use: {meter} (guessed from its name)": "Kullanılan: {meter} (adından tahmin edildi)",
+  "Use Nova's estimate": "Nova'nın tahminini kullan",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova bu sensörü maliyet olarak kullanamaz, bu yüzden kendi tahminini kullanır."
 }

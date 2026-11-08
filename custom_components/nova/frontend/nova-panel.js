@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.84.1
+ * v8.85.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.84.1 ",
+      console.log("%c Nova Panel %c v8.85.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -2218,15 +2218,14 @@ ${this._dockHtml()}`;
             <label>Peak threshold (kW)</label>
             <input class="cfg-field cfg-num" type="number" id="energyPeakKw" min="0.1" step="0.1" value="${this._esc(this._energyPeakKw(e))}">
           </div>
+          <div class="stub-body">Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.</div>
+          <div class="cfg-row">
+            <label>Home load sensor</label>
+            <select class="cfg-field" id="energyHomeMeter" data-cfg-key="energy_home_meter_entity">${this._optSelect(this._homeMeterOptions(cfg.energy_home_meter_entity || ""), cfg.energy_home_meter_entity || "")}</select>
+          </div>
           <div class="stub-body">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
-          <div class="cfg-row">
-            <label>Cost today entity</label>
-            <input class="cfg-field" type="text" data-cfg-key="energy_cost_today_entity" value="${this._esc(cfg.energy_cost_today_entity || "")}" placeholder="sensor.electricity_cost_today">
-          </div>
-          <div class="cfg-row">
-            <label>Net cost today entity (optional)</label>
-            <input class="cfg-field" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(cfg.energy_cost_net_entity || "")}" placeholder="sensor.net_electricity_cost_today">
-          </div>
+          ${this._costFieldHtml("Cost today entity", "energy_cost_today_entity", cfg.energy_cost_today_entity || "")}
+          ${this._costFieldHtml("Net cost today entity (optional)", "energy_cost_net_entity", cfg.energy_cost_net_entity || "")}
         </div>
 
         <div class="panel">
@@ -2236,6 +2235,74 @@ ${this._dockHtml()}`;
           ${this._appliancesCardBody()}
         </div>
     `;
+  }
+
+  // The home load sensor list (8.85.0): "" lets Nova guess by name, then
+  // every power sensor (W or kW). A saved pick that no longer exists stays
+  // listed and selected, marked not found, so it is never silently dropped.
+  _homeMeterOptions(selected) {
+    const states = this._hass?.states || {};
+    const pairs = Object.keys(states).filter(eid => {
+      const a = states[eid].attributes || {};
+      const unit = (a.unit_of_measurement || "").toLowerCase();
+      return eid.startsWith("sensor.") && (a.device_class === "power" || unit === "w" || unit === "kw");
+    }).sort().map(eid => {
+      const name = (states[eid].attributes || {}).friendly_name;
+      return [eid, name ? `${name} (${eid})` : eid];
+    });
+    // A saved pick is always listed and selected: marked not found when it
+    // is gone, by its name when it exists but isn't power-like.
+    if (selected && !pairs.some(([v]) => v === selected)) {
+      const name = states[selected] ? ((states[selected].attributes || {}).friendly_name || selected)
+        : this._t("{entity} (not found)", { entity: selected });
+      pairs.unshift([selected, name]);
+    }
+    return [["", this._tx("Guess from sensor names")], ...pairs];
+  }
+
+  // A cost in money: device_class monetary, or a unit that is a currency on
+  // its own. A price per unit (€/kWh) is not a cost. Mirrors
+  // solar.is_currency_sensor (8.85.0).
+  _isCurrencySensor(state) {
+    const a = (state && state.attributes) || {};
+    const unit = String(a.unit_of_measurement || "").trim();
+    // A rate tagged monetary (GBP/kWh) is still a price, so "/" goes first.
+    if (unit.includes("/")) return false;
+    if (a.device_class === "monetary") return true;
+    if (!unit) return false;
+    const symbols = ["€", "$", "£", "¥", "₹", "₩", "₽", "₺", "₪", "₦", "₱", "₫", "₴", "₵", "₸",
+      "R", "kr", "zł", "Kč", "Ft", "lei"];
+    return symbols.includes(unit) || /^[A-Z]{3}$/.test(unit);
+  }
+
+  // One cost field: Nova's estimate first, then every currency sensor. A
+  // saved value Nova can't use stays selected, with a warning under it.
+  _costFieldHtml(label, key, saved) {
+    const states = this._hass?.states || {};
+    const pairs = Object.keys(states).filter(eid => this._isCurrencySensor(states[eid])).sort().map(eid => {
+      const name = (states[eid].attributes || {}).friendly_name;
+      return [eid, name ? `${name} (${eid})` : eid];
+    });
+    const usable = !saved || this._isCurrencySensor(states[saved]);
+    if (saved && !pairs.some(([v]) => v === saved)) {
+      const name = states[saved] ? ((states[saved].attributes || {}).friendly_name || saved)
+        : this._t("{entity} (not found)", { entity: saved });
+      pairs.unshift([saved, name]);
+    }
+    const options = this._optSelect([["", this._tx("Use Nova's estimate")], ...pairs], saved);
+    return `<div class="cfg-row">
+            <label>${label}</label>
+            <select class="cfg-field" data-cfg-key="${key}">${options}</select>
+          </div>${usable ? "" : `
+          <div class="stub-body diag-warn">${this._tHtml("Nova can't use this sensor as a cost, so it uses its own estimate.")}</div>`}`;
+  }
+
+  _homeMeterLine(e) {
+    if (!e.meter) return this._tHtml("No home load sensor found. Pick one below.");
+    const meter = this._esc(e.meter);
+    return e.meter_source === "picked"
+      ? this._tHtml("In use: {meter} (picked in Settings)", { meter })
+      : this._tHtml("In use: {meter} (guessed from its name)", { meter });
   }
 
   // The peak threshold lives in nova/energy's status (peak_watts), not in
@@ -2273,6 +2340,7 @@ ${this._dockHtml()}`;
       : "";
     return `
       <div class="cfg-row"><label>Current draw</label>${draw}</div>
+      <div class="stub-body" id="energyMeterInUse">${this._homeMeterLine(e)}</div>
       <div class="mode-grid" id="newEnergyAgency">${agencyChips}</div>
       ${advice}
       ${runRows}`;
@@ -2411,6 +2479,23 @@ ${this._dockHtml()}`;
   _wireEnergy() {
     const root = this.shadowRoot;
     root.getElementById("energyRefresh")?.addEventListener("click", () => this._fetchEnergyStatus());
+    // Home load sensor (8.85.0): save it, restart the appliance monitor so
+    // it watches the new sensor, then show the status from the new pick.
+    root.getElementById("energyHomeMeter")?.addEventListener("change", async (ev) => {
+      try {
+        await this._saveSetting("energy_home_meter_entity", ev.target.value);
+        await this._hass.callWS({ type: "nova/reload_appliances" });
+      } catch (err) {
+        this._fail(err, "save the home load sensor");
+      }
+      await this._fetchEnergyStatus();
+    });
+    // The cost fields (8.85.0) save like the Settings tab's selects.
+    root.querySelectorAll('select.cfg-field[data-cfg-key^="energy_cost_"]').forEach(sel => {
+      sel.addEventListener("change", async () => {
+        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
+    });
     // Same autosave as _wireSettings: number inputs save as a Number or null.
     root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
       inp.addEventListener("change", async () => {

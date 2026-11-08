@@ -485,7 +485,7 @@ async def test_appliance_discovery_gets_an_exclusion_snapshot(load, monkeypatch)
     rt_obj = entry.runtime_data
     monkeypatch.setattr(am, "_discover_sensors", _discover)
     monkeypatch.setattr(am, "_discover_native_appliances", lambda hass_: {})
-    monkeypatch.setattr(am, "_discover_whole_home_meter", lambda hass_: None)
+    monkeypatch.setattr(am, "_discover_whole_home_meter", lambda hass_, chosen="": None)
     monkeypatch.setattr(am._MON, "running", False)
     try:
         await am.start(hass, {"appliance_profile": []}, entry=entry)

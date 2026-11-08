@@ -114,14 +114,17 @@ def _read_whole_home_watts(hass) -> tuple[Optional[float], str]:
     """(watts, meter entity). The meter is the one the appliance monitor
     found, else one recognised by name. (None, '') when there is no meter and
     (None, meter) when it exists but gives no number."""
-    meter = None
-    try:
-        from . import appliance_monitor
-        found = appliance_monitor._discover_whole_home_meter(hass)
-        meter = getattr(found, "entity_id", None) if found else None
-    except Exception:
-        meter = None
-    meter = meter or _fallback_meter(hass)
+    # A meter the user picked is used even when it gives no number: home
+    # load is then unavailable, never a guess (8.85.0).
+    meter = _picked_meter()
+    if not meter:
+        try:
+            from . import appliance_monitor
+            found = appliance_monitor._discover_whole_home_meter(hass)
+            meter = getattr(found, "entity_id", None) if found else None
+        except Exception:
+            meter = None
+        meter = meter or _fallback_meter(hass)
     if not meter:
         return None, ""
     state = hass.states.get(meter)
@@ -131,6 +134,12 @@ def _read_whole_home_watts(hass) -> tuple[Optional[float], str]:
         return _watts(state), meter
     except (ValueError, TypeError):
         return None, meter
+
+
+def _picked_meter() -> str:
+    """The home load sensor chosen in Settings (energy_home_meter_entity),
+    or "" when none is chosen."""
+    return str(_cfg("energy_home_meter_entity", "") or "").strip()
 
 
 def _fallback_meter(hass) -> Optional[str]:
@@ -198,6 +207,8 @@ def power_status(hass) -> dict:
         "watts": None if watts is None else round(watts),
         "kw": None if watts is None else round(watts / 1000, 2),
         "meter": meter,
+        # picked: chosen in Settings; guessed: found by its name; none.
+        "meter_source": "picked" if _picked_meter() else ("guessed" if meter else "none"),
         "peak_watts": round(peak),
         "over_peak": watts is not None and watts >= peak,
         "agency": effective_agency(),

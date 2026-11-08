@@ -107,6 +107,7 @@
     "energy_agency",
     "energy_cost_net_entity",
     "energy_cost_today_entity",
+    "energy_home_meter_entity",
     "energy_mode_bump",
     "energy_peak_watts",
     "excluded_domains",

@@ -386,15 +386,30 @@ def test_the_response_names_the_provider_and_the_model_used(make, load):
 
 # ── the retry without temperature ────────────────────────────────────────────
 
-def test_a_temperature_deprecation_is_retried_once_without_it(make):
-    provider, sent = make(
-        RuntimeError("`temperature` is DEPRECATED for this model"),
-        _reply([_Block("text", text="ok")]))
+# The API refusing it (older SDK), and the anthropic 2.x SDK refusing it
+# locally before any request (HA 2026.11 ships 2.3.0).
+_TEMPERATURE_REFUSALS = [
+    RuntimeError("`temperature` is DEPRECATED for this model"),
+    TypeError("Messages.create() got an unexpected keyword argument 'temperature'"),
+]
+
+
+@pytest.mark.parametrize("refusal", _TEMPERATURE_REFUSALS)
+def test_a_temperature_deprecation_is_retried_once_without_it(make, refusal):
+    provider, sent = make(refusal, _reply([_Block("text", text="ok")]))
     result = provider.chat([{"role": "user", "content": "hi"}], temperature=0.3,
                            tools=TOOLS)
     assert result["text"] == "ok"
     assert "temperature" in sent[0] and "temperature" not in sent[1]
     assert {k: v for k, v in sent[0].items() if k != "temperature"} == sent[1]
+
+
+def test_after_temperature_is_refused_later_calls_leave_it_out(make):
+    provider, sent = make(_TEMPERATURE_REFUSALS[1])
+    for _ in range(3):
+        provider.chat([{"role": "user", "content": "hi"}], temperature=0.3)
+    assert len(sent) == 4
+    assert "temperature" not in sent[2] and "temperature" not in sent[3]
 
 
 @pytest.mark.parametrize("message", [

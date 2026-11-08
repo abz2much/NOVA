@@ -2845,14 +2845,6 @@ if (require.main === module) setTimeout(async () => {
       && c.value === JSON.stringify([{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }, { name: "Oven", type: "appliance", entity: "", watts: 3000 }]))]);
   sRoot = elNew.shadowRoot;
 
-  const costEntityInput = sRoot.querySelector('input[data-cfg-key="energy_cost_today_entity"]');
-  costEntityInput.value = "sensor.electricity_cost_today";
-  costEntityInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["energy tab: Energy Management cost-entity field autosaves via the generic cfg-field handler",
-    _updateConfigCalls.some(c => c.key === "energy_cost_today_entity" && c.value === "sensor.electricity_cost_today")]);
-  sRoot = elNew.shadowRoot;
-
   // Peak threshold: shown in kW from nova/energy's peak_watts, saved in
   // watts. Empty or non positive input saves nothing.
   {
@@ -2873,6 +2865,133 @@ if (require.main === module) setTimeout(async () => {
     checks.push(["energy tab: setting the peak to 9 kW saves energy_peak_watts 9000",
       _updateConfigCalls.some(c => c.key === "energy_peak_watts" && c.value === 9000)]);
     sRoot = elNew.shadowRoot;
+  }
+
+  // Review fix: a saved home sensor that exists but isn't power-like (its
+  // unit changed, say) stays selected too, never shown as "guess".
+  for (const saved of ["sensor.daily_kwh"]) {
+    const el = window.document.createElement("nova-panel");
+    window.document.body.appendChild(el);
+    el.hass = Object.assign({}, hass, {
+      states: { "sensor.daily_kwh": { state: "3", attributes: { device_class: "energy", unit_of_measurement: "kWh" } } },
+      callWS: async (m) => {
+        if (m.type === "nova/get_panel_data") {
+          const data = await hass.callWS(m);
+          return Object.assign({}, data, { config: Object.assign({}, data.config, { energy_home_meter_entity: saved }) });
+        }
+        return hass.callWS(m);
+      } });
+    await new Promise(r => setTimeout(r, 150));
+    el.shadowRoot.querySelector('.nav-tab[data-tab="energy"]').click();
+    await new Promise(r => setTimeout(r, 150));
+    const pick = el.shadowRoot.querySelector('select[data-cfg-key="energy_home_meter_entity"]');
+    checks.push(["energy tab: a saved home load sensor that isn't power-like stays selected",
+      pick?.value === saved]);
+    el.remove();
+  }
+
+  // 8.85.0: the home load sensor is picked from a list of power sensors. A
+  // saved pick that no longer exists stays selected, marked "not found",
+  // and the status line says which sensor is in use and how it was chosen.
+  {
+    const reloads = [];
+    const states = {
+      "sensor.house_load": { state: "700", attributes: { device_class: "power", unit_of_measurement: "W", friendly_name: "House consumption" } },
+      "sensor.home_consumption": { state: "0", attributes: { unit_of_measurement: "kW", friendly_name: "Home Consumption" } },
+      "sensor.daily_kwh": { state: "3", attributes: { device_class: "energy", unit_of_measurement: "kWh" } },
+    };
+    const ws = async (m) => {
+      if (m.type === "nova/get_panel_data") {
+        const data = await hass.callWS(m);
+        return Object.assign({}, data, { config: Object.assign({}, data.config, { energy_home_meter_entity: "sensor.gone" }) });
+      }
+      if (m.type === "nova/energy" && m.action === "status") {
+        return { watts: null, kw: null, meter: "sensor.gone", meter_source: "picked", peak_watts: 8000,
+          over_peak: false, agency: "advisory", configured_agency: "advisory", running: [], advice: [] };
+      }
+      if (m.type === "nova/reload_appliances") { reloads.push(m); return { ok: true }; }
+      return hass.callWS(m);
+    };
+    // Opened on the dashboard, then the Energy tab, as a person does: the
+    // panel data has loaded before the tab draws.
+    const el = window.document.createElement("nova-panel");
+    window.document.body.appendChild(el);
+    el.hass = Object.assign({}, hass, { states, callWS: ws });
+    await new Promise(r => setTimeout(r, 150));
+    el.shadowRoot.querySelector('.nav-tab[data-tab="energy"]').click();
+    await new Promise(r => setTimeout(r, 150));
+    const R = el.shadowRoot;
+    const pick = R.querySelector('select[data-cfg-key="energy_home_meter_entity"]');
+    const values = pick ? Array.from(pick.options).map(o => o.value) : [];
+    const gone = pick && Array.from(pick.options).find(o => o.value === "sensor.gone");
+    checks.push(["energy tab: the home load sensor is picked from the power sensors, with a guess option",
+      !!pick && values[0] === "" && values.includes("sensor.house_load") && values.includes("sensor.home_consumption")
+      && !values.includes("sensor.daily_kwh")]);
+    checks.push(["energy tab: a saved home load sensor that no longer exists stays selected, marked not found",
+      !!gone && gone.selected && /not found/.test(gone.textContent)]);
+    checks.push(["energy tab: the status says which home load sensor is in use and that it was picked",
+      /sensor\.gone/.test(R.getElementById("energyStatusBody")?.textContent || "")
+      && /picked/.test(R.getElementById("energyStatusBody")?.textContent || "")]);
+    const before = _updateConfigCalls.length;
+    if (pick) {
+      pick.value = "sensor.house_load";
+      pick.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    await new Promise(r => setTimeout(r, 50));
+    checks.push(["energy tab: picking a home load sensor saves it and restarts the appliance monitor",
+      _updateConfigCalls.slice(before).some(c => c.key === "energy_home_meter_entity" && c.value === "sensor.house_load")
+      && reloads.length === 1]);
+    el.remove();
+  }
+
+  // 8.85.0: the cost fields list only sensors in a currency. A saved value
+  // Nova can't use as a cost (a price per kWh, or one that is gone) stays
+  // selected with a warning that Nova uses its own estimate instead.
+  {
+    const states = {
+      "sensor.cost_cloud": { state: "3.0", attributes: { unit_of_measurement: "€", friendly_name: "Net cost cloud" } },
+      "sensor.grid_cost": { state: "2.0", attributes: { device_class: "monetary", unit_of_measurement: "EUR" } },
+      "input_number.price": { state: "0.40", attributes: { unit_of_measurement: "€/kWh", friendly_name: "Price" } },
+      "sensor.rate": { state: "0.25", attributes: { device_class: "monetary", unit_of_measurement: "GBP/kWh" } },
+      "sensor.house_load": { state: "700", attributes: { device_class: "power", unit_of_measurement: "W" } },
+    };
+    const ws = async (m) => {
+      if (m.type === "nova/get_panel_data") {
+        const data = await hass.callWS(m);
+        return Object.assign({}, data, { config: Object.assign({}, data.config,
+          { energy_cost_today_entity: "input_number.price", energy_cost_net_entity: "" }) });
+      }
+      return hass.callWS(m);
+    };
+    const el = window.document.createElement("nova-panel");
+    window.document.body.appendChild(el);
+    el.hass = Object.assign({}, hass, { states, callWS: ws });
+    await new Promise(r => setTimeout(r, 150));
+    el.shadowRoot.querySelector('.nav-tab[data-tab="energy"]').click();
+    await new Promise(r => setTimeout(r, 150));
+    const R = el.shadowRoot;
+    const today = R.querySelector('select[data-cfg-key="energy_cost_today_entity"]');
+    const net = R.querySelector('select[data-cfg-key="energy_cost_net_entity"]');
+    const vals = sel => (sel ? Array.from(sel.options).map(o => o.value) : []);
+    checks.push(["energy tab: both cost fields list only sensors in a currency, with Nova's estimate first",
+      !!today && !!net && vals(net).join(",") === ",sensor.cost_cloud,sensor.grid_cost"
+      && vals(today).includes("sensor.cost_cloud") && vals(today).includes("sensor.grid_cost")
+      && !vals(today).includes("sensor.house_load") && !vals(today).includes("sensor.rate")
+      && vals(today)[0] === ""]);
+    const warn = sel => sel?.closest(".cfg-row")?.nextElementSibling;
+    checks.push(["energy tab: a saved price per kWh stays selected, with a warning that Nova uses its estimate",
+      today?.value === "input_number.price"
+      && /uses its own estimate/.test(warn(today)?.textContent || "")
+      && !/uses its own estimate/.test(warn(net)?.textContent || "")]);
+    const before = _updateConfigCalls.length;
+    if (today) {
+      today.value = "sensor.cost_cloud";
+      today.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    await new Promise(r => setTimeout(r, 50));
+    checks.push(["energy tab: picking a cost sensor saves it",
+      _updateConfigCalls.slice(before).some(c => c.key === "energy_cost_today_entity" && c.value === "sensor.cost_cloud")]);
+    el.remove();
   }
 
   // The Solar panel is gone (2b): nova/solar's self-sufficiency is the Live
@@ -4613,7 +4732,11 @@ if (require.main === module) setTimeout(async () => {
     };
     // The screen reader pass numbers the ids it adds (a11y-1, a11y-2…) in
     // drawing order, so the number is left out of the fingerprint.
-    const flat = s => String(s).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
+    // parse5 8.1 (Nov 2026) escapes < and > inside attribute values, as the
+    // HTML standard now says; older versions don't. Undo that inside
+    // attributes so a pin depends on Nova's markup, not the serializer.
+    const attrsAsBefore = s => s.replace(/="([^"]*)"/g, (_, v) => `="${v.replace(/&lt;/g, "<").replace(/&gt;/g, ">")}"`);
+    const flat = s => attrsAsBefore(String(s)).replace(/\s+/g, " ").replace(/a11y-\d+/g, "a11y-N").trim();
     const pin = (name, value) => {
       const got = crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
       checks.push([`pinned results: ${name} are unchanged` + (got === PINS[name] ? "" : ` (got ${got})`), got === PINS[name]]);

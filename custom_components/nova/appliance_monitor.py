@@ -532,8 +532,16 @@ def _seeded(native: _NativeAppliance) -> _NativeAppliance:
     return native
 
 
-def _discover_whole_home_meter(hass: HomeAssistant) -> Optional[_DeltaTracker]:
-    """The house's total power meter, if one can be recognised."""
+def _discover_whole_home_meter(hass: HomeAssistant, chosen: str = ""
+                               ) -> Optional[_DeltaTracker]:
+    """The house's total power meter: the one the user picked
+    (energy_home_meter_entity, 8.85.0), even while it gives no number, else
+    one recognised by name."""
+    chosen = str(chosen or "").strip()
+    if chosen:
+        state = hass.states.get(chosen)
+        watts = (_parse_watts(state) if state is not None else None) or 0.0
+        return _DeltaTracker(entity_id=chosen, baseline_w=watts, last_reading=watts)
     import re
     candidates: list[tuple[bool, float, str]] = []
     for state in hass.states.async_all("sensor"):
@@ -999,7 +1007,8 @@ async def start(hass: HomeAssistant, config: dict, entry: Any = None) -> None:
     _MON.natives = await hass.async_add_executor_job(
         _discover_native_appliances, hass)
     _MON.delta = await hass.async_add_executor_job(
-        _discover_whole_home_meter, hass)
+        _discover_whole_home_meter, hass,
+        str(_MON.config.get("energy_home_meter_entity", "") or ""))
 
     if _MON.delta is not None:
         # The whole-home meter is never an appliance of its own.

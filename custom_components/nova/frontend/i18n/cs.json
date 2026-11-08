@@ -1360,5 +1360,14 @@
   "Berry Sky": "Bobulové nebe",
   "Quantum Ice": "Kvantový led",
   "Pine Mist": "Borová mlha",
-  "Ember": "Žhavé uhlíky"
+  "Ember": "Žhavé uhlíky",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Vyberte senzor, který ukazuje příkon celé domácnosti. Pokud ponecháte odhad, Nova ho najde podle názvu.",
+  "Home load sensor": "Senzor spotřeby domu",
+  "Guess from sensor names": "Odhadnout podle názvů senzorů",
+  "{entity} (not found)": "{entity} (nenalezeno)",
+  "No home load sensor found. Pick one below.": "Senzor spotřeby domu nebyl nalezen. Vyberte ho níže.",
+  "In use: {meter} (picked in Settings)": "Používá se: {meter} (vybráno v Nastavení)",
+  "In use: {meter} (guessed from its name)": "Používá se: {meter} (odhadnuto podle názvu)",
+  "Use Nova's estimate": "Použít odhad Novy",
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova tento senzor nemůže použít jako náklady, proto použije vlastní odhad."
 }
