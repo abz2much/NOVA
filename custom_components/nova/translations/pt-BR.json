@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} será descontinuado",
       "description": "Algo no Home Assistant, geralmente uma automação ou um script, chamou {service}. O recurso por trás dele foi removido, então a chamada não faz nada, e o próprio serviço será removido em uma versão futura do Nova. Remova a chamada da sua automação ou script.\n\nEste aviso some quando o Home Assistant reinicia e só volta se o serviço for chamado de novo."
+    },
+    "safety_monitoring_down": {
+      "title": "O monitoramento de segurança do Nova não está em execução",
+      "description": "Uma parte do monitoramento de segurança do Nova não conseguiu iniciar, então os alertas de fumaça, monóxido de carbono, vazamento e invasão, ou a ligação entre o alarme e o bloqueio, podem não funcionar. O que falhou: {failed}.\n\nVeja a causa em Configurações → Sistema → Registros. Depois recarregue o Nova em Configurações → Dispositivos e serviços. Este aviso some sozinho quando tudo iniciar corretamente."
     }
   },
   "exceptions": {

@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} udfases",
       "description": "Noget i Home Assistant, som regel en automatisering eller et script, kaldte {service}. Funktionen bag den er fjernet, så kaldet gør intet, og selve tjenesten fjernes i en senere version af Nova. Fjern kaldet fra din automatisering eller dit script.\n\nDenne meddelelse forsvinder, når Home Assistant genstarter, og kommer kun igen, hvis tjenesten kaldes igen."
+    },
+    "safety_monitoring_down": {
+      "title": "Novas sikkerhedsovervågning kører ikke",
+      "description": "En del af Novas sikkerhedsovervågning kunne ikke starte, så advarsler om røg, kulilte, lækage og indbrud, eller forbindelsen mellem din alarm og lockdown, virker muligvis ikke. Hvad der fejlede: {failed}.\n\nSe årsagen under Indstillinger → System → Logfiler. Genindlæs derefter Nova under Indstillinger → Enheder og tjenester. Denne meddelelse forsvinder af sig selv, når alt starter korrekt."
     }
   },
   "exceptions": {

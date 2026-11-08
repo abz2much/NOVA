@@ -1043,8 +1043,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         core_config = await hass.async_add_executor_job(
             nova_config.effective_config_with_runtime, entry, rc)
         await cognitive_core.ensure_lockdown(hass, core_config)
+        from . import repair_notices
+        repair_notices.clear_safety_failure(hass, "lockdown")
     except Exception as exc:
         _LOGGER.warning("Nova lockdown wiring failed (non-fatal): %s", exc)
+        from . import repair_notices
+        repair_notices.note_safety_failure(hass, "lockdown", str(exc))
         core_config = None
 
     # The cognitive core (smoke, CO, gas and leak alarms, freeze warnings,
@@ -1054,8 +1058,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         if core_config is None:
             core_config = dict(effective)
         await cognitive_core.start(hass, core_config, entry=entry)
+        from . import repair_notices
+        repair_notices.clear_safety_failure(hass, "core")
     except Exception as exc:
         _LOGGER.error("Nova cognitive core failed to start: %s", exc)
+        from . import repair_notices
+        repair_notices.note_safety_failure(hass, "core", str(exc))
 
     # The sidebar panel (idempotent across reloads) and its websocket API.
     await _attempt("Nova panel registration failed (non-fatal): %s",

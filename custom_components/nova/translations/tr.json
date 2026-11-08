@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} kullanımdan kaldırılıyor",
       "description": "Home Assistant'ta bir şey, genellikle bir otomasyon ya da betik, {service} hizmetini çağırdı. Arkasındaki özellik kaldırıldığı için çağrı hiçbir şey yapmaz ve hizmetin kendisi de Nova'nın sonraki bir sürümünde kaldırılacak. Çağrıyı otomasyonunuzdan ya da betiğinizden çıkarın.\n\nBu bildirim Home Assistant yeniden başladığında kaybolur ve yalnızca hizmet yeniden çağrılırsa geri gelir."
+    },
+    "safety_monitoring_down": {
+      "title": "Nova'nın güvenlik izlemesi çalışmıyor",
+      "description": "Nova'nın güvenlik izlemesinin bir bölümü başlatılamadı; bu yüzden duman, karbonmonoksit, sızıntı ve izinsiz giriş uyarıları ya da alarmınız ile kilitleme arasındaki bağlantı çalışmayabilir. Başarısız olan: {failed}.\n\nNedeni Ayarlar → Sistem → Günlükler bölümünde görebilirsiniz. Ardından Nova'yı Ayarlar → Cihazlar ve hizmetler bölümünden yeniden yükleyin. Her şey düzgün başladığında bu bildirim kendiliğinden kalkar."
     }
   },
   "exceptions": {

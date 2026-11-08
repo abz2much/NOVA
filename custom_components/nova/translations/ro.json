@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} va fi retras",
       "description": "Ceva din Home Assistant, de obicei o automatizare sau un script, a apelat {service}. Funcția din spatele lui a fost eliminată, așa că apelul nu face nimic, iar serviciul în sine va fi eliminat într-o versiune viitoare Nova. Elimină apelul din automatizare sau din script.\n\nAceastă notificare dispare la repornirea Home Assistant și revine doar dacă serviciul este apelat din nou."
+    },
+    "safety_monitoring_down": {
+      "title": "Monitorizarea de siguranță Nova nu rulează",
+      "description": "O parte din monitorizarea de siguranță Nova nu a putut porni, așa că alertele de fum, monoxid de carbon, scurgeri și intruziune, sau legătura dintre alarmă și blocare, ar putea să nu funcționeze. Ce a eșuat: {failed}.\n\nVerificați cauza în Setări → Sistem → Jurnale. Apoi reîncărcați Nova în Setări → Dispozitive și servicii. Această notificare dispare singură când totul pornește corect."
     }
   },
   "exceptions": {

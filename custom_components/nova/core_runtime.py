@@ -931,6 +931,16 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     core.automation_contexts = contexts
     core.entry = entry
 
+    try:
+        await _bring_up(core, hass, config)
+    except Exception:
+        # Never leave `running` true with no listener or loop behind it.
+        await stop()
+        raise
+
+
+async def _bring_up(core, hass: HomeAssistant, config: dict) -> None:
+    """The steps of start() that can fail once the core has begun to change."""
     # Files are read in the executor: ignore rules, lockdown state,
     # autonomy grants and the pattern store.
     core.ignore_mgr = await hass.async_add_executor_job(_m_ignore.IgnoreManager)

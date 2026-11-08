@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} bude vyradená",
       "description": "Niečo v Home Assistante, zvyčajne automatizácia alebo skript, zavolalo {service}. Funkcia za touto službou bola odstránená, takže volanie nič nerobí, a samotná služba bude v niektorej ďalšej verzii Novy odstránená. Odstráňte volanie z automatizácie alebo skriptu.\n\nToto upozornenie zmizne po reštarte Home Assistantu a vráti sa, len ak sa služba zavolá znova."
+    },
+    "safety_monitoring_down": {
+      "title": "Bezpečnostné sledovanie Nova nebeží",
+      "description": "Časť bezpečnostného sledovania Nova sa nepodarilo spustiť, takže upozornenia na dym, oxid uhoľnatý, únik vody a vlámanie alebo prepojenie medzi alarmom a uzamknutím nemusia fungovať. Čo zlyhalo: {failed}.\n\nPríčinu nájdete v Nastavenia → Systém → Záznamy. Potom znova načítajte Nova v Nastavenia → Zariadenia a služby. Toto oznámenie zmizne samo, hneď ako všetko správne naštartuje."
     }
   },
   "exceptions": {

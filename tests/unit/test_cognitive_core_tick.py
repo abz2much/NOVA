@@ -683,6 +683,17 @@ async def test_start_builds_every_manager_listens_and_starts_one_task(cc, fake_h
     await cc.stop()
 
 
+async def test_a_start_that_fails_partway_leaves_the_core_stopped(
+        cc, fake_hass, lifecycle, monkeypatch):
+    """Otherwise the core reports running with no listener or loop behind it."""
+    def broken():
+        raise RuntimeError("store locked")
+    monkeypatch.setattr(sys.modules["jc.core_runtime"], "StateLogger", broken)
+    with pytest.raises(RuntimeError, match="store locked"):
+        await cc.start(fake_hass, {})
+    assert cc._CORE.running is False
+
+
 async def test_start_twice_stops_the_first_run_cleanly(cc, fake_hass, lifecycle):
     await cc.start(fake_hass, {})
     first = lifecycle.tasks[0]

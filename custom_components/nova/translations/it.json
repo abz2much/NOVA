@@ -222,6 +222,10 @@
     "retired_service_no_effect": {
       "title": "Nova: {service} sta per essere ritirato",
       "description": "Qualcosa in Home Assistant, di solito un'automazione o uno script, ha chiamato {service}. La funzione collegata è stata rimossa, quindi la chiamata non fa nulla, e il servizio stesso verrà rimosso in una versione futura di Nova. Togli la chiamata dall'automazione o dallo script.\n\nQuesto avviso scompare al riavvio di Home Assistant e ritorna solo se il servizio viene chiamato di nuovo."
+    },
+    "safety_monitoring_down": {
+      "title": "Il monitoraggio di sicurezza di Nova non è in funzione",
+      "description": "Una parte del monitoraggio di sicurezza di Nova non è riuscita ad avviarsi, quindi gli avvisi di fumo, monossido di carbonio, perdite e intrusione, o il collegamento tra l'allarme e il blocco, potrebbero non funzionare. Cosa non ha funzionato: {failed}.\n\nControlla Impostazioni → Sistema → Registri per trovare la causa. Poi ricarica Nova in Impostazioni → Dispositivi e servizi. Questo avviso scompare da solo quando tutto si avvia correttamente."
     }
   },
   "exceptions": {
