@@ -1114,8 +1114,11 @@ class NovaAgent(conversation.ConversationEntity):
                         else:
                             _LOGGER.info("Nova reply → Cast: tts=%s speaker=%s",
                                          tts_ent, speaker)
-                            # Fire and forget, then the satellite stays quiet.
-                            # Waiting for a "playing" state (v7.50, v7.51) broke
+                            # The satellite stays quiet only when a speaker
+                            # took the reply, so a failed delivery never ends
+                            # in silence. This waits for the play_media call,
+                            # which tts_helper bounds, not for a "playing"
+                            # state: waiting for that (v7.50, v7.51) broke
                             # idle Cast speakers that never report it.
                             # Spoken History (v7.104.0): only this path knows
                             # the reply was delivered, so only here is a
@@ -1124,13 +1127,24 @@ class NovaAgent(conversation.ConversationEntity):
                             repeat_of_id = (local_result.repeat_of_id if local_result
                                             and getattr(local_result, "repeat_of_id", None)
                                             else None)
-                            self.hass.async_create_task(async_announce(
-                                self.hass, response_text, tts_ent, [speaker],
-                                context="repeat" if repeat_of_id else "reply",
-                                repeat_of_id=repeat_of_id))
-                            cast_routed = True
-                            reopen_speaker, reopen_device = speaker, device_id
-                            log_line = f"→ Cast {speaker} via {tts_ent}"
+                            try:
+                                took = await async_announce(
+                                    self.hass, response_text, tts_ent, [speaker],
+                                    context="repeat" if repeat_of_id else "reply",
+                                    repeat_of_id=repeat_of_id)
+                            except Exception as exc:
+                                _LOGGER.warning("Nova reply: speaker %s failed: %s",
+                                                speaker, exc)
+                                took = False
+                            if took:
+                                cast_routed = True
+                                reopen_speaker, reopen_device = speaker, device_id
+                                log_line = f"→ Cast {speaker} via {tts_ent}"
+                            else:
+                                _LOGGER.warning("Nova reply: speaker %s did not take "
+                                                "the reply — the satellite will speak it",
+                                                speaker)
+                                log_line = f"speaker {speaker} did not take it — satellite will speak"
                         try:
                             nova_log("REPLY", log_line)
                         except Exception:

@@ -31,6 +31,8 @@ DEFAULT_MAX_PER_HOUR = 6
 DEFAULT_DEDUP_MINUTES = 10
 _HOUR = 3600
 _BUDGET_TTL = 60.0
+# A reservation nobody released (a delivery that died) is ignored after this.
+_RESERVATION_TTL_S = 60.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ class GateState:
     muted_entities: set[str] = field(default_factory=set)
     muted_categories: set[str] = field(default_factory=set)
     recent_messages: deque = field(default_factory=lambda: deque(maxlen=20))
+    # Announcements being delivered right now, not yet recorded (reserve()).
+    reservations: list = field(default_factory=list)
     mute_all: bool = False
     # When a timed mute ends (epoch seconds), keyed by mute_key().
     until: dict[str, float] = field(default_factory=dict)
@@ -120,9 +124,35 @@ def _habituated(key: str, urgency: str, category: str, entity_id: str = "") -> b
         return False
 
 
+def _live_reservations() -> list:
+    """The reservations still held, dropping any past their time limit."""
+    since = _now() - _RESERVATION_TTL_S
+    _STATE.reservations[:] = [r for r in _STATE.reservations if r["timestamp"] >= since]
+    return _STATE.reservations
+
+
+def reserve(*, entity_id: str, category: str, urgency: str, message: str,
+            dedup_key: str = "") -> dict:
+    """Hold this announcement's place while it is delivered. Delivery takes
+    seconds and records what was said only afterwards, so a second sender that
+    checks the gate in the meantime would pass too and say it twice. The
+    reservation counts as said for repeats and the hourly cap until
+    release(). Call it in the same step as the check that allowed it."""
+    token = {"timestamp": _now(), "entity_id": entity_id, "category": category,
+             "urgency": urgency, "message": message, "key": dedup_key or ""}
+    _STATE.reservations.append(token)
+    return token
+
+
+def release(token: Optional[dict]) -> None:
+    """Give up a reservation (record_announcement has the real record by now)."""
+    if token is not None:
+        _STATE.reservations[:] = [r for r in _STATE.reservations if r is not token]
+
+
 def _is_repeat(message: str, dedup_key: str, window_minutes: int) -> Optional[str]:
     since = _now() - window_minutes * 60
-    for said in _STATE.recent_messages:
+    for said in [*_STATE.recent_messages, *_live_reservations()]:
         if said["timestamp"] < since:
             continue
         if dedup_key and said.get("key") == dedup_key:
@@ -156,7 +186,7 @@ def can_announce(
         return False, f"{entity_id} is normal for this home (came up days running)"
 
     cap = max(1, int(round(max_per_hour * _budget_multiplier())))
-    spoken = len(_recent_within(_STATE.history, _HOUR))
+    spoken = len(_recent_within(_STATE.history, _HOUR)) + len(_live_reservations())
     if urgency != "high" and spoken >= cap:
         return False, f"rate limit ({spoken}/{cap}/hour)"
 

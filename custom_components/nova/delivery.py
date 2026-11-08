@@ -349,8 +349,41 @@ async def async_deliver(hass, req: DeliveryRequest, *, speak=None, push=None) ->
     source with its own phone notification (the core's snapshots and rating
     buttons) passes `push`, an async function of the request id that
     returns what took it."""
-    from . import action_log
     cond = conditions(hass, req)
+    # Held in the same step as the check, so a second sender that checks while
+    # this one is still speaking sees it (output_gate.reserve).
+    reservation = _reserve(req, cond)
+    try:
+        return await _deliver(hass, req, cond, speak, push)
+    finally:
+        _release(reservation)
+
+
+def _reserve(req: DeliveryRequest, cond: Conditions):
+    """The output gate's reservation for a request it allowed, else None."""
+    if req.urgency == "critical" or req.requested_by_user or not cond.gate_allowed:
+        return None
+    try:
+        from . import output_gate
+        return output_gate.reserve(
+            entity_id=req.entity_id, category=req.gate_category, urgency=req.urgency,
+            message=req.message, dedup_key=req.dedup_key)
+    except Exception as exc:
+        _LOGGER.debug("delivery: could not reserve: %s", exc)
+        return None
+
+
+def _release(reservation) -> None:
+    try:
+        from . import output_gate
+        output_gate.release(reservation)
+    except Exception as exc:
+        _LOGGER.debug("delivery: could not release: %s", exc)
+
+
+async def _deliver(hass, req: DeliveryRequest, cond: Conditions, speak, push) -> Outcome:
+    """The delivery itself, once the gate has been read and the place held."""
+    from . import action_log
     decision = decide(req, cond)
     out = Outcome(decision=decision, request_id=action_log.new_request_id())
     pushed_yet = False

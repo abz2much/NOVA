@@ -41,6 +41,11 @@ _STATE: dict[str, dict] = {}
 _LAST_SPOKEN: dict[tuple[str, str], float] = {}
 _ANNOUNCE_COOLDOWN_S = 1800.0
 
+# One lock per camera, held for the whole of evaluate(). A doorbell check and
+# an Eufy "delivered" event close together would otherwise both read the old
+# state, both see the package arrive, and both announce it.
+_LOCKS: dict[str, asyncio.Lock] = {}
+
 # Monotonic stamps for the sensor triggers: one shared "early_check" stamp
 # for porch motion, and "mailbox:<entity_id>" per mailbox sensor.
 _TRIGGER_LAST: dict[str, float] = {}
@@ -388,7 +393,15 @@ def _with_honorific(honorific, sentence: str) -> str:
 async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
                    entity_id: str, det: dict, source: str = "periodic") -> bool:
     """Apply one detection to the camera's state and announce what changed.
-    Returns whether anything was spoken."""
+    Returns whether anything was spoken. Checks of one camera run one at a
+    time, so the second sees what the first recorded."""
+    async with _LOCKS.setdefault(entity_id, asyncio.Lock()):
+        return await _evaluate(hass, groq_client, honorific, tts_entity, speakers,
+                               entity_id, det, source)
+
+
+async def _evaluate(hass, groq_client, honorific, tts_entity, speakers,
+                    entity_id: str, det: dict, source: str) -> bool:
     from . import alert_path, delivery
 
     before = _STATE.get(entity_id, _EMPTY)

@@ -259,6 +259,63 @@ def test_a_repeat_label_holds_a_repeat_whatever_its_words(load, monkeypatch):
                            message="Want the outside light?", dedup_key="offer:hall")[0]
 
 
+async def test_two_deliveries_of_the_same_alert_at_once_speak_once(d, load, fake_hass, monkeypatch):
+    """Both pass the output gate before either has said anything, because the
+    speakers take time and what was said is recorded afterwards."""
+    import asyncio
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    hab = load("habituation")
+    monkeypatch.setattr(hab, "is_quiet", lambda k: False)
+    monkeypatch.setattr(hab, "record", lambda *a, **k: None)
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
+    spoken = []
+
+    def conditions(hass, req):          # the real gate, as the real conditions() asks it
+        allowed, reason = og.can_announce(
+            entity_id=req.entity_id, category=req.gate_category, urgency=req.urgency,
+            message=req.message, dedup_key=req.dedup_key, habit_key=req.habit_key)
+        return d.Conditions(gate_allowed=allowed, gate_reason=reason)
+
+    async def speak(hass, req, message, targets, request_id):
+        await asyncio.sleep(0.01)       # a speaker takes real time
+        spoken.append(message)
+        return True
+    monkeypatch.setattr(d, "conditions", conditions)
+    monkeypatch.setattr(d, "_speakers", lambda hass, req, cond: (["media_player.hall"], "source"))
+    monkeypatch.setattr(d, "_habit_note", lambda req: req.spoken or req.message)
+    monkeypatch.setattr(d, "_speak", speak)
+
+    first, second = await asyncio.gather(
+        d.async_deliver(fake_hass, _req(d, entity_id="sensor.washer")),
+        d.async_deliver(fake_hass, _req(d, entity_id="sensor.washer")))
+
+    assert len(spoken) == 1
+    assert sorted([first.spoken, second.spoken]) == [False, True]
+
+
+async def test_a_delivery_that_is_held_leaves_no_reservation_behind(d, load, fake_hass, monkeypatch):
+    """The hold ends with the delivery, so a later identical alert is judged afresh."""
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    monkeypatch.setattr(load("habituation"), "is_quiet", lambda k: False)
+    monkeypatch.setattr(load("habituation"), "record", lambda *a, **k: None)
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
+
+    def conditions(hass, req):
+        allowed, reason = og.can_announce(
+            entity_id=req.entity_id, category=req.gate_category, urgency=req.urgency,
+            message=req.message, dedup_key=req.dedup_key, habit_key=req.habit_key)
+        return d.Conditions(quiet_hours=True, gate_allowed=allowed, gate_reason=reason)
+    monkeypatch.setattr(d, "conditions", conditions)
+    monkeypatch.setattr(d, "_speakers", lambda hass, req, cond: ([], "source"))
+    monkeypatch.setattr(d, "_habit_note", lambda req: req.message)
+    out = await d.async_deliver(fake_hass, _req(d, entity_id="sensor.washer"))
+    assert not out.spoken                              # held for quiet hours
+    assert og.can_announce(entity_id="sensor.washer", category="info", urgency="low",
+                           message="The washer is done.") == (True, "ok")
+
+
 # ── senders ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture
