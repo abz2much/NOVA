@@ -119,11 +119,39 @@ async def test_critical_device_classes_always_critical(clf, llm, dc, old, new):
                    "category": "security", "rule": "safety"}
 
 
-@pytest.mark.parametrize("dc", ["tamper", "safety", "sound", "vibration", "problem"])
-async def test_non_critical_classes_on_binary_sensors_go_to_the_provider(clf, llm, dc):
+@pytest.mark.parametrize("dc", ["sound", "vibration"])
+async def test_other_classes_on_binary_sensors_go_to_the_provider(clf, llm, dc):
     out = await _run(clf, "binary_sensor.hall_box", "off", "on", dc=dc)
     assert len(llm.calls) == 1
     assert out == {"worth_considering": False}
+
+
+@pytest.mark.parametrize("dc, urgency, category, rule", [
+    ("tamper", "high", "security", "tamper"),
+    ("safety", "high", "security", "safety_sensor"),
+    ("problem", "medium", "other", "problem"),
+])
+async def test_tamper_safety_and_problem_turning_on_are_flagged_by_rule(
+        clf, llm, dc, urgency, category, rule):
+    """No provider call, so they cannot vanish when the provider is down."""
+    out = await _run(clf, "binary_sensor.hall_box", "off", "on", dc=dc)
+    assert out == {"worth_considering": True, "urgency": urgency,
+                   "category": category, "rule": rule}
+    assert llm.calls == []
+
+
+@pytest.mark.parametrize("dc", ["tamper", "safety", "problem"])
+@pytest.mark.parametrize("new", ["off", "unavailable"])
+async def test_tamper_safety_and_problem_anything_but_on_is_skipped(clf, llm, dc, new):
+    out = await _run(clf, "binary_sensor.hall_box", "on", new, dc=dc)
+    assert out == {"worth_considering": False, "rule": f"{dc}_clear"}
+    assert llm.calls == []
+
+
+async def test_a_tamper_alert_survives_the_provider_being_down(clf, llm):
+    llm.reply = RuntimeError("provider down")
+    out = await _run(clf, "binary_sensor.hall_box", "off", "on", dc="tamper")
+    assert out["worth_considering"] is True and out["urgency"] == "high"
 
 
 # ── Rule 5: openings ───────────────────────────────────────────────────────

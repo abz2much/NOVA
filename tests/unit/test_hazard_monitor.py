@@ -143,9 +143,13 @@ async def test_a_smaller_radius_setting_drops_a_quake(hz, feed, settings):
     assert await scan(hz, hz._check_earthquakes) == []
 
 
-async def test_a_quake_is_reported_once(hz, feed):
+async def test_a_quake_is_offered_until_it_has_been_told(hz, feed):
+    """The check only looks. Marking it told is up to the caller, once it was
+    delivered (see the periodic check below)."""
     feed.reply = {"features": [quake("q9", 4.0, north_of_home(1), place="here")]}
     assert len(await scan(hz, hz._check_earthquakes)) == 1
+    assert len(await scan(hz, hz._check_earthquakes)) == 1
+    hz._remember("quake", "q9")
     assert await scan(hz, hz._check_earthquakes) == []
 
 
@@ -207,6 +211,61 @@ async def test_natural_events_use_their_nearest_point_and_the_radius(hz, feed):
     found = await scan(hz, hz._check_disasters)
     assert found == [{"id": "EONET_near", "title": "Wildfire XYZ", "category": "Wildfires",
                       "dist_km": 10, "url": "https://test/near"}]
+
+
+# ── telling each event once, and only once it was delivered ───────────────
+
+class _Hass:
+    """Home Assistant as far as the periodic check goes."""
+    def __init__(self):
+        self.config = types.SimpleNamespace(latitude=HOME[0], longitude=HOME[1])
+        self.states = types.SimpleNamespace(get=lambda entity_id: None)
+
+    async def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+@pytest.fixture
+def told(hz, feed, settings, monkeypatch, tmp_path):
+    """periodic_check against a USGS feed holding one quake. `box.sent` is
+    each delivery tried, and `box.ok` says whether the next one gets through."""
+    settings["hazard_monitor_enabled"] = True
+    feed.reply = lambda url: ({"features": [quake("q1", 4.0, north_of_home(2), place="near")]}
+                              if url == hz._USGS_FDSN else None)
+    box = types.SimpleNamespace(sent=[], ok=True)
+
+    async def deliver(hass, push_text, action_key, *, speak_text="", night=False):
+        box.sent.append(action_key)
+        return box.ok
+
+    async def no_warnings(hass, honorific, *, in_quiet):
+        return {}
+    monkeypatch.setattr(hz, "_deliver", deliver)
+    monkeypatch.setattr(hz, "_poll_warnings", no_warnings)
+    monkeypatch.setattr(hz, "_in_quiet_hours", lambda hass: False)
+    monkeypatch.setattr(hz, "_SEEN_FILE", str(tmp_path / "seen.json"), raising=False)
+    monkeypatch.setattr(hz, "_seen_loaded", False, raising=False)
+    return box
+
+
+async def test_a_quake_that_failed_to_send_is_offered_again(hz, told):
+    """Otherwise a send that failed is lost for good."""
+    told.ok = False
+    await hz.periodic_check(_Hass(), "sir")
+    told.ok = True
+    await hz.periodic_check(_Hass(), "sir")
+    await hz.periodic_check(_Hass(), "sir")
+    assert told.sent == ["quake", "quake"]      # the failed try, the one that got through, then silence
+
+
+async def test_a_told_quake_is_not_told_again_after_a_restart(hz, told):
+    """Otherwise every restart repeats whatever is still active."""
+    await hz.periodic_check(_Hass(), "sir")
+    for ids in hz._SEEN.values():               # a restart forgets everything held in memory
+        ids.clear()
+    hz._seen_loaded = False
+    await hz.periodic_check(_Hass(), "sir")
+    assert told.sent == ["quake"]
 
 
 # ── a scan on request ───────────────────────────────────────────────────────

@@ -163,14 +163,14 @@ async def test_all_legacy_paths_are_phone_only_in_quiet_hours(
     delivery.monkeypatch.setattr(hm, "_in_quiet_hours", lambda hass: quiet)
 
     async def quake(*args):
-        return [{"mag": 5.0, "dist_km": 20, "place": "near home"}]
+        return [{"id": "q", "mag": 5.0, "dist_km": 20, "place": "near home"}]
 
     async def weather(*args):
-        return [{"severity": "Extreme", "event": "Storm", "area": "Home",
+        return [{"id": "w", "severity": "Extreme", "event": "Storm", "area": "Home",
                  "instruction": "Stay inside"}]
 
     async def disaster(*args):
-        return [{"title": "Wildfire", "category": "Wildfires", "dist_km": 30}]
+        return [{"id": "d", "title": "Wildfire", "category": "Wildfires", "dist_km": 30}]
 
     delivery.monkeypatch.setattr(hm, "_check_earthquakes", quake)
     delivery.monkeypatch.setattr(hm, "_check_weather", weather)

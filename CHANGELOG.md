@@ -1,3 +1,10 @@
+## [8.85.6] Fewer lost alerts
+
+### Fixed
+- **Weather, earthquake and natural disaster alerts are no longer repeated after every restart, and a failed send is tried again.** Nova marked each one as told when it fetched it, before sending, and only kept that in memory. A send that failed was lost for good, and a restart told you everything still active a second time. An alert is now marked told only once it was spoken or pushed, and the list is saved to `hazard_seen.json`. Earthquakes still look back one hour, so a gap longer than an hour can still miss one.
+- **Tamper, safety and problem sensors are no longer lost when the AI provider is down.** They had no rule, so each one was sent to the AI to judge, and if it could not answer the event vanished. A tamper or safety sensor turning on is now flagged high urgency, and a problem sensor medium, without asking the AI.
+- **The hourly limit on AI calls no longer drops entry and unlock events.** It counted every event, including the many a rule settles without any AI call, so after 30 busy events in an hour a door opening or an unlock could be dropped. It now counts, and holds back, only the events that need an AI call.
+
 ## [8.85.5] Safer doors, alarms and reminders
 
 ### Fixed

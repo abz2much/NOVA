@@ -328,11 +328,23 @@ async def test_a_phone_only_request_never_looks_up_speakers(hm, requests_):
     assert req.source == "odd" and req.spoken == ""
 
 
+@pytest.mark.parametrize("outcome, told", [
+    ({"spoken": True}, True),
+    ({"pushed": ["notify.phone"]}, True),
+    ({}, False),                          # reached no speaker and no phone
+])
+async def test_deliver_says_whether_anyone_could_be_told(hm, requests_, monkeypatch, outcome, told):
+    async def deliver(hass, req):
+        return requests_.dl.Outcome(decision=requests_.dl.Decision(False, False, ""), **outcome)
+    monkeypatch.setattr(requests_.dl, "async_deliver", deliver)
+    assert await hm._deliver(None, "push", "quake") is told
+
+
 async def test_a_delivery_failure_is_swallowed(hm, requests_, monkeypatch):
     async def boom(hass, req):
         raise RuntimeError
     monkeypatch.setattr(requests_.dl, "async_deliver", boom)
-    await hm._deliver(None, "push", "quake")
+    assert await hm._deliver(None, "push", "quake") is False
 
 
 # ── the periodic check ──────────────────────────────────────────────────────
@@ -347,6 +359,7 @@ def legacy(hm, monkeypatch, cfg):
 
     async def deliver(hass, push_text, action_key, *, speak_text="", night=False):
         st.delivered.append((action_key, push_text, speak_text, night))
+        return True
     monkeypatch.setattr(hm, "_deliver", deliver)
     monkeypatch.setattr(hm, "_in_quiet_hours", lambda hass: st.quiet)
 

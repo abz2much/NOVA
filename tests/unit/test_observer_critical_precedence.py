@@ -63,12 +63,48 @@ def test_critical_hazard_passes_every_shortcut(obs, block):
     assert len(hass.tasks) == 1
 
 
-@pytest.mark.parametrize("block", ["ignored", "group", "debounce", "rate"])
+@pytest.mark.parametrize("block", ["ignored", "group", "debounce"])
 def test_ordinary_events_keep_every_shortcut(obs, block):
     o, hass, blocks, _ = obs
     blocks[block] = True
     o._on_state_changed(_event(*DOOR))
     assert hass.tasks == []
+
+
+# The hourly limit is on classifier calls. An event a rule settles makes none,
+# so it is neither counted nor held back; only one that needs the provider is.
+RULE_SETTLED = [
+    DOOR,                                                              # a door opening
+    ("lock.front_door", None, "locked", "unlocked"),                   # an unlock
+    ("binary_sensor.hall_tamper", "tamper", "off", "on"),              # a tamper
+]
+NEEDS_PROVIDER = ("cover.garage_door", None, "closed", "open")        # no rule covers it
+
+
+@pytest.mark.parametrize("event", RULE_SETTLED, ids=["door", "unlock", "tamper"])
+def test_the_rate_limit_never_holds_back_an_event_a_rule_settles(obs, event):
+    """Otherwise 30 busy events in an hour can drop an entry or an unlock."""
+    o, hass, blocks, _ = obs
+    blocks["rate"] = True
+    o._on_state_changed(_event(*event))
+    assert len(hass.tasks) == 1
+
+
+def test_the_rate_limit_still_holds_back_an_event_that_needs_the_provider(obs):
+    o, hass, blocks, _ = obs
+    blocks["rate"] = True
+    o._on_state_changed(_event(*NEEDS_PROVIDER))
+    assert hass.tasks == []
+
+
+@pytest.mark.parametrize("event, counted", [
+    (DOOR, 0), (RULE_SETTLED[1], 0), (NEEDS_PROVIDER, 1)])
+def test_only_an_event_that_needs_the_provider_is_counted(obs, monkeypatch, event, counted):
+    o, hass, _, _ = obs
+    calls = []
+    monkeypatch.setattr(o, "_record_classifier_call", lambda: calls.append(1))
+    o._on_state_changed(_event(*event))
+    assert len(calls) == counted
 
 
 def test_a_quick_retrip_is_not_dropped_as_flapping(obs):
@@ -81,7 +117,7 @@ def test_a_quick_retrip_is_not_dropped_as_flapping(obs):
 
 def test_all_clear_is_not_critical(obs):
     o, hass, blocks, _ = obs
-    blocks["rate"] = True
+    blocks["debounce"] = True
     o._on_state_changed(_event("binary_sensor.hall_smoke", "smoke", "on", "off"))
     assert hass.tasks == []
 

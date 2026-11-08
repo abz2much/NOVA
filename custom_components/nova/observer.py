@@ -353,6 +353,24 @@ def _record_classifier_call() -> None:
     _STATE.classifier_timestamps.append(time.time())
 
 
+def _needs_provider(event: Event) -> bool:
+    """Whether classifying this event means a provider call, which is what the
+    hourly limit counts. An event a rule settles makes none, so it is neither
+    counted nor held back. Anything unclear counts as needing the provider."""
+    try:
+        before, after = _states(event)
+        if before is None or after is None:
+            return True
+        entity_id = event.data.get("entity_id", "")
+        return not classifier.settled_by_rule(
+            entity_id=entity_id, old_state=before.state, new_state=after.state,
+            friendly_name=after.attributes.get("friendly_name", entity_id),
+            device_class=after.attributes.get("device_class"),
+            now_hhmm=dt_util.now().strftime("%H:%M"))
+    except Exception:
+        return True
+
+
 def _debounced(entity_id: str, min_interval_s: float = 30.0) -> bool:
     """True if this entity was let through within the interval; otherwise
     note it now and let it through."""
@@ -547,10 +565,11 @@ def _on_state_changed(event: Event) -> None:
         _record_for_context(event)
         return
 
-    if not critical and _over_rate_limit(event):
-        return
-    _STATE.rate_limit_warn_logged = False
-    _record_classifier_call()
+    if _needs_provider(event):
+        if not critical and _over_rate_limit(event):
+            return
+        _STATE.rate_limit_warn_logged = False
+        _record_classifier_call()
     _record_for_context(event)
     _STATE.hass.async_create_task(_process_event(event))
 
