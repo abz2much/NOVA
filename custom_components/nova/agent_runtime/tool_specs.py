@@ -124,7 +124,8 @@ NOVA_TOOLS: list[dict[str, Any]] = [
     _tool("remember", (
               "Save something the user teaches you (a device nickname, a preference, a "
               "routine) to recall in later conversations. A preference or routine is saved "
-              "PENDING: ask the user to confirm it, then call confirm_pending_fact (or "
+              "PENDING: you cannot confirm it; only the user can, in the Memory tab of "
+              "the Nova panel, so tell them to confirm it there (or call "
               "reject_pending_fact if they say no). It only stores a fact for conversation "
               "and never changes what alerting, sentinel or automation code does at "
               "runtime, so never describe it as installing, enforcing or locking in a rule."
@@ -140,12 +141,6 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "the actions for a routine."
             )),
     }, ["key", "name", "value"]),
-    _tool("confirm_pending_fact", (
-              "Confirm a preference or routine that remember saved as pending, only once "
-              "the user has really said it is right in this conversation."
-          ), {
-        "fact_id": _p("integer", "The fact_id the remember call returned."),
-    }, ["fact_id"]),
     _tool("reject_pending_fact", (
               "Discard a preference or routine that remember saved as pending, when the "
               "user says it is wrong or does not confirm it."

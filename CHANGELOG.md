@@ -1,3 +1,18 @@
+## [8.85.5] Safer doors, alarms and reminders
+
+### Fixed
+- **Releasing a door latch by voice now needs a phone tap**, the same as unlocking. The "release the latch" command (`lock.open`) was missing from the lists, so a copied voice could have opened a latched door.
+- **Nova now tells you when it cannot tell which alarm is yours.** With more than one Alarmo panel and none chosen, Nova announced no alarm and did no automatic lockdown, and said nothing about it. Settings, Repairs now shows "Nova needs you to choose your home alarm" until you pick one under Settings, Security alarm in the Nova panel.
+- **Only an admin can use `nova.create_automation`.** It can write lock and cover actions, and any logged in user could call it. Automations and scripts, which have no user, still work.
+- **Nova's AI can no longer confirm its own memories.** It could save a fact and confirm it in the same turn, so text from a poisoned email or web page could plant a fact. Only you can confirm one, in the Memory tab. The AI can still reject one.
+- **Searching Nova's memory works with apostrophes, commas and hyphens.** A search such as "Sam's dog" found nothing, with no sign that anything was wrong.
+- **An alert held back while you slept no longer counts as heard.** After three days of the same alert Nova goes quiet about it. It counted a day when it decided to send, so an alert held back three nights running could go quiet without you ever hearing it. A day now counts only once the alert was delivered.
+- **An alert that went quiet speaks again after 30 days.** It stayed quiet for ever, even for a real fault weeks later. It then needs three days running to go quiet again.
+- **A reminder is marked done only once it was delivered.** If it reached no speaker and no phone, it was marked done anyway and lost. Nova now tries again every 5 minutes, and gives up, with a warning in the log, a day after it was due.
+
+### Changed
+- **A reminder set for when you are home now goes to your phone if nobody is home.** Before, it waited, with no message, until someone came in. A reminder no phone could take stays due and is tried again.
+
 ## [8.85.4] Nova tells you when its safety monitoring is down
 
 ### Fixed

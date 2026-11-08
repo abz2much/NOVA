@@ -121,33 +121,14 @@ async def _exec_remember(hass: HomeAssistant, args: dict,
         "message": (
             f"Saved '{name}: {value}' as PENDING, not yet trusted — ask the "
             f"user to confirm this is actually correct before relying on it "
-            f"again. If they confirm, call confirm_pending_fact with "
-            f"fact_id={fact['id']}. If they say no or correct it, call "
-            f"reject_pending_fact with the same fact_id instead. This is a "
+            f"again. You cannot confirm it yourself: only the user can, in "
+            f"the Memory tab of the Nova panel, so tell them to confirm it "
+            f"there. If they say no or correct it, call "
+            f"reject_pending_fact with fact_id={fact['id']} instead. This is a "
             f"conversational memory only — it does not change any alerting "
             f"or automation code. Report it to the user as a saved "
             f"preference, never as an installed or enforced rule."
         ),
-    })
-
-
-async def _exec_confirm_pending_fact(hass: HomeAssistant, args: dict) -> str:
-    """Promote a pending fact (from `remember`) to confirmed, once the user
-    has actually approved it in conversation (v7.88.0)."""
-    try:
-        raw_id: Any = args.get("fact_id")
-        fact_id = int(raw_id)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "fact_id is required and must be an integer"})
-    from ... import knowledge
-    ok = await hass.async_add_executor_job(knowledge.confirm_fact, fact_id)
-    if not ok:
-        return json.dumps({"error": f"no pending fact with id {fact_id} (already "
-                                    f"confirmed, rejected, or never existed)"})
-    return json.dumps({
-        "success": True, "confirmed": fact_id, "enforced": False,
-        "message": "Fact confirmed and now trusted in conversation — still a "
-                   "memory only, not a change to any alerting or automation code.",
     })
 
 

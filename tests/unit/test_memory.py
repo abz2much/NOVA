@@ -34,6 +34,28 @@ def test_store_and_search_roundtrip(mem):
     assert "16x20x1" in results[0]["text"]
 
 
+@pytest.mark.parametrize("query", [
+    "Sam's dog",              # apostrophe
+    "rascal, honestly",       # comma
+    "bit-of-a",               # hyphen
+    'the "rascal"',           # double quote
+    "dog AND",                # a search operator word on its own
+    "rascal)",                # bracket
+    "dog:",                   # colon
+])
+def test_search_copes_with_punctuation_in_the_query(mem, query):
+    """An unquoted FTS5 query turns these into a syntax error, and the search
+    then silently returns nothing, so recall is off with no sign of it."""
+    mem.store_memory("Sam's dog is a bit-of-a rascal, honestly", role="user",
+                     conversation_id="conv-a")
+    assert len(mem.search_memory(query, k=5)) == 1
+
+
+def test_a_query_of_only_punctuation_finds_nothing_and_does_not_fail(mem):
+    mem.store_memory("the furnace filter is 16x20x1", role="user", conversation_id="conv-a")
+    assert mem.search_memory("!!! ,,, --", k=5) == []
+
+
 def test_search_scoped_to_conversation_id(mem):
     """The actual fix: two different conversations' turns must not leak into
     each other's retrieval."""

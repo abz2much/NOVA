@@ -143,9 +143,10 @@ async def test_an_alias_with_no_name_or_value_is_stored_as_blank(mem, tmp_path,
 
 PENDING_MESSAGE = (
     "Saved 'likes tea: with milk' as PENDING, not yet trusted — ask the user to "
-    "confirm this is actually correct before relying on it again. If they "
-    "confirm, call confirm_pending_fact with fact_id=12. If they say no or "
-    "correct it, call reject_pending_fact with the same fact_id instead. This is "
+    "confirm this is actually correct before relying on it again. You cannot "
+    "confirm it yourself: only the user can, in the Memory tab of the Nova "
+    "panel, so tell them to confirm it there. If they say no or correct it, "
+    "call reject_pending_fact with fact_id=12 instead. This is "
     "a conversational memory only — it does not change any alerting or "
     "automation code. Report it to the user as a saved preference, never as an "
     "installed or enforced rule.")
@@ -225,56 +226,33 @@ async def test_a_nameless_preference_call_raises_as_before(mem, know):
         await mem._exec_remember(FakeHass(), {"key": "preference", "name": None})
 
 
-# ── confirming and rejecting facts ───────────────────────────────────────────
+# ── rejecting facts ───────────────────────────────────────────
 
 @pytest.fixture
 def facts(monkeypatch):
-    box = types.SimpleNamespace(confirmed=[], forgotten=[], ok=True, removed=True)
-
-    def confirm_fact(fact_id):
-        box.confirmed.append(fact_id)
-        return box.ok
+    box = types.SimpleNamespace(forgotten=[], removed=True)
 
     def forget(fact_id=None):
         box.forgotten.append(fact_id)
         return box.removed
 
-    _stub(monkeypatch, "knowledge", confirm_fact=confirm_fact, forget=forget)
+    _stub(monkeypatch, "knowledge", forget=forget)
     return box
 
 
 @pytest.mark.parametrize("raw, expected", [(5, 5), ("7", 7), (3.9, 3), (True, 1)])
 async def test_a_fact_id_is_read_as_a_whole_number(mem, facts, raw, expected):
-    await mem._exec_confirm_pending_fact(FakeHass(), {"fact_id": raw})
     await mem._exec_reject_pending_fact(FakeHass(), {"fact_id": raw})
-    assert facts.confirmed == [expected] and facts.forgotten == [expected]
+    assert facts.forgotten == [expected]
 
 
 @pytest.mark.parametrize("raw", [None, "", "abc", [], {}])
 async def test_a_missing_or_bad_fact_id_is_refused(mem, facts, raw):
     expected = {"error": "fact_id is required and must be an integer"}
-    assert json.loads(await mem._exec_confirm_pending_fact(
-        FakeHass(), {"fact_id": raw})) == expected
     assert json.loads(await mem._exec_reject_pending_fact(
         FakeHass(), {"fact_id": raw})) == expected
-    assert await mem._exec_confirm_pending_fact(FakeHass(), {}) == json.dumps(expected)
-    assert facts.confirmed == [] and facts.forgotten == []
-
-
-async def test_confirming_a_pending_fact(mem, facts):
-    out = await mem._exec_confirm_pending_fact(FakeHass(), {"fact_id": 4})
-    assert json.loads(out) == {
-        "success": True, "confirmed": 4, "enforced": False,
-        "message": "Fact confirmed and now trusted in conversation — still a memory "
-                   "only, not a change to any alerting or automation code."}
-    assert list(json.loads(out)) == ["success", "confirmed", "enforced", "message"]
-
-
-async def test_confirming_a_fact_that_is_not_pending(mem, facts):
-    facts.ok = False
-    out = await mem._exec_confirm_pending_fact(FakeHass(), {"fact_id": 4})
-    assert json.loads(out) == {
-        "error": "no pending fact with id 4 (already confirmed, rejected, or never existed)"}
+    assert await mem._exec_reject_pending_fact(FakeHass(), {}) == json.dumps(expected)
+    assert facts.forgotten == []
 
 
 @pytest.mark.parametrize("removed, success", [(True, True), (False, False), (0, False),

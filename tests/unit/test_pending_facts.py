@@ -109,23 +109,18 @@ async def test_remember_routine_stages_as_pending_household_fact(agent, hass, kn
 
 # ── confirm / reject ─────────────────────────────────────────────────────────
 
-async def test_confirm_pending_fact_promotes_it(agent, hass, knowledge):
+async def test_a_fact_the_user_confirms_reaches_the_model(agent, hass, knowledge):
+    """Confirmed in the panel (nova/pending_fact_action), not by a tool."""
     staged = json.loads(await agent._exec_remember(
         hass, {"key": "routine", "name": "movie night", "value": "dim lights"}))
     fact_id = staged["fact_id"]
 
-    out = json.loads(await agent._exec_confirm_pending_fact(hass, {"fact_id": fact_id}))
-    assert out["success"] is True
+    assert knowledge.confirm_fact(fact_id) is True
 
     confirmed = knowledge.all_facts(status="confirmed")
     assert len(confirmed) == 1 and confirmed[0]["id"] == fact_id
     # now it actually reaches the model
     assert "movie night" in knowledge.prompt_block(now=confirmed[0]["created_at"])
-
-
-async def test_confirm_pending_fact_rejects_unknown_id(agent, hass, knowledge):
-    out = json.loads(await agent._exec_confirm_pending_fact(hass, {"fact_id": 999999}))
-    assert "error" in out
 
 
 async def test_reject_pending_fact_deletes_it(agent, hass, knowledge):
@@ -138,18 +133,33 @@ async def test_reject_pending_fact_deletes_it(agent, hass, knowledge):
     assert knowledge.all_facts() == []
 
 
-async def test_confirm_pending_fact_requires_valid_id(agent, hass):
-    out = json.loads(await agent._exec_confirm_pending_fact(hass, {}))
-    assert "error" in out
-
-
 # ── tool registration ────────────────────────────────────────────────────────
 
-def test_pending_fact_tools_registered(agent):
+def test_no_agent_tool_can_confirm_a_fact(load):
+    """Only the admin gated panel command confirms a fact. Not the main agent,
+    not a sub agent: text the model read aloud could otherwise store a fact
+    and confirm it in the same turn."""
+    mem = load("agent_runtime.capabilities.memory")
+    reg = load("agent_runtime.registry")
+    gr = load("agent_runtime.grants")
+    specs = load("agent_runtime.tool_specs")
+    assert not hasattr(mem, "_exec_confirm_pending_fact")
+    for table in (reg.TOOL_REGISTRY, reg._TOOL_MAP):
+        assert "confirm_pending_fact" not in table
+    offered = {t["function"]["name"] for t in specs.NOVA_TOOLS}
+    assert "confirm_pending_fact" not in offered
+    assert not any("confirm" in n and "fact" in n for n in offered | set(reg._TOOL_MAP))
+    for grant in (gr.HEADLESS_TOOLS, gr._SUBAGENT_DENY):
+        assert "confirm_pending_fact" not in grant
+    # No tool body reaches knowledge.confirm_fact: every agent runtime module is clean.
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent_runtime"
+    for f in root.rglob("*.py"):
+        assert "confirm_fact" not in f.read_text(), f.name
+
+def test_the_model_can_reject_a_pending_fact(agent):
     names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert "confirm_pending_fact" in names
     assert "reject_pending_fact" in names
-    assert "confirm_pending_fact" in agent._TOOL_MAP
     assert "reject_pending_fact" in agent._TOOL_MAP
 
 

@@ -506,9 +506,24 @@ async def _package_tick(hass: HomeAssistant, entry: NovaConfigEntry,
         _LOGGER.debug("Nova package tick error: %s", exc)
 
 
+def _check_alarm_choice(hass: HomeAssistant) -> None:
+    """Warn when several alarm panels exist and none is chosen, which leaves
+    the alarm alert and the automatic lockdown off. Never raises."""
+    try:
+        from . import alarm_source, repair_notices
+        panels = alarm_source.unchosen_panels(hass)
+        if panels:
+            repair_notices.note_alarm_choice_needed(hass, panels)
+        else:
+            repair_notices.clear_alarm_choice_needed(hass)
+    except Exception as exc:
+        _LOGGER.debug("Nova alarm choice check error: %s", exc)
+
+
 async def _health_tick(hass: HomeAssistant, _now: Any) -> None:
     """Reachability of core dependencies, so the panel stays current. A
     synthetic miss reads as idle; only real usage failures show as down."""
+    _check_alarm_choice(hass)
     try:
         from .diagnostics import run_service_health
         result = await run_service_health(hass)
@@ -1064,6 +1079,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         _LOGGER.error("Nova cognitive core failed to start: %s", exc)
         from . import repair_notices
         repair_notices.note_safety_failure(hass, "core", str(exc))
+
+    _check_alarm_choice(hass)
 
     # The sidebar panel (idempotent across reloads) and its websocket API.
     await _attempt("Nova panel registration failed (non-fatal): %s",

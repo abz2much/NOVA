@@ -316,7 +316,8 @@ def d(load, monkeypatch):
         if state["raise_on"] and state["raise_on"] in req.message:
             raise RuntimeError("delivery failed")
         state["sent"].append(req)
-        return state["outcome"] or mod.Outcome(decision=mod.Decision(True, False))
+        return state["outcome"] or mod.Outcome(decision=mod.Decision(True, False),
+                                                spoken=True)
 
     def quiet(hass):
         state["quiet_calls"] += 1
@@ -456,12 +457,21 @@ async def test_quiet_hours_are_checked_per_respecting_reminder(rem, home, d, clo
     assert d.state["quiet_calls"] == 3 and len(d.state["sent"]) == 3
 
 
-async def test_nobody_home_holds_a_home_only_reminder(rem, home, d, clock):
+async def test_nobody_home_sends_a_home_only_reminder_to_the_phone_only(rem, home, d, clock):
+    """Nobody is there to hear the speakers, so it goes to the phone."""
     rem.add_reminder("home only", clock["now"])
     rem.add_reminder("anywhere", clock["now"], None, False)
     home["summary"] = {"anyone_home": False}
     await _watcher(rem, FakeHass(), _Getters())._check_async()
-    assert [r.message for r in d.state["sent"]] == ["Reminder: anywhere."]
+    assert {r.message: r.phone_only for r in d.state["sent"]} == {
+        "Reminder: anywhere.": False, "Reminder: home only.": True}
+
+
+async def test_a_home_only_reminder_no_phone_took_stays_due(rem, home, d, clock):
+    rem.add_reminder("home only", clock["now"])
+    home["summary"] = {"anyone_home": False}
+    d.state["outcome"] = d.Outcome(decision=d.Decision(False, False, "phone only"))
+    await _watcher(rem, FakeHass(), _Getters())._check_async()
     assert [r["label"] for r in rem.get_due_reminders()] == ["home only"]
 
 
@@ -469,7 +479,7 @@ async def test_a_summary_without_the_flag_counts_as_nobody_home(rem, home, d, cl
     rem.add_reminder("x", clock["now"])
     home["summary"] = {}
     await _watcher(rem, FakeHass(), _Getters())._check_async()
-    assert d.state["sent"] == []
+    assert [r.phone_only for r in d.state["sent"]] == [True]
 
 
 async def test_getters_and_presence_are_read_once_per_tick(rem, home, d, clock):
@@ -507,12 +517,45 @@ async def test_store_work_runs_in_the_executor_in_order(rem, home, d, monkeypatc
     assert [args for _n, args in jobs] == [(), (7,), (due[0],)]
 
 
-async def test_marked_fired_whatever_delivery_decided(rem, home, d, clock):
+@pytest.mark.parametrize("outcome, fired", [
+    ({"spoken": True}, True),
+    ({"pushed": ["notify.phone"]}, True),
+    ({}, False),                      # reached no speaker and no phone
+])
+async def test_a_reminder_is_marked_fired_only_when_it_was_delivered(
+        rem, home, d, clock, outcome, fired):
+    """Otherwise a reminder nobody heard is lost for good."""
+    rem.add_reminder("x", clock["now"])
+    d.state["outcome"] = d.Outcome(decision=d.Decision(False, False, "held"), **outcome)
+    await _watcher(rem, FakeHass(), _Getters())._check_async()
+    assert (rem.get_due_reminders() == []) is fired
+    if fired:
+        assert _rows(rem)[0]["last_fired"] == clock["now"].isoformat()
+
+
+async def test_an_undelivered_reminder_is_retried_but_not_every_tick(rem, home, d, clock):
     rem.add_reminder("x", clock["now"])
     d.state["outcome"] = d.Outcome(decision=d.Decision(False, False, "held"))
-    await _watcher(rem, FakeHass(), _Getters())._check_async()
+    w = _watcher(rem, FakeHass(), _Getters())
+    await w._check_async()
+    clock["now"] += timedelta(minutes=1)
+    await w._check_async()
+    assert len(d.state["sent"]) == 1              # too soon to try again
+    clock["now"] += timedelta(minutes=5)
+    await w._check_async()
+    assert len(d.state["sent"]) == 2
+
+
+async def test_an_undelivered_reminder_is_given_up_after_a_day(rem, home, d, clock, caplog):
+    rem.add_reminder("x", clock["now"])
+    d.state["outcome"] = d.Outcome(decision=d.Decision(False, False, "held"))
+    w = _watcher(rem, FakeHass(), _Getters())
+    await w._check_async()
+    clock["now"] += timedelta(hours=24, minutes=1)
+    with caplog.at_level("WARNING"):
+        await w._check_async()
     assert rem.get_due_reminders() == []
-    assert _rows(rem)[0]["last_fired"] == clock["now"].isoformat()
+    assert "gave up" in caplog.text
 
 
 async def test_a_one_shot_fires_once(rem, home, d, clock):
@@ -670,15 +713,16 @@ def test_source_contracts():
 
 # ── 8.49.22 regressions ──────────────────────────────────────────────────────
 
-async def test_a_repeating_reminder_held_while_away_fires_once_on_arrival(
+async def test_a_repeating_reminder_overdue_while_away_fires_once(
         rem, home, d, clock):
-    """Bug 5: an hourly reminder held for hours fires once, not once per
-    missed hour, when someone gets home."""
+    """Bug 5: an hourly reminder due for hours fires once, not once per
+    missed hour. With nobody home that one goes to the phone, and nothing
+    more is sent when someone gets home."""
     rem.add_reminder("take the tablets", clock["now"] - timedelta(hours=9), "hourly")
     home["summary"] = {"anyone_home": False}
     w = _watcher(rem, FakeHass(), _Getters())
     await w._check_async()
-    assert d.state["sent"] == []
+    assert [r.phone_only for r in d.state["sent"]] == [True]
     home["summary"] = {"anyone_home": True}
     for _ in range(10):                       # five minutes of ticks
         await w._check_async()

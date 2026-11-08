@@ -252,7 +252,7 @@
     },
     {
       "function": {
-        "description": "Save something the user teaches you (a device nickname, a preference, a routine) to recall in later conversations. A preference or routine is saved PENDING: ask the user to confirm it, then call confirm_pending_fact (or reject_pending_fact if they say no). It only stores a fact for conversation and never changes what alerting, sentinel or automation code does at runtime, so never describe it as installing, enforcing or locking in a rule. To really stop alerts about an entity, use ignore_entity.",
+        "description": "Save something the user teaches you (a device nickname, a preference, a routine) to recall in later conversations. A preference or routine is saved PENDING: you cannot confirm it; only the user can, in the Memory tab of the Nova panel, so tell them to confirm it there (or call reject_pending_fact if they say no). It only stores a fact for conversation and never changes what alerting, sentinel or automation code does at runtime, so never describe it as installing, enforcing or locking in a rule. To really stop alerts about an entity, use ignore_entity.",
         "name": "remember",
         "parameters": {
           "properties": {
@@ -278,25 +278,6 @@
             "key",
             "name",
             "value"
-          ],
-          "type": "object"
-        }
-      },
-      "type": "function"
-    },
-    {
-      "function": {
-        "description": "Confirm a preference or routine that remember saved as pending, only once the user has really said it is right in this conversation.",
-        "name": "confirm_pending_fact",
-        "parameters": {
-          "properties": {
-            "fact_id": {
-              "description": "The fact_id the remember call returned.",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "fact_id"
           ],
           "type": "object"
         }

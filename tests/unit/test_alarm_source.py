@@ -1,6 +1,8 @@
 """Security alarm selection must be explicit, public and fail safe."""
 from types import SimpleNamespace
 
+import pytest
+
 
 def _registry(monkeypatch, entries):
     import sys
@@ -88,6 +90,24 @@ def test_staggered_multiple_alarmo_startup_remains_ambiguous(
 
     assert alarm_source.entity_ids(fake_hass, {}) == ()
     assert alarm_source.states(fake_hass, {}) == []
+
+
+_UP, _DOWN = "alarm_control_panel.upstairs", "alarm_control_panel.downstairs"
+
+
+@pytest.mark.parametrize("panels, config, waiting", [
+    ({_UP: "alarmo", _DOWN: "alarmo"}, {}, (_DOWN, _UP)),          # several, none chosen
+    ({_UP: "alarmo", _DOWN: "alarmo"}, {"security_alarm_entity": _UP}, ()),
+    ({_UP: "alarmo"}, {}, ()),                                      # one is found by itself
+    ({}, {}, ()),                                                   # no alarm at all
+    ({_UP: "ring_mqtt", _DOWN: "eufy_security"}, {}, ()),           # only Alarmo is guessed
+])
+def test_panels_waiting_for_a_choice(load, fake_hass, monkeypatch, panels, config, waiting):
+    """Several Alarmo panels and none chosen turns the alarm alert and the
+    automatic lockdown off with no sign of it. Anything else is not waiting."""
+    alarm_source = load("alarm_source")
+    _registry(monkeypatch, panels)
+    assert alarm_source.unchosen_panels(fake_hass, config) == waiting
 
 
 def test_no_alarmo_source_fails_quietly(load, fake_hass, monkeypatch):

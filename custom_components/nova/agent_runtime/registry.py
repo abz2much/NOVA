@@ -53,7 +53,6 @@ from .capabilities.home import (
     _exec_search_entities,
 )
 from .capabilities.memory import (
-    _exec_confirm_pending_fact,
     _exec_ignore,
     _exec_ingest_documents,
     _exec_lookup_relations,
@@ -104,7 +103,6 @@ _TOOL_MAP = dict((
     ("bulk_control", _exec_bulk_control),
     ("execute_plan", _exec_execute_plan),
     ("remember", _exec_remember),
-    ("confirm_pending_fact", _exec_confirm_pending_fact),
     ("reject_pending_fact", _exec_reject_pending_fact),
     ("propose_relation", _exec_propose_relation),
     ("reject_pending_relation", _exec_reject_pending_relation),
@@ -171,7 +169,6 @@ _CLASSIFICATION = {
     "get_home_summary":           ("home", False, False, False, _H),
     "activity_history":           ("home", False, False, False, _H),
     "remember":                   ("memory", False, True, False, _H),
-    "confirm_pending_fact":       ("memory", False, True, False, _H),
     "reject_pending_fact":        ("memory", False, True, False, _H),
     "propose_relation":           ("memory", False, True, False, _H),
     "reject_pending_relation":    ("memory", False, True, False, _H),

@@ -170,6 +170,15 @@ def _hit_from_row(row, conversation_id: Optional[str],
     }
 
 
+def _fts_query(query: str) -> str:
+    """The FTS5 MATCH text for ``query``: up to 8 words, each quoted so an
+    apostrophe, comma, hyphen, bracket or a word like AND is matched as plain
+    text instead of being read as search syntax. A word with no letter or
+    digit is dropped. Empty when nothing is left."""
+    words = [w for w in query.split() if any(c.isalnum() for c in w)][:8]
+    return " OR ".join('"' + w.replace('"', '""') + '"' for w in words)
+
+
 def search_memory(
     query: str,
     k: int = 5,
@@ -193,6 +202,9 @@ def search_memory(
     """
     if not query:
         return []
+    query_clean = _fts_query(query)
+    if not query_clean:
+        return []
 
     _ensure_initialized()
 
@@ -201,7 +213,6 @@ def search_memory(
             with contextlib.closing(_store.connect(_db_path(), mkdir=False,
                                                    busy_timeout_ms=None)) as conn:
                 # FTS5 MATCH query
-                query_clean = " OR ".join(query.split()[:8])  # limit query terms
                 # FTS5 can't filter into the JSON metadata column directly, so
                 # when conversation_id-scoping is requested, over-fetch and
                 # filter in Python, then truncate to k — unchanged from before

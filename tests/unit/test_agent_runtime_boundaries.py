@@ -119,7 +119,7 @@ def _tool_messages(client):
 
 def test_registry_classifies_every_offered_tool(agent, registry):
     offered = [t["function"]["name"] for t in agent.NOVA_TOOLS]
-    assert len(offered) == 56
+    assert len(offered) == 55
     assert set(offered) == set(registry.TOOL_REGISTRY)
     for name, row in registry.TOOL_REGISTRY.items():
         assert row.executor is agent._TOOL_MAP.get(name)
@@ -147,7 +147,7 @@ def test_every_unsafe_tool_is_subagent_denied(registry, grants):
     for name, row in registry.TOOL_REGISTRY.items():
         if row.mutates or row.persists or row.capability in ("specialists", "delegation"):
             assert name in grants._SUBAGENT_DENY, name
-    for extra in ("confirm_pending_fact", "reject_pending_fact", "look_at_camera",
+    for extra in ("reject_pending_fact", "look_at_camera",
                   "ask_executive_assistant", "ask_marketing_agent",
                   "ask_security_privacy_agent", "ask_homelab_infra_agent",
                   "ask_house_manager_agent", "delegate_task"):
@@ -160,7 +160,7 @@ _HEADLESS_FORBIDDEN = [
     "control_device", "bulk_control", "run_scene_or_script", "execute_plan",
     "run_voice_phrase",
     "approve_suggestion", "dismiss_suggestion", "set_mode", "acknowledge_alert",
-    "dismiss_intrusion", "remember", "confirm_pending_fact", "reject_pending_fact",
+    "dismiss_intrusion", "remember", "reject_pending_fact",
     "ignore_entity", "unignore_entity", "ingest_documents", "manage_autonomy",
     "ask_executive_assistant", "ask_marketing_agent", "ask_security_privacy_agent",
     "ask_homelab_infra_agent", "ask_house_manager_agent", "delegate_task",

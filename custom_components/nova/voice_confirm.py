@@ -42,6 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 # switches whose id looks security related (see action_is_protected).
 _SENSITIVE = {
     ("lock", "unlock"),
+    ("lock", "open"),                 # releases the latch, so it lets someone in
     ("cover", "open"),
     ("cover", "open_cover"),
     ("cover", "toggle"),

@@ -53,6 +53,7 @@ class World:
         self.unload_ok = True
         self.purged = (0, 0)
         self.purged_history = 0
+        self.unchosen = ()               # alarm panels waiting for a choice
         self.docs = (0, 0)
         self.hazard = {"fired": False}
         self.time_changes: list = []
@@ -316,7 +317,11 @@ def _install(monkeypatch, load, world: World):
             release_runtime=sync("core.release")),
         "repair_notices": _mod(
             "repair_notices", note_safety_failure=sync("note_safety_failure"),
-            clear_safety_failure=sync("clear_safety_failure")),
+            clear_safety_failure=sync("clear_safety_failure"),
+            note_alarm_choice_needed=sync("note_alarm_choice_needed"),
+            clear_alarm_choice_needed=sync("clear_alarm_choice_needed")),
+        "alarm_source": _mod("alarm_source", unchosen_panels=sync(
+            "unchosen_panels", lambda hass, config=None: world.unchosen)),
         "bootstrap": _mod("bootstrap", schedule_bootstrap=sync(
             "schedule_bootstrap", lambda hass: "bootstrap-handle")),
         "voice_recognition": _mod("voice_recognition",
@@ -779,6 +784,28 @@ async def test_a_clean_start_clears_both_safety_notices(env):
     await _setup(env)
     assert env.world.calls("note_safety_failure") == []
     assert [a[1] for a, _k in env.world.calls("clear_safety_failure")] == ["lockdown", "core"]
+
+
+@pytest.mark.parametrize("when", ["setup", "hourly"])
+async def test_several_unchosen_alarm_panels_raise_a_warning(env, when):
+    env.world.unchosen = ("alarm_control_panel.down", "alarm_control_panel.up")
+    await _setup(env)
+    if when == "hourly":
+        env.world.log.clear()
+        await _tick(env.world, "health")(None)
+    [(args, _k)] = env.world.calls("note_alarm_choice_needed")
+    assert args[1] == ("alarm_control_panel.down", "alarm_control_panel.up")
+    assert env.world.calls("clear_alarm_choice_needed") == []
+
+
+@pytest.mark.parametrize("when", ["setup", "hourly"])
+async def test_no_waiting_alarm_panel_clears_the_warning(env, when):
+    await _setup(env)
+    if when == "hourly":
+        env.world.log.clear()
+        await _tick(env.world, "health")(None)
+    assert env.world.calls("note_alarm_choice_needed") == []
+    assert len(env.world.calls("clear_alarm_choice_needed")) == 1
 
 
 # ── Unload ──────────────────────────────────────────────────────────────────

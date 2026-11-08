@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Bezpečnostní sledování Nova neběží",
       "description": "Část bezpečnostního sledování Nova se nepodařilo spustit, takže upozornění na kouř, oxid uhelnatý, únik vody a vloupání nebo propojení mezi alarmem a uzamčením nemusí fungovat. Co selhalo: {failed}.\n\nPříčinu najdete v Nastavení → Systém → Protokoly. Potom znovu načtěte Nova v Nastavení → Zařízení a služby. Toto oznámení zmizí samo, jakmile vše správně naběhne."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova potřebuje, abyste vybrali domácí alarm",
+      "description": "Nova našla více než jeden alarmový panel: {panels}. Dokud nevyberete, který je váš domácí alarm, Nova neoznámí jeho spuštění a automaticky nic nezamkne.\n\nV panelu Nova otevřete Nastavení → Zabezpečovací alarm a vyberte jej. Toto oznámení zmizí samo, jakmile to uděláte."
     }
   },
   "exceptions": {

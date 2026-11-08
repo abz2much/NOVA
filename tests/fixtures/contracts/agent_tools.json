@@ -43,7 +43,6 @@
     "bulk_control",
     "calendar_agenda",
     "cognitive_status",
-    "confirm_pending_fact",
     "connectivity_status",
     "control_device",
     "create_goal",
@@ -122,7 +121,6 @@
     "ask_marketing_agent",
     "ask_security_privacy_agent",
     "bulk_control",
-    "confirm_pending_fact",
     "control_device",
     "create_goal",
     "delegate_task",
@@ -357,23 +355,6 @@
         "type": "object"
       },
       "required": []
-    },
-    "confirm_pending_fact": {
-      "parameters": {
-        "properties": {
-          "fact_id": {
-            "description": "The fact_id the remember call returned.",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "fact_id"
-        ],
-        "type": "object"
-      },
-      "required": [
-        "fact_id"
-      ]
     },
     "connectivity_status": {
       "parameters": {

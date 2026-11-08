@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Nova's safety monitoring is not running",
       "description": "Part of Nova's safety monitoring failed to start, so smoke, carbon monoxide, leak and intrusion alerts, or the link between your alarm and lockdown, may not work. What failed: {failed}.\n\nCheck Settings → System → Logs for the cause. Then reload Nova under Settings → Devices & services. This notice clears itself once everything starts cleanly."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova needs you to choose your home alarm",
+      "description": "Nova found more than one alarm panel: {panels}. Until you choose which one is your home alarm, Nova will not announce when the alarm goes off and will not lock down automatically.\n\nIn the Nova panel, open Settings → Security alarm and choose it. This notice clears itself once you have."
     }
   },
   "exceptions": {

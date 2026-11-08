@@ -81,8 +81,8 @@ _SUBAGENT_DENY: set = set().union(
     {"approve_suggestion", "dismiss_suggestion", "review_suggestions",
      "manage_autonomy"},
     # writers to persistent stores, pending facts included
-    {"remember", "ingest_documents", "confirm_pending_fact",
-     "reject_pending_fact", "propose_relation", "reject_pending_relation"},
+    {"remember", "ingest_documents", "reject_pending_fact",
+     "propose_relation", "reject_pending_relation"},
     # camera vision, which can announce
     {"look_at_camera", "where_last_seen", "what_changed"},
     # the external specialist webhooks

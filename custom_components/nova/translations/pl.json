@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "Monitorowanie bezpieczeństwa Nova nie działa",
       "description": "Część monitorowania bezpieczeństwa Nova nie uruchomiła się, więc alerty o dymie, tlenku węgla, wycieku i włamaniu lub połączenie między alarmem a blokadą mogą nie działać. Co się nie powiodło: {failed}.\n\nPrzyczynę znajdziesz w Ustawienia → System → Logi. Następnie przeładuj Nova w Ustawienia → Urządzenia i usługi. To powiadomienie zniknie samo, gdy wszystko uruchomi się poprawnie."
+    },
+    "alarm_choice_needed": {
+      "title": "Nova prosi o wybór alarmu domowego",
+      "description": "Nova znalazła więcej niż jeden panel alarmowy: {panels}. Dopóki nie wybierzesz, który jest alarmem domowym, Nova nie ogłosi, że alarm się włączył, i nie zablokuje domu automatycznie.\n\nW panelu Nova otwórz Ustawienia → Alarm bezpieczeństwa i go wybierz. To powiadomienie zniknie samo, gdy to zrobisz."
     }
   },
   "exceptions": {

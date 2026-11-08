@@ -226,6 +226,10 @@
     "safety_monitoring_down": {
       "title": "O monitoramento de segurança do Nova não está em execução",
       "description": "Uma parte do monitoramento de segurança do Nova não conseguiu iniciar, então os alertas de fumaça, monóxido de carbono, vazamento e invasão, ou a ligação entre o alarme e o bloqueio, podem não funcionar. O que falhou: {failed}.\n\nVeja a causa em Configurações → Sistema → Registros. Depois recarregue o Nova em Configurações → Dispositivos e serviços. Este aviso some sozinho quando tudo iniciar corretamente."
+    },
+    "alarm_choice_needed": {
+      "title": "O Nova precisa que você escolha o alarme da casa",
+      "description": "O Nova encontrou mais de um painel de alarme: {panels}. Até você escolher qual é o alarme da casa, o Nova não vai avisar quando ele disparar e não fará o bloqueio automático.\n\nNo painel do Nova, abra Configurações → Alarme de segurança e escolha. Este aviso some sozinho depois disso."
     }
   },
   "exceptions": {
