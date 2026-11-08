@@ -134,6 +134,7 @@ from .core_learning import (
     learning_active,
     log_camera_event,
     log_command,
+    purge_old_history,
     run_analysis_now,
 )
 from .core_lockdown import build_lockdown_message, LockdownManager
@@ -298,6 +299,7 @@ _OWNERS = {
     'lockdown_status': _m_lockdown_sync,
     'log_camera_event': _m_learning,
     'log_command': _m_learning,
+    'purge_old_history': _m_learning,
     'release_runtime': _m_runtime,
     'request_lockdown': _m_lockdown_sync,
     'revoke_autonomy': _m_runtime,

@@ -105,6 +105,13 @@ def log_command(text: str, handled_by: str = "agent",
         store.log_command(text, handled_by, entity_ids, person)
 
 
+def purge_old_history(days: int) -> int:
+    """Drop pattern history older than ``days``. Returns how many rows went;
+    0 when the core is not running."""
+    store = _m_state._CORE.state_logger
+    return store.purge_older_than(days) if store else 0
+
+
 def learning_active() -> bool:
     """Whether pattern learning is on right now. The state logger exists only
     between the core's start() and stop(), so this is the one switch every

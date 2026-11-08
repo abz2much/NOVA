@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from .core_bridge import _patterns_db
@@ -105,6 +105,19 @@ class StateLogger:
                              "VALUES (?, ?, ?, ?, ?, ?, ?)", row)
         except Exception:
             pass
+
+    def purge_older_than(self, days: int) -> int:
+        """Drop state changes and commands older than ``days``. Returns how
+        many rows went, or 0 on a failure, which is logged."""
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        try:
+            with self._open() as conn:
+                return sum(conn.execute(f"DELETE FROM {table} WHERE timestamp < ?",
+                                        (cutoff,)).rowcount
+                           for table in ("state_changes", "commands"))
+        except Exception as exc:
+            _LOGGER.warning("Pattern DB purge failed: %s", exc)
+            return 0
 
     def distinct_logged_entities(self) -> set:
         """Every entity already in the store, which a history import skips so

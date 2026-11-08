@@ -52,6 +52,7 @@ class World:
         self.sched_ok = True
         self.unload_ok = True
         self.purged = (0, 0)
+        self.purged_history = 0
         self.docs = (0, 0)
         self.hazard = {"fired": False}
         self.time_changes: list = []
@@ -309,6 +310,8 @@ def _install(monkeypatch, load, world: World):
                          stop=asyn("observer.stop")),
         "cognitive_core": _mod(
             "cognitive_core", ensure_lockdown=asyn("ensure_lockdown"),
+            purge_old_history=sync("purge_old_history",
+                                   lambda days: world.purged_history),
             start=asyn("core.start"), stop=asyn("core.stop"),
             release_runtime=sync("core.release")),
         "bootstrap": _mod("bootstrap", schedule_bootstrap=sync(
@@ -608,7 +611,7 @@ async def test_scheduler_ticks_in_order_with_intervals(env, caplog):
                  "Nova: multi-hazard monitor active (sweep every 10 min)",
                  "Nova: document auto-ingest active (scan every 10 min)",
                  "Nova: nightly sleep-state prompt active (checked every 10 min)",
-                 "Nova: automatic database purge active (daily, 30-day retention)"):
+                 "Nova: automatic database purge active (daily; conversations 30 days, pattern history 90 days)"):
         assert line in caplog.text
 
 
@@ -1225,6 +1228,16 @@ async def test_db_purge_tick(env, caplog):
         await _tick(env.world, "db_purge")(None)
     assert "Nova daily purge: 4 conversation record(s), 0 expired fact(s)" in caplog.text
     assert env.world.calls("purge_old_records")[0][0] == (30,)
+
+
+async def test_db_purge_tick_prunes_pattern_history_after_90_days(env, caplog):
+    """Without this the pattern store only ever grows."""
+    await _setup(env)
+    env.world.purged_history = 12
+    with caplog.at_level(logging.INFO):
+        await _tick(env.world, "db_purge")(None)
+    assert env.world.calls("purge_old_history")[0][0] == (90,)
+    assert "12 pattern history row(s)" in caplog.text
 
 
 # ── Briefings ───────────────────────────────────────────────────────────────
