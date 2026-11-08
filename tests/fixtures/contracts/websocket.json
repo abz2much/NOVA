@@ -105,9 +105,11 @@
     "registered": true
   },
   "nova/camera_diagnostics": {
-    "admin": false,
+    "admin": true,
     "error_codes": [
-      "camera_diag_failed"
+      "camera_diag_failed",
+      "diagnostics_too_soon",
+      "unknown_camera"
     ],
     "fields": {
       "entity_id": {
@@ -980,7 +982,7 @@
     "registered": true
   },
   "nova/search_memory": {
-    "admin": false,
+    "admin": true,
     "error_codes": [
       "search_failed"
     ],

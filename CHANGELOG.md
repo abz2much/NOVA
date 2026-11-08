@@ -1,3 +1,12 @@
+## [8.85.7] Who can search chats and test cameras
+
+### Fixed
+- **Only an admin can search Nova's conversation memory over the panel connection.** `nova/search_memory` let any signed-in user search every resident's past chats, with no limit on the length of the search or the number of results. It is now admin only, with a 200 character search and at most 20 results. The Nova panel itself never used it, so nothing in the panel changes.
+- **Only an admin can run a camera's diagnostic, and only on a real camera, once a minute per camera.** Any signed-in user could run it, it accepted any entity as if it were a camera, and it can wake a camera's stream for up to 30 seconds. The Diagnose button works as before for admins, and shows a message if you press it again within a minute.
+
+### Not changed
+- **The panel's main data feed (`nova/get_panel_data`) is still open to every signed-in user.** It carries lockdown, intrusion, camera and alarm panel state. Hiding it would break the panel for household members who are not admins, so it stays an accepted risk, as decided on 13 September.
+
 ## [8.85.6] Fewer lost alerts
 
 ### Fixed

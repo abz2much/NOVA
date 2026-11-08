@@ -70,6 +70,44 @@ async def test_open_read_command_allowed_for_non_admin(
     assert resp["success"] is True
 
 
+@pytest.mark.parametrize("message", [
+    {"type": "nova/search_memory", "query": "pizza"},
+    {"type": "nova/camera_diagnostics"},
+])
+async def test_memory_search_and_camera_diagnostics_reject_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token, message,
+):
+    """search_memory reads every resident's chats, and camera_diagnostics can
+    wake a camera's stream: both are admin only."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id(message)
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+@pytest.mark.parametrize("extra", [
+    {"query": ""},
+    {"query": "x" * 201},
+    {"query": "x", "k": 0},
+    {"query": "x", "k": 21},
+])
+async def test_memory_search_limits_the_query_and_the_result_count(
+    hass, hass_ws_client, extra,
+):
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({"type": "nova/search_memory", **extra})
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "invalid_format"
+
+
 async def test_list_models_rejects_non_admin(
     hass, hass_ws_client, hass_read_only_access_token,
 ):

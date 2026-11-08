@@ -280,15 +280,17 @@ async def ws_edit_relation(hass: HomeAssistant, connection: websocket_api.Active
 
 # ── conversation search ─────────────────────────────────────────────────────
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/search_memory",
-    vol.Required("query"): str,
-    vol.Optional("k", default=5): int,
+    vol.Required("query"): vol.All(str, vol.Length(min=1, max=200)),
+    vol.Optional("k", default=5): vol.All(int, vol.Range(min=1, max=20)),
 })
 @websocket_api.async_response
 async def ws_search_memory(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
                            msg: dict[str, Any]) -> None:
-    """Past conversations that match the query."""
+    """Past conversations that match the query. Admins only: it searches every
+    resident's chats. The panel does not use it."""
     try:
         from .memory import search_memory
         found = await _run(hass, lambda: search_memory(msg["query"], k=msg["k"]))
