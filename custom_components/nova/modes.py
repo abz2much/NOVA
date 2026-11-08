@@ -14,10 +14,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Optional
 
 from . import paths
+from .persistence.files import write_json_atomic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,14 +126,18 @@ def _load() -> None:
         _LOGGER.warning("Could not restore operational mode: %s", exc)
 
 
+# Held while the mode is changed and saved, so two threads never change it or
+# write the file at the same time.
+_LOCK = threading.Lock()
+
+
 def _persist() -> None:
+    """Save the mode. Written to a uniquely named temporary file and renamed
+    into place, so a reader sees the old or the new file, never half of one,
+    and two writers never share a temporary file."""
     path = _mode_state_path()
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_state, f)
-        os.replace(tmp, path)
+        write_json_atomic(path, dict(_state), encoding="utf-8")
     except Exception as exc:
         _LOGGER.debug("Could not persist operational mode: %s", exc)
 
@@ -178,11 +184,13 @@ def set_mode(name: str, reason: str = "") -> dict:
     modes = _all_modes()
     if key not in modes:
         return {"ok": False, "error": f"unknown mode '{name}'", "available": sorted(modes)}
-    _state["mode"] = key
-    _state["since"] = time.time()
-    _state["reason"] = str(reason or "")
-    _persist()
-    _LOGGER.info("Operational mode set to %s (%s)", key, _state["reason"] or "no reason")
+    with _LOCK:
+        _state["mode"] = key
+        _state["since"] = time.time()
+        _state["reason"] = str(reason or "")
+        _persist()
+        reason_text = _state["reason"]
+    _LOGGER.info("Operational mode set to %s (%s)", key, reason_text or "no reason")
     return {"ok": True, "mode": key, "overrides": _resolve(key)}
 
 

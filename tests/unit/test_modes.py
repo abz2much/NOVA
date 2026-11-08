@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 
 import pytest
@@ -212,6 +213,49 @@ def test_persist_failure_still_switches(modes, tmp_path, monkeypatch):
     monkeypatch.setattr(modes, "MODE_STATE_PATH", str(blocker / "mode_state.json"))
     res = modes.set_mode("party")
     assert res["ok"] is True and modes.active_mode() == "party"
+
+
+def test_a_second_writer_finishing_mid_write_does_not_fail_the_first(modes, monkeypatch, caplog):
+    """With one fixed temporary name the second writer's rename took the first
+    writer's file away, and the first one's rename then failed quietly."""
+    real = os.replace
+    seen = []
+
+    def replace(src, dst):
+        seen.append(src)
+        if len(seen) == 1:
+            modes._persist()          # another writer finishes while this one is writing
+        real(src, dst)
+    monkeypatch.setattr(os, "replace", replace)
+    with caplog.at_level("DEBUG", logger=modes._LOGGER.name):
+        modes.set_mode("movie", "film")
+    assert "Could not persist" not in caplog.text
+    assert _disk(modes)["mode"] == "movie"
+    folder = os.path.dirname(modes.MODE_STATE_PATH)
+    assert [name for name in os.listdir(folder) if name.endswith(".tmp")] == []
+
+
+def test_writers_in_different_threads_take_turns(modes, monkeypatch):
+    """Two threads changing the mode at once must not write the file at once."""
+    guard = threading.Lock()
+    busy = {"now": 0, "most": 0}
+
+    def slow_persist():
+        with guard:
+            busy["now"] += 1
+            busy["most"] = max(busy["most"], busy["now"])
+        time.sleep(0.02)
+        with guard:
+            busy["now"] -= 1
+    monkeypatch.setattr(modes, "_persist", slow_persist)
+    threads = [threading.Thread(target=modes.set_mode, args=(name,))
+               for name in ("party", "movie", "lab", "guest")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert busy["most"] == 1
+    assert modes.active_mode() in {"party", "movie", "lab", "guest"}
 
 
 # ── loading from disk ──────────────────────────────────────────────────────
