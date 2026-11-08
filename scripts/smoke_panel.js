@@ -1440,6 +1440,13 @@ if (require.main === module) setTimeout(async () => {
   // Drag/resize itself isn't exercised here — jsdom implements neither
   // createSVGPoint nor getScreenCTM, so that math needs a real browser to
   // verify (same reason Classic's identical drag code isn't jsdom-tested).
+  // Open the editor's Settings group first, as a person would: a hidden
+  // section can't take focus (jsdom 30+ follows browsers on this).
+  {
+    const fpGroup = sRoot.getElementById("settings-card-floor_plan_editor").getAttribute("data-settings-group");
+    sRoot.querySelector(`.settings-nav-btn[data-settings-section="${fpGroup}"]`).click();
+    sRoot = elNew.shadowRoot;
+  }
   sRoot.querySelector('.fpn-floor-tab[data-fpn-floor="2f"]').click();
   let fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: floor tab switch re-renders just that card with the other floor's rooms",
@@ -4773,6 +4780,11 @@ if (require.main === module) setTimeout(async () => {
     elNew._uiStrings = null;
     const cfg = { floor_plan_units: "imperial" };
     elNew._liveData = Object.assign({}, saved.live, { config: cfg });
+    // No background refresh while these checks edit the panel's config: one
+    // would swap the shared fake panel data back in, and the edits below
+    // would then leak into every later check (seen with jsdom 31's timing).
+    const realFetchLive = elNew._fetchLiveData;
+    elNew._fetchLiveData = async () => {};
     elNew._hass = Object.assign({}, hass, { states: {
       "binary_sensor.front_door": { state: "on", attributes: { device_class: "door", friendly_name: "Front Door" } },
       "binary_sensor.back_door": { state: "off", attributes: { device_class: "door" } },
@@ -5175,6 +5187,7 @@ if (require.main === module) setTimeout(async () => {
       heads.join("|") === 'The "Twins"|Tom & Jerry']);
 
     hass.callWS = saved.callWS;
+    elNew._fetchLiveData = realFetchLive;
     elNew._uiStrings = saved.strings; elNew._liveData = saved.live; elNew._hass = saved.hass;
     elNew._editingPlan = saved.plan; elNew._editingEntities = saved.ents; elNew._editingCameras = saved.cams;
     elNew._editingElements = saved.els; elNew._editingProperty = saved.prop; elNew._editorFloor = saved.floor; elNew._editVB = saved.vb;
@@ -5325,6 +5338,9 @@ if (require.main === module) setTimeout(async () => {
     dashP.hass = { ...hass };
     await new Promise(r => setTimeout(r, 120));
     const D = dashP.shadowRoot;
+    // The room tiles are in the Areas panel; open it first, as a person
+    // does (a hidden panel can't take focus, jsdom 30+ follows browsers).
+    D.querySelector('.dock-btn[data-dock="areas"]')?.click();
     const lights = Array.from(D.querySelectorAll(".area-light-toggle[data-light-area]"));
     const target = lights[lights.length - 1];
     const area = target?.getAttribute("data-light-area");
@@ -5752,9 +5768,16 @@ if (require.main === module) setTimeout(async () => {
     const sent = [];
     const P = document.createElement("nova-panel");
     P._currentTab = "settings";
+    // The editor's own Settings group is open, as after a person picks it:
+    // a hidden section can't take focus (jsdom 30+ follows browsers).
+    P._settingsSection = window.customElements.get("nova-panel").SETTINGS_CARDS
+      .find(c => c.id === "floor_plan_editor").group;
     document.body.appendChild(P);
     P.hass = { ...hass, callWS: async (m) => { sent.push(m); return hass.callWS(m); } };
     await new Promise(r => setTimeout(r, 150));
+    // This panel edits its own copy of the panel data, never the shared
+    // fake data later checks are given.
+    P._liveData = structuredClone(P._liveData);
     const fresh = () => {
       P._liveData.config = { floor_plan_units: "imperial" };
       P._editingPlan = { tf: { label: "Test Floor", viewBox: "0 0 260 200", rooms: [{ name: "Den", x: 20, y: 20, w: 60, h: 40, type: "room" },
