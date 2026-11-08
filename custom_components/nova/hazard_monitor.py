@@ -54,6 +54,10 @@ _DEF_NIGHT_SPEAK_LEVEL = "red"
 # half its ids, whichever the set gives up first.
 _SEEN: dict = {"quake": set(), "wx": set(), "disaster": set()}
 _SEEN_CAP = 500
+# The same ids kept on disk, so a restart does not tell them all again.
+SEEN_FILE_NAME = "hazard_seen.json"
+_SEEN_FILE: Optional[str] = None      # override; None resolves via paths.py
+_seen_loaded = False
 
 # The delivery source for each kind of alert.
 _ACTION = {"quake": "hazard_earthquake", "wx": "hazard_weather",
@@ -255,6 +259,39 @@ def _bbox(lat: float, lon: float, radius_km: float) -> tuple[float, float, float
     return lat - lat_span, lat + lat_span, lon - lon_span, lon + lon_span
 
 
+def _seen_path() -> str:
+    from . import paths
+    return _SEEN_FILE or paths.nova_path(SEEN_FILE_NAME)
+
+
+def _load_seen() -> None:
+    """Read the saved ids into _SEEN, once. A missing or damaged file means
+    none are known. Blocking: run it in the executor."""
+    global _seen_loaded
+    _seen_loaded = True
+    from .persistence import files
+    read = files.read_json(_seen_path())
+    if read.status != files.OK or not isinstance(read.value, dict):
+        return
+    for feed, ids in read.value.items():
+        if isinstance(ids, list):
+            _SEEN.setdefault(feed, set()).update(str(i) for i in ids)
+
+
+def _save_seen() -> None:
+    """Write the ids told so far. Blocking: run it in the executor."""
+    from .persistence import files
+    try:
+        files.write_json_atomic(_seen_path(), {f: sorted(ids) for f, ids in _SEEN.items()})
+    except Exception as exc:
+        _LOGGER.warning("Nova hazard: could not save the told events: %s", type(exc).__name__)
+
+
+def _is_told(feed: str, event_id: str) -> bool:
+    """Whether this id was already passed on. Only looks."""
+    return event_id in _SEEN.get(feed, ())
+
+
 def _remember(feed: str, event_id: str) -> bool:
     """Mark an id as passed on; True only the first time."""
     seen = _SEEN.setdefault(feed, set())
@@ -315,7 +352,7 @@ async def _check_earthquakes(hass, lat: float, lon: float) -> list[dict]:
                 continue
             km = _haversine_km(lat, lon, float(point[1]), float(point[0]))
             # The box is square, so the radius is checked here.
-            if km > radius or not _remember("quake", quake_id):
+            if km > radius or _is_told("quake", quake_id):
                 continue
             found.append({"id": quake_id, "mag": info.get("mag"),
                           "place": info.get("place") or "unknown location",
@@ -340,7 +377,7 @@ async def _check_weather(hass, lat: float, lon: float) -> list[dict]:
             alert_id = feature.get("id")
             info = feature.get("properties", {}) or {}
             severity = info.get("severity") or "Unknown"
-            if severity not in wanted or not alert_id or not _remember("wx", alert_id):
+            if severity not in wanted or not alert_id or _is_told("wx", alert_id):
                 continue
             found.append({"id": alert_id, "event": info.get("event") or "Weather alert",
                           "severity": severity, "headline": info.get("headline") or "",
@@ -383,7 +420,7 @@ async def _check_disasters(hass, lat: float, lon: float) -> list[dict]:
             if not event_id:
                 continue
             km = _nearest_km(lat, lon, event.get("geometry", []))
-            if km is None or km > radius or not _remember("disaster", event_id):
+            if km is None or km > radius or _is_told("disaster", event_id):
                 continue
             kinds = ", ".join(c.get("title", "") for c in event.get("categories", []) if c)
             links = event.get("sources")
@@ -426,12 +463,12 @@ def _fmt_disaster(d: dict, honorific: str) -> str:
 # ── delivery ────────────────────────────────────────────────────────────────
 
 async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "",
-                   night: bool = False) -> None:
+                   night: bool = False) -> bool:
     """Hand one hazard to delivery: every phone always, and speak_text on the
     whole house broadcast when given. The caller has already applied the level
     rules; night says the night level let it speak in quiet hours. Shush, the
     Announcements switch, sleep and notifications only still apply in
-    delivery. Never raises."""
+    delivery. True when it was spoken or pushed. Never raises."""
     try:
         from . import audio_routing, delivery, tts_helper
         speakers = []
@@ -446,9 +483,11 @@ async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "
             quiet_ok=night, sleep_ok=night, push=delivery.PUSH_ALWAYS,
             all_phones=True, push_first=True, tts_context="hazard",
             tts_entity=tts_helper.find_best_tts_entity(hass) or "", record_kind="hazard")
-        await delivery.async_deliver(hass, request)
+        out = await delivery.async_deliver(hass, request)
+        return bool(out.spoken or out.pushed)
     except Exception as exc:
         _LOGGER.debug("hazard: delivery failed: %s", exc)
+        return False
 
 
 # ── weather warnings ────────────────────────────────────────────────────────
@@ -583,13 +622,19 @@ async def periodic_check(hass, honorific: str = "sir") -> dict:
              ("disaster", effective_flag(hass, "hazard_disasters_on"), _check_disasters,
               _fmt_disaster))
     fired = {key: 0 for key, *_rest in feeds}
+    if not _seen_loaded:
+        await hass.async_add_executor_job(_load_seen)
     for key, wanted, check, word in feeds:
         if not wanted:
             continue
         for item in await check(hass, lat, lon):
             text = word(item, honorific)
-            await _deliver(hass, text, key, speak_text="" if in_quiet else text)
-            fired[key] += 1
+            # Told only once it got through, so a failed send is tried again.
+            if await _deliver(hass, text, key, speak_text="" if in_quiet else text):
+                _remember(key, item["id"])
+                fired[key] += 1
+        if fired[key]:
+            await hass.async_add_executor_job(_save_seen)
     if any(fired.values()):
         _LOGGER.info("hazard: %d new alert(s): %s", sum(fired.values()), fired)
     return {"checked": True, "fired": fired, "center": _rounded(centre), "warnings": warnings}

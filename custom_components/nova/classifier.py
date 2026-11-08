@@ -37,6 +37,13 @@ _NOISE_TRANSITIONS = {
 }
 
 _OPENING_CLASSES = {"door", "window", "garage_door", "opening"}
+# Turning on is worth attention without asking the provider, so these cannot
+# vanish when it is down: (urgency, category, rule).
+_ATTENTION_CLASSES = {
+    "tamper": ("high", "security", "tamper"),
+    "safety": ("high", "security", "safety_sensor"),
+    "problem": ("medium", "other", "problem"),
+}
 _MOTION_CLASSES = {"motion", "occupancy"}
 _ROUTINE_DOMAINS = ("light", "switch", "climate", "media_player")
 _URGENCIES = ("low", "medium", "high", "critical")
@@ -84,6 +91,10 @@ def _rule_classify(entity_id, old_state, new_state, friendly_name,
         return _skip("noise_dc")
     if URGENCY_CEILINGS.get(dc) == "critical":
         return _flag("critical", "security", "safety")
+    if dc in _ATTENTION_CLASSES:
+        if new_state != "on":
+            return _skip(f"{dc}_clear")
+        return _flag(*_ATTENTION_CLASSES[dc])
 
     hour = _hour(now_hhmm)
     if dc in _OPENING_CLASSES:
@@ -128,6 +139,15 @@ def _rule_classify(entity_id, old_state, new_state, friendly_name,
     if eid.startswith("binary_sensor.") and not dc:
         return _skip("binary_no_dc")
     return None
+
+
+def settled_by_rule(*, entity_id: str, old_state: str, new_state: str,
+                    friendly_name: str = "", device_class: Optional[str] = None,
+                    now_hhmm: str = "") -> bool:
+    """Whether the rule table settles this event, so classify() makes no
+    provider call for it."""
+    return _rule_classify(entity_id, old_state, new_state, friendly_name,
+                          device_class, now_hhmm) is not None
 
 
 def _parse_json(raw: str) -> Any:

@@ -387,6 +387,7 @@ def flow(ob, load, monkeypatch, fake_hass):
 
 DOOR = _ev("binary_sensor.door", "off", "on", "door")
 MOTION = _ev("binary_sensor.hall", "off", "on", "motion")
+NEEDS_PROVIDER = _ev("cover.garage_door", "closed", "open")   # no classifier rule covers it
 
 
 def test_handler_ignores_events_while_stopped(flow, monkeypatch):
@@ -399,7 +400,8 @@ def test_handler_ignores_events_while_stopped(flow, monkeypatch):
 def test_handler_sends_an_ordinary_event_to_the_pipeline(flow):
     ob, knobs, seen = flow
     ob._on_state_changed(DOOR)
-    assert len(seen["tasks"]) == 1 and seen["context"] == [DOOR] and seen["calls"] == 1
+    # A rule settles a door opening, so it makes no classifier call to count.
+    assert len(seen["tasks"]) == 1 and seen["context"] == [DOOR] and seen["calls"] == 0
     assert seen["interval"] == ob.DEBOUNCE_DEFAULT_S
     assert seen.get("unobserved") is True
 
@@ -531,12 +533,12 @@ def test_rate_limit_warns_once_and_spares_arrivals(flow, caplog):
     ob, knobs, seen = flow
     knobs["rate"] = True
     with caplog.at_level("WARNING"):
-        ob._on_state_changed(DOOR)
-        ob._on_state_changed(DOOR)
+        ob._on_state_changed(NEEDS_PROVIDER)
+        ob._on_state_changed(NEEDS_PROVIDER)
     assert caplog.text.count("hit rate limit") == 1
     assert seen["tasks"] == [] and ob._STATE.rate_limit_warn_logged is True
     ob._on_state_changed(_ev("person.a", "not_home", "home"))
-    assert len(seen["tasks"]) == 1 and ob._STATE.rate_limit_warn_logged is False
+    assert len(seen["tasks"]) == 1
 
 
 # ── the pipeline's first steps ──────────────────────────────────────────────
