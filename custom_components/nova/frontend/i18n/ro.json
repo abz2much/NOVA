@@ -523,5 +523,12 @@
   "Berry Sky": "Cer de fructe de pădure",
   "Quantum Ice": "Gheață cuantică",
   "Pine Mist": "Ceață de pin",
-  "Ember": "Jar"
+  "Ember": "Jar",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Alege senzorul care arată consumul de energie al întregii case. Dacă lași ghicirea, Nova caută unul după nume.",
+  "Home load sensor": "Senzor consum casă",
+  "Guess from sensor names": "Ghicește după numele senzorilor",
+  "{entity} (not found)": "{entity} (negăsit)",
+  "No home load sensor found. Pick one below.": "Nu s-a găsit niciun senzor de consum al casei. Alege unul mai jos.",
+  "In use: {meter} (picked in Settings)": "În uz: {meter} (ales în Setări)",
+  "In use: {meter} (guessed from its name)": "În uz: {meter} (ghicit după nume)"
 }

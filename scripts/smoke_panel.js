@@ -2875,6 +2875,60 @@ if (require.main === module) setTimeout(async () => {
     sRoot = elNew.shadowRoot;
   }
 
+  // 8.85.0: the home load sensor is picked from a list of power sensors. A
+  // saved pick that no longer exists stays selected, marked "not found",
+  // and the status line says which sensor is in use and how it was chosen.
+  {
+    const reloads = [];
+    const states = {
+      "sensor.house_load": { state: "700", attributes: { device_class: "power", unit_of_measurement: "W", friendly_name: "House consumption" } },
+      "sensor.home_consumption": { state: "0", attributes: { unit_of_measurement: "kW", friendly_name: "Home Consumption" } },
+      "sensor.daily_kwh": { state: "3", attributes: { device_class: "energy", unit_of_measurement: "kWh" } },
+    };
+    const ws = async (m) => {
+      if (m.type === "nova/get_panel_data") {
+        const data = await hass.callWS(m);
+        return Object.assign({}, data, { config: Object.assign({}, data.config, { energy_home_meter_entity: "sensor.gone" }) });
+      }
+      if (m.type === "nova/energy" && m.action === "status") {
+        return { watts: null, kw: null, meter: "sensor.gone", meter_source: "picked", peak_watts: 8000,
+          over_peak: false, agency: "advisory", configured_agency: "advisory", running: [], advice: [] };
+      }
+      if (m.type === "nova/reload_appliances") { reloads.push(m); return { ok: true }; }
+      return hass.callWS(m);
+    };
+    // Opened on the dashboard, then the Energy tab, as a person does: the
+    // panel data has loaded before the tab draws.
+    const el = window.document.createElement("nova-panel");
+    window.document.body.appendChild(el);
+    el.hass = Object.assign({}, hass, { states, callWS: ws });
+    await new Promise(r => setTimeout(r, 150));
+    el.shadowRoot.querySelector('.nav-tab[data-tab="energy"]').click();
+    await new Promise(r => setTimeout(r, 150));
+    const R = el.shadowRoot;
+    const pick = R.querySelector('select[data-cfg-key="energy_home_meter_entity"]');
+    const values = pick ? Array.from(pick.options).map(o => o.value) : [];
+    const gone = pick && Array.from(pick.options).find(o => o.value === "sensor.gone");
+    checks.push(["energy tab: the home load sensor is picked from the power sensors, with a guess option",
+      !!pick && values[0] === "" && values.includes("sensor.house_load") && values.includes("sensor.home_consumption")
+      && !values.includes("sensor.daily_kwh")]);
+    checks.push(["energy tab: a saved home load sensor that no longer exists stays selected, marked not found",
+      !!gone && gone.selected && /not found/.test(gone.textContent)]);
+    checks.push(["energy tab: the status says which home load sensor is in use and that it was picked",
+      /sensor\.gone/.test(R.getElementById("energyStatusBody")?.textContent || "")
+      && /picked/.test(R.getElementById("energyStatusBody")?.textContent || "")]);
+    const before = _updateConfigCalls.length;
+    if (pick) {
+      pick.value = "sensor.house_load";
+      pick.dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    await new Promise(r => setTimeout(r, 50));
+    checks.push(["energy tab: picking a home load sensor saves it and restarts the appliance monitor",
+      _updateConfigCalls.slice(before).some(c => c.key === "energy_home_meter_entity" && c.value === "sensor.house_load")
+      && reloads.length === 1]);
+    el.remove();
+  }
+
   // The Solar panel is gone (2b): nova/solar's self-sufficiency is the Live
   // panel's header meta and its first advice sentence is the line under the
   // flow diagram.

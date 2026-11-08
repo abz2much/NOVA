@@ -2218,6 +2218,11 @@ ${this._dockHtml()}`;
             <label>Peak threshold (kW)</label>
             <input class="cfg-field cfg-num" type="number" id="energyPeakKw" min="0.1" step="0.1" value="${this._esc(this._energyPeakKw(e))}">
           </div>
+          <div class="stub-body">Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.</div>
+          <div class="cfg-row">
+            <label>Home load sensor</label>
+            <select class="cfg-field" id="energyHomeMeter" data-cfg-key="energy_home_meter_entity">${this._optSelect(this._homeMeterOptions(cfg.energy_home_meter_entity || ""), cfg.energy_home_meter_entity || "")}</select>
+          </div>
           <div class="stub-body">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
           <div class="cfg-row">
             <label>Cost today entity</label>
@@ -2236,6 +2241,31 @@ ${this._dockHtml()}`;
           ${this._appliancesCardBody()}
         </div>
     `;
+  }
+
+  // The home load sensor list (8.85.0): "" lets Nova guess by name, then
+  // every power sensor (W or kW). A saved pick that no longer exists stays
+  // listed and selected, marked not found, so it is never silently dropped.
+  _homeMeterOptions(selected) {
+    const states = this._hass?.states || {};
+    const pairs = Object.keys(states).filter(eid => {
+      const a = states[eid].attributes || {};
+      const unit = (a.unit_of_measurement || "").toLowerCase();
+      return eid.startsWith("sensor.") && (a.device_class === "power" || unit === "w" || unit === "kw");
+    }).sort().map(eid => {
+      const name = (states[eid].attributes || {}).friendly_name;
+      return [eid, name ? `${name} (${eid})` : eid];
+    });
+    if (selected && !states[selected]) pairs.unshift([selected, this._t("{entity} (not found)", { entity: selected })]);
+    return [["", this._tx("Guess from sensor names")], ...pairs];
+  }
+
+  _homeMeterLine(e) {
+    if (!e.meter) return this._tHtml("No home load sensor found. Pick one below.");
+    const meter = this._esc(e.meter);
+    return e.meter_source === "picked"
+      ? this._tHtml("In use: {meter} (picked in Settings)", { meter })
+      : this._tHtml("In use: {meter} (guessed from its name)", { meter });
   }
 
   // The peak threshold lives in nova/energy's status (peak_watts), not in
@@ -2273,6 +2303,7 @@ ${this._dockHtml()}`;
       : "";
     return `
       <div class="cfg-row"><label>Current draw</label>${draw}</div>
+      <div class="stub-body" id="energyMeterInUse">${this._homeMeterLine(e)}</div>
       <div class="mode-grid" id="newEnergyAgency">${agencyChips}</div>
       ${advice}
       ${runRows}`;
@@ -2411,6 +2442,17 @@ ${this._dockHtml()}`;
   _wireEnergy() {
     const root = this.shadowRoot;
     root.getElementById("energyRefresh")?.addEventListener("click", () => this._fetchEnergyStatus());
+    // Home load sensor (8.85.0): save it, restart the appliance monitor so
+    // it watches the new sensor, then show the status from the new pick.
+    root.getElementById("energyHomeMeter")?.addEventListener("change", async (ev) => {
+      try {
+        await this._saveSetting("energy_home_meter_entity", ev.target.value);
+        await this._hass.callWS({ type: "nova/reload_appliances" });
+      } catch (err) {
+        this._fail(err, "save the home load sensor");
+      }
+      await this._fetchEnergyStatus();
+    });
     // Same autosave as _wireSettings: number inputs save as a Number or null.
     root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
       inp.addEventListener("change", async () => {

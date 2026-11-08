@@ -523,5 +523,12 @@
   "Berry Sky": "Bærhimmel",
   "Quantum Ice": "Kvanteis",
   "Pine Mist": "Furutåke",
-  "Ember": "Glød"
+  "Ember": "Glød",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Velg sensoren som viser strømforbruket for hele hjemmet. Står den på gjett, finner Nova en ut fra navnet.",
+  "Home load sensor": "Sensor for husets forbruk",
+  "Guess from sensor names": "Gjett ut fra sensornavn",
+  "{entity} (not found)": "{entity} (ikke funnet)",
+  "No home load sensor found. Pick one below.": "Fant ingen sensor for husets forbruk. Velg en nedenfor.",
+  "In use: {meter} (picked in Settings)": "I bruk: {meter} (valgt i Innstillinger)",
+  "In use: {meter} (guessed from its name)": "I bruk: {meter} (gjettet ut fra navnet)"
 }

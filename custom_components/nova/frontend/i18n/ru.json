@@ -1360,5 +1360,12 @@
   "Berry Sky": "Ягодное небо",
   "Quantum Ice": "Квантовый лёд",
   "Pine Mist": "Сосновая дымка",
-  "Ember": "Тлеющие угли"
+  "Ember": "Тлеющие угли",
+  "Pick the sensor that shows your whole home's power use. Left on guess, Nova looks for one by its name.": "Выберите датчик, который показывает потребление электроэнергии всего дома. Если оставить угадывание, Nova найдёт его по названию.",
+  "Home load sensor": "Датчик потребления дома",
+  "Guess from sensor names": "Угадать по названиям датчиков",
+  "{entity} (not found)": "{entity} (не найден)",
+  "No home load sensor found. Pick one below.": "Датчик потребления дома не найден. Выберите его ниже.",
+  "In use: {meter} (picked in Settings)": "Используется: {meter} (выбран в Настройках)",
+  "In use: {meter} (guessed from its name)": "Используется: {meter} (угадан по названию)"
 }
