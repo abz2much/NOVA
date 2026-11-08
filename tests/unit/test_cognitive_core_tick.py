@@ -251,7 +251,7 @@ async def test_the_sleeping_flag_reaches_safety_proactive_and_every_emit(cc, env
     assert env.emitted == [({"type": "freeze_warning", "urgency": "high", "message": "m"}, True)]
 
 
-async def test_actions_are_emitted_in_a_fixed_order(cc, env):
+async def test_actions_are_emitted_most_urgent_first_then_in_the_order_gathered(cc, env):
     cc._CORE.lockdown_mgr = _Lockdown([{"type": "lockdown_engaged"}])
     env.safety.actions = [{"type": "freeze_critical"}, {"type": "intrusion_investigating"}]
     cc._CORE.proactive_mgr = _Proactive([{"type": "proactive_lights", "urgency": "low"}])
@@ -262,9 +262,11 @@ async def test_actions_are_emitted_in_a_fixed_order(cc, env):
     # 8.49.36: follow up and goal reports come from the background job and
     # are delivered by the next tick, still after anticipation.
     await _deliver_ai_work(cc, env)
+    # An action with no urgency counts as medium, so the one low urgency offer
+    # goes last; the rest keep the order they were gathered in.
     assert _types(env) == ["lockdown_engaged", "freeze_critical", "intrusion_investigating",
-                           "proactive_lights", "energy_offer", "presence_prediction",
-                           "followup_result", "goal_result"]
+                           "energy_offer", "presence_prediction",
+                           "followup_result", "goal_result", "proactive_lights"]
 
 
 async def test_a_lockdown_tick_error_does_not_stop_safety(cc, env):
@@ -295,7 +297,8 @@ async def test_a_safety_tick_error_is_logged_and_the_gathered_actions_and_the_re
     env.followups = [{"type": "followup_result"}]
     with caplog.at_level("WARNING"):
         await _deliver_ai_work(cc, env)
-    assert _types(env) == ["lockdown_engaged", "proactive_lights", "energy_offer", "followup_result"]
+    # The low urgency offer goes after the medium ones (most urgent first).
+    assert _types(env) == ["lockdown_engaged", "energy_offer", "followup_result", "proactive_lights"]
     assert "Cognitive safety tick error: safety broke" in caplog.text
 
 
@@ -311,6 +314,19 @@ async def test_a_hazard_alarm_already_on_is_announced_by_the_tick(cc, env, fake_
     env.emitted.clear()
     await cc._tick()
     assert [a for a, _ in env.emitted if a["type"] == "critical_hazard"] == []
+
+
+async def test_the_tick_delivers_the_most_urgent_action_first(cc, env):
+    """Each action is delivered in turn, and a slow speaker holds up the ones
+    behind it, so a critical alert must not queue behind something minor."""
+    cc._CORE.lockdown_mgr = _Lockdown([{"type": "lockdown_engaged", "urgency": "high"}])
+    env.safety.actions = [{"type": "chatter_a", "urgency": "medium"},
+                          {"type": "intrusion_confirmed", "urgency": "critical"},
+                          {"type": "chatter_b", "urgency": "medium"}]
+    cc._CORE.proactive_mgr = _Proactive([{"type": "proactive_lights", "urgency": "low"}])
+    await cc._tick()
+    assert _types(env) == ["intrusion_confirmed", "lockdown_engaged",
+                           "chatter_a", "chatter_b", "proactive_lights"]
 
 
 async def test_a_missing_safety_manager_does_not_stop_the_tick(cc, env):
