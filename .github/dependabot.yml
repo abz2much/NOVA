@@ -1,0 +1,24 @@
+# Keeps CI's tools current: a pull request per new version, each week.
+# Patch and minor updates merge themselves once every check passes
+# (.github/workflows/dependabot-automerge.yml); major updates wait for a
+# person. Tool updates never make a Nova release on their own: a release
+# only happens when manifest.json's version changes.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    labels: [dependencies, ci]
+
+  - package-ecosystem: pip
+    directory: "/ci"
+    schedule: { interval: weekly, day: monday }
+    labels: [dependencies, ci]
+    ignore:
+      # Follows the version Home Assistant's wyoming integration uses.
+      - dependency-name: wyoming
+
+  - package-ecosystem: npm
+    directory: "/ci"
+    schedule: { interval: weekly, day: monday }
+    labels: [dependencies, ci]
