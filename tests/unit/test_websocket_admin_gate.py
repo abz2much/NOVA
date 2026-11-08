@@ -24,10 +24,16 @@ benefit.
 
 Reaffirmed 13 Sept 2026: an external review flagged get_panel_data,
 get_activity_log, search_memory, and get_person_routines specifically as
-readable by any signed-in user, admin or not. This remains a deliberate
+readable by any signed-in user, admin or not. This remained a deliberate
 design — an accepted risk, not an oversight. Don't re-gate these without
 an explicit compatibility decision; it silently breaks the panel for non-admin
 household members, not just narrows what they can see.
+
+Changed 8 Nov 2026 (8.85.7), by an explicit decision: search_memory is now
+admin only, with a 200 character query and 20 result cap. It searches every
+resident's chats and the panel never calls it, so nothing breaks. The rest of
+that list stays open as before. camera_diagnostics is admin only too, like
+camera_snapshot.
 """
 from ws_sources import ws_text
 
@@ -103,6 +109,11 @@ ADMIN_GATED_TYPES = [
     # about the household, and a choice changes what Nova tells it.
     "convenience_status",
     "convenience_choice",
+    # Fix 21 and 23 of the Nova and JARVIS review. search_memory reads every
+    # resident's chats and the panel never calls it. camera_diagnostics can
+    # wake a camera's stream; the sibling camera_snapshot was already gated.
+    "search_memory",
+    "camera_diagnostics",
 ]
 
 
@@ -125,7 +136,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 59
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 61
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

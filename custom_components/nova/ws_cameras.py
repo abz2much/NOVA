@@ -40,6 +40,10 @@ _SNAP_LOG_QUIET_S = 300
 _SNAP_LOG_TS: dict[str, float] = {}
 
 _PROBE_TIMEOUT_S = 30
+# A probe can wake a camera's stream, so a camera is probed at most once in
+# this many seconds.
+_PROBE_MIN_GAP_S = 60
+_PROBE_TS: dict[str, float] = {}
 
 
 def _snap_log(entity_id: str, msg: str) -> None:
@@ -224,19 +228,30 @@ def _camera_platforms(hass: HomeAssistant) -> tuple[list[dict], dict[str, int]]:
     return rows, counts
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/camera_diagnostics",
     vol.Optional("entity_id"): str,
 })
 @websocket_api.async_response
 async def ws_camera_diagnostics(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
-    """A list of every camera Home Assistant has, and when an entity is
-    given, a test of each way Nova can get a frame from it."""
+    """A list of every camera Home Assistant has, and when a camera is given,
+    a test of each way Nova can get a frame from it. Admins only, and one
+    probe per camera a minute: it can wake the camera's stream."""
     try:
         summary, platforms = _camera_platforms(hass)
         probe = None
         target = msg.get("entity_id")
         if target:
+            target = str(target)
+            if not _is_live_camera(hass, target):
+                connection.send_error(msg["id"], "unknown_camera", target)
+                return
+            now = time.time()
+            if now - _PROBE_TS.get(target, 0) < _PROBE_MIN_GAP_S:
+                connection.send_error(msg["id"], "diagnostics_too_soon", target)
+                return
+            _PROBE_TS[target] = now
             from . import camera as cam
             try:
                 probe = await asyncio.wait_for(

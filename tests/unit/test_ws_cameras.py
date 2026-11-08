@@ -36,6 +36,7 @@ def cams(load, monkeypatch):
     logged = []
     monkeypatch.setattr(mod, "nova_log", lambda cat, msg: logged.append((cat, msg)))
     monkeypatch.setattr(mod, "_SNAP_LOG_TS", {})
+    monkeypatch.setattr(mod, "_PROBE_TS", {}, raising=False)
     monkeypatch.setattr(mod, "_get_cameras", lambda hass: ["cams"])
     mod._logged = logged
     yield mod
@@ -275,17 +276,40 @@ async def test_diagnostics_a_hung_probe_times_out(cams, camera_mod, monkeypatch)
     assert conn.results[0][1]["probe"]["verdict"].startswith("probe timed out after 30s")
 
 
-async def test_current_behaviour_diagnostics_probes_any_entity_id(cams, camera_mod, monkeypatch):
-    # Looks wrong: unlike snapshot, rename and location, diagnostics does
-    # not check the id is a camera (or exists) before probing it.
+@pytest.mark.parametrize("target", ["lock.front_door", "camera.missing"])
+async def test_diagnostics_only_probes_a_camera_that_exists(cams, camera_mod, monkeypatch, target):
+    """Like snapshot, rename and location, so nothing else is poked."""
     probed = []
 
     async def probe(hass, eid):
         probed.append(eid)
-        return {"entity_id": eid, "verdict": "no camera"}
+        return {"entity_id": eid, "verdict": "x"}
     monkeypatch.setattr(camera_mod, "probe_camera", probe, raising=False)
-    await _call(cams.ws_camera_diagnostics, _hass(), entity_id="lock.front_door")
-    assert probed == ["lock.front_door"]
+    conn = await _call(cams.ws_camera_diagnostics, _hass("camera.a"), entity_id=target)
+    assert probed == []
+    assert conn.errors == [(9, "unknown_camera", target)]
+
+
+async def test_diagnostics_probes_a_camera_at_most_once_a_minute(cams, camera_mod, monkeypatch):
+    """A probe can wake the camera's stream, so it is not for hammering."""
+    probed = []
+
+    async def probe(hass, eid):
+        probed.append(eid)
+        return {"entity_id": eid, "verdict": "ok"}
+    monkeypatch.setattr(camera_mod, "probe_camera", probe, raising=False)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(cams.time, "time", lambda: clock["now"])
+    hass = _hass("camera.a", "camera.b")
+    await _call(cams.ws_camera_diagnostics, hass, entity_id="camera.a")
+    clock["now"] += 30
+    soon = await _call(cams.ws_camera_diagnostics, hass, entity_id="camera.a")
+    other = await _call(cams.ws_camera_diagnostics, hass, entity_id="camera.b")
+    clock["now"] += 31
+    later = await _call(cams.ws_camera_diagnostics, hass, entity_id="camera.a")
+    assert probed == ["camera.a", "camera.b", "camera.a"]
+    assert [e[:2] for e in soon.errors] == [(9, "diagnostics_too_soon")]
+    assert other.errors == [] and later.errors == []
 
 
 # ── nova/compute_camera_coverage and nova/mmwave_overview ──────────────────
