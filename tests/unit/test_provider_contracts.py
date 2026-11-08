@@ -440,3 +440,28 @@ def test_hostnames_resolving_to_link_local_are_refused(pk):
         return [(2, 1, 6, "", ("169.254.169.254", port))]
     with pytest.raises(pk.errors.ProviderError):
         pk.destinations.check_url("http://sneaky.example/", resolve=True, resolver=resolver)
+
+
+# ── SDK clients never wait forever ──────────────────────────────────────────
+
+@pytest.mark.parametrize("cls_name, module, client, base_url", [
+    ("GroqProvider", "groq", "Groq", None),
+    ("OpenAIProvider", "openai", "OpenAI", None),
+    ("AnthropicProvider", "anthropic", "Anthropic", None),
+    ("CustomProvider", "openai", "OpenAI", "http://llm.example:8080/v1"),
+])
+def test_sdk_clients_are_built_with_a_timeout_and_a_retry_cap(
+        lp, monkeypatch, cls_name, module, client, base_url):
+    """A stalled provider must fail within a minute and be retried at most
+    once, or it hangs the agent and the reasoning loop."""
+    made = []
+    fake = types.ModuleType(module)
+    setattr(fake, client, lambda **kw: made.append(kw))
+    fake.DefaultHttpxClient = lambda **kw: object()
+    monkeypatch.setitem(sys.modules, module, fake)
+
+    getattr(lp, cls_name)("key", "m", base_url)
+
+    options = made[0]
+    assert 0 < options.get("timeout", float("inf")) <= 60
+    assert options.get("max_retries", float("inf")) <= 1

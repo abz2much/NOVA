@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Optional
 
-from .capabilities import SDK_CLIENT_POLICY, ProviderCapabilities, groq_vision
+from .capabilities import SDK_CLIENT_OPTIONS, SDK_CLIENT_POLICY, ProviderCapabilities, groq_vision
 from .errors import ProviderConfigurationError, ProviderErrorKind
 from .openai_wire import build_openai_kwargs, parse_openai_completion
 from .base import LLMProvider
@@ -29,7 +29,7 @@ class GroqProvider(LLMProvider):
             raise ProviderConfigurationError(
                 ProviderErrorKind.PROVIDER_UNAVAILABLE, self.name,
                 detail="the groq package is not installed") from exc
-        kwargs = {"api_key": api_key}
+        kwargs = {"api_key": api_key, **SDK_CLIENT_OPTIONS}
         if base_url:
             kwargs["base_url"] = base_url
         self._client = Groq(**kwargs)

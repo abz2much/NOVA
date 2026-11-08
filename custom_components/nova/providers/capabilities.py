@@ -47,6 +47,11 @@ SDK_CLIENT_POLICY = ConcurrencyPolicy(
     max_in_flight=8,
     reason="shared SDK client over a thread-safe httpx connection pool",
 )
+# What every SDK client (groq, openai, anthropic) is built with. Without a
+# timeout the SDKs wait for minutes and retry twice, so one stalled provider
+# hangs the agent or the reasoning loop. 60s matches native Gemini; one retry
+# keeps a slow provider from stalling a spoken reply.
+SDK_CLIENT_OPTIONS = {"timeout": 60.0, "max_retries": 1}
 # Native Ollama builds a fresh urllib request per call and keeps no shared
 # connection state; the limit protects a single local GPU server.
 OLLAMA_POLICY = ConcurrencyPolicy(
