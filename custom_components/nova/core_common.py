@@ -14,11 +14,26 @@ still re-exports each name below as the very same object.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Callable, Coroutine, Optional
 
 from .persistence.files import write_json_atomic  # noqa: F401  (patch point)
 
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
+
+
+def run_on_loop(hass: Any, make_coro: Callable[[], Coroutine], name: str) -> bool:
+    """Start make_coro() as a task on Home Assistant's event loop, from any
+    thread. The core's state_changed listener runs on a worker thread, where
+    HA 2026.11 refuses hass.async_create_task (8.85.0: every hazard and
+    alarm announcement was dropped). The coroutine is made on the loop, so
+    none is left unawaited. False, logged, when the loop has closed."""
+    try:
+        hass.loop.call_soon_threadsafe(
+            lambda: hass.async_create_task(make_coro(), name=name))
+    except RuntimeError as exc:
+        _LOGGER.warning("Nova: could not start %s, the event loop is closed: %s", name, exc)
+        return False
+    return True
 
 
 # ── Tick and lockdown timing ────────────────────────────────────────────────

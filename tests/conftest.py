@@ -343,7 +343,7 @@ def _load(modname: str):
 # ── 3. Fixtures ───────────────────────────────────────────────────────────
 
 import pytest  # noqa: E402  (after the stand-ins on purpose)
-from fakes import FakeHass, FakeProvider  # noqa: E402
+from fakes import FakeHass, FakeProvider, LoopHass  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -449,6 +449,40 @@ def fake_hass():
     Home Assistant fixture the integration tests use."""
     hass = FakeHass()
     return hass
+
+
+@pytest.fixture
+def loop_hass():
+    """A LoopHass (HA's loop thread, as strict as HA 2026.11), closed after
+    the test."""
+    hass = LoopHass()
+    yield hass
+    hass.close()
+
+
+def run_in_worker_thread(fn, *args):
+    """Call fn(*args) on a fresh thread, as HA runs a plain (non @callback)
+    state_changed listener, and return what it returned or raise what it
+    raised."""
+    import threading
+    box = {}
+
+    def _run():
+        try:
+            box["value"] = fn(*args)
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test
+            box["error"] = exc
+    worker = threading.Thread(target=_run)
+    worker.start()
+    worker.join(5)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+@pytest.fixture
+def in_worker():
+    return run_in_worker_thread
 
 
 @pytest.fixture

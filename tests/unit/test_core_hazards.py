@@ -21,6 +21,8 @@ def _event(eid, dc, old, new, name="Kitchen detector"):
 class _Hass:
     def __init__(self):
         self.tasks = []
+        # Runs the hand-off at once; LoopHass checks the real thread rule.
+        self.loop = SimpleNamespace(call_soon_threadsafe=lambda cb, *a: cb(*a))
 
     def async_create_task(self, coro, name=None):
         self.tasks.append(coro)
@@ -78,6 +80,39 @@ async def test_delivery_is_the_core_alert_path(hz, load, monkeypatch):
     await hz.async_announce(_Hass(), {}, {"type": "critical_hazard", "urgency": "critical",
                                           "message": "m", "entity_id": "binary_sensor.x"})
     assert seen == [("critical_hazard", "critical")]
+
+
+def test_an_alarm_seen_on_a_worker_thread_is_still_announced(hz, loop_hass, in_worker):
+    # HA 2026.11 refuses async_create_task off its loop; the listener runs
+    # on a worker thread, so every leak/smoke alarm was dropped (8.85.0).
+    assert in_worker(hz.on_state_changed, loop_hass, {},
+                     _event("binary_sensor.x", "moisture", "off", "on"))
+    loop_hass.settle()
+    assert loop_hass.tasks == ["nova_hazard_announce"]
+
+
+def test_run_on_loop_after_shutdown_does_not_raise(load, loop_hass):
+    common = load("core_common")
+    loop_hass.close()
+
+    async def _never():
+        raise AssertionError("must not run")
+    assert common.run_on_loop(loop_hass, _never, "nova_hazard_announce") is False
+
+
+def test_the_whole_path_from_a_worker_thread_announces_once(load, monkeypatch,
+                                                            loop_hass, in_worker):
+    rt = load("core_runtime")
+    state = load("core_state")._CORE
+    monkeypatch.setattr(state, "running", True)
+    monkeypatch.setattr(state, "hass", loop_hass)
+    monkeypatch.setattr(state, "config", {})
+    monkeypatch.setattr(state, "ignore_mgr", SimpleNamespace(is_ignored=lambda e: True))
+    monkeypatch.setattr(load("entity_filter"), "is_excluded", lambda h, e, *a: False)
+    monkeypatch.setattr(load("core_common"), "_live_honorific", lambda h: "")
+    in_worker(rt._on_state_changed, _event("binary_sensor.x", "smoke", "off", "on"))
+    loop_hass.settle()
+    assert loop_hass.tasks == ["nova_hazard_announce"]
 
 
 def test_the_core_listener_announces_before_ignore_rules(load, monkeypatch):

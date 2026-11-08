@@ -35,6 +35,8 @@ def _event(old, new, eid=ALARM, open_sensors=None):
 class _Hass:
     def __init__(self):
         self.tasks = []
+        # Runs the hand-off at once; LoopHass checks the real thread rule.
+        self.loop = SimpleNamespace(call_soon_threadsafe=lambda cb, *a: cb(*a))
         self.states = SimpleNamespace(get=lambda eid: SimpleNamespace(
             attributes={"friendly_name": {"binary_sensor.back_door": "Back Door"}.get(eid, eid)}))
 
@@ -93,6 +95,26 @@ def test_on_state_changed_schedules_one_alert(ca):
     assert ca.on_state_changed(hass, {}, _event("armed_away", "triggered"))
     assert not ca.on_state_changed(hass, {}, _event("armed_away", "pending"))
     assert len(hass.tasks) == 1
+
+
+def test_the_alarm_seen_on_a_worker_thread_is_still_announced(ca, loop_hass, in_worker):
+    # Same HA 2026.11 thread rule as the hazards (8.85.0).
+    assert in_worker(ca.on_state_changed, loop_hass, {}, _event("armed_away", "triggered"))
+    loop_hass.settle()
+    assert loop_hass.tasks == ["nova_alarm_announce"]
+
+
+def test_the_whole_path_from_a_worker_thread_alerts_once(ca, load, monkeypatch,
+                                                        loop_hass, in_worker):
+    rt = load("core_runtime")
+    state = load("core_state")._CORE
+    monkeypatch.setattr(state, "running", True)
+    monkeypatch.setattr(state, "hass", loop_hass)
+    monkeypatch.setattr(state, "config", {})
+    monkeypatch.setattr(state, "ignore_mgr", SimpleNamespace(is_ignored=lambda e: True))
+    in_worker(rt._on_state_changed, _event("armed_away", "triggered"))
+    loop_hass.settle()
+    assert loop_hass.tasks == ["nova_alarm_announce"]
 
 
 @pytest.mark.parametrize("value,expected", [

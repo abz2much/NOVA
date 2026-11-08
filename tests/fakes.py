@@ -6,6 +6,8 @@ Assistant.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -315,3 +317,44 @@ def attach_runtime(hass, runtime):
     entry = FakeConfigEntry(runtime)
     hass.config_entries = FakeConfigEntries([entry])
     return entry
+
+
+class LoopHass:
+    """Home Assistant's event loop thread, as strict as HA 2026.11.
+
+    A real asyncio loop runs on its own thread. `async_create_task` only
+    works on that thread: from any other it raises the RuntimeError HA
+    raises ("calls hass.async_create_task from a thread other than the
+    event loop"). Coroutines it is given are recorded by name and closed,
+    never run. `settle()` waits until callbacks already handed to the loop
+    have run; `close()` stops the loop and closes it.
+    """
+
+    def __init__(self, states=None):
+        self.loop = asyncio.new_event_loop()
+        self.tasks: list = []
+        self.states = states if states is not None else types.SimpleNamespace(
+            get=lambda eid: None)
+        self._thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self._thread.start()
+
+    def async_create_task(self, coro, name=None):
+        if threading.current_thread() is not self._thread:
+            coro.close()
+            raise RuntimeError(
+                "Detected that custom integration 'nova' calls hass.async_create_task "
+                "from a thread other than the event loop")
+        self.tasks.append(name)
+        coro.close()
+
+    def settle(self, timeout: float = 2.0) -> None:
+        done = threading.Event()
+        self.loop.call_soon_threadsafe(done.set)
+        assert done.wait(timeout), "the loop did not run"
+
+    def close(self) -> None:
+        if self.loop.is_closed():
+            return
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join(2.0)
+        self.loop.close()
