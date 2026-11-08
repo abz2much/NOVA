@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with: { python-version: "${{ matrix.python-version }}" }
       - name: Install the test tools
         # Listed in ci/requirements-unit.txt so Dependabot can keep them current.
@@ -79,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install PHACC and Nova's requirements
