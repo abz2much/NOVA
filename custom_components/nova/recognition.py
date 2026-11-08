@@ -322,7 +322,11 @@ async def restore(hass) -> None:
     try:
         saved = await hass.async_add_executor_job(_read_log)
         if saved and not _FACE_LOG:
-            _FACE_LOG.extend(saved)
+            # Marked as restored: the Faces tab shows them, but they never
+            # stand intrusion monitoring down (face_roster), because the log
+            # of unexplained person detections is not saved and so could not
+            # veto them.
+            _FACE_LOG.extend(dict(entry, restored=True) for entry in saved)
             last: dict = {}
             for entry in saved:
                 last[entry["camera_entity"]] = entry
