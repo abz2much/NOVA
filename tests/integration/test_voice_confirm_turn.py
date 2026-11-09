@@ -423,3 +423,22 @@ async def test_the_carried_history_is_not_replaced_by_the_cross_session_reseed(
         await _say(hass, entity_id, "it's freezing", a, conversation_id="conv-1")
         await _say(hass, entity_id, "Yes.", a, conversation_id="conv-2")
     assert "it's freezing" in asker.seen[1]
+
+
+async def test_the_context_a_satellite_reopen_passes_reaches_the_agent(hass, tmp_path,
+                                                                        monkeypatch):
+    """start_conversation's extra_system_prompt carries the question Nova just
+    asked aloud, so a bare "yes" has something to answer."""
+    from homeassistant.components import conversation as conv
+    from custom_components.nova import conversation as nova_conv
+    entity_id, a, _a_sat, _b, _calls, _pc = await _setup(hass, monkeypatch, tmp_path)
+    asker = _Asker()
+    local, run = asker.patches()
+    with local, run:
+        nova_conv._dedup_cache.clear()
+        await conv.async_converse(
+            hass, "Yes.", "voice-ctx", Context(user_id="u1"), agent_id=entity_id,
+            device_id=a, extra_system_prompt="Nova just asked aloud: \"Shall I close it?\"")
+        await _say(hass, entity_id, "Hello.", a, conversation_id="voice-plain")
+    assert "Shall I close it?" in asker.personas[0]
+    assert "Shall I close it?" not in asker.personas[1]

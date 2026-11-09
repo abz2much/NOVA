@@ -448,3 +448,46 @@ def test_a_night_level_hazard_speaks_through_quiet_hours_and_sleep(d):
     assert _say(d.decide(req, d.Conditions(quiet_hours=True, asleep=True))) == (True, True)
     # shush and the Announcements switch still hold the speech
     assert _say(d.decide(req, d.Conditions(announcements_on=False))) == (False, True)
+
+
+# ── a spoken question opens the microphone for the answer ───────────────────
+
+@pytest.fixture
+def listening(d, monkeypatch):
+    """Records what delivery asks continued_conversation to do."""
+    import sys
+    import types
+    pkg = d.__name__.rsplit(".", 1)[0]
+    rec = types.SimpleNamespace(on=True, asked=[])
+    ns = types.SimpleNamespace(
+        listen_after_questions=lambda: rec.on,
+        ends_in_question=lambda text: str(text or "").rstrip().endswith("?"),
+        schedule_answer_listen=lambda hass, targets, q: rec.asked.append((list(targets), q)) or True)
+    monkeypatch.setitem(sys.modules, f"{pkg}.continued_conversation", ns)
+    return rec
+
+
+async def test_a_spoken_question_listens_for_the_answer(d, fake, fake_hass, listening):
+    await d.async_deliver(fake_hass, _req(d, message="The garage is open. Shall I close it?"))
+    assert listening.asked == [(["media_player.hall"], "The garage is open. Shall I close it?")]
+
+
+@pytest.mark.parametrize("kw", [
+    dict(message="The washer is done."),                       # not a question
+    dict(message="Is the stove on?", urgency="high"),          # too important to wait on
+    dict(message="Is the stove on?", urgency="critical")])
+async def test_other_messages_leave_the_mic_alone(d, fake, fake_hass, listening, kw):
+    await d.async_deliver(fake_hass, _req(d, **kw))
+    assert listening.asked == []
+
+
+async def test_the_mic_stays_shut_when_the_setting_is_off(d, fake, fake_hass, listening):
+    listening.on = False
+    await d.async_deliver(fake_hass, _req(d, message="Shall I?"))
+    assert listening.asked == []
+
+
+async def test_nothing_listens_when_the_question_was_not_spoken(d, fake, fake_hass, listening):
+    fake["speech_works"] = False
+    await d.async_deliver(fake_hass, _req(d, message="Shall I?"))
+    assert listening.asked == []

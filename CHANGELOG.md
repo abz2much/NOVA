@@ -1,3 +1,11 @@
+## [8.85.14] Answer a spoken question
+
+### Added
+- **A spoken alert that asks a question can listen for the answer.** Off by default: set `proactive_question_listen` to `true` in `config.json`. When an ordinary alert ends in a question mark, the microphone of the satellite in that room opens once the speaker has finished, and Nova is told what it just asked, so "Yes" is understood. It never opens a microphone in another room, and never for high or critical alerts.
+
+### Fixed
+- **A satellite reopen can now carry background to the answer.** The extra text Home Assistant passes when it reopens a satellite was ignored, so a bare "Yes" had no question to answer. Nova now adds it to what the model sees for that turn, up to 400 characters.
+
 ## [8.85.13] Data retention
 
 ### Added

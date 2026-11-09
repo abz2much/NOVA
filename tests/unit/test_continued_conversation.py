@@ -345,3 +345,63 @@ def test_monotonic_clock_by_default(cc, monkeypatch):
     cc.remember_reopen("devA", "c")
     clock["t"] = 1200.0
     assert cc.take_reopened("devA") is None
+
+
+# ── listening for the answer to a spoken question ───────────────────────────
+
+@pytest.mark.parametrize("text, expected", [
+    ("The garage door is open. Shall I close it?", True),
+    ("  Is anyone home? ", True),
+    ('Did you mean the "hall light?"', True),
+    ("The washer is done.", False),
+    ("Why is this open? It was shut an hour ago.", False),
+    ("", False),
+    (None, False)])
+def test_only_a_message_ending_in_a_question_mark_asks(cc, text, expected):
+    assert cc.ends_in_question(text) is expected
+
+
+def test_the_answer_satellite_is_the_one_in_the_speakers_room(cc, monkeypatch):
+    _routing(cc, monkeypatch, area_of={SPK: "hall"},
+             sats={"hall": ["assist_satellite.hall"], "den": ["assist_satellite.den"]})
+    assert cc.answer_satellite(None, [SPK]) == "assist_satellite.hall"
+
+
+def test_a_satellite_that_spoke_is_listened_on(cc, monkeypatch):
+    _routing(cc, monkeypatch)
+    assert cc.answer_satellite(None, [SAT]) == SAT
+
+
+def test_no_satellite_in_the_room_means_no_microphone_opens(cc, monkeypatch):
+    """Never a satellite in another room: a mic must not open elsewhere."""
+    _routing(cc, monkeypatch, area_of={SPK: "hall"}, sats={"den": ["assist_satellite.den"]})
+    assert cc.answer_satellite(None, [SPK]) is None
+    _routing(cc, monkeypatch, area_of={}, sats={"den": ["assist_satellite.den"]})
+    assert cc.answer_satellite(None, [SPK]) is None
+    _routing(cc, monkeypatch, broken=True)
+    assert cc.answer_satellite(None, [SPK]) is None
+
+
+async def test_the_mic_opens_with_the_question_as_context(cc, fake_hass, sleeps, monkeypatch):
+    _routing(cc, monkeypatch, area_of={SPK: "hall"}, sats={"hall": [SAT]})
+    assert cc.schedule_answer_listen(fake_hass, [SPK], "Shall I close the garage?") is True
+    await fake_hass.drain()
+    (domain, service, data), = fake_hass.service_calls
+    assert (domain, service) == ("assist_satellite", "start_conversation")
+    assert data["entity_id"] == SAT and data["start_message"] == ""
+    assert "Shall I close the garage?" in data["extra_system_prompt"]
+
+
+def test_nothing_is_scheduled_without_a_satellite(cc, fake_hass, monkeypatch):
+    _routing(cc, monkeypatch, area_of={SPK: "hall"})
+    assert cc.schedule_answer_listen(fake_hass, [SPK], "Shall I?") is False
+    assert fake_hass._tasks == []
+
+
+def test_the_setting_is_off_unless_turned_on(cc, monkeypatch):
+    _config(cc, monkeypatch, {})
+    assert cc.listen_after_questions() is False
+    _config(cc, monkeypatch, {"proactive_question_listen": True})
+    assert cc.listen_after_questions() is True
+    _config(cc, monkeypatch, broken=True)
+    assert cc.listen_after_questions() is False

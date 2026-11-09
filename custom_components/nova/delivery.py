@@ -447,7 +447,25 @@ async def _say(hass, req: DeliveryRequest, out: Outcome, speak) -> bool:
         except Exception as exc:
             _LOGGER.warning("delivery: %s speech failed: %s", req.source, exc)
             return False
-    return bool(out.targets) and await _speak(hass, req, message, out.targets, out.request_id)
+    spoken = bool(out.targets) and await _speak(hass, req, message, out.targets,
+                                                out.request_id)
+    if spoken:
+        _listen_for_answer(hass, req, message, out.targets)
+    return spoken
+
+
+def _listen_for_answer(hass, req: DeliveryRequest, message: str, targets: list) -> None:
+    """A spoken question opens the satellite mic for the answer, when the
+    person switched that on. Never for a high or critical alert, which says
+    its piece and waits for nothing. A failure here never undoes the alert."""
+    if req.urgency in ("high", "critical"):
+        return
+    try:
+        from . import continued_conversation as cc
+        if cc.listen_after_questions() and cc.ends_in_question(message):
+            cc.schedule_answer_listen(hass, targets, message)
+    except Exception as exc:
+        _LOGGER.debug("delivery: listening for the answer skipped: %s", exc)
 
 
 def _falls_back(req: DeliveryRequest) -> bool:
