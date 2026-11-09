@@ -199,6 +199,7 @@
     "pattern_learn_presence",
     "pattern_min_occurrences",
     "person_honorifics",
+    "proactive_question_listen",
     "reasoning_model",
     "reasoning_provider",
     "recognition_source",

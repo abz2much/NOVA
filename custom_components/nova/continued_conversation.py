@@ -120,8 +120,9 @@ def _speaker_state(hass, speaker_entity_id: str) -> Optional[str]:
 
 async def _reopen_after_speaker(hass, satellite_entity_id: str,
                                 speaker_entity_id: str, reply_text: str,
-                                follow: bool = True) -> None:
-    """Wait for the speaker to finish the reply, then reopen the mic."""
+                                follow: bool = True, context: str = "") -> None:
+    """Wait for the speaker to finish the reply, then reopen the mic.
+    ``context`` goes to the answer as extra_system_prompt."""
     import asyncio
     import time
 
@@ -149,6 +150,8 @@ async def _reopen_after_speaker(hass, satellite_entity_id: str,
         else satellite_entity_id
     try:
         payload = {"entity_id": target, "start_message": ""}
+        if context:
+            payload["extra_system_prompt"] = context
         await hass.services.async_call("assist_satellite", "start_conversation",
                                        payload, blocking=False)
     except Exception:  # noqa: BLE001
@@ -156,15 +159,66 @@ async def _reopen_after_speaker(hass, satellite_entity_id: str,
 
 
 def schedule_reopen(hass, satellite_entity_id: Optional[str], speaker_entity_id: Optional[str],
-                    reply_text: str, *, follow: bool = True) -> bool:
+                    reply_text: str, *, follow: bool = True, context: str = "") -> bool:
     """Start the speaker-aware reopen in the background. False if not possible."""
     if not satellite_entity_id or not speaker_entity_id:
         return False
     hass.async_create_task(
         _reopen_after_speaker(hass, satellite_entity_id, speaker_entity_id,
-                              reply_text, follow=follow)
+                              reply_text, follow=follow, context=context)
     )
     return True
+
+
+# ── A spoken alert that asks a question ─────────────────────────────────────
+
+_QUESTION_CONTEXT = "Nova just asked aloud: \"{}\" The person's next words answer it."
+
+
+def listen_after_questions() -> bool:
+    """Whether a spoken alert that ends in a question opens the mic for the
+    answer. Off unless switched on."""
+    return _flag("proactive_question_listen", False)
+
+
+def ends_in_question(text) -> bool:
+    """True when the message ends in a question mark (a closing quote or
+    bracket after it does not matter)."""
+    return str(text or "").rstrip().rstrip("\"')]").endswith("?")
+
+
+def answer_satellite(hass, targets) -> Optional[str]:
+    """The satellite to listen on: one that spoke the alert, else one in the
+    room of a speaker that did. None when there is none, because a mic must
+    never open in a room the alert was not heard in."""
+    targets = [str(t) for t in (targets or [])]
+    for target in targets:
+        if target.startswith("assist_satellite."):
+            return target
+    try:
+        from . import audio_routing
+        for target in targets:
+            area = audio_routing.entity_area(hass, target)
+            if not area:
+                continue
+            found = audio_routing.satellites_in_area(hass, area)
+            if found:
+                return str(found[0])
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def schedule_answer_listen(hass, targets, question: str) -> bool:
+    """Once the speaker has finished the question, open the satellite's mic,
+    passing the question so the answer makes sense. False when there is no
+    satellite to listen on."""
+    satellite = answer_satellite(hass, targets)
+    if not satellite:
+        return False
+    speakers = [str(t) for t in targets if not str(t).startswith("assist_satellite.")]
+    return schedule_reopen(hass, satellite, (speakers or [satellite])[0], question,
+                           follow=False, context=_QUESTION_CONTEXT.format(question[:300]))
 
 
 def remember_reopen(device_id: Optional[str], conversation_id: Optional[str], *, now=None) -> None:

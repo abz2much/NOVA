@@ -198,6 +198,19 @@ When Nova keeps a satellite listening after its own question (for example
 conversation, so a plain "Yes" is understood. This lasts 60 seconds and only
 on that satellite.
 
+### Answering a question in a spoken alert
+
+Off by default. Set `proactive_question_listen` to `true` in `config.json`
+and a spoken alert that ends in a question mark (for example "The garage door
+is still open. Shall I close it?") opens the microphone of the satellite in
+that room once the speaker has finished. Nova is told the question it just
+asked, so a plain "Yes" is understood.
+
+- It only listens on a satellite that spoke the alert or sits in the same
+  area as the speaker that did. With none, nothing opens.
+- High and critical alerts never wait for an answer.
+- Nothing is spoken twice: the alert is said once, then the microphone opens.
+
 Replies on a voice satellite are kept to one or two short sentences, and
 never talk about voice phrases, tools or how Nova works. Chat replies are
 unchanged.

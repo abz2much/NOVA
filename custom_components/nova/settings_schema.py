@@ -284,6 +284,9 @@ _ALL = (
     # Camera analyses Nova starts itself, per day, over every camera. 0 is
     # no limit. Doorbell presses, requests and the alarm are never held back.
     _n("vision_daily_limit", 300),
+    # A spoken alert that ends in "?" opens the satellite mic in that room
+    # for the answer. Off unless switched on; never for high or critical.
+    _b("proactive_question_listen", False),
     # Days of pattern history to keep (7 to 365). The daily purge trims past
     # it and compacts the database; chats stay at 30 days or less.
     _n("data_retention_days", 90),

@@ -891,6 +891,12 @@ class NovaAgent(conversation.ConversationEntity):
                     extras.append(VOICE_REPLY_RULE)
             except Exception as exc:
                 _LOGGER.debug("Voice reply rule skipped: %s", exc)
+        # Background a satellite reopen passes along (start_conversation's
+        # extra_system_prompt), for example the question Nova just asked aloud.
+        if device_id and not is_chat:
+            background = str(getattr(user_input, "extra_system_prompt", "") or "").strip()
+            if background:
+                extras.append(background[:400])
         for block in extras:
             if block:
                 persona += "\n\n" + block
