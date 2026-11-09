@@ -241,8 +241,27 @@ class _CameraWatch:
 
     # Nest ------------------------------------------------------------------
 
+    def _note_person(self, camera: str) -> None:
+        """Tell stand-down a person was seen on this camera. Safety context,
+        so it does not depend on the Camera Watch switches."""
+        try:
+            from .recognition import note_person_detected
+            note_person_detected(camera)
+        except Exception as exc:
+            _LOGGER.debug("Nova: could not note a person on %s: %s", camera, exc)
+
     @callback
     def on_nest(self, event: Any) -> None:
+        try:
+            data = event.data
+            kind = str(data.get("type") or data.get("event_type") or "").lower()
+            device = data.get("device_id") or data.get("nest_device_id")
+            if "person" in kind and device:
+                camera = self._nest_camera(self.hass, device)
+                if camera:
+                    self._note_person(camera)
+        except Exception as exc:
+            _LOGGER.debug("Nova (nest person note) error: %s", exc)
         if not self._flag("camera_auto_analyze", True):
             return
         try:
@@ -333,6 +352,8 @@ class _CameraWatch:
         if not hit:
             return
         camera, role = hit
+        if role == "stranger":
+            self._note_person(camera)
         if role.startswith("package_"):
             # Package Watch alone, as with the porch sweep this replaced, so
             # Camera Watch off with Package Watch on keeps working.

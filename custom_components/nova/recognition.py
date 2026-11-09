@@ -192,8 +192,9 @@ def _parse_sub_label(sub) -> tuple[str, float]:
 
 def _camera_entity_from_name(camera_name: str) -> str:
     """Frigate and Double Take name cameras like ``front_door``; Home Assistant
-    calls the same camera ``camera.front_door``."""
-    return "camera." + camera_name.lower()
+    calls the same camera ``camera.front_door``. A full entity id is kept."""
+    name = camera_name.lower()
+    return name if name.startswith("camera.") else "camera." + name
 
 
 def remember_recognition(camera_name: str, name: str, confidence: float,
@@ -342,7 +343,8 @@ async def restore(hass) -> None:
 
 
 def note_person_detected(camera_name: str) -> None:
-    """Record a Frigate person detection on this camera."""
+    """Record a person detection on this camera (a name like ``front_door`` or
+    an entity id). Frigate, Nest and Eufy all report here."""
     try:
         _PERSON_LOG.append({"camera_entity": _camera_entity_from_name(camera_name),
                             "ts": _utcnow()})

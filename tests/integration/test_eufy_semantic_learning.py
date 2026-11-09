@@ -347,3 +347,22 @@ async def test_no_vision_llm_call_for_routine_person_detection(hass, monkeypatch
     await hass.async_block_till_done()
 
     assert vision_called["count"] == 0
+
+
+async def test_a_eufy_stranger_is_noted_as_a_person_but_a_known_face_is_not(hass, monkeypatch):
+    from custom_components.nova import camera_semantic, recognition
+
+    async def _fake_record(hass_, **kw):
+        return True
+    monkeypatch.setattr(camera_semantic, "record_event", _fake_record)
+    recognition._PERSON_LOG.clear()
+
+    entry, ent = await _setup_nova_with_eufy(hass)
+    hass.states.async_set(ent["person"], "on")
+    await hass.async_block_till_done()
+    assert recognition.recent_person_detections(60) == []
+
+    hass.states.async_set(ent["stranger"], "on")
+    await hass.async_block_till_done()
+    assert [p["camera_entity"] for p in recognition.recent_person_detections(60)] == [ent["camera"]]
+    recognition._PERSON_LOG.clear()

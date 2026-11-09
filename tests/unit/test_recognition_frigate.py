@@ -124,6 +124,7 @@ def test_parse_sub_label(rec, sub, want):
 
 def test_camera_entity_from_name(rec):
     assert rec._camera_entity_from_name("Front_Door") == "camera.front_door"
+    assert rec._camera_entity_from_name("camera.front_door") == "camera.front_door"   # an id is kept
 
 
 # ── remembering ──────────────────────────────────────────────────────────────
