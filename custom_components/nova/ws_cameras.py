@@ -32,8 +32,6 @@ from .ws_log import nova_log
 
 _LOGGER = logging.getLogger(f"{__package__}.websocket")
 
-_Conn = websocket_api.ActiveConnection
-
 # The panel asks for a snapshot every few seconds; a broken camera logs at
 # most once in this window.
 _SNAP_LOG_QUIET_S = 300
@@ -72,7 +70,7 @@ def _reason(what: str, exc: Exception) -> str:
     vol.Required("camera"): dict,
 })
 @websocket_api.async_response
-async def ws_compute_camera_coverage(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_compute_camera_coverage(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Which rooms one camera can confirm, and why, worked out from the
     geometric candidates the panel sends (AI review with a geometry only
     fallback)."""
@@ -99,7 +97,7 @@ async def ws_compute_camera_coverage(hass: HomeAssistant, connection: _Conn, msg
     vol.Required("entity_id"): str,
 })
 @websocket_api.async_response
-async def ws_camera_snapshot(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_camera_snapshot(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """One frame from Nova's camera backends, as base64 JPEG.
 
     The panel falls back to this when Home Assistant's camera proxy has
@@ -137,7 +135,7 @@ async def ws_camera_snapshot(hass: HomeAssistant, connection: _Conn, msg: dict) 
     vol.Required("name"): vol.Any(str, None),
 })
 @websocket_api.async_response
-async def ws_rename_camera(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_rename_camera(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Give a camera a name used only inside Nova; a blank name goes back
     to Home Assistant's. The entity itself is never renamed."""
     entity_id = str(msg["entity_id"])
@@ -168,7 +166,7 @@ async def ws_rename_camera(hass: HomeAssistant, connection: _Conn, msg: dict) ->
     vol.Required("mode"): vol.In(["auto", "indoor", "outdoor"]),
 })
 @websocket_api.async_response
-async def ws_camera_location(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_camera_location(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Mark a camera indoor or outdoor, or hand it back to the heuristics.
 
     The entity goes into the indoor_entities or outdoor_entities list, which
@@ -234,7 +232,7 @@ def _camera_platforms(hass: HomeAssistant) -> tuple[list[dict], dict[str, int]]:
     vol.Optional("entity_id"): str,
 })
 @websocket_api.async_response
-async def ws_camera_diagnostics(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_camera_diagnostics(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """A list of every camera Home Assistant has, and when a camera is given,
     a test of each way Nova can get a frame from it. Admins only, and one
     probe per camera a minute: it can wake the camera's stream."""
@@ -306,7 +304,7 @@ def _room_sensors(hass: HomeAssistant, entity_ids, now: float):
     vol.Required("type"): "nova/mmwave_overview",
 })
 @websocket_api.async_response
-async def ws_mmwave_overview(hass: HomeAssistant, connection: _Conn, msg: dict) -> None:
+async def ws_mmwave_overview(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     """Rooms with presence, occupancy or motion sensors, for the residence
     tab, each with its sensors' live state. A room with only a door contact
     is left out, so the tab shows real presence coverage.

@@ -311,9 +311,9 @@ async def solar_status(hass) -> dict:
     advice = []
     if solar_w is not None:
         line = f"Generating {solar_w / 1000:.1f} kW of solar right now."
-        if grid_direction == "export":
+        if grid_direction == "export" and grid_w is not None:
             line += f" Exporting {abs(grid_w) / 1000:.1f} kW to the grid."
-        elif grid_direction == "import":
+        elif grid_direction == "import" and grid_w is not None:
             line += f" Still importing {grid_w / 1000:.1f} kW from the grid."
         if battery_pct is not None:
             line += f" Battery at {battery_pct:.0f}%."
@@ -378,7 +378,7 @@ async def _daily_sum(hass, entity_id: Optional[str]) -> Optional[float]:
     for row in rows:
         raw_state = row.get("state") if isinstance(row, dict) else getattr(row, "state", None)
         try:
-            values.append(float(raw_state))
+            values.append(float(raw_state))  # type: ignore[arg-type]  # None raises TypeError, caught below
         except (TypeError, ValueError):
             continue
     if len(values) < 2:
@@ -427,7 +427,7 @@ def _linked_forecast_entries(hass, prefs: Optional[dict]) -> list:
 def _forecast_key(entry) -> Optional[str]:
     """The output key (forecast_today_total_kwh and so on) for one forecast
     sensor's registry entry, from its platform's key scheme, or None."""
-    keys = _FORECAST_KEYS.get(getattr(entry, "platform", None)) or {}
+    keys = _FORECAST_KEYS.get(getattr(entry, "platform", None) or "") or {}
     uid = getattr(entry, "unique_id", "") or ""
     for suffix, out_key in keys.items():
         if uid.endswith(suffix):

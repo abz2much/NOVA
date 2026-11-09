@@ -185,7 +185,7 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
     provider = cam._cfg_opt(hass, "vision_provider", "groq") or "groq"
     model = cam._cfg_opt(hass, "vision_model", cam.VISION_MODEL) or cam.VISION_MODEL
     image_url = "data:image/jpeg;base64," + base64.b64encode(frame).decode()
-    question = [
+    question: list[dict] = [
         {"role": "system", "content": _PKG_PROMPT},
         {"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": image_url}},

@@ -343,7 +343,7 @@ async def async_announce(hass: HomeAssistant, text: str, tts_entity: str | None,
 
     try:
         from .diagnostics.service_health import record_usage
-        record_usage("tts", bool(took), None if took else "all speakers failed")
+        record_usage("tts", bool(took), "" if took else "all speakers failed")
     except Exception:
         pass
 

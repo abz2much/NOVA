@@ -58,7 +58,7 @@ def energy_card_data(status: dict, today: dict) -> Optional[dict]:
     stays empty: Nova keeps no hourly series, and the panel hides it."""
     status = status if isinstance(status, dict) else {}
     today = today if isinstance(today, dict) else {}
-    data = {
+    data: dict[str, Any] = {
         "solar_today_kwh": _num(today.get("solar_kwh"), 1),
         "battery_pct": _num((status.get("battery") or {}).get("pct"), 0),
         "export_kwh": _num(today.get("grid_export_kwh"), 1),

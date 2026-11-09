@@ -155,7 +155,7 @@ async def _reopen_after_speaker(hass, satellite_entity_id: str,
         pass
 
 
-def schedule_reopen(hass, satellite_entity_id: str, speaker_entity_id: str,
+def schedule_reopen(hass, satellite_entity_id: Optional[str], speaker_entity_id: Optional[str],
                     reply_text: str, *, follow: bool = True) -> bool:
     """Start the speaker-aware reopen in the background. False if not possible."""
     if not satellite_entity_id or not speaker_entity_id:
@@ -167,7 +167,7 @@ def schedule_reopen(hass, satellite_entity_id: str, speaker_entity_id: str,
     return True
 
 
-def remember_reopen(device_id: str, conversation_id: str, *, now=None) -> None:
+def remember_reopen(device_id: Optional[str], conversation_id: Optional[str], *, now=None) -> None:
     """Note which conversation a reopen on ``device_id`` continues."""
     if not device_id or not conversation_id:
         return

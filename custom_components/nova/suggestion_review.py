@@ -93,8 +93,8 @@ def build_messages(pattern: Any, *, fence: Callable[..., str]) -> list[dict]:
         automation = json.loads(generate_automation(pattern))
     except Exception:
         automation = {}
-    match = details.get("automation_match") if isinstance(
-        details.get("automation_match"), dict) else {}
+    raw_match = details.get("automation_match")
+    match = raw_match if isinstance(raw_match, dict) else {}
     existing = [str(m.get("name") or m.get("entity_id") or "")
                 for m in (match.get("matches") or []) if isinstance(m, dict)]
     data = {

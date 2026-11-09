@@ -358,7 +358,7 @@ def match(text: Any, config: Any) -> Optional[PhraseMatch]:
             for phrase in entry.get("phrases") or []:
                 if not isinstance(phrase, str):
                     continue
-                hit = _match_phrase(u_norm, phrase, mode)
+                hit = _match_phrase(u_norm, phrase, str(mode))
                 if hit is not None:
                     tier, n_content, extra = hit
                     found.append(((tier == "exact", n_content, -extra), entry, phrase, tier))

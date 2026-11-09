@@ -113,7 +113,7 @@ def _area_capabilities(hass: HomeAssistant, area_id: str) -> list[str]:
         if domain == "binary_sensor":
             state = hass.states.get(entity_id)
             kind = state.attributes.get("device_class") if state else None
-            code = _SENSOR_CAPABILITY.get(kind)
+            code = _SENSOR_CAPABILITY.get(kind or "")
         else:
             code = _DOMAIN_CAPABILITY.get(domain)
         if code:

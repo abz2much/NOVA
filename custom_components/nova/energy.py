@@ -116,7 +116,7 @@ def _read_whole_home_watts(hass) -> tuple[Optional[float], str]:
     (None, meter) when it exists but gives no number."""
     # A meter the user picked is used even when it gives no number: home
     # load is then unavailable, never a guess (8.85.0).
-    meter = _picked_meter()
+    meter: Optional[str] = _picked_meter()
     if not meter:
         try:
             from . import appliance_monitor
@@ -159,7 +159,7 @@ def _running_appliances(hass) -> list[dict]:
     declared = _cfg("appliances", [])
     if not isinstance(declared, list):
         return []
-    running = []
+    running: list[dict] = []
     for appliance in declared:
         if not isinstance(appliance, dict):
             continue

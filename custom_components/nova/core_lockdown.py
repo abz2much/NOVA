@@ -339,7 +339,7 @@ class LockdownManager:
                 if state.entity_id not in self.exempt_locks
                 and str(state.state).lower() not in _LOCK_STATES_HANDLED]
 
-    def _is_relevant(self, dom: str, dc, eid: str = None) -> bool:
+    def _is_relevant(self, dom: str, dc, eid: Optional[str] = None) -> bool:
         if dom == "lock":
             return eid not in self.exempt_locks
         if dom == "cover":
@@ -437,10 +437,10 @@ class LockdownManager:
         except Exception as exc:
             # The live check skipped it (door open, or unreadable) or the
             # command failed: either way it is named as not locked.
-            skipped = isinstance(exc, NotSecured)
             _LOGGER.warning("Lockdown: %s %s: %s",
-                            "skipped" if skipped else "failed to lock", eid, exc)
-            if skipped:
+                            "skipped" if isinstance(exc, NotSecured) else "failed to lock",
+                            eid, exc)
+            if isinstance(exc, NotSecured):
                 await self._record("not locked", exc.note, entity_id=eid,
                                    assessment=exc.code)
                 await self._set_row(row_id, "blocked", exc.code)

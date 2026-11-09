@@ -108,13 +108,13 @@ def quiet() -> tuple[bool, dict]:
     unshush or nothing is muted."""
     from . import output_gate
     gate = output_gate.status()
-    attrs = {
+    attrs: dict[str, Any] = {
         "mute_all": bool(gate["mute_all"]),
         "muted_categories": list(gate["muted_categories"]),
         "muted_entities": list(gate["muted_entities"]),
         "until": _iso(output_gate.quiet_until()),
     }
-    on = attrs["mute_all"] or bool(attrs["muted_categories"] or attrs["muted_entities"])
+    on = bool(attrs["mute_all"]) or bool(attrs["muted_categories"] or attrs["muted_entities"])
     return on, attrs
 
 

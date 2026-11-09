@@ -14,7 +14,7 @@ import os
 import re
 import time
 import weakref
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -47,7 +47,7 @@ _LOGGER = logging.getLogger(__name__)
 try:   # faces seen recently, for the prompt; optional
     from .recognition import recognition_context_string
 except ImportError:
-    recognition_context_string = None
+    recognition_context_string = None  # type: ignore[assignment]
 
 MAX_HISTORY = 20    # turns kept per conversation for the agent
 MAX_ITERS = 8       # the agent's tool loop limit
@@ -713,7 +713,7 @@ class NovaAgent(conversation.ConversationEntity):
             if voice_line is not None:
                 nova_log("VOICE", voice_line + (" recording" if recording else ""))
             if recording:
-                return _silent(user_input, user_input.conversation_id, enrol_reply)
+                return _silent(user_input, user_input.conversation_id, enrol_reply or "")
 
         # ── Several satellites, one request (v5.7.01) ───────────────────────
         is_dup, cached = False, None
@@ -770,7 +770,7 @@ class NovaAgent(conversation.ConversationEntity):
             pending_offer = (cognitive_core.pending_offer_for(self.hass, device_id)
                              if device_id and not is_chat else None)
         except Exception:
-            cognitive_core = None
+            cognitive_core = None  # type: ignore[assignment]
             pending_offer = None
         # A plain yes or no to that offer passes; anything else said in the
         # room must still be addressed to Nova. Chat turns always are, and so
@@ -795,7 +795,7 @@ class NovaAgent(conversation.ConversationEntity):
         # unresolved speaker never falls back to the shared "primary" bucket.
         # Seeding, semantic memory, knowledge and the command log all reuse
         # this; when it fails they behave as with nobody resolved.
-        identity_module = None
+        identity_module: Any = None
         ident = None
         episodic_subject = None
         try:

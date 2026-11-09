@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Optional, Sequence
 
 from .solar import (
     _daily_sum, _energy_to_kwh, _grid_direction, _grid_sensors, _live_pct, _live_watts,
@@ -84,7 +84,7 @@ def net_flow(flows: list[tuple[Optional[float], Optional[str]]]) -> Optional[flo
     understate the flow."""
     if not flows or any(w is None for w, _ in flows):
         return None
-    return sum(w for w, _ in flows)
+    return sum(w for w, _ in flows if w is not None)
 
 
 def flow_state(net_w: Optional[float], kind: str) -> tuple[Optional[int], Optional[str]]:
@@ -103,7 +103,7 @@ def solar_power(rates: list[Optional[float]]) -> Optional[float]:
     one is unavailable."""
     if not rates or any(r is None for r in rates):
         return None
-    return sum(abs(r) for r in rates)
+    return sum(abs(r) for r in rates if r is not None)
 
 
 def house_power(solar_w: Optional[float], battery_net: Optional[float],
@@ -199,7 +199,7 @@ def build_status(solar_rates: list[Optional[float]],
                  battery_flows: list[tuple[Optional[float], Optional[str]]],
                  battery_pcts: list[Optional[float]],
                  grid_flows: list[tuple[Optional[float], Optional[str]]],
-                 battery_packs: list[tuple[Optional[float], Optional[float]]] = ()) -> dict:
+                 battery_packs: Sequence[tuple[Optional[float], Optional[float]]] = ()) -> dict:
     """The status dict from already read values, one entry per configured
     source. Unconfigured when there is no solar, battery or grid source.
     battery_packs is one (capacity kWh, percent) pair per battery source."""
@@ -247,8 +247,8 @@ def home_today(solar: Optional[float], grid_import: Optional[float], grid_export
     grid export - battery charged. None if any part is None. A negative
     under TODAY_NOISE_KWH reads as 0; a larger one means the totals
     disagree, so the result is None."""
-    parts = (solar, grid_import, grid_export, charged, discharged)
-    if any(p is None for p in parts):
+    if solar is None or grid_import is None or grid_export is None \
+            or charged is None or discharged is None:
         return None
     total = solar + grid_import + discharged - grid_export - charged
     if total < 0:
@@ -288,7 +288,7 @@ def _totals_side(hass, source: dict) -> Optional[str]:
     either is missing or they cannot be compared. Passing no rate makes
     solar._grid_direction answer from the totals only, never the sign."""
     found = _grid_direction(hass, source, None)
-    return {"import": "from", "export": "to"}.get(found)
+    return {"import": "from", "export": "to"}.get(found or "")
 
 
 def _source_rate(hass, source: dict) -> Optional[float]:
@@ -298,7 +298,7 @@ def _source_rate(hass, source: dict) -> Optional[float]:
     values = [_live_watts(hass, e) for e in _grid_sensors(source)["rates"]]
     if not values or any(v is None for v in values):
         return None
-    return sum(values)
+    return sum(v for v in values if v is not None)
 
 
 def _flows(hass, sources: list[dict]) -> list[tuple[Optional[float], Optional[str]]]:
@@ -331,8 +331,11 @@ async def energy_flow_status(hass) -> dict:
 def _capacity_kwh(source: dict) -> Optional[float]:
     """A battery source's "capacity" from the Energy dashboard prefs, read
     as kWh. None when missing or not a positive number."""
+    raw_capacity = source.get("capacity")
+    if raw_capacity is None:
+        return None
     try:
-        cap = float(source.get("capacity"))
+        cap = float(raw_capacity)
     except (TypeError, ValueError):
         return None
     return cap if cap > 0 else None

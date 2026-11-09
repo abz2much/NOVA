@@ -130,7 +130,7 @@ def _local_clock(stamp: str) -> str:
     return moment.astimezone().strftime("%H:%M")
 
 
-def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
+def _gather_overnight_events(hass: HomeAssistant, hours: float = 12) -> list[str]:
     """Up to ten sentinel events from the last `hours`, newest first, each
     as "HH:MM: detail" in local time."""
     db_file = Path(_conversations_db())

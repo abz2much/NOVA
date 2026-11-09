@@ -213,7 +213,7 @@ def _numeric_series(samples, points: int) -> list[float]:
         else:
             raw = getattr(sample, "state", None)
         try:
-            values.append(float(raw))
+            values.append(float(raw))  # type: ignore[arg-type]  # None raises TypeError, caught below
         except (TypeError, ValueError):
             pass
     return _downsample(values, points)

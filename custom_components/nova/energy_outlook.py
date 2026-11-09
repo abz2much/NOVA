@@ -669,7 +669,8 @@ def build_outlook(now: datetime, tariff: Optional[dict], export_tariff: Optional
 
     messages, states = [], []
     if tariff_status == "learning":
-        messages.append(_MESSAGES["tariff_learning"].format(n=tariff["days"], need=TARIFF_MIN_DAYS))
+        messages.append(_MESSAGES["tariff_learning"].format(
+            n=(tariff or {}).get("days", 0), need=TARIFF_MIN_DAYS))
         states.append("learning")
     elif not priced:
         messages.append(_MESSAGES["no_price"])
@@ -698,7 +699,7 @@ def build_outlook(now: datetime, tariff: Optional[dict], export_tariff: Optional
                       solar, loads)
     out["points"] = points
 
-    advice = []
+    advice: list[Optional[dict]] = []
     if tariff_status == "ok" and capacity_kwh:
         advice.append(advice_battery_hold(points, stored_kwh, capacity_kwh))
         if has_forecast:
@@ -716,9 +717,9 @@ def build_outlook(now: datetime, tariff: Optional[dict], export_tariff: Optional
                 {d: v for d, v in usual_by_day.items() if d in full},
                 {d: v for d, v in solar_by_day.items() if d in full}))
     advice.append(advice_high_use(now, today_home_kwh, profile))
-    advice = [a for a in advice if a]
-    advice.sort(key=lambda a: (a["level"] == "info", -(a.get("saving") or 0.0)))
-    out["advice"] = advice[:3]
+    kept = [a for a in advice if a]
+    kept.sort(key=lambda a: (a["level"] == "info", -(a.get("saving") or 0.0)))
+    out["advice"] = kept[:3]
     out["best_window"] = best_window(points, hours, flat=tariff_status == "flat") if priced else None
     return out
 
@@ -762,8 +763,9 @@ async def _state_history(hass, entity_id: str, start: datetime, end: datetime
         if t is None:
             continue
         state = row.get("state") if isinstance(row, dict) else getattr(row, "state", None)
+        v: Optional[float]
         try:
-            v = float(state)
+            v = float(state)  # type: ignore[arg-type]  # None raises TypeError, caught below
             v = v if math.isfinite(v) else None
         except (TypeError, ValueError):
             v = None
@@ -804,7 +806,7 @@ async def _hourly_changes(hass, ids: list[str], start: datetime, end: datetime
     return out
 
 
-def _parse_hourly(mapping: dict, scale: float) -> dict[datetime, float]:
+def _parse_hourly(mapping: Optional[dict], scale: float) -> dict[datetime, float]:
     out: dict[datetime, float] = {}
     for key, val in (mapping or {}).items():
         try:
@@ -864,9 +866,9 @@ async def _forecast_hourly(hass, now: datetime, tz, prefs: Optional[dict] = None
     if linked:
         try:
             ids = [entry_id for domain, entry_id in linked if domain == prefer]
-            out = await _energy_platform_forecast(hass, prefer, ids)
-            if out:
-                return out, "hourly"
+            linked_out = await _energy_platform_forecast(hass, prefer or "", ids)
+            if linked_out:
+                return linked_out, "hourly"
         except Exception as exc:
             _LOGGER.debug("energy_outlook: linked forecast failed: %s", exc)
 
@@ -1026,7 +1028,8 @@ async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: 
     if hit is not None and _clock() - hit["at"] < LEARNED_TTL_S:
         return hit["value"]
 
-    tariff = await _tariff(hass, *grid["import_price"], now, tz)
+    import_entity, import_number = grid["import_price"]
+    tariff = await _tariff(hass, import_entity, import_number, now, tz)
     export_tariff = None
     exp_entity, exp_number = grid["export_price"]
     if exp_entity or exp_number is not None:
@@ -1045,7 +1048,7 @@ async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: 
     # The day's forecast: the "forecast today" sensors of the one forecast
     # integration in use, added up per day (one per array) where every one
     # of them has a morning value.
-    pairs = []
+    pairs: list[tuple[float, float]] = []
     if fc_entities and solar_ids:
         days = [now.date() - timedelta(days=d) for d in range(FACTOR_DAYS, 0, -1)]
         per_entity = []
@@ -1058,7 +1061,7 @@ async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: 
         for day in days:
             values = [m.get(day) for m in per_entity]
             if day in actual and all(v is not None for v in values):
-                pairs.append((actual[day], sum(values)))
+                pairs.append((actual[day], sum(v for v in values if v is not None)))
     value = {"tariff": tariff, "export_tariff": export_tariff, "profile": profile,
              "factor": forecast_factor(pairs)}
     _learned_cache.clear()

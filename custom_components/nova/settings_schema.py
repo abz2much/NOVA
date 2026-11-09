@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 BOOL = "bool"
 NUMBER = "number"
@@ -54,7 +54,7 @@ class Setting:
     exact_true: bool = False
 
 
-def _b(key: str, default: bool, payload: str = "plain", exact_true: bool = False) -> Setting:
+def _b(key: str, default: Optional[bool], payload: str = "plain", exact_true: bool = False) -> Setting:
     return Setting(key, BOOL, default, payload, exact_true)
 
 

@@ -11,6 +11,7 @@ the repairs platform, which would expect a fix flow.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
@@ -25,7 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 # Our own record of the notice, so an outage does not rewrite the registry
 # over and over and a restart leaves nothing stale. cleared_once lets the
 # first success after startup remove a notice from an earlier run.
-_state = {"active": False, "detail": None, "cleared_once": False}
+_state: dict[str, Any] = {"active": False, "detail": None, "cleared_once": False}
 
 
 def note_llm_problem(hass: HomeAssistant, detail: str) -> None:

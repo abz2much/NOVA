@@ -20,7 +20,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 from homeassistant.core import Event, HomeAssistant, callback
 
@@ -195,7 +195,7 @@ class _ProactiveState:
     last_briefing_time: float = 0.0
     last_arrival_briefing: float = 0.0
     security_events: list = field(default_factory=list)   # opening times
-    unsub_presence: Optional[object] = None
+    unsub_presence: Optional[Callable[[], None]] = None
     unsub_timer: Optional[object] = None
     # Who presence says has come home, waiting for the front door to open.
     pending_arrival_person: str = ""
@@ -251,6 +251,8 @@ def _release_arrival() -> None:
     _STATE.last_arrival_briefing = now
     _LOGGER.info("Proactive: %s opened the front door, triggering welcome "
                  "briefing", person)
+    if _STATE.hass is None:
+        return
     _STATE.hass.async_create_task(
         _trigger_briefing("arrival", person_name=person, person_entity=entity))
 
@@ -284,6 +286,8 @@ def _count_opening() -> None:
         return
     _LOGGER.info("Proactive: %d security events in 30min (house empty), "
                  "triggering security briefing", len(_STATE.security_events))
+    if _STATE.hass is None:
+        return
     _STATE.hass.async_create_task(_trigger_briefing("security"))
     _STATE.security_events.clear()
 

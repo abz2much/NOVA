@@ -226,6 +226,7 @@ def forget(*, fact_id: Optional[int] = None, subject: Optional[str] = None,
            key: Optional[str] = None) -> int:
     """Delete one fact by id, or by key (within one subject when given).
     Returns how many rows went."""
+    params: tuple
     if fact_id is not None:
         sql, params = "DELETE FROM facts WHERE id = ?", (fact_id,)
     elif key is not None and subject is not None:
@@ -261,7 +262,8 @@ def _live_rows(conn: sqlite3.Connection, subject: Optional[str], now: float,
                subjects: Optional[list] = None, status: Optional[str] = None) -> list:
     """Unexpired fact rows. ``subjects`` (a list) wins over ``subject``;
     ``status`` limits them to one status."""
-    where, params = ["(expires_at IS NULL OR expires_at >= ?)"], [now]
+    where: list = ["(expires_at IS NULL OR expires_at >= ?)"]
+    params: list = [now]
     if subjects is not None:
         where.append("subject IN (%s)" % (",".join("?" * len(subjects)) or "''"))
         params += list(subjects)

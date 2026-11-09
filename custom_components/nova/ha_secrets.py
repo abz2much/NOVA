@@ -73,7 +73,7 @@ def _read_secrets(path: Path | None = None, force: bool = False) -> dict:
     """
     global _SECRETS_CACHE
     cacheable = path is None
-    target = _secrets_path() if cacheable else path
+    target = _secrets_path() if (cacheable or path is None) else path
     cached = _SECRETS_CACHE
     if cacheable and not force and cached is not None and cached[0] == target:
         return cached[1]
@@ -388,7 +388,7 @@ async def split_shared_credential(hass) -> dict:
     from .const import CREDENTIAL_LEGACY_FALLBACK_PROVIDERS
     run = hass.async_add_executor_job
 
-    result = {"migrated": None, "ambiguous": False, "reason": None}
+    result: dict[str, Any] = {"migrated": None, "ambiguous": False, "reason": None}
     try:
         cfg = await run(nova_config.get_all)
     except Exception:
@@ -398,6 +398,7 @@ async def split_shared_credential(hass) -> dict:
         return result
 
     saved = str(cfg.get("llm_provider") or "").strip().lower()
+    target: Optional[str]
     if saved in CREDENTIAL_LEGACY_FALLBACK_PROVIDERS:
         target = saved
     else:

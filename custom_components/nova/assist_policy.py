@@ -348,7 +348,7 @@ def _map_reported(reported: Any, domain: str) -> Optional[tuple]:
 def _intent_service(intent_type: str) -> str:
     """A readable service label for a fixed-domain convenience intent."""
     base = intent_type[4:] if intent_type.startswith("Hass") else intent_type
-    out = []
+    out: list[str] = []
     for ch in base:
         if ch.isupper() and out:
             out.append("_")

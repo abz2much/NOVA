@@ -584,7 +584,7 @@ def _known_notify_services(hass: HomeAssistant) -> list:
 def _area_rows(hass: HomeAssistant, bedrooms) -> list:
     """One card per area with anything in it: occupied rooms first, then
     bedrooms, then by name."""
-    rows = []
+    rows: list[dict[str, Any]] = []
     for area_id in _all_areas_with_anything(hass):
         capabilities = _area_capabilities(hass, area_id)
         occupied = audio_routing.is_area_occupied(hass, area_id)

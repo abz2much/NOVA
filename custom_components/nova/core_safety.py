@@ -10,7 +10,7 @@ import datetime
 import json
 import logging
 import time
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from homeassistant.core import HomeAssistant
 
@@ -117,7 +117,7 @@ class SafetyManager:
         # When each kind of alert or check last went out (epoch seconds).
         self._last_intrusion_alert = self._last_freeze_alert = 0.0
         self._last_lockdown_check = 0.0
-        self._investigation = None   # the intrusion investigation under way, if any
+        self._investigation: Optional[dict] = None   # the intrusion investigation under way, if any
         self._freeze_warned = False
         # One cold spell is one episode: the critical alert is spoken once,
         # reminders after that go to the phones only, and the episode ends
@@ -137,7 +137,7 @@ class SafetyManager:
         self._saved: tuple = (None, None)
         # The household reading for the tick under way (household.py); None
         # between ticks, when the helpers below read the house live.
-        self._house = None
+        self._house: Optional[Any] = None
         # Doors and windows already open when the alarm armed home or night,
         # and that arming's time. A sensor dropping out and coming back
         # resets its change time, so these stay left out until seen shut.
@@ -451,8 +451,8 @@ class SafetyManager:
                      if household.ALARM_POSTURE.get(str(st.state).lower()) == household.HOME]
         except Exception:
             return None
-        times = [t for t in times if t is not None]
-        return min(times) if times else None
+        stamps = [t for t in times if t is not None]
+        return min(stamps) if stamps else None
 
     def _note_open_when_armed(self) -> None:
         """Keep _open_when_armed up to date. On a new arming for people at
@@ -832,6 +832,8 @@ class SafetyManager:
         way in, or a camera confirms a person; motion unrelated to the entry is
         watched, not concluded. Returns an alert only when it escalates."""
         inv = self._investigation
+        if inv is None:
+            return None
         # Stand down once the situation that opened it is over: the residents
         # came home (away), or the house woke (sleeping). Old investigations
         # have no trigger and count as away. Confinement ending is handled by
@@ -1104,7 +1106,7 @@ class SafetyManager:
                 [{"key": eid, "domain": domain, "service": service, "entity_id": eid}
                  for eid, domain, service in planned])) if planned else {}
 
-        sweep = {"locked": [], "closed": [], "failed": [], "failed_eids": [], "sent": []}
+        sweep: dict[str, list] = {"locked": [], "closed": [], "failed": [], "failed_eids": [], "sent": []}
         for states, domain in ((locks, "lock"), (covers, "cover")):
             if not await self._secure_all(states, domain, rows, sweep, automatic_generation):
                 return []
@@ -1209,7 +1211,7 @@ class SafetyManager:
                 sweep["failed"].append(name)
                 sweep["failed_eids"].append(eid)
                 await self._log_row(row_id, "blocked" if skipped else "failed",
-                                    exc.code if skipped else "service_call_failed")
+                                    exc.code if isinstance(exc, NotSecured) else "service_call_failed")
         return True
 
     async def _verify(self, sweep: dict, memory: dict) -> list:

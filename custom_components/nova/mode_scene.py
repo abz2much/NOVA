@@ -8,7 +8,7 @@ logged, so a mood can never stop a mode from switching.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ async def apply_mode_entry(
             )
 
         row = await hass.async_add_executor_job(_open_row)
+        data: dict[str, Any]
         if level == 0:
             service, data = "turn_off", {"entity_id": lights}
         else:

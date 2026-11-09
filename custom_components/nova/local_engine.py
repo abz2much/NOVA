@@ -596,7 +596,7 @@ def _find_entities_in_area(hass, area_name, domain):
         try:
             from .entity_filter import is_excluded
         except Exception:
-            def is_excluded(_hass, _eid):
+            def is_excluded(hass, entity_id, *args, **kwargs):  # type: ignore[misc]
                 return False
         area_reg, ent_reg, dev_reg = _registries(hass)
         area = _first_area(area_reg, area_name)
@@ -696,7 +696,8 @@ def _needs_confirmation(hass, action, entity_id="", device_id=None) -> bool:
     service = _service_for(action, entity_id)
     if service is None:
         return False
-    return _policy_requires_confirmation(hass, *service, entity_id, device_id)
+    domain, service_name = service
+    return _policy_requires_confirmation(hass, domain, service_name, entity_id, device_id)
 
 
 def _needs_confirmation_domain(hass, domain, service, entity_id="", device_id=None) -> bool:
@@ -1462,6 +1463,8 @@ def _action_args(action: str, groups: tuple) -> dict:
     if action not in keys:
         return {}
     spoken = extra if (extra and action != "volume_set") else (groups[0] if groups else None)
+    if spoken is None:
+        return {}
     try:
         return {keys[action]: int(spoken)}
     except (TypeError, ValueError):

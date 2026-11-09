@@ -98,7 +98,7 @@ def _pattern_rate_ok(entity_id: str, now: float, device_class: str = "") -> bool
 
 
 def log_command(text: str, handled_by: str = "agent",
-                entity_ids: list = None, person: str = "unknown"):
+                entity_ids: Optional[list] = None, person: str = "unknown"):
     """Store a spoken or typed command for pattern learning."""
     store = _m_state._CORE.state_logger
     if store:
@@ -132,7 +132,10 @@ def log_camera_event(entity_id: str, new_state: str, area_id: str = "",
     learning is off. This writes to SQLite, so call it from the executor."""
     if not learning_active():
         return False
-    _m_state._CORE.state_logger.log_state_change(
+    logger = _m_state._CORE.state_logger
+    if logger is None:
+        return False
+    logger.log_state_change(
         entity_id, "", new_state, area_id,
         triggered_by="camera", person=person,
         person_confidence=float(person_confidence or 0.0),

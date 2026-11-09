@@ -15,7 +15,7 @@ REASONING_SYSTEM_APPENDIX and the rest) with the same signatures.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from .cognitive import coordinator as _coordinator
 from .cognitive import evaluators as _evaluators
@@ -38,7 +38,7 @@ _TRUE_WORDS = ("1", "true", "yes", "on")
 def _snapshot(event_summary="", urgency="", category="", recent_announcements=(),
               anyone_home=False, from_state="", to_state="", entity_id="",
               friendly_name="", device_class="") -> EventSnapshot:
-    fields = dict(locals())
+    fields: dict[str, Any] = dict(locals())
     return EventSnapshot.build(**fields)
 
 
@@ -184,7 +184,7 @@ async def decide(hass, provider, *, honorific: str, event_summary: str,
     is cached. With the connection breaker open the model is skipped. The
     hooks are read now, so a patched rule or switch takes effect. See
     cognitive.coordinator."""
-    fields = dict(
+    fields: dict[str, Any] = dict(
         honorific=honorific, event_summary=event_summary,
         home_state_summary=home_state_summary, classifier_urgency=classifier_urgency,
         classifier_category=classifier_category,

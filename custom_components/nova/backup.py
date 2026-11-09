@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import threading
 import time
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def _database_snapshots(root: str, arcroot: str, snap_dir: str) -> dict[str, tup
     # off so a backup never changes a database's journal mode. Imported here
     # because this module also loads without the rest of Nova.
     from .persistence import sqlite as _store
-    plain = dict(busy_timeout_ms=None, wal=False, row_factory=False, mkdir=False)
+    plain: dict[str, Any] = dict(busy_timeout_ms=None, wal=False, row_factory=False, mkdir=False)
     found: dict[str, tuple[str, str]] = {}
     for source, arcname in candidates:
         if not source.endswith(".db") or os.path.islink(source) or not _is_sqlite(source):
@@ -252,7 +253,7 @@ def _moved(member: tarfile.TarInfo, old: str, new: str) -> tarfile.TarInfo:
     target too, so it still names the same member)."""
     def swap(name: str) -> str:
         return new + name[len(old):] if name.startswith(old) else name
-    changes = {"name": swap(member.name)}
+    changes: dict[str, Any] = {"name": swap(member.name)}
     if member.islnk():
         changes["linkname"] = swap(member.linkname)
     return member.replace(**changes, deep=False)
