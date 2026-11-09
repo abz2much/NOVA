@@ -59,6 +59,7 @@ EXECUTORS = {
         "search_entities": "_exec_search_entities",
         "get_area_devices": "_exec_get_area_devices",
         "get_home_summary": "_exec_home_summary",
+        "security_audit": "_exec_security_audit",
         "activity_history": "_exec_activity_history",
     },
     "memory": {
@@ -108,6 +109,7 @@ RULES = {
         "search_entities": (False, False, False, False),
         "get_area_devices": (False, False, False, False),
         "get_home_summary": (False, False, False, False),
+        "security_audit": (False, False, False, False),
         "activity_history": (False, False, False, False),
     },
     "memory": {
@@ -192,7 +194,7 @@ def test_each_tool_runs_the_function_from_its_capability_module(reg):
 
 def test_the_dispatch_table_holds_exactly_these_tools(reg):
     assert set(reg._TOOL_MAP) == set(_flat(EXECUTORS))
-    assert len(reg._TOOL_MAP) == 54
+    assert len(reg._TOOL_MAP) == 55
     assert "delegate_task" not in reg._TOOL_MAP
 
 

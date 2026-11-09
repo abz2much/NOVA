@@ -142,6 +142,9 @@ Center** setting turns the rotation off.
   `get_area_devices`, `get_home_summary`), and read Home Assistant's history
   and logbook to answer "what happened while I was out?"
   (`activity_history`).
+- It can check the home's security when you ask "is the house secure?"
+  (`security_audit`). It reads states only and changes nothing. See
+  [Safety and security](safety-and-security.md#asking-for-a-security-check).
 - Names are matched in a fixed order: entity ID, then exact name or alias,
   then the kind of device you name (such as "the lights"), then close
   matches with a clear lead. If a name could mean several devices, Nova asks

@@ -1,3 +1,8 @@
+## [8.85.15] Security check
+
+### Added
+- **Ask Nova whether the house is secure.** A new read-only tool, `security_audit`, answers "is the house secure?" or "did I leave anything open?". It lists open doors, windows and garage doors, unlocked locks, a disarmed alarm, and sensors, locks, alarms or cameras it cannot read, most serious first. Open and unlocked things are only flagged when nobody is home. With no readable person entity it says it cannot tell and judges none of them. Locks exempted from lockdown are left out. It changes nothing.
+
 ## [8.85.14] Answer a spoken question
 
 ### Added

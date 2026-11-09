@@ -1,5 +1,5 @@
 """Read only home tools: entity state, entity search, a room's devices, the
-home summary and recorded history."""
+home summary, a security audit and recorded history."""
 from __future__ import annotations
 
 import json
@@ -269,6 +269,83 @@ async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
                               "temperature": weather.attributes.get("temperature"),
                               "humidity": weather.attributes.get("humidity")}
     return json.dumps(summary)
+
+
+# ── security audit ──────────────────────────────────────────────────────────
+
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_UNREADABLE = ("unavailable", "unknown")
+
+
+def _exempt_locks() -> set:
+    """Locks left out of every check (a thermostat's child lock, say)."""
+    try:
+        from ...core_bridge import _lockdown_exempt_locks
+        return set(_lockdown_exempt_locks())
+    except Exception:
+        return set()
+
+
+def _security_findings(states, exempt: set) -> dict:
+    """What is wrong with the home's security, from states alone. Open ways in,
+    unlocked locks and a disarmed alarm count only when nobody is home. A
+    sensor, lock, alarm or camera that cannot be read counts always. With no
+    person to go by, nothing is said about being away."""
+    people = [s.state for s in states.async_all("person")]
+    known = [p for p in people if p not in _UNREADABLE]
+    anyone_home = None if not known else any(p == "home" for p in known)
+    away = anyone_home is False
+    findings: list[dict] = []
+
+    def add(severity: str, entity_id: str, what: str) -> None:
+        findings.append({"severity": severity, "entity_id": entity_id, "what": what})
+
+    for s in states.async_all("binary_sensor"):
+        if s.attributes.get("device_class", "") not in _OPENINGS:
+            continue
+        if s.state == "on" and away:
+            add("high", s.entity_id, f"{_name(s)} is open and nobody is home")
+        elif s.state in _UNREADABLE:
+            add("medium", s.entity_id,
+                f"{_name(s)} sensor cannot be read, so Nova cannot tell if it is open")
+    for s in states.async_all("cover"):
+        if s.attributes.get("device_class", "") in ("garage", "door", "gate") \
+                and s.state == "open" and away:
+            add("high", s.entity_id, f"{_name(s)} is open and nobody is home")
+    for s in states.async_all("lock"):
+        if s.entity_id in exempt:
+            continue
+        if s.state == "unlocked" and away:
+            add("high", s.entity_id, f"{_name(s)} is unlocked and nobody is home")
+        elif s.state in _UNREADABLE:
+            add("medium", s.entity_id,
+                f"{_name(s)} cannot be read, so Nova cannot tell if it is locked")
+    for s in states.async_all("alarm_control_panel"):
+        if s.state == "disarmed" and away:
+            add("medium", s.entity_id, f"{_name(s)} is disarmed and nobody is home")
+        elif s.state in _UNREADABLE:
+            add("medium", s.entity_id, f"{_name(s)} cannot be read")
+    for s in states.async_all("camera"):
+        if s.state in _UNREADABLE:
+            add("low", s.entity_id, f"{_name(s)} is offline")
+
+    findings.sort(key=lambda f: _SEVERITY_ORDER[f["severity"]])
+    report: dict[str, Any] = {"anyone_home": anyone_home, "findings": findings,
+                              "all_clear": anyone_home is not None and not findings}
+    if anyone_home is None:
+        report["note"] = ("Nova cannot tell whether anyone is home (no readable "
+                          "person entities), so it has not judged open doors, "
+                          "unlocked locks or the alarm.")
+    return report
+
+
+async def _exec_security_audit(hass: HomeAssistant, args: dict) -> str:
+    """A read only check of the home's security: what is open, unlocked,
+    disarmed or unreadable, most serious first. It changes nothing."""
+    try:
+        return json.dumps(_security_findings(hass.states, _exempt_locks()))
+    except Exception as exc:
+        return json.dumps({"error": tool_error_text(exc, "security_audit")})
 
 
 async def _exec_activity_history(hass: HomeAssistant, args: dict) -> str:
