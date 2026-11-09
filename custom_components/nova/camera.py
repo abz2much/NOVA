@@ -36,6 +36,7 @@ from .const import DEFAULT_VISION_MODEL, DOMAIN
 from .database import save_message
 from .directive_helper import build_system_prompt
 from .tts_helper import async_announce
+from . import vision_budget
 
 try:
     from .recognition import last_seen_at
@@ -87,6 +88,24 @@ def _cfg_opt(hass: HomeAssistant, key: str, default=None):
     Reads the entry's runtime config, so it belongs on the event loop."""
     from . import nova_config
     return nova_config.runtime_get(hass, _camera_entry(hass), key, default)
+
+
+def _vision_limit(hass: HomeAssistant) -> int:
+    """Today's limit on the analyses Nova starts itself (0 is no limit)."""
+    return vision_budget.limit_from(
+        _cfg_opt(hass, "vision_daily_limit", vision_budget.DEFAULT_DAILY_LIMIT))
+
+
+def _over_the_limit(hass: HomeAssistant, camera_name: str, limit: int) -> dict:
+    """The answer for an automatic analysis the day's limit has stopped. The
+    first one each day is logged; the rest are quiet."""
+    if vision_budget.note_refusal():
+        _LOGGER.warning(
+            "Nova has used today's %d automatic camera analyses, so the rest wait "
+            "until tomorrow. Raise vision_daily_limit to allow more, or set it to 0 "
+            "for no limit.", limit)
+        _nova_log(f"Camera analyses paused for today: the limit of {limit} is used up")
+    return {"success": False, "error": "vision_budget", "camera": camera_name}
 
 
 async def _camera_config(hass: HomeAssistant) -> dict:
@@ -868,18 +887,24 @@ async def _frames_for(hass: HomeAssistant, entity_id: str, data: dict,
 async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_client,
                                honorific: str, tts_entity: str | None,
                                speakers: list[str], gate_announce: bool = False,
-                               force_images: Optional[list] = None) -> dict:
+                               force_images: Optional[list] = None,
+                               background: bool = False) -> dict:
     """The nova.analyze_camera service, also used by the automatic paths.
 
     Gets a frame (or a clip, with ``frames`` above one, or the given
     ``force_images``), describes it with the vision model, judges it with the
     camera reasoning model and records the result across Nova. With
     ``gate_announce`` only notable scenes are spoken; a manual request always
-    reports back."""
+    reports back. ``background`` marks an analysis Nova began on its own; it
+    counts against the day's limit (vision_budget) and is skipped once that
+    is used up."""
     entity_id: str = call.data["entity_id"]
     prompt: str = call.data.get("prompt", _DEFAULT_PROMPT)
     announce: bool = call.data.get("announce", True)
     camera_name = _camera_friendly_name(hass, entity_id)
+    limit = _vision_limit(hass) if background else 0
+    if background and vision_budget.exhausted(limit):
+        return _over_the_limit(hass, camera_name, limit)
     integration = _camera_integration(hass, entity_id)
     _LOGGER.info("Nova: analysing %s (%s, via %s)", entity_id, camera_name, integration)
 
@@ -902,6 +927,8 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
     payload = [sheet] if sheet is not None else frames
     encoded = [base64.b64encode(frame).decode() for frame in payload]
 
+    if background and not vision_budget.take(limit):
+        return _over_the_limit(hass, camera_name, limit)   # used up while this one waited
     task = _vision_task(camera_name, len(encoded) if clip else 0, sheet is not None,
                         interval, _recognition_hint(hass, entity_id))
     system = build_system_prompt(hass, honorific, task)
@@ -1293,7 +1320,7 @@ async def async_visitor_observation(hass: HomeAssistant, groq_client, honorific:
     })
     result = await async_analyze_camera(
         hass, request, groq_client, honorific, None, [],
-        gate_announce=True, force_images=[_downscale_jpeg(frame)])
+        gate_announce=True, force_images=[_downscale_jpeg(frame)], background=True)
     if not result.get("success"):
         return
     await _log_training(hass, entity_id, "visitor", result)
@@ -1324,4 +1351,5 @@ async def async_auto_analyze_on_event(hass: HomeAssistant, groq_client, honorifi
         "interval": 1.2,
     })
     await async_analyze_camera(
-        hass, request, groq_client, honorific, tts_entity, speakers, gate_announce=True)
+        hass, request, groq_client, honorific, tts_entity, speakers,
+        gate_announce=True, background=True)

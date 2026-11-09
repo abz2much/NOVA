@@ -1027,10 +1027,10 @@ def flows(cam, load, monkeypatch, fake_hass):
                               media=None)
 
     async def analyse(hass, call, client, honorific, tts, speakers, gate_announce=False,
-                      force_images=None):
+                      force_images=None, background=False):
         f.calls.append({"data": dict(call.data), "gate": gate_announce,
                         "force": force_images, "honorific": honorific, "tts": tts,
-                        "speakers": speakers})
+                        "speakers": speakers, "background": background})
         return dict(f.results.pop(0))
     monkeypatch.setattr(cam, "async_analyze_camera", analyse)
 
@@ -1070,6 +1070,7 @@ async def test_doorbell_live_clip_wins(cam, flows, fake_hass):
         "behind them. Focus on what the resident would want to know.")
     assert (data["announce"], data["frames"], data["interval"]) == (False, 3, 1.2)
     assert flows.calls[0]["gate"] is True and len(flows.calls) == 1
+    assert flows.calls[0]["background"] is False     # someone rang: always answered
     assert res["spoke"] is True
     req = flows.delivered[0]
     assert (req.source, req.category, req.message, req.entity_id) == \
@@ -1126,6 +1127,7 @@ async def test_auto_analyse(cam, flows, fake_hass):
         "it. Focus on what the resident would want to know."),
         "announce": True, "frames": 3, "interval": 1.2}
     assert flows.calls[1]["gate"] is True
+    assert flows.calls[1]["background"] is True      # counts against the daily limit
 
 
 async def test_auto_analyse_doorbell(cam, flows, fake_hass, monkeypatch):
@@ -1147,6 +1149,7 @@ async def test_visitor_observation(cam, flows, fake_hass, monkeypatch):
     call = flows.calls[1]
     assert call["force"] == [b"small:EV"] and call["tts"] is None and call["speakers"] == []
     assert call["data"]["announce"] is False and call["gate"] is True
+    assert call["background"] is True
     assert call["data"]["prompt"].startswith("A person was detected at the door (no doorbell")
     assert flows.logged == [("Door", "camera.door", "visitor", {"success": True})]
 
@@ -1166,3 +1169,30 @@ async def test_visitor_observation_live_and_nothing(cam, flows, fake_hass, monke
 
 def test_fake_call(cam):
     assert cam._FakeCall({"a": 1}).data == {"a": 1}
+
+
+# ── the daily limit on automatic analyses ───────────────────────────────────
+
+async def test_an_automatic_analysis_is_skipped_once_the_day_is_used_up(cam, monkeypatch, fake_hass):
+    vb = cam.vision_budget
+    vb.reset()
+    monkeypatch.setattr(cam, "_cfg_opt", lambda hass, key, default=None:
+                        2 if key == "vision_daily_limit" else default)
+    asked = []
+
+    async def frames(*args, **kwargs):
+        asked.append(1)
+        return [], 1.0
+    monkeypatch.setattr(cam, "_frames_for", frames)
+    monkeypatch.setattr(cam, "_camera_friendly_name", lambda h, e: "Yard")
+    monkeypatch.setattr(cam, "_camera_integration", lambda h, e: "x")
+    vb.take(2)
+    vb.take(2)
+    call = cam._FakeCall({"entity_id": "camera.yard", "announce": False})
+    out = await cam.async_analyze_camera(fake_hass, call, "C", "sir", None, [], background=True)
+    assert out == {"success": False, "error": "vision_budget", "camera": "Yard"}
+    assert asked == []                      # nothing was fetched or paid for
+    # A request someone made themselves is never held back.
+    out = await cam.async_analyze_camera(fake_hass, call, "C", "sir", None, [])
+    assert out["error"] == "no_image" and asked == [1]
+    vb.reset()
