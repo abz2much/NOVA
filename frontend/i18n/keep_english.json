@@ -75,11 +75,24 @@
    "Hybrid"
   ],
   "da": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
+   "Feedback",
+   "Garage",
    "Hybrid",
+   "Live",
+   "Orange",
+   "Scene",
    "Script",
    "Send",
    "Status",
-   "Zone {number}"
+   "Zone {number}",
+   "garage",
+   "normal",
+   "{count} sensor"
   ],
   "de": [
    "BRIEFINGS",
@@ -163,18 +176,40 @@
    "▶ BRIEFING…"
   ],
   "it": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
    "BROADCAST",
+   "CAM {number}",
+   "Feedback",
+   "Garage",
    "Home",
+   "No",
    "OFF",
    "ON",
+   "Routine",
    "SATELLITE",
    "Satellite",
-   "Script"
+   "Script",
+   "SearXNG (self-hosted)",
+   "garage"
   ],
   "nb": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
    "Hybrid",
+   "Live",
+   "Scene",
    "Send",
-   "Status"
+   "Status",
+   "Thai",
+   "normal",
+   "{count} sensor"
   ],
   "nl": [
    "+ Camera",
@@ -216,10 +251,20 @@
    "ROUTING"
   ],
   "pt": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
+   "Manual",
    "OFF",
    "ON",
    "Real",
-   "Script"
+   "Script",
+   "normal",
+   "real",
+   "watts",
+   "{count} sensor"
   ],
   "pt-br": [
    "1 min",
@@ -242,11 +287,25 @@
    "{count} sensor"
   ],
   "ro": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
    "CALENDAR",
+   "CAM {number}",
+   "Calendar",
+   "Feedback",
    "General",
    "Include",
+   "Live",
+   "Manual",
    "Real",
-   "Script"
+   "Script",
+   "normal",
+   "real",
+   "{count} ACTIVE",
+   "◉ SEMANTIC (Ollama)"
   ],
   "sv": [
    "1 min",
@@ -263,6 +322,24 @@
    "garage",
    "normal",
    "{count} sensor"
+  ],
+  "fi": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min",
+   "Thai"
+  ],
+  "sk": [
+   "1 min",
+   "10 min",
+   "2 min",
+   "3 min",
+   "5 min"
+  ],
+  "tr": [
+   "normal"
   ]
  },
  "setup dialog": {

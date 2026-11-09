@@ -749,7 +749,7 @@
   "That link already exists.": "该关联已存在。",
   "That link is no longer waiting for confirmation.": "该关联已不再等待确认。",
   "The first name must be 1 to 80 characters and cannot be 'unknown'.": "第一个名称必须为 1 到 80 个字符，且不能是 'unknown'。",
-  "The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.": "Nova 说话和书写所用的语言。面板本身的语言在上方设置，不受影响。安全通知仅提供英语、法语、德语、西班牙语、意大利语、荷兰语和葡萄牙语翻译；在其他语言中仍为英语，而 Nova 生成的文本会遵循此设置。",
+  "The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian only; in any other language they stay in English, while text Nova generates follows this setting.": "Nova 说话和书写所用的语言。面板本身的语言在上方设置，不受影响。安全通知仅提供英语、法语、德语、西班牙语、意大利语、荷兰语、葡萄牙语、波兰语、俄语和乌克兰语翻译；在其他语言中仍为英语，而 Nova 生成的文本会遵循此设置。",
   "The link word must be lowercase with underscores, 2 to 40 characters, such as owns or adjacent_to.": "关联词必须为小写并使用下划线，2 到 40 个字符，例如 owns 或 adjacent_to。",
   "The provider returned more models than fit in one page — list may be incomplete.": "服务商返回的模型多于一页可容纳的数量——列表可能不完整。",
   "The second name must be 1 to 80 characters and cannot be 'unknown'.": "第二个名称必须为 1 到 80 个字符，且不能是 'unknown'。",

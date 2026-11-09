@@ -955,7 +955,7 @@
  "The app had no voice saved for {name}.",
  "The data is not valid JSON.",
  "The first name must be 1 to 80 characters and cannot be 'unknown'.",
- "The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.",
+ "The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian only; in any other language they stay in English, while text Nova generates follows this setting.",
  "The link word must be lowercase with underscores, 2 to 40 characters, such as owns or adjacent_to.",
  "The provider returned more models than fit in one page — list may be incomplete.",
  "The second name must be 1 to 80 characters and cannot be 'unknown'.",

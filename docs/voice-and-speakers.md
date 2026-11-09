@@ -368,8 +368,8 @@ person's voice again. The token is in the backup, so Nova keeps working.
   which voice is used, Home Assistant's language, or the panel. Nova asks the
   voice to speak that language when the voice says it can. A voice that cannot
   keeps its own default, and English always does. Safety notifications are
-  translated into English, French, German, Spanish, Italian, Dutch and
-  Portuguese. In other languages they stay English.
+  translated into English, French, German, Spanish, Italian, Dutch, Portuguese,
+  Polish, Russian and Ukrainian. In other languages they stay English.
 
 ## Troubleshooting
 
@@ -397,7 +397,7 @@ Panel, **Settings → General**:
 |---|---|
 | Announcements | Master switch for proactive speech. Your own reminders and briefings ignore it. |
 | Nova speaks | The language Nova talks and writes in. Auto follows Home Assistant, including its region, such as Brazilian Portuguese, Canadian French, Latin American Spanish, Swiss German or Traditional Chinese. |
-| Language | The panel's language. Auto follows Home Assistant. Fully translated in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional Chinese; other languages are partly translated. |
+| Language | The panel's language. Auto follows Home Assistant. Translated in all 20 panel languages. |
 
 Panel, **Settings → Room Speakers**, **Satellite → Speaker** and
 **Announcement Speakers**: see above.
