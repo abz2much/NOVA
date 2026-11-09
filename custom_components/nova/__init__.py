@@ -611,15 +611,31 @@ async def _sleep_prompt_tick(hass: HomeAssistant, entry: NovaConfigEntry,
         _LOGGER.debug("Nova sleep-prompt tick error: %s", exc)
 
 
+# Chats and the activity log are never kept past 30 days. Pattern history is
+# what camera awareness looks back over, so it gets the data_retention_days
+# setting (90 by default). A shorter setting trims chats sooner too.
 _PURGE_KEEP_DAYS = 30
-# Pattern history is kept longer: camera awareness can look back 90 days.
-_PATTERN_KEEP_DAYS = 90
+_RETENTION_DEFAULT = 90
+_RETENTION_RANGE = (7, 365)
+
+
+def _retention_days() -> int:
+    """The data_retention_days setting, held to 7..365; 90 if unusable."""
+    value = _briefing_setting("data_retention_days", _RETENTION_DEFAULT)
+    try:
+        days = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return _RETENTION_DEFAULT
+    return max(_RETENTION_RANGE[0], min(_RETENTION_RANGE[1], days))
 
 
 async def _db_purge_tick(hass: HomeAssistant, _now: Any) -> None:
-    """Old conversation rows and expired facts, once a day."""
+    """Old conversation rows, expired facts and old pattern history, once a
+    day. Each database is compacted when rows went."""
     try:
-        deleted = await hass.async_add_executor_job(purge_old_records, _PURGE_KEEP_DAYS)
+        keep = _retention_days()
+        deleted = await hass.async_add_executor_job(
+            purge_old_records, min(_PURGE_KEEP_DAYS, keep))
         from . import knowledge
         expired = await hass.async_add_executor_job(knowledge.purge_expired)
         if deleted or expired:
@@ -627,7 +643,7 @@ async def _db_purge_tick(hass: HomeAssistant, _now: Any) -> None:
                          "%d expired fact(s)", deleted, expired)
         from . import cognitive_core
         history = await hass.async_add_executor_job(
-            cognitive_core.purge_old_history, _PATTERN_KEEP_DAYS)
+            cognitive_core.purge_old_history, keep)
         if history:
             _LOGGER.info("Nova daily purge: %d pattern history row(s)", history)
     except Exception as exc:
@@ -956,7 +972,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         _LOGGER.info("Nova: nightly sleep-state prompt active "
                      "(checked every %s min)", 10)
     if sched.add("db_purge", timedelta(hours=24), partial(_db_purge_tick, hass)):
-        _LOGGER.info("Nova: automatic database purge active (daily; conversations 30 days, pattern history 90 days)")
+        _LOGGER.info("Nova: automatic database purge active (daily; conversations up to 30 days, pattern history per data_retention_days, 90 by default)")
     await _attempt("Nova: briefing scheduler registration failed: %s",
                    partial(_schedule_briefings, hass, entry, llm_client, unsubs),
                    level=logging.DEBUG)

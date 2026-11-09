@@ -82,3 +82,21 @@ def test_purge_never_raises_on_a_broken_db(load, tmp_path, monkeypatch):
     blocker.write_text("x")                          # a file where a dir is needed
     monkeypatch.setattr(db, "DB_PATH", blocker / "sub" / "conversations.db")
     assert db.purge_old_records(days=30) == 0         # fails safe, doesn't raise
+
+
+def test_purge_gives_the_freed_space_back_to_the_disk(load, tmp_path, monkeypatch):
+    """Deleting rows alone leaves the file as big as it was."""
+    db = load("database")
+    path = tmp_path / "conversations.db"
+    monkeypatch.setattr(db, "DB_PATH", path)
+    with db._connect() as conn:
+        conn.executemany(
+            "INSERT INTO conversations (timestamp, device_id, role, content) VALUES (?,?,?,?)",
+            [(_iso(40), "test", "user", "x" * 2000) for _ in range(400)])
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # the rows are in the file
+    before = path.stat().st_size
+
+    assert db.purge_old_records(days=30) == 400
+
+    assert path.stat().st_size < before / 2

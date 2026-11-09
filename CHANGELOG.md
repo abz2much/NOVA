@@ -1,3 +1,11 @@
+## [8.85.13] Data retention
+
+### Added
+- **A setting for how long learned history is kept.** `data_retention_days` in `config.json` (7 to 365, 90 by default, the same as before). The daily clean-up deletes pattern history older than that. Chats and the activity log stay at 30 days, or at this setting if it is lower.
+
+### Fixed
+- **The databases now shrink after the daily clean-up.** Deleting old rows left `patterns.db` and `conversations.db` as big as they were. Nova now compacts each one after it deletes rows from it.
+
 ## [8.85.12] Smaller fixes from the review
 
 ### Fixed

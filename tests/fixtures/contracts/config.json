@@ -88,6 +88,7 @@
     "continued_conversation_speaker_reopen",
     "custom_base_url",
     "custom_modes",
+    "data_retention_days",
     "departure_alerts_enabled",
     "departure_excluded_calendars",
     "departure_lead_minutes",

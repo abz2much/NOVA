@@ -76,6 +76,19 @@ def connect(path: StrPath, *, timeout: float = 5.0,
     return conn
 
 
+def compact(conn: sqlite3.Connection) -> None:
+    """Hand the space freed by deleted rows back to the disk (VACUUM, then
+    empty the write-ahead log). Call it on a connection with nothing
+    pending, after a purge. It never raises: a store that is busy simply
+    stays its size until the next day's purge."""
+    try:
+        conn.commit()
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error as exc:
+        _LOGGER.debug("Nova storage: compact skipped: %s", exc)
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 

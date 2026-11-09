@@ -619,7 +619,7 @@ async def test_scheduler_ticks_in_order_with_intervals(env, caplog):
                  "Nova: multi-hazard monitor active (sweep every 10 min)",
                  "Nova: document auto-ingest active (scan every 10 min)",
                  "Nova: nightly sleep-state prompt active (checked every 10 min)",
-                 "Nova: automatic database purge active (daily; conversations 30 days, pattern history 90 days)"):
+                 "Nova: automatic database purge active (daily; conversations up to 30 days, pattern history per data_retention_days, 90 by default)"):
         assert line in caplog.text
 
 
@@ -1288,6 +1288,23 @@ async def test_db_purge_tick_prunes_pattern_history_after_90_days(env, caplog):
         await _tick(env.world, "db_purge")(None)
     assert env.world.calls("purge_old_history")[0][0] == (90,)
     assert "12 pattern history row(s)" in caplog.text
+
+
+@pytest.mark.parametrize("setting, convo_days, history_days", [
+    (14, 14, 14),        # a shorter keep-time trims everything sooner
+    (200, 30, 200),      # a longer one lengthens history only; chats stay at 30
+    (1, 7, 7),           # too small a value is raised to the 7-day floor
+    (9999, 30, 365),     # too large is held to the 365-day ceiling
+    ("soon", 30, 90),    # rubbish falls back to the default
+    (None, 30, 90)])
+async def test_db_purge_tick_follows_the_data_retention_setting(
+        env, setting, convo_days, history_days):
+    await _setup(env)
+    if setting is not None:
+        env.world.cfg["data_retention_days"] = setting
+    await _tick(env.world, "db_purge")(None)
+    assert env.world.calls("purge_old_records")[0][0] == (convo_days,)
+    assert env.world.calls("purge_old_history")[0][0] == (history_days,)
 
 
 # ── Briefings ───────────────────────────────────────────────────────────────
