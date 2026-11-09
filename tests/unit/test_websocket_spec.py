@@ -682,11 +682,11 @@ async def test_debug_log_sends_a_copy_of_the_entries(ws, load, monkeypatch):
 
 async def test_provider_activity_passes_the_database_path(ws, load, monkeypatch):
     pa = load("provider_activity")
-    seen = []
+    seen, one_day = [], {"day": "2026-01-01", "entries": []}
     monkeypatch.setattr(pa, "db_path_for", lambda hass: "/tmp/x.db")
-    monkeypatch.setattr(pa, "list_days", lambda days, db_path=None: seen.append(db_path) or [1])
+    monkeypatch.setattr(pa, "list_days", lambda days, db_path=None: seen.append(db_path) or [one_day])
     conn = await _call(ws.ws_get_provider_activity, _hass(_entry(load)))
-    assert seen == ["/tmp/x.db"] and conn.results == [(3, {"days": [1]})]
+    assert seen == ["/tmp/x.db"] and conn.results == [(3, {"days": [one_day], "currency": "$"})]
 
 
 @pytest.fixture

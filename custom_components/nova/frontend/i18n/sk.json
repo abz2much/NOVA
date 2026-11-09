@@ -1369,5 +1369,7 @@
   "inferred": "odvodené",
   "observed": "pozorované",
   "spare solar": "prebytočná solárna energia",
-  "stated": "deklarované"
+  "stated": "deklarované",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

@@ -1369,5 +1369,7 @@
   "inferred": "dedus",
   "observed": "observat",
   "spare solar": "solar în exces",
-  "stated": "declarat"
+  "stated": "declarat",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

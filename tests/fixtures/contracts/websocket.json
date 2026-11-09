@@ -544,6 +544,7 @@
       }
     },
     "literal_response_keys": [
+      "currency",
       "days"
     ],
     "registered": true

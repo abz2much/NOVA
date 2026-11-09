@@ -1217,16 +1217,21 @@ async def ws_get_provider_activity(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict,
 ) -> None:
     """Daily LLM use per provider, model and role (Phase 5): calls, successes
-    and failures, mean tokens and latency, for 1 to 90 days. No prompts,
+    and failures, mean and total tokens, latency and an estimated cost (only
+    for models the user has priced), for 1 to 90 days. No prompts,
     replies, tool arguments, images or credentials are kept; admin only even
     so, since it shows which providers and models are set up."""
     try:
         from . import provider_activity
         days = min(90, max(1, int(msg.get("days", 7))))
         db_path = provider_activity.db_path_for(hass)
-        history = await hass.async_add_executor_job(
-            partial(provider_activity.list_days, days, db_path=db_path))
-        connection.send_result(msg["id"], {"days": history})
+        from . import nova_config
+        result = await hass.async_add_executor_job(
+            partial(provider_activity.report, days,
+                    nova_config.get("ai_prices", {}),
+                    nova_config.get("ai_price_currency", "$"), db_path=db_path))
+        connection.send_result(msg["id"], {"days": result["days"],
+                                           "currency": result["currency"]})
     except Exception as exc:
         _LOGGER.exception("ws_get_provider_activity failed: %s", exc)
         connection.send_error(msg["id"], "get_provider_activity_failed", safe_error_message(exc))

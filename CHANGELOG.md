@@ -1,3 +1,8 @@
+## [8.85.16] Token totals and cost
+
+### Added
+- **Provider Activity shows total tokens and an estimated cost.** The card on the Diagnostics tab showed only average tokens per call. It now also shows each model's total tokens in and out for the day. If you set `ai_prices` in `config.json` (your price per million tokens for each model, for example `{"openai/gpt-4o": {"input": 2.5, "output": 10}}`) it shows an estimated cost too, in the symbol set by `ai_price_currency` (`$` by default). Nova ships no prices, so a model you have not priced shows no cost. The two new lines are in English in every language for now.
+
 ## [8.85.15] Security check
 
 ### Added

@@ -1369,5 +1369,7 @@
   "In use: {meter} (picked in Settings)": "Används: {meter} (vald i Inställningar)",
   "In use: {meter} (guessed from its name)": "Används: {meter} (gissad utifrån namnet)",
   "Use Nova's estimate": "Använd Novas uppskattning",
-  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova kan inte använda den här sensorn som en kostnad, så den använder sin egen uppskattning."
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova kan inte använda den här sensorn som en kostnad, så den använder sin egen uppskattning.",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

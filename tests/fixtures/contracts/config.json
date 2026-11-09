@@ -47,6 +47,8 @@
     "adaptive_awareness",
     "adaptive_interruption_budget",
     "adaptive_suggestion_threshold",
+    "ai_price_currency",
+    "ai_prices",
     "announce_notify_only",
     "announcement_speakers",
     "announcements_enabled",

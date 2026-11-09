@@ -97,6 +97,8 @@ and the locks left out of lockdown, are described in
 | `visitor_learning` | Settings → Cameras | Quietly learns from people at the door. Never spoken. |
 | `package_detection` | Settings → Cameras | Watches porch cameras for packages and mail. Off until you turn it on (since 8.41.0). |
 | `vision_daily_limit` | `config.json` only | How many camera analyses Nova may start by itself in a day, over all cameras. 300 by default; 0 means no limit. A doorbell press, a request and the security alarm are never held back. |
+| `ai_prices` | `config.json` only | What you pay for each AI model, so Provider Activity can show an estimated cost. Per million tokens, in your own currency: `{"openai/gpt-4o": {"input": 2.5, "output": 10}}`. The key is `provider/model`, or just the model name. Nova ships no prices, because they change. A model with no price shows no cost. |
+| `ai_price_currency` | `config.json` only | The symbol shown before an estimated cost, up to 8 characters. `$` by default. |
 | `proactive_question_listen` | `config.json` only | Off by default. When on, a spoken alert that ends in a question mark opens the microphone of the satellite in that room for your answer. Never for high or critical alerts. |
 | `data_retention_days` | `config.json` only | How many days of learned history Nova keeps in `patterns.db`, from 7 to 365. 90 by default. Once a day Nova deletes what is older and then shrinks the file to match. Chats and the activity log are kept for 30 days, or for this many days if you set less. |
 | `camera_event_learning` | Settings → Learning & Memory → Routine Learning | Feeds detections from Eufy, Frigate, Nest and Nova's own vision into routine learning. On by default, and off whenever Nova's learning itself is off. |

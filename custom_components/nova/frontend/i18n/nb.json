@@ -1369,5 +1369,7 @@
   "inferred": "utledet",
   "observed": "observert",
   "spare solar": "ledig solenergi",
-  "stated": "oppgitt"
+  "stated": "oppgitt",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

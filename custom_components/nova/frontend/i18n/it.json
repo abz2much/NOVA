@@ -1369,5 +1369,7 @@
   "inferred": "dedotto",
   "observed": "osservato",
   "spare solar": "solare in eccesso",
-  "stated": "dichiarato"
+  "stated": "dichiarato",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

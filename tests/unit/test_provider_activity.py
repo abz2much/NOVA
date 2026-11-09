@@ -206,3 +206,79 @@ def test_concurrent_records_to_same_key_accumulate_atomically(pa, tmp_path):
     # computed over call_count, so this proves the underlying sums are exact
     assert entry["avg_input_tokens"] == round(10 * n_success / total, 1)
     assert entry["avg_output_tokens"] == round(20 * n_success / total, 1)
+
+
+# ── total tokens and estimated cost ─────────────────────────────────────────
+
+def test_list_days_gives_the_token_totals(pa, tmp_path):
+    db = str(tmp_path / "activity.db")
+    for tokens_in, tokens_out in ((10, 20), (30, 40)):
+        pa.record("groq", "llama3", "llm", "cloud", "text", True, input_tokens=tokens_in,
+                  output_tokens=tokens_out, day="2026-01-01", db_path=db)
+    entry = pa.list_days(days=3650, db_path=db)[0]["entries"][0]
+    assert (entry["input_tokens"], entry["output_tokens"]) == (40, 60)
+
+
+def test_totals_are_none_when_the_provider_never_reported_usage(pa, tmp_path):
+    db = str(tmp_path / "activity.db")
+    pa.record("ollama", "llama3", "llm", "local", "text", True, day="2026-01-01", db_path=db)
+    entry = pa.list_days(days=3650, db_path=db)[0]["entries"][0]
+    assert (entry["input_tokens"], entry["output_tokens"]) == (None, None)
+
+
+def _day(**entry):
+    base = {"provider": "openai", "model": "gpt-x", "input_tokens": 2_000_000,
+            "output_tokens": 500_000}
+    return [{"day": "2026-01-01", "entries": [{**base, **entry}]}]
+
+
+@pytest.mark.parametrize("prices, entry, expected", [
+    # per million tokens: 2 x 3 + 0.5 x 15
+    ({"openai/gpt-x": {"input": 3, "output": 15}}, {}, 13.5),
+    # the bare model name works when no provider/model key matches
+    ({"gpt-x": {"input": 3, "output": 15}}, {}, 13.5),
+    # provider/model wins over the bare model name
+    ({"openai/gpt-x": {"input": 1, "output": 1}, "gpt-x": {"input": 9, "output": 9}}, {}, 2.5),
+    # a model with no price shows no cost: never a guess
+    ({"other/model": {"input": 3, "output": 15}}, {}, None),
+    ({}, {}, None),
+    # no usage reported means no cost
+    ({"gpt-x": {"input": 3, "output": 15}}, {"input_tokens": None, "output_tokens": None}, None),
+    # only one side reported: the other counts as nothing
+    ({"gpt-x": {"input": 3, "output": 15}}, {"output_tokens": None}, 6.0),
+    # a bad price row is ignored, not a crash
+    ({"gpt-x": {"input": "free", "output": 15}}, {}, None),
+    ({"gpt-x": {"input": -1, "output": 15}}, {}, None),
+    ({"gpt-x": "3,15"}, {}, None)])
+def test_cost_is_priced_per_million_tokens(pa, prices, entry, expected):
+    days = pa.add_costs(_day(**entry), pa.parse_prices(prices))
+    assert days[0]["entries"][0]["cost"] == expected
+
+
+def test_prices_may_arrive_as_json_text_or_rubbish(pa):
+    assert pa.parse_prices('{"gpt-x": {"input": 1, "output": 2}}') == {
+        "gpt-x": {"input": 1.0, "output": 2.0}}
+    assert pa.parse_prices({"gpt-x": {"input": 1, "output": 2}}) == {
+        "gpt-x": {"input": 1.0, "output": 2.0}}
+    assert pa.parse_prices("not json") == {}
+    assert pa.parse_prices(None) == {}
+    assert pa.parse_prices(["a"]) == {}
+
+
+def test_the_report_has_costs_and_the_currency(pa, tmp_path):
+    db = str(tmp_path / "activity.db")
+    pa.record("openai", "gpt-x", "llm", "cloud", "text", True, input_tokens=2_000_000,
+              output_tokens=500_000, day="2026-01-01", db_path=db)
+    pa.record("ollama", "llama3", "llm", "local", "text", True, input_tokens=100,
+              output_tokens=100, day="2026-01-01", db_path=db)
+    out = pa.report(3650, '{"openai/gpt-x": {"input": 3, "output": 15}}', "£", db_path=db)
+    costs = {e["model"]: e["cost"] for e in out["days"][0]["entries"]}
+    assert costs == {"gpt-x": 13.5, "llama3": None}
+    assert out["currency"] == "£"
+
+
+@pytest.mark.parametrize("currency, shown", [(None, "$"), ("", "$"), ("  ", "$"),
+                                              (5, "$"), ("€", "€"), ("£ ", "£"),
+                                              ("x" * 40, "x" * 8)])
+def test_the_currency_is_short_text_defaulting_to_dollars(pa, tmp_path, currency, shown):
+    assert pa.report(7, {}, currency, db_path=str(tmp_path / "a.db"))["currency"] == shown
