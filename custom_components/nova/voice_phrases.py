@@ -39,19 +39,132 @@ _FORBIDDEN_DATA_KEYS = {"entity_id", "area_id", "device_id", "target"}
 
 _STOP_WORDS = frozenset(
     "the a an in here it is am are bit really so very just now my our".split())
-_NEGATIONS = frozenset({"not", "no", "never", "cannot", "nothing"})
+# Each guard below reads the English words and the same words in French,
+# German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian.
+# A guard only ever stops a match, so a word that means something else in
+# another language can at worst make Nova ask again; it never runs more.
+_NEGATIONS = frozenset(
+    {"not", "no", "never", "cannot", "nothing"}
+    | set("pas jamais rien non aucun".split())                  # fr
+    | set("nicht nie nichts kein keine keinen nein".split())     # de
+    | set("nunca nada".split())                                  # es
+    | set("non mai niente nulla".split())                        # it
+    | set("niet geen nooit niets nee".split())                   # nl
+    | set("não nao nem".split())                                 # pt
+    | set("nie nigdy nic".split())                               # pl
+    | set("не нет никогда ничего".split())                       # ru
+    | set("не ні ніколи нічого".split()))                        # uk
 _QUESTION_STARTS = frozenset(
-    "is are was were what why how when who does do did should could would will".split())
+    set("is are was were what why how when who does do did should could would will".split())
+    | set("est qui quand comment pourquoi combien quel quelle".split())     # fr
+    | set("ist sind war waren was warum wie wann wer wo wieso hat kann".split())  # de
+    | set("es está qué cómo cuándo quién dónde cuánto cuál".split())        # es
+    | set("è come quando perché chi dove quanto cosa quale".split())        # it
+    | set("zijn wat waarom hoe wanneer wie waar kan".split())               # nl
+    | set("é foi porque quem onde quanto qual".split())                     # pt
+    | set("czy co dlaczego jak kiedy kto gdzie ile który".split())          # pl
+    | set("что как где когда почему зачем кто сколько какой можно".split())  # ru
+    | set("чи що чому як коли хто де скільки який".split()))                # uk
 _OPPOSITES = (
     ("on", "off"), ("up", "down"), ("open", "close"), ("lock", "unlock"),
     ("start", "stop"), ("arm", "disarm"), ("enable", "disable"),
     ("warm", "cold"), ("hot", "cold"), ("warmer", "colder"), ("high", "low"),
     ("more", "less"), ("increase", "decrease"), ("raise", "lower"),
 )
+# The same pairs in the other languages, each side a set of the common
+# spoken forms (command, infinitive, particle). Pairs are only ever read
+# within one pair, never across them.
+_OPPOSITE_WORDS = (
+    # French
+    ("allume allumer allumez", "éteins éteindre éteignez eteins"),
+    ("ouvre ouvrir ouvrez", "ferme fermer fermez"),
+    ("verrouille verrouiller", "déverrouille deverrouille déverrouiller"),
+    ("arme armer active activer", "désarme desarme désarmer désactive désactiver"),
+    ("monte monter augmente augmenter", "descends descendre baisse baisser diminue"),
+    ("chaud chaude", "froid froide"),
+    ("démarre démarrer", "arrête arrêter"),
+    # German
+    ("an ein einschalten anschalten", "aus ausschalten"),
+    ("auf öffne öffnen", "zu schließe schließen schliesse"),
+    ("sperre sperren verriegle verriegeln abschließen", "entsperre entsperren entriegle entriegeln aufschließen"),
+    ("aktiviere aktivieren scharf", "deaktiviere deaktivieren unscharf"),
+    ("hoch rauf lauter höher", "runter herunter leiser tiefer"),
+    ("warm wärmer heiß", "kalt kälter"),
+    ("mehr", "weniger"),
+    ("starte starten", "stoppe stoppen"),
+    # Spanish
+    ("enciende encender prende prender", "apaga apagar"),
+    ("abre abrir", "cierra cerrar"),
+    ("bloquea bloquear", "desbloquea desbloquear"),
+    ("activa activar arma armar", "desactiva desactivar desarma desarmar"),
+    ("sube subir aumenta aumentar", "baja bajar disminuye disminuir"),
+    ("caliente calor", "frío frio"),
+    ("más", "menos"),
+    ("inicia iniciar arranca", "detén deten detener"),
+    # Italian
+    ("accendi accendere", "spegni spegnere"),
+    ("apri aprire", "chiudi chiudere"),
+    ("blocca bloccare", "sblocca sbloccare"),
+    ("attiva attivare inserisci", "disattiva disattivare disinserisci"),
+    ("alza alzare su", "abbassa abbassare giù giu"),
+    ("caldo", "freddo"),
+    ("più piu", "meno"),
+    ("avvia avviare", "ferma fermare"),
+    # Dutch
+    ("aan aanzetten", "uit uitzetten uitschakelen"),
+    ("open opent openen", "dicht sluit sluiten"),
+    ("vergrendel vergrendelen", "ontgrendel ontgrendelen"),
+    ("activeer activeren inschakelen", "deactiveer deactiveren"),
+    ("omhoog hoger", "omlaag lager"),
+    ("warm warmer", "koud kouder"),
+    ("meer", "minder"),
+    ("start starten", "stop stoppen"),
+    # Portuguese
+    ("liga ligar acende acender", "desliga desligar apaga apagar"),
+    ("abre abrir", "fecha fechar"),
+    ("tranca trancar bloqueia bloquear", "destranca destrancar desbloqueia desbloquear"),
+    ("ativa ativar arma armar", "desativa desativar desarma desarmar"),
+    ("sobe subir aumenta aumentar", "desce descer baixa baixar diminui"),
+    ("quente", "frio"),
+    ("mais", "menos"),
+    ("inicia iniciar", "parar"),
+    # Polish
+    ("włącz włączyć zapal zapalić", "wyłącz wyłączyć zgaś zgasić"),
+    ("otwórz otworzyć", "zamknij zamknąć"),
+    ("zablokuj zablokować", "odblokuj odblokować"),
+    ("uzbrój aktywuj aktywować", "rozbrój dezaktywuj dezaktywować"),
+    ("podnieś zwiększ wyżej", "obniż zmniejsz niżej"),
+    ("ciepło ciepły gorąco", "zimno zimny chłodno"),
+    ("więcej", "mniej"),
+    ("uruchom", "zatrzymaj"),
+    # Russian
+    ("включи включить зажги", "выключи выключить погаси"),
+    ("открой открыть", "закрой закрыть"),
+    ("заблокируй заблокировать запри запереть", "разблокируй разблокировать отопри"),
+    ("активируй активировать", "деактивируй деактивировать"),
+    ("повысь увеличь прибавь выше теплее", "понизь уменьши убавь ниже холоднее"),
+    ("тепло жарко", "холодно"),
+    ("больше", "меньше"),
+    ("запусти запустить", "останови остановить"),
+    # Ukrainian
+    ("увімкни увімкнути ввімкни ввімкнути запали", "вимкни вимкнути погаси"),
+    ("відчини відчинити відкрий відкрити", "зачини зачинити закрий закрити"),
+    ("заблокуй заблокувати замкни замкнути", "розблокуй розблокувати відімкни відімкнути"),
+    ("активуй активувати", "деактивуй деактивувати"),
+    ("підвищ збільш вище тепліше", "знизь зменш нижче холодніше"),
+    ("тепло гаряче", "холодно"),
+    ("більше", "менше"),
+    ("запусти запустити", "зупини зупинити"),
+)
 _OPPOSITE_OF: dict[str, set[str]] = {}
 for _a, _b in _OPPOSITES:
     _OPPOSITE_OF.setdefault(_a, set()).add(_b)
     _OPPOSITE_OF.setdefault(_b, set()).add(_a)
+for _left, _right in _OPPOSITE_WORDS:
+    for _a in _left.split():
+        for _b in _right.split():
+            _OPPOSITE_OF.setdefault(_a, set()).add(_b)
+            _OPPOSITE_OF.setdefault(_b, set()).add(_a)
 
 _CONTRACTIONS = (
     (re.compile(r"\bi'?m\b"), "i am"),
@@ -73,8 +186,25 @@ _NT_BARE = {
 _NT_BARE_RE = re.compile(r"\b(" + "|".join(_NT_BARE) + r")\b")
 
 _LEADING_ADDRESS = ("hey nova", "ok nova", "okay nova", "hi nova", "nova")
-_TRAILING = ("nova", "please")
-_LEADING_POLITE = ("please", "can you", "could you", "would you")
+_TRAILING = (
+    "nova", "please",
+    "sil vous plait", "sil vous plaît", "sil te plait", "sil te plaît",   # fr
+    "bitte",                                                              # de
+    "por favor",                                                          # es, pt
+    "per favore", "per piacere",                                          # it
+    "alsjeblieft", "alstublieft",                                         # nl
+    "proszę", "prosze",                                                   # pl
+    "пожалуйста",                                                         # ru
+    "будь ласка",                                                         # uk
+)
+_LEADING_POLITE = (
+    "please", "can you", "could you", "would you",
+    "peux tu", "pouvez vous", "pourriez vous",                            # fr
+    "kannst du", "könntest du", "könnten sie", "bitte",                   # de
+    "puedes", "podrías", "puoi", "potresti",                              # es, it
+    "kun je", "kunt u", "podes", "czy możesz",                            # nl, pt, pl
+    "можешь", "можете", "ти можеш",                                       # ru, uk
+)
 
 _SERVICE_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
