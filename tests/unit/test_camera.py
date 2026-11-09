@@ -913,6 +913,19 @@ async def test_analyse_captures_clip_when_asked(cam, env, monkeypatch):
     assert res["error"] == "no_image" and asked == {"count": 4, "interval": 1.2}
 
 
+async def test_a_single_frame_is_shrunk_before_it_is_sent_to_the_vision_model(
+        cam, env, monkeypatch):
+    """A clip's frames and the doorbell's image were already shrunk; a plain
+    single frame went up at full size, costing tokens and upload time."""
+    import base64
+    monkeypatch.setattr(cam, "_downscale_jpeg", lambda b, m=1024: b"small:" + b)
+    env.chat.replies[:] = ["x", env.judge()]
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    url = env.chat.calls[0]["messages"][1]["content"][0]["image_url"]["url"]
+    assert base64.b64decode(url.split(",", 1)[1]) == b"small:" + GOOD
+    env.hass.close_pending()
+
+
 @pytest.mark.parametrize("images", [[b"A" * 10], [b"A", b"B", b"C"]], ids=["one frame", "a clip"])
 async def test_the_vision_prompt_warns_about_night_and_infrared_pictures(
         cam, env, monkeypatch, images):

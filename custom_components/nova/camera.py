@@ -860,7 +860,9 @@ async def _frames_for(hass: HomeAssistant, entity_id: str, data: dict,
         return await _capture_frame_sequence(
             hass, entity_id, count=wanted, interval=interval), interval
     best = await _get_best_image(hass, entity_id)
-    return ([best] if best else []), interval
+    # Shrunk like a clip's frames and the doorbell's image, to save vision
+    # tokens and upload time (unchanged when small or without Pillow).
+    return ([_downscale_jpeg(best)] if best else []), interval
 
 
 async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_client,
