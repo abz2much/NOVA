@@ -1019,6 +1019,37 @@ async def test_analyse_scene_memory(cam, env, load, monkeypatch):
     env.hass.close_pending()
 
 
+async def test_an_empty_or_off_property_scene_is_kept_out_of_scene_memory(cam, env, load, monkeypatch):
+    sm = load("scene_memory")
+    monkeypatch.setattr(sm, "enabled", lambda: True)
+
+    async def remember(hass, eid, text, location):
+        env.scenes.append((eid, text, location))
+    monkeypatch.setattr(sm, "async_remember", remember)
+    monkeypatch.setattr(load("camera_semantic"), "resolve_location", lambda h, e: "front")
+    env.chat.replies[:] = ["Two people walk past on the pavement.",
+                           env.judge(notable=False, category="empty", summary="Nothing.",
+                                     speak=""),
+                           "A man at the door.", env.judge(category="person")]
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    assert env.scenes == [("camera.porch", "A man at the door.", "front")]
+    env.hass.close_pending()
+
+
+@pytest.mark.parametrize("clip_count", [0, 3])
+def test_the_vision_task_keeps_to_the_property(cam, clip_count):
+    task = cam._vision_task("Porch", clip_count, False, 1.2, "")
+    for fragment in ("own property", "passers-by", "neighbour"):
+        assert fragment in task
+
+
+def test_the_judge_treats_activity_off_the_property_as_an_empty_scene(cam):
+    rules = cam._REASONING_RULES
+    assert "off the property" in rules and "neighbour" in rules
+    assert "empty" in rules.split("off the property", 1)[1][:300]
+
+
 # ── doorbell and visitor flows ───────────────────────────────────────────────
 
 @pytest.fixture

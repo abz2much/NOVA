@@ -252,7 +252,12 @@ _REASONING_RULES = (
     "You are Nova's camera-reasoning module. You are given a description of what "
     "a camera saw. Decide whether it is notable enough to mention to the resident. "
     "Routine or benign activity — a recognised resident arriving, an empty scene, "
-    "a car passing on the public street — is NOT notable. Notable: an unrecognised "
+    "a car passing on the public street — is NOT notable. Activity that is only "
+    "off the property, such as people or cars on the public road or pavement or "
+    "anything on a neighbour's land, is an empty scene: category \"empty\", not "
+    "notable, and the summary says only that nothing is on the property. Someone "
+    "or something coming onto the property, or stopping at it, is not off the "
+    "property. Notable: an unrecognised "
     "person approaching or lingering, a delivery or package, mail, someone at an "
     "unusual hour, property damage, an animal where it shouldn't be, or anything "
     "that genuinely warrants attention. Be conservative about what you flag. "
@@ -842,6 +847,13 @@ def _recognition_hint(hass: HomeAssistant, entity_id: str) -> str:
 # Added to every camera task. At night, and in infrared (black and white)
 # pictures, shadows, insects close to the lens, spider webs and glare are
 # often taken for people, and a person described by mistake is spoken aloud.
+_OFF_PROPERTY_RULE = (
+    " Describe only the household's own property and its entrances. Do not "
+    "describe or identify passers-by on the public road or pavement, "
+    "neighbours or their homes. If the only activity is off the property, say "
+    "nothing is on the property. Anyone or anything that comes onto the "
+    "property, or stops at it, is in scope.")
+
 _NIGHT_CAUTION = (
     " Be careful at night and with infrared (black and white) pictures: "
     "shadows, insects close to the lens, spider webs, reflections and headlights "
@@ -851,7 +863,7 @@ _NIGHT_CAUTION = (
 
 def _vision_task(camera_name: str, clip_count: int, sheet: bool, interval: float,
                  hint: str) -> str:
-    hint = _NIGHT_CAUTION + hint
+    hint = _NIGHT_CAUTION + _OFF_PROPERTY_RULE + hint
     if not clip_count:
         return (f"You are analysing the camera feed '{camera_name}'. Describe what you "
                 "see clearly and concisely — as Nova would. Note specific details: "
@@ -1024,7 +1036,10 @@ async def _record_scene(hass: HomeAssistant, call, entity_id: str, camera_name: 
                                      judgment["notable"])
     except Exception:  # noqa: BLE001
         pass
-    if call.data.get("record_scene", True):
+    # An empty scene, which includes the road and the neighbours' land, is not
+    # remembered: it holds nothing the household needs and could hold passers-by.
+    if call.data.get("record_scene", True) and str(
+            judgment.get("category") or "").lower() != "empty":
         try:
             from . import camera_semantic, scene_memory
             if scene_memory.enabled():
