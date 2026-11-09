@@ -1140,7 +1140,7 @@ async def predict_departure(hass, now: float = None) -> list:
         skipped = _excluded_calendars(nova_config)
         home_names = _home_names(hass)
         from . import comms
-        upcoming = sorted((ev for ev in comms.gather_events(hass)
+        upcoming = sorted((ev for ev in await comms.gather_events_ahead(hass, DEPART_LOOKAHEAD_H)
                            if ev.get("start") and not ev.get("all_day")
                            and ev.get("calendar") not in skipped
                            and is_real_place(ev.get("location"), home_names)),

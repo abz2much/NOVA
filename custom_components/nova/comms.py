@@ -98,6 +98,61 @@ def gather_events(hass) -> list[dict]:
     return events
 
 
+async def gather_events_ahead(hass, hours: int) -> list[dict]:
+    """gather_events plus the other events each calendar lists for the next
+    ``hours`` hours, from the calendar.get_events service. A calendar entity
+    shows only one event at a time, so while one runs the next stays hidden
+    from gather_events alone. If the service fails, the one-event view is
+    all there is. Never raises."""
+    events = gather_events(hass)
+    try:
+        ids = [state.entity_id for state in hass.states.async_all("calendar")]
+        if not ids:
+            return events
+        start = _now()
+        reply = await hass.services.async_call(
+            "calendar", "get_events",
+            {"entity_id": ids, "start_date_time": start.isoformat(),
+             "end_date_time": (start + timedelta(hours=max(1, int(hours)))).isoformat()},
+            blocking=True, return_response=True)
+        if not isinstance(reply, dict):
+            return events
+        seen = {(e["calendar"], e["title"], e["start"]) for e in events}
+        for calendar, body in reply.items():
+            for item in (body or {}).get("events") or []:
+                event = _service_event(calendar, item, start)
+                if event is None:
+                    continue
+                key = (event["calendar"], event["title"], event["start"])
+                if key not in seen:
+                    seen.add(key)
+                    events.append(event)
+    except Exception:  # noqa: BLE001 - fall back to the one-event view
+        pass
+    return events
+
+
+def _service_event(calendar: str, item: Any, now: datetime) -> Optional[dict]:
+    """One calendar.get_events entry in gather_events' shape, or None."""
+    if not isinstance(item, dict):
+        return None
+    start = _parse(item.get("start"))
+    if start is None:
+        return None
+    end = _parse(item.get("end")) or start + timedelta(hours=1)
+    # A date with no time is an all-day event.
+    all_day = "T" not in str(item.get("start")) and ":" not in str(item.get("start"))
+    return {
+        "calendar": calendar,
+        "title": str(item.get("summary") or calendar),
+        "start": start,
+        "end": end,
+        "all_day": all_day,
+        "location": item.get("location"),
+        "active": start <= now < end,
+    }
+
+
 def find_conflicts(events: list[dict], tight_gap_min: int) -> dict:
     """Find overlapping pairs and too-short gaps between timed events."""
     gap = timedelta(minutes=max(0, int(tight_gap_min)))
