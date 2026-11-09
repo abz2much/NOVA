@@ -144,7 +144,7 @@ If you run Ollama and the local Piper voice, nothing leaves your network. Wearab
 
 ## Languages
 
-Nova follows Home Assistant's language, and you can choose another under Settings, General. The setup dialog is available in 21 languages. The panel is fully translated in 11 (German, Dutch, French, Spanish, Brazilian Portuguese, Swedish, Polish, Russian, Czech, Simplified Chinese and Traditional Chinese). Others show English where a translation is missing. Safety alerts are translated for English, French, German, Spanish, Italian, Dutch and Portuguese. See [Translating Nova](docs/translating.md) if you'd like to help.
+Nova follows Home Assistant's language, and you can choose another under Settings, General. The setup dialog is available in 21 languages. The panel is fully translated in 11 (German, Dutch, French, Spanish, Brazilian Portuguese, Swedish, Polish, Russian, Czech, Simplified Chinese and Traditional Chinese). Others show English where a translation is missing. Nova asks the voice to speak your language when the voice supports it. Safety alerts are translated for English, French, German, Spanish, Italian, Dutch and Portuguese. See [Translating Nova](docs/translating.md) if you'd like to help.
 
 ## Common questions
 

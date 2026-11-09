@@ -365,7 +365,9 @@ person's voice again. The token is in the backup, so Nova keeps working.
 - Continued conversation (keeping the microphone open after a reply) is off
   by default.
 - "Nova speaks" changes the words Nova writes and speaks. It does not change
-  the voice, Home Assistant's language, or the panel. Safety notifications are
+  which voice is used, Home Assistant's language, or the panel. Nova asks the
+  voice to speak that language when the voice says it can. A voice that cannot
+  keeps its own default, and English always does. Safety notifications are
   translated into English, French, German, Spanish, Italian, Dutch and
   Portuguese. In other languages they stay English.
 
