@@ -109,7 +109,7 @@ ADMIN_GATED_TYPES = [
     # about the household, and a choice changes what Nova tells it.
     "convenience_status",
     "convenience_choice",
-    # Fix 21 and 23 of the Nova and JARVIS review. search_memory reads every
+    # Fixed in 8.85.7. search_memory reads every
     # resident's chats and the panel never calls it. camera_diagnostics can
     # wake a camera's stream; the sibling camera_snapshot was already gated.
     "search_memory",
