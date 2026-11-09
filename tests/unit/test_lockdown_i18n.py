@@ -28,6 +28,9 @@ def i18n(load):
     ("it", "a e b", "a, b e c"),
     ("nl", "a en b", "a, b en c"),
     ("pt", "a e b", "a, b e c"),
+    ("pl", "a i b", "a, b i c"),
+    ("ru", "a и b", "a, b и c"),
+    ("uk", "a і b", "a, b і c"),
     ("en", "a and b", "a, b, and c"),    # English keeps its serial comma
     ("en-US", "a and b", "a, b, and c"),
     ("fr-CA", "a et b", "a, b et c"),

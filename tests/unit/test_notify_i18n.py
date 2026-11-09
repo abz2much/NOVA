@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-LANGUAGES = {"en", "fr", "de", "es", "it", "nl", "pt"}
+LANGUAGES = {"en", "fr", "de", "es", "it", "nl", "pt", "pl", "ru", "uk"}
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 LEAD_IN = "{honorific}, "
 
@@ -115,7 +115,7 @@ def test_titles(i18n, key, lang, expected):
 
 # ── the tables themselves ────────────────────────────────────────────────
 
-def test_every_entry_exists_in_all_seven_languages(i18n):
+def test_every_entry_exists_in_all_ten_languages(i18n):
     for table_name, table in _both_tables(i18n):
         for key, by_lang in table.items():
             assert set(by_lang) == LANGUAGES, f"{table_name}[{key!r}] missing languages"
