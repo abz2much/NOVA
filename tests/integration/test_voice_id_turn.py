@@ -67,6 +67,7 @@ class _Turn:
 
     def __init__(self):
         self.dedup = 0
+        self.dedup_calls = []
         self.phrases = 0
         self.local = 0
         self.agent = 0
@@ -77,6 +78,7 @@ class _Turn:
 
         def dedup(*a, **k):
             self.dedup += 1
+            self.dedup_calls.append((a, k))
             return real_dedup(*a, **k)
 
         async def phrase(*a, **k):
@@ -159,6 +161,30 @@ async def test_the_turn_logs_its_voice_result_and_behaves_as_before(
     for _cat, msg in lines:
         if _cat in ("VOICE", "STT"):
             assert TEXT not in msg and TOKEN not in msg
+
+
+async def test_the_identified_speaker_reaches_the_multi_wake_dedup(
+        hass, isolated, monkeypatch, socket_enabled):
+    """So two different people saying the same words are not taken for one
+    utterance heard by two satellites."""
+    from custom_components.nova import identity
+    monkeypatch.setattr(identity, "voice_identity_enabled", lambda: True)
+    conv_entity = await _setup_nova(hass)
+    hass.states.async_set("person.abi", "home", {"friendly_name": "Abi"})
+    turn = _Turn()
+    async with VoiceApp(blocks=[KNOWN]) as app:
+        await _set_app(hass, app.uri)
+        ps = turn.patches()
+        for p in ps:
+            p.start()
+        try:
+            await _voice_turn(hass, conv_entity, TEXT, DEVICE)
+        finally:
+            for p in ps:
+                p.stop()
+    (args, kwargs), = turn.dedup_calls
+    speaker = kwargs.get("speaker", args[2] if len(args) > 2 else None)
+    assert speaker == "Abi"
 
 
 async def test_no_voice_line_on_an_install_without_voice_id(hass, isolated, monkeypatch):

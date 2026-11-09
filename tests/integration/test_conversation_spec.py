@@ -41,6 +41,25 @@ def test_a_duplicate_gets_the_winning_reply_once_it_is_recorded(conv):
     assert conv._check_and_claim_dedup("what time is it", "sat_b") == (True, "It is noon.")
 
 
+def test_two_different_identified_people_saying_the_same_words_are_two_requests(conv):
+    """Two people answering "yes" in two rooms are not one utterance heard twice."""
+    assert conv._check_and_claim_dedup("yes", "sat_a", "person.abi") == (False, None)
+    assert conv._check_and_claim_dedup("yes", "sat_b", "person.sam") == (False, None)
+
+
+def test_one_identified_voice_heard_by_two_satellites_is_still_one_request(conv):
+    assert conv._check_and_claim_dedup("yes", "sat_a", "person.abi") == (False, None)
+    assert conv._check_and_claim_dedup("yes", "sat_b", "person.abi") == (True, None)
+
+
+@pytest.mark.parametrize("first, second", [("person.abi", None), (None, "person.abi")])
+def test_a_satellite_that_could_not_tell_who_spoke_does_not_split_one_request(
+        conv, first, second):
+    """Voice ID can recognise a voice on one satellite and not another."""
+    assert conv._check_and_claim_dedup("yes", "sat_a", first) == (False, None)
+    assert conv._check_and_claim_dedup("yes", "sat_b", second) == (True, None)
+
+
 def test_the_same_device_asking_again_is_never_a_duplicate(conv):
     conv._check_and_claim_dedup("hello", "sat_a")
     assert conv._check_and_claim_dedup("hello", "sat_a") == (False, None)

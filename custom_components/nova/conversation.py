@@ -76,8 +76,9 @@ _SATELLITE = "assist_satellite."
 # the window gets the winner's reply back as text and nothing is spoken twice.
 
 _DEDUP_WINDOW = 4.0   # seconds; transcripts from two rooms land this close
-# normalised words -> (claimed at, the winner's reply or None, the winner's device)
-_dedup_cache: dict[str, tuple[float, str | None, str | None]] = {}
+# normalised words -> (claimed at, the winner's reply or None, the winner's
+# device, the person Voice ID named, or None)
+_dedup_cache: dict[str, tuple[float, str | None, str | None, str | None]] = {}
 
 
 def _dedup_key(text: str) -> str:
@@ -85,20 +86,27 @@ def _dedup_key(text: str) -> str:
     return text.lower().strip().rstrip(".,!?")
 
 
-def _check_and_claim_dedup(text: str, device_id: str | None) -> tuple[bool, str | None]:
+def _check_and_claim_dedup(text: str, device_id: str | None,
+                           speaker: str | None = None) -> tuple[bool, str | None]:
     """(True, the winner's reply so far) when another device already claimed
     these words within the window; otherwise this device claims them and
-    gets (False, None). Claims older than twice the window are swept."""
+    gets (False, None). Claims older than twice the window are swept.
+
+    ``speaker`` is the person Voice ID named, when it did. Two satellites
+    hearing one voice share a claim, even if only one of them could tell who
+    spoke. Two different named people saying the same words are two requests,
+    so the second is not a duplicate and takes over the claim."""
     now = time.time()
     for key in [k for k, row in _dedup_cache.items() if now - row[0] > 2 * _DEDUP_WINDOW]:
         del _dedup_cache[key]
     key = _dedup_key(text)
     claim = _dedup_cache.get(key)
     if claim is not None:
-        claimed_at, reply, owner = claim
+        claimed_at, reply, owner, claimed_by = claim
         if owner != device_id and now - claimed_at < _DEDUP_WINDOW:
-            return True, reply
-    _dedup_cache[key] = (now, None, device_id)
+            if not (speaker and claimed_by and speaker != claimed_by):
+                return True, reply
+    _dedup_cache[key] = (now, None, device_id, speaker)
     return False, None
 
 
@@ -107,7 +115,7 @@ def _record_dedup_response(text: str, response: str) -> None:
     key = _dedup_key(text)
     claim = _dedup_cache.get(key)
     if claim is not None:
-        _dedup_cache[key] = (claim[0], response, claim[2])
+        _dedup_cache[key] = (claim[0], response, claim[2], claim[3])
 
 
 # ── Persona file ────────────────────────────────────────────────────────────
@@ -710,7 +718,8 @@ class NovaAgent(conversation.ConversationEntity):
         # ── Several satellites, one request (v5.7.01) ───────────────────────
         is_dup, cached = False, None
         if not is_chat:   # Chat turns are never duplicates and claim nothing
-            is_dup, cached = _check_and_claim_dedup(user_input.text, device_id)
+            speaker = voice_ident.person if voice_ident is not None and voice_ident.known else None
+            is_dup, cached = _check_and_claim_dedup(user_input.text, device_id, speaker)
         if is_dup:
             _LOGGER.warning("Nova dedup: suppressing duplicate from device=%s "
                             "(already handled)", device_id)
