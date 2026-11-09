@@ -714,7 +714,7 @@ async def _execute_action(hass, action, entity_id, args, device_id=None):
     try:
         if action in _CLIMATE:
             temperature = args.get("temperature")
-            if not temperature:
+            if temperature is None:      # a spoken zero is a value; Home Assistant checks the range
                 return False
             await hass.services.async_call(
                 "climate", "set_temperature",
