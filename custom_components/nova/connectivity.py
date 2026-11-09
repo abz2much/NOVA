@@ -1,4 +1,9 @@
-"""Circuit breaker tracking whether Nova's cloud reasoning agent is reachable.
+"""Circuit breakers tracking whether Nova's cloud models are reachable.
+
+There is one breaker per tier: "agent" (the conversation, the default) and
+"reasoning" (the cognitive core's cloud fallback). A tier that keeps failing
+opens only its own breaker, so a broken reasoning model cannot take the
+conversation offline.
 
 Callers report each real agent call's outcome and ask before making one. Once
 enough calls fail in a row the breaker opens and Nova falls back to local-only
@@ -44,7 +49,19 @@ class _BreakerState:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-_BREAKER = _BreakerState()
+_BREAKER = _BreakerState()          # the "agent" tier
+_DEFAULT_TIER = "agent"
+_BREAKERS: dict[str, _BreakerState] = {_DEFAULT_TIER: _BREAKER}
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _breaker(tier: str) -> _BreakerState:
+    """The breaker for a tier, made on first use."""
+    with _REGISTRY_LOCK:
+        found = _BREAKERS.get(tier)
+        if found is None:
+            found = _BREAKERS[tier] = _BreakerState()
+        return found
 
 
 def _now() -> float:
@@ -52,9 +69,9 @@ def _now() -> float:
     return time.monotonic()
 
 
-def allow_request() -> bool:
-    """Return True if a cloud agent call should be attempted now."""
-    b = _BREAKER
+def allow_request(tier: str = _DEFAULT_TIER) -> bool:
+    """Return True if a cloud call for this tier should be attempted now."""
+    b = _breaker(tier)
     with b.lock:
         if b.state == _CLOSED:
             return True
@@ -79,9 +96,9 @@ def allow_request() -> bool:
         return False
 
 
-def record_success() -> None:
-    """Report a successful agent call; closes the breaker from any state."""
-    b = _BREAKER
+def record_success(tier: str = _DEFAULT_TIER) -> None:
+    """Report a successful call; closes the tier's breaker from any state."""
+    b = _breaker(tier)
     with b.lock:
         was = b.state
         b.state = _CLOSED
@@ -93,9 +110,9 @@ def record_success() -> None:
         _LOGGER.info("Agent call succeeded; breaker closed (was %s)", was)
 
 
-def record_failure() -> None:
-    """Report a failed agent call; may open or re-open the breaker."""
-    b = _BREAKER
+def record_failure(tier: str = _DEFAULT_TIER) -> None:
+    """Report a failed call; may open or re-open the tier's breaker."""
+    b = _breaker(tier)
     with b.lock:
         now = _now()
         b.consecutive_failures += 1
@@ -123,15 +140,20 @@ def record_failure() -> None:
         _LOGGER.warning(message)
 
 
-def is_online() -> bool:
-    """Return True iff the breaker is closed. Never changes state."""
-    with _BREAKER.lock:
-        return _BREAKER.state == _CLOSED
+def is_online(tier: str = _DEFAULT_TIER) -> bool:
+    """Return True iff the tier's breaker is closed. Never changes state."""
+    b = _breaker(tier)
+    with b.lock:
+        return b.state == _CLOSED
 
 
-def status() -> dict[str, Any]:
-    """Return a JSON-serialisable diagnostics snapshot. Never changes state."""
-    b = _BREAKER
+def status(tier: str = _DEFAULT_TIER) -> dict[str, Any]:
+    """Return a JSON-serialisable diagnostics snapshot of one tier, with the
+    state of every tier under "tiers". Never changes state."""
+    b = _breaker(tier)
+    with _REGISTRY_LOCK:
+        everyone = list(_BREAKERS.items())
+    tiers = {name: other.state for name, other in everyone}
     with b.lock:
         now = _now()
         cooldown = 0
@@ -148,14 +170,17 @@ def status() -> dict[str, Any]:
                 max(0, int(now - b.last_success)) if b.last_success else None),
             "last_failure_ago_s": (
                 max(0, int(now - b.last_failure)) if b.last_failure else None),
+            "tiers": tiers,
         }
 
 
 def reset() -> None:
-    """Force the breaker closed, keeping lifetime totals and timestamps."""
-    b = _BREAKER
-    with b.lock:
-        b.state = _CLOSED
-        b.consecutive_failures = 0
-        b.half_open_probes = 0
-    _LOGGER.info("Agent breaker manually reset to closed")
+    """Force every tier's breaker closed, keeping lifetime totals and timestamps."""
+    with _REGISTRY_LOCK:
+        everyone = list(_BREAKERS.values())
+    for b in everyone:
+        with b.lock:
+            b.state = _CLOSED
+            b.consecutive_failures = 0
+            b.half_open_probes = 0
+    _LOGGER.info("Agent breakers manually reset to closed")

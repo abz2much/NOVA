@@ -101,10 +101,35 @@ def test_the_shared_list(answers, text, expected):
     assert answers.yes_or_no(text) == expected
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("oui", "yes"), ("non", "no"), ("annule", "no"),
+    ("ja", "yes"), ("nein", "no"), ("Ja, bitte.", "yes"), ("abbrechen", "no"),
+    ("sí", "yes"), ("si", "yes"), ("cancelar", "no"), ("claro", "yes"),
+    ("sì", "yes"), ("annulla", "no"),
+    ("nee", "no"), ("annuleren", "no"),
+    ("sim", "yes"), ("não", "no"), ("nao", "no"),
+    ("tak", "yes"), ("nie", "no"), ("anuluj", "no"),
+    ("да", "yes"), ("нет", "no"), ("отмена", "no"),
+    ("так", "yes"), ("ні", "no"), ("скасувати", "no"),
+    # A sentence that only contains an answer word is still not an answer.
+    ("oui mais pas maintenant", None), ("nein danke schön", None),
+    ("не знаю", None),
+])
+def test_the_shared_list_in_other_languages(answers, text, expected):
+    assert answers.yes_or_no(text) == expected
+
+
+def test_no_word_is_both_yes_and_no(answers):
+    assert answers.YES.isdisjoint(answers.NO)
+
+
 def test_every_yes_no_question_reads_the_shared_list(answers, load):
     vc = load("voice_confirm")
-    assert answers.YES <= set(vc._YES) and answers.NO <= set(vc._NO)
-    assert set(vc._YES) - answers.YES == {"unlock it", "open it"}
+    # A "no" may be said in any language, but a confirmation to unlock or
+    # open is a "yes" in English only: a stray foreign word must never confirm.
+    assert answers.NO <= set(vc._NO)
+    assert set(vc._YES) == set(answers._YES_EN) | {"unlock it", "open it"}
+    assert not {"oui", "ja", "sí", "vai", "pode", "los", "да"} & set(vc._YES)
 
 
 async def test_a_held_request_reads_the_shared_list(load):

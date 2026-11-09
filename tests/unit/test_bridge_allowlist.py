@@ -40,6 +40,9 @@ FOREIGN_ALLOWLIST = {
     ("automation/inventory.py", "_runtime_entities",
      "component = hass.data.get(DATA_COMPONENT)"):
         "the automation integration's entity component",
+    ("tts_helper.py", "_engine_languages",
+     "entity = hass.data[tts.DATA_COMPONENT].get_entity(entity_id)"):
+        "the tts integration's entity component, to read one voice's languages",
 }
 
 # Names that existed only for the bridge. None may come back as a function,
@@ -126,7 +129,7 @@ def test_each_foreign_use_appears_exactly_once():
 
 
 def test_every_foreign_entry_has_a_reason():
-    assert len(FOREIGN_ALLOWLIST) == 4
+    assert len(FOREIGN_ALLOWLIST) == 5
     for key, reason in FOREIGN_ALLOWLIST.items():
         assert isinstance(reason, str) and len(reason) > 10, key
 

@@ -39,7 +39,7 @@ def seen(load, connectivity, monkeypatch, runtime):
 
     monkeypatch.setattr(coord, "_local_mind", capture)
     monkeypatch.setattr(cache, "signature", signature)
-    monkeypatch.setattr(connectivity, "allow_request", lambda: False)
+    monkeypatch.setattr(connectivity, "allow_request", lambda *_a: False)
     box["rl"] = rl
     yield box
     connectivity.reset()

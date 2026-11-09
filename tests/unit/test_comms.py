@@ -343,3 +343,64 @@ def test_agenda_config_failure_uses_default(cm, fake_hass, load, monkeypatch):
     b = ev("B", s + timedelta(minutes=40), s + timedelta(minutes=60))
     monkeypatch.setattr(cm, "gather_events", lambda hass: [a, b])
     assert cm.agenda(fake_hass)["conflicts"] == ["tight: only 10 min between “A” and “B”"]
+
+
+# ── gather_events_ahead: more than the one event a calendar entity shows ────
+
+class _CalendarServices:
+    """hass.services for calendar.get_events: replies with `reply`, or fails."""
+
+    def __init__(self, reply=None, fail=False):
+        self.reply, self.fail, self.calls = reply, fail, []
+
+    async def async_call(self, domain, service, data=None, blocking=False,
+                         return_response=False):
+        self.calls.append((domain, service, dict(data or {}), return_response))
+        if self.fail:
+            raise RuntimeError("calendar down")
+        return self.reply
+
+
+def _ahead(cm, hass, hours=12):
+    import asyncio
+    return asyncio.run(cm.gather_events_ahead(hass, hours))
+
+
+def test_the_next_event_after_the_running_one_is_seen(cm, fake_hass):
+    fake_hass.states.set("calendar.work", "on", message="Standup",
+                         start_time="2026-03-02 09:00:00", end_time="2026-03-02 09:15:00")
+    fake_hass._services = _CalendarServices({"calendar.work": {"events": [
+        {"start": "2026-03-02T09:00:00", "end": "2026-03-02T09:15:00", "summary": "Standup"},
+        {"start": "2026-03-02T11:30:00", "end": "2026-03-02T12:00:00", "summary": "Dentist",
+         "location": "High Street"},
+    ]}})
+    out = _ahead(cm, fake_hass)
+    assert [e["title"] for e in out] == ["Standup", "Dentist"]    # Standup is not doubled
+    assert out[1]["start"] == datetime(2026, 3, 2, 11, 30)
+    assert out[1]["location"] == "High Street"
+    assert out[1]["calendar"] == "calendar.work" and out[1]["all_day"] is False
+
+
+def test_the_service_is_asked_for_the_window_and_a_response(cm, fake_hass):
+    fake_hass.states.set("calendar.work", "off", message="X", start_time="2026-03-02 09:00:00")
+    services = fake_hass._services = _CalendarServices({"calendar.work": {"events": []}})
+    _ahead(cm, fake_hass, hours=6)
+    domain, service, data, wants_reply = services.calls[0]
+    assert (domain, service, wants_reply) == ("calendar", "get_events", True)
+    assert data["entity_id"] == ["calendar.work"]
+    assert "start_date_time" in data and "end_date_time" in data
+
+
+def test_a_failed_calendar_service_falls_back_to_the_one_event(cm, fake_hass):
+    fake_hass.states.set("calendar.work", "off", message="Standup",
+                         start_time="2026-03-02 09:00:00", end_time="2026-03-02 09:15:00")
+    fake_hass._services = _CalendarServices(fail=True)
+    assert [e["title"] for e in _ahead(cm, fake_hass)] == ["Standup"]
+
+
+def test_an_all_day_event_from_the_service_is_marked_all_day(cm, fake_hass):
+    fake_hass.states.set("calendar.home", "off", message="x", start_time="2026-03-02 09:00:00")
+    fake_hass._services = _CalendarServices({"calendar.home": {"events": [
+        {"start": "2026-03-03", "end": "2026-03-04", "summary": "Holiday"}]}})
+    out = _ahead(cm, fake_hass)
+    assert [e for e in out if e["title"] == "Holiday"][0]["all_day"] is True

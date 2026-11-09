@@ -27,7 +27,7 @@ import logging
 import re
 import time
 from collections import deque
-from typing import Optional
+from typing import Any, Optional
 
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
@@ -113,7 +113,7 @@ class _ObserverState:
     settings the pipeline reads."""
 
     def __init__(self) -> None:
-        self.hass = None
+        self.hass: Optional[Any] = None
         self.config: dict = {}
         # entity -> when it was last let through (the per entity debounce)
         self.last_seen: dict[str, float] = {}
@@ -571,6 +571,8 @@ def _on_state_changed(event: Event) -> None:
         _STATE.rate_limit_warn_logged = False
         _record_classifier_call()
     _record_for_context(event)
+    if _STATE.hass is None:
+        return
     _STATE.hass.async_create_task(_process_event(event))
 
 

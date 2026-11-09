@@ -5,7 +5,9 @@ Every test points the cache at its own temporary file and resets the
 module-level state, restored afterwards by monkeypatch."""
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import time
 
 import pytest
@@ -237,6 +239,34 @@ def test_remember_loads_before_writing(rc):
     rc.CACHE_PATH.write_text(json.dumps({"kept": {"speak": True, "refreshed": 1}}))
     rc.remember("new", False, "low")
     assert set(_file(rc)) == {"kept", "new"}
+
+
+async def test_remember_on_the_event_loop_writes_the_file_off_the_loop(rc, monkeypatch):
+    """Dumping up to 2,000 entries to disk on the event loop blocks Home Assistant."""
+    loop_thread = threading.get_ident()
+    wrote_on = []
+    real = rc.write_json_atomic
+
+    def spy(path, data, **kw):
+        wrote_on.append(threading.get_ident())
+        return real(path, data, **kw)
+    monkeypatch.setattr(rc, "write_json_atomic", spy)
+    rc.remember("s", True, "high")
+    for _ in range(100):                       # the write happens in the executor
+        if wrote_on:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.02)
+    assert wrote_on and loop_thread not in wrote_on
+    assert _file(rc)["s"]["speak"] is True
+
+
+async def test_verdicts_remembered_one_after_another_all_reach_the_file(rc):
+    """Saves that run in the executor must not leave an older state behind."""
+    for n in range(5):
+        rc.remember(f"s{n}", n % 2 == 0, "low")
+    await asyncio.sleep(0.2)
+    assert set(_file(rc)) == {f"s{n}" for n in range(5)}
 
 
 def test_remember_then_get(rc):

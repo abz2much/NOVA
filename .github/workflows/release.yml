@@ -1,6 +1,9 @@
 # Publishes the GitHub release for the version in manifest.json, so HACS
 # offers it. Runs when a merge to main changes the version (or this file),
 # and by hand from the Actions tab. Does nothing if that release exists.
+# It waits for the Validate workflow on the same commit first and publishes
+# only if that passed (scripts/wait_for_checks.sh), so a merge whose checks
+# fail never reaches HACS.
 name: Publish release
 
 on:
@@ -13,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release
@@ -21,10 +25,24 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Wait for the checks on this commit to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 -c "import json;print(json.load(open('custom_components/nova/manifest.json'))['version'])")"
+          if gh release view "v${VERSION}" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists, no need to wait."
+            exit 0
+          fi
+          bash scripts/wait_for_checks.sh
       - name: Publish the release if it is missing
         env:
           GH_TOKEN: ${{ github.token }}

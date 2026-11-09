@@ -7,9 +7,10 @@ with English as the fallback for any language or key that is missing.
 Device names, area names and the honorific are filled in as they are, never
 translated.
 
-The longer lockdown summaries that stitch device lists into one sentence
-("I locked X and closed Y, but Z is open") are still English only; a half
-translated sentence reads worse than a clean English one.
+Polish, Russian and Ukrainian are written without declension: a device name
+is always given as it is, so the wording around it avoids cases (a colon
+label, an infinitive or an impersonal past) and never needs a gender. These
+three were written without a native reader checking them.
 
 Notes for the lockdown templates:
 * {names} is a comma joined device list and always follows the verb, so
@@ -34,7 +35,8 @@ _HONORIFIC_LEAD_IN = "{honorific}, "
 # The word for "and" in device lists, and the languages that put a comma
 # before it.
 _AND: dict[str, str] = {"en": "and", "fr": "et", "de": "und", "es": "y",
-                        "it": "e", "nl": "en", "pt": "e"}
+                        "it": "e", "nl": "en", "pt": "e", "pl": "i",
+                        "ru": "и", "uk": "і"}
 _OXFORD = {"en"}
 
 
@@ -105,6 +107,33 @@ _TITLE_TEXT: dict[str, dict[str, str]] = {
         "intrusion_confirmed": "Nova — INTRUSÃO",
         "critical_hazard": "Nova — Alarme de segurança",
         "lockdown": "Nova — Casa protegida",
+    },
+    "pl": {  # Polish
+        "freeze_critical": "Nova — Ostrzeżenie o mrozie",
+        "freeze_warning": "Nova — Alert temperatury",
+        "intrusion_investigating": "Nova — Alert bezpieczeństwa",
+        "alarm_triggered": "Nova — Alert bezpieczeństwa",
+        "intrusion_confirmed": "Nova — WŁAMANIE",
+        "critical_hazard": "Nova — Alarm bezpieczeństwa",
+        "lockdown": "Nova — Dom zabezpieczony",
+    },
+    "ru": {  # Russian
+        "freeze_critical": "Nova — Угроза замерзания",
+        "freeze_warning": "Nova — Оповещение о температуре",
+        "intrusion_investigating": "Nova — Оповещение безопасности",
+        "alarm_triggered": "Nova — Оповещение безопасности",
+        "intrusion_confirmed": "Nova — ВТОРЖЕНИЕ",
+        "critical_hazard": "Nova — Сигнал тревоги",
+        "lockdown": "Nova — Дом защищён",
+    },
+    "uk": {  # Ukrainian
+        "freeze_critical": "Nova — Загроза замерзання",
+        "freeze_warning": "Nova — Сповіщення про температуру",
+        "intrusion_investigating": "Nova — Сповіщення безпеки",
+        "alarm_triggered": "Nova — Сповіщення безпеки",
+        "intrusion_confirmed": "Nova — ВТОРГНЕННЯ",
+        "critical_hazard": "Nova — Сигнал тривоги",
+        "lockdown": "Nova — Будинок захищено",
     },
 }
 
@@ -643,6 +672,205 @@ _MESSAGE_TEXT: dict[str, dict[str, str]] = {
         "lockdown_nighttime_failed_only": (
             "{honorific}, confinamento noturno: a casa não está totalmente segura "
             "— {failed}."
+        ),
+    },
+    "pl": {  # Polish
+        "freeze_critical": (
+            "{honorific}, temperatura na zewnątrz spadła do {reading}. Ryzyko "
+            "zamarznięcia rur jest wysokie. Zalecam otworzyć drzwiczki szafek "
+            "przy ścianach zewnętrznych i ustawić ogrzewanie na co najmniej "
+            "{set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, temperatura na zewnątrz wynosi {reading}. Monitoruję "
+            "ryzyko zamarznięcia rur."
+        ),
+        "intrusion_alert": (
+            "{honorific}, wykryto ruch: {where}, a w domu nikogo nie ma{ctx}. "
+            "Sprawdzam od strony wejścia — zaalarmuję dom i wszystkie "
+            "urządzenia tylko wtedy, gdy to prawdziwe włamanie."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, wykryto ruch: {where}, gdy domownicy śpią{ctx}. "
+            "Sprawdzam od strony wejścia — zaalarmuję dom i wszystkie "
+            "urządzenia tylko wtedy, gdy to prawdziwe włamanie."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, wykryto ruch: {where}, gdy dom jest "
+            "zabezpieczony{ctx}. Sprawdzam od strony wejścia — zaalarmuję dom i "
+            "wszystkie urządzenia tylko wtedy, gdy to prawdziwe włamanie."
+        ),
+        "intrusion_ctx_open": " (otwarte: {name})",
+        "intrusion_ctx_armed": " (alarm uzbrojony)",
+        "lockdown_lifted": "{honorific}, blokada zniesiona. Dom wrócił do normy.",
+        "lockdown_already_secured": "{honorific}, blokada włączona — dom był już w pełni zabezpieczony.",
+        "lockdown_locked": "zamknięto na zamek {names}",
+        "lockdown_closed": "zamknięto {names}",
+        "lockdown_lock_pending": "zamknąć na zamek {names}",
+        "lockdown_close_pending": "zamknąć {names}",
+        "lockdown_gap_one": "{names}: otwarte, nie mogę tego zabezpieczyć zdalnie — zamknij ręcznie",
+        "lockdown_gap_few": "{names}: otwarte, nie mogę tego zabezpieczyć zdalnie — zamknij ręcznie",
+        "lockdown_gap_many": (
+            "otwarte wejścia: {count}; nie mogę ich zabezpieczyć zdalnie — "
+            "zamknij je ręcznie"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, blokada włączona. Polecenia wysłane: {did}. "
+            "Powiadomię, jeśli coś nie zostanie zabezpieczone."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, blokada włączona. Polecenia wysłane: {did}, ale "
+            "{gap}. Powiadomię, jeśli coś nie zostanie zabezpieczone."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, blokada włączona. Wszystko było już zabezpieczone, "
+            "ale {gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, blokada nocna: {body}. Dom jest zabezpieczony.",
+        "lockdown_left_alone": "{names}: po zabezpieczeniu otwarto ponownie, więc zostawiam to do rana",
+        "lockdown_unreadable": "{names}: nie mogę sprawdzić, czy jest zamknięte",
+        "lockdown_secure_failed": "{names}: nie udało się zabezpieczyć — sprawdź ręcznie",
+        "lockdown_failed_only": "{honorific}, blokada włączona, ale {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, blokada nocna: {body}. Dom nie jest w pełni "
+            "zabezpieczony — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, blokada nocna: dom nie jest w pełni zabezpieczony — "
+            "{failed}."
+        ),
+    },
+    "ru": {  # Russian
+        "freeze_critical": (
+            "{honorific}, температура на улице упала до {reading}. Риск "
+            "замерзания труб высокий. Рекомендую открыть дверцы шкафов у "
+            "наружных стен и установить отопление не ниже {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, температура на улице {reading}. Слежу за риском "
+            "замерзания труб."
+        ),
+        "intrusion_alert": (
+            "{honorific}, движение: {where}, в доме никого нет{ctx}. Проверяю "
+            "со стороны входа — подниму тревогу в доме и на всех устройствах, "
+            "только если это настоящее проникновение."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, движение: {where}, пока в доме спят{ctx}. Проверяю со "
+            "стороны входа — подниму тревогу в доме и на всех устройствах, "
+            "только если это настоящее проникновение."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, движение: {where}, пока дом под защитой{ctx}. "
+            "Проверяю со стороны входа — подниму тревогу в доме и на всех "
+            "устройствах, только если это настоящее проникновение."
+        ),
+        "intrusion_ctx_open": " (открыто: {name})",
+        "intrusion_ctx_armed": " (сигнализация включена)",
+        "lockdown_lifted": "{honorific}, режим блокировки снят. Дом вернулся в обычный режим.",
+        "lockdown_already_secured": "{honorific}, режим блокировки включён — дом уже был полностью защищён.",
+        "lockdown_locked": "заперли {names}",
+        "lockdown_closed": "закрыли {names}",
+        "lockdown_lock_pending": "запереть {names}",
+        "lockdown_close_pending": "закрыть {names}",
+        "lockdown_gap_one": "{names}: открыто, дистанционно защитить нельзя — закройте вручную",
+        "lockdown_gap_few": "{names}: открыто, дистанционно защитить нельзя — закройте вручную",
+        "lockdown_gap_many": (
+            "открытых проёмов: {count}; дистанционно защитить их нельзя — "
+            "закройте их вручную"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, режим блокировки включён. Команды отправлены: {did}. "
+            "Сообщу, если что-то не удастся защитить."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, режим блокировки включён. Команды отправлены: {did}, "
+            "но {gap}. Сообщу, если что-то не удастся защитить."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, режим блокировки включён. Всё уже было защищено, но "
+            "{gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, ночная блокировка: {body}. Дом защищён.",
+        "lockdown_left_alone": "{names}: после защиты снова открыто, оставляю до утра",
+        "lockdown_unreadable": "{names}: не удаётся определить, закрыто ли",
+        "lockdown_secure_failed": "{names}: не удалось защитить — проверьте вручную",
+        "lockdown_failed_only": "{honorific}, режим блокировки включён, но {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, ночная блокировка: {body}. Дом защищён не полностью — "
+            "{failed}."
+        ),
+        "lockdown_nighttime_failed_only": "{honorific}, ночная блокировка: дом защищён не полностью — {failed}.",
+    },
+    "uk": {  # Ukrainian
+        "freeze_critical": (
+            "{honorific}, температура надворі впала до {reading}. Ризик "
+            "замерзання труб високий. Рекомендую відчинити дверцята шаф біля "
+            "зовнішніх стін і встановити опалення не нижче {set_to}."
+        ),
+        "freeze_warning": (
+            "{honorific}, температура надворі {reading}. Стежу за ризиком "
+            "замерзання труб."
+        ),
+        "intrusion_alert": (
+            "{honorific}, рух: {where}, удома нікого немає{ctx}. Перевіряю з "
+            "боку входу — здійму тривогу вдома і на всіх пристроях, лише якщо "
+            "це справжнє проникнення."
+        ),
+        "intrusion_alert_sleep": (
+            "{honorific}, рух: {where}, поки вдома сплять{ctx}. Перевіряю з "
+            "боку входу — здійму тривогу вдома і на всіх пристроях, лише якщо "
+            "це справжнє проникнення."
+        ),
+        "intrusion_alert_confined": (
+            "{honorific}, рух: {where}, поки будинок під захистом{ctx}. "
+            "Перевіряю з боку входу — здійму тривогу вдома і на всіх пристроях, "
+            "лише якщо це справжнє проникнення."
+        ),
+        "intrusion_ctx_open": " (відчинено: {name})",
+        "intrusion_ctx_armed": " (сигналізацію ввімкнено)",
+        "lockdown_lifted": (
+            "{honorific}, режим блокування знято. Будинок повернувся до "
+            "звичайного режиму."
+        ),
+        "lockdown_already_secured": (
+            "{honorific}, режим блокування ввімкнено — будинок уже був повністю "
+            "захищений."
+        ),
+        "lockdown_locked": "замкнули {names}",
+        "lockdown_closed": "зачинили {names}",
+        "lockdown_lock_pending": "замкнути {names}",
+        "lockdown_close_pending": "зачинити {names}",
+        "lockdown_gap_one": "{names}: відчинено, віддалено захистити неможливо — зачиніть вручну",
+        "lockdown_gap_few": "{names}: відчинено, віддалено захистити неможливо — зачиніть вручну",
+        "lockdown_gap_many": (
+            "відчинених отворів: {count}; віддалено захистити їх неможливо — "
+            "зачиніть їх вручну"
+        ),
+        "lockdown_did_pending": (
+            "{honorific}, режим блокування ввімкнено. Команди надіслано: {did}. "
+            "Повідомлю, якщо щось не вдасться захистити."
+        ),
+        "lockdown_did_gap_pending": (
+            "{honorific}, режим блокування ввімкнено. Команди надіслано: {did}, "
+            "але {gap}. Повідомлю, якщо щось не вдасться захистити."
+        ),
+        "lockdown_gap_only": (
+            "{honorific}, режим блокування ввімкнено. Усе вже було захищено, "
+            "але {gap}."
+        ),
+        "lockdown_nighttime": "{honorific}, нічне блокування: {body}. Будинок захищено.",
+        "lockdown_left_alone": "{names}: після захисту знову відчинено, залишаю до ранку",
+        "lockdown_unreadable": "{names}: не вдається визначити, чи зачинено",
+        "lockdown_secure_failed": "{names}: не вдалося захистити — перевірте вручну",
+        "lockdown_failed_only": "{honorific}, режим блокування ввімкнено, але {gap}.",
+        "lockdown_nighttime_partial": (
+            "{honorific}, нічне блокування: {body}. Будинок захищено не "
+            "повністю — {failed}."
+        ),
+        "lockdown_nighttime_failed_only": (
+            "{honorific}, нічне блокування: будинок захищено не повністю — "
+            "{failed}."
         ),
     },
 }

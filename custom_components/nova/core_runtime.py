@@ -428,6 +428,16 @@ async def _gather_anticipation(hass, config) -> list:
     return found
 
 
+_URGENCY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _urgency_rank(action) -> int:
+    """Where an action sits in the tick's delivery order: the most urgent
+    first. An action with no urgency counts as medium."""
+    urgency = str(action.get("urgency", "medium")).lower() if isinstance(action, dict) else "medium"
+    return _URGENCY_ORDER.get(urgency, _URGENCY_ORDER["medium"])
+
+
 async def _tick():
     """One pass over the house: gather what needs saying, then deliver it."""
     core = _core()
@@ -515,9 +525,13 @@ async def _tick():
         actions += _take_ai_actions()
         _start_ai_work(hass, config)
 
-        # Deliver. Anticipation alerts take the convenience path, which works
-        # out its verdict from this tick's reading first. Each action is sent
-        # on its own, so one failure loses only that one.
+        # Deliver, most urgent first (a stable sort: equal urgency keeps the
+        # order it was gathered in), because each action waits for the one
+        # before it and a slow speaker would hold a critical alert back.
+        # Anticipation alerts take the convenience path, which works out its
+        # verdict from this tick's reading first. Each action is sent on its
+        # own, so one failure loses only that one.
+        actions.sort(key=_urgency_rank)
         from . import alert_path, convenience
         reading = alert_path.situation(hass, config, sleeping=asleep_fact,
                                        quiet=quiet_fact, house=house)

@@ -490,7 +490,7 @@ def _judge_labelled(event: dict, label: str) -> None:
         pass
 
 
-def label_event(event_id: str, label: str, source: str = LABEL_SOURCE_PANEL) -> dict:
+def label_event(event_id: str, label: Optional[str], source: str = LABEL_SOURCE_PANEL) -> dict:
     """Label an event "real" or "false", or clear it with None or "". This is
     what learning learns from."""
     _load_log()

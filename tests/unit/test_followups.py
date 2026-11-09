@@ -324,7 +324,10 @@ async def test_runner_failure_marks_failed_and_continues(fu, fake_hass, activity
         return "fine"
 
     actions = await fu.async_process_due(fake_hass, {}, runner, now=T0 + timedelta(minutes=3))
-    assert [a["message"] for a in actions] == ["fine"]
+    # A follow-up that fails is said so, rather than vanishing; the other still runs.
+    assert [(a["type"], a["urgency"], a["message"]) for a in actions] == [
+        ("followup_failed", "medium", "I couldn't run the follow-up you scheduled: breaks."),
+        ("followup", "medium", "fine")]
     rows = {r["instruction"]: r for r in _rows(fu)}
     assert rows["breaks"]["status"] == "failed"
     assert rows["breaks"]["result"] == "model offline"
@@ -338,7 +341,8 @@ async def test_non_string_result_counts_as_failure(fu, fake_hass, activity):
     async def runner(instruction, context):
         return 42
 
-    assert await fu.async_process_due(fake_hass, {}, runner, now=T0 + timedelta(minutes=2)) == []
+    actions = await fu.async_process_due(fake_hass, {}, runner, now=T0 + timedelta(minutes=2))
+    assert [a["type"] for a in actions] == ["followup_failed"]
     assert _rows(fu)[0]["status"] == "failed"
 
 
@@ -347,7 +351,9 @@ async def test_no_runner_fails_every_due_row(fu, fake_hass):
     fu.schedule("b", 1, now=T0)
     fu.schedule("later", 90, now=T0)
     actions = await fu.async_process_due(fake_hass, {}, None, now=T0 + timedelta(minutes=2))
-    assert actions == []
+    assert [(a["type"], a["message"]) for a in actions] == [
+        ("followup_failed", "I couldn't run the follow-up you scheduled: a."),
+        ("followup_failed", "I couldn't run the follow-up you scheduled: b.")]
     rows = {r["instruction"]: r for r in _rows(fu)}
     assert rows["a"]["status"] == rows["b"]["status"] == "failed"
     assert rows["a"]["result"] == "no runner available"

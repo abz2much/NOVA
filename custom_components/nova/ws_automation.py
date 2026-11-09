@@ -190,7 +190,7 @@ async def ws_goal_action(hass: HomeAssistant, connection: websocket_api.ActiveCo
                 connection.send_error(msg["id"], "empty_outcome",
                                       "a goal needs an outcome to work toward")
                 return
-            extra = {}
+            extra: dict[str, Any] = {}
             if msg.get("interval_min") is not None:
                 extra["check_interval_min"] = float(msg["interval_min"])
             made = await hass.async_add_executor_job(

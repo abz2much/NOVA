@@ -850,8 +850,10 @@ def vision_env(safety, monkeypatch):
         def __init__(self, data):
             self.data = data
 
-    async def analyze(hass, call, client, honorific, p1, p2, gate_announce=False):
-        calls.append({"data": call.data, "client": client, "gate": gate_announce})
+    async def analyze(hass, call, client, honorific, p1, p2, gate_announce=False,
+                      property_only=True):
+        calls.append({"data": call.data, "client": client, "gate": gate_announce,
+                      "property_only": property_only})
         if reply["exc"] is not None:
             raise reply["exc"]
         return reply["value"]
@@ -877,6 +879,8 @@ def vision_env(safety, monkeypatch):
 async def test_vision_reply_text_is_read_conservatively(vision_env, text, expected):
     vision_env.reply["value"] = {"analysis": text}
     assert await vision_env.safety._confirm_person_with_vision("camera.den") is expected
+    # The alarm's check sees the whole picture, road and pavement included.
+    assert vision_env.calls[-1]["property_only"] is False
 
 
 async def test_vision_reads_analysis_then_description_then_message(vision_env):

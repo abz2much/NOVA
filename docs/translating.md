@@ -22,12 +22,13 @@ There are three separate sets of text.
 
 ### The panel
 
-- Fully translated: Brazilian Portuguese, Czech, Dutch, French, German,
-  Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional
-  Chinese. Checks in CI keep these complete.
-- Partly translated: Danish, Finnish, Italian, Norwegian Bokmål, Portuguese,
-  Romanian, Slovak, Turkish and Ukrainian. Their files exist, and anything
-  not yet translated shows in English.
+- Fully translated, and kept complete by checks in CI: Brazilian Portuguese,
+  Czech, Danish, Dutch, Finnish, French, German, Italian, Norwegian Bokmål,
+  Polish, Portuguese, Romanian, Russian, Simplified Chinese, Slovak, Spanish,
+  Swedish, Traditional Chinese, Turkish and Ukrainian.
+- Not yet read by a native speaker: Danish, Finnish, Italian, Norwegian
+  Bokmål, Portuguese, Romanian, Slovak, Turkish and Ukrainian (done in 8.85.12).
+  Corrections are welcome.
 - Entity IDs, model names, counts, log content and other live values are
   never translated.
 - Some text Nova's backend sends is still English in every language: Setup
@@ -49,7 +50,8 @@ English.
 ### Safety notifications
 
 Safety notifications are translated for English, French, German, Spanish,
-Italian, Dutch and Portuguese. In any other language they stay in English.
+Italian, Dutch, Portuguese, Polish, Russian and Ukrainian. In any other language
+they stay in English.
 
 ## How regional languages are matched
 

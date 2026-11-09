@@ -233,6 +233,20 @@ async def test_the_check_asks_at_temperature_zero(pm, model, fake_hass):
     assert (model["role"], model["data_category"]) == ("package", "vision")
 
 
+async def test_the_package_check_stops_when_the_days_vision_calls_are_used_up(
+        pm, model, camera_mod, fake_hass, monkeypatch, load):
+    vb = load("vision_budget")
+    vb.reset()
+    monkeypatch.setattr(camera_mod, "_cfg_opt", lambda hass, key, default=None:
+                        1 if key == "vision_daily_limit" else default)
+    model["reply"] = '{"package": true, "mail": false, "count": 1, "description": "box"}'
+    assert await pm.detect_on_camera(fake_hass, None, DOOR) == _seen(True, False, 1, "box")
+    model.pop("temperature")
+    assert await pm.detect_on_camera(fake_hass, None, DOOR) is None
+    assert "temperature" not in model          # the model was not asked again
+    vb.reset()
+
+
 # ── the second look ─────────────────────────────────────────────────────────
 
 BOX = _seen(True, description="box")

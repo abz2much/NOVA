@@ -104,7 +104,7 @@ async def test_unreachable_provider_falls_to_local_mind(cascade, fake_hass,
     assert provider.calls == 1
     assert out["message"] == FLOOR_MESSAGE
     assert trace["origin"] == "local_mind"
-    assert connectivity.status()["consecutive_failures"] == 1
+    assert connectivity.status("reasoning")["consecutive_failures"] == 1
     assert cascade.learned == []                  # a failure is never learned
 
 
@@ -114,7 +114,7 @@ async def test_unreadable_reply_counts_as_failure(cascade, fake_hass,
     out = await cascade.decide(fake_hass, provider)
     assert out["message"] == FLOOR_MESSAGE
     assert "provider_failure" in out
-    assert connectivity.status()["consecutive_failures"] == 1
+    assert connectivity.status("reasoning")["consecutive_failures"] == 1
     assert cascade.learned == []
 
 
@@ -133,9 +133,9 @@ async def test_two_failures_open_the_breaker_and_skip_the_network(
         cascade, fake_hass, provider_factory, connectivity):
     failing = provider_factory(exc=REFUSED)
     await cascade.decide(fake_hass, failing)
-    assert connectivity.status()["state"] == "closed"     # one is not enough
+    assert connectivity.status("reasoning")["state"] == "closed"     # one is not enough
     await cascade.decide(fake_hass, failing)
-    assert connectivity.status()["state"] == "open"
+    assert connectivity.status("reasoning")["state"] == "open"
 
     spare = provider_factory(replies=[_reply(True, message="Never sent.", urgency="high")])
     out = await cascade.decide(fake_hass, spare)
@@ -156,8 +156,8 @@ async def test_breaker_holds_until_cooldown_then_probe_recovers(
     out = await cascade.decide(fake_hass, good)
     assert good.calls == 1                            # the probe went through
     assert out["speak"] is True
-    assert connectivity.status()["state"] == "closed"
-    assert connectivity.status()["consecutive_failures"] == 0
+    assert connectivity.status("reasoning")["state"] == "closed"
+    assert connectivity.status("reasoning")["consecutive_failures"] == 0
 
 
 async def test_failed_probe_reopens_at_once(cascade, fake_hass, provider_factory, connectivity):
@@ -165,8 +165,8 @@ async def test_failed_probe_reopens_at_once(cascade, fake_hass, provider_factory
     cascade.clock["now"] += 120
     await cascade.decide(fake_hass, failing)
     assert failing.calls == 3
-    assert connectivity.status()["state"] == "open"
-    assert connectivity.status()["cooldown_remaining_s"] == 60
+    assert connectivity.status("reasoning")["state"] == "open"
+    assert connectivity.status("reasoning")["cooldown_remaining_s"] == 60
 
 
 # ── provider answers ────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ async def test_spoken_verdict_is_returned_and_learned(cascade, fake_hass,
     assert "shed window" in out["message"].lower()
     assert trace["origin"] == "provider"
     assert [entry[1:] for entry in cascade.learned] == [(True, "high")]
-    assert connectivity.status()["total_successes"] >= 1
+    assert connectivity.status("reasoning")["total_successes"] >= 1
 
 
 async def test_silent_verdict_is_returned_and_learned_at_classifier_urgency(

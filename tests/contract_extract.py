@@ -161,11 +161,11 @@ def websocket_contract() -> dict:
     handler (a lower bound: keys added through a variable or ** spread are
     pinned from real calls in websocket_responses.json instead)."""
     tree = ws_tree()
-    registered = {
-        ast.unparse(n.args[1]) for n in ast.walk(tree)
-        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "async_register_command"
-        and len(n.args) >= 2
-    }
+    register_fn = next(n for n in tree.body
+                       if isinstance(n, ast.FunctionDef) and n.name == "async_register")
+    commands = next(a.value for a in register_fn.body
+                    if isinstance(a, ast.Assign) and a.targets[0].id == "commands")
+    registered = {ast.unparse(e) for e in commands.elts}
     out = {}
     for fn in tree.body:
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):

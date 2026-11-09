@@ -401,6 +401,49 @@ def test_the_pure_decision_never_raises(env, monkeypatch):
     assert d["stand_down"] is False and "alert goes ahead" in d["reason"]
 
 
+async def _restart(env, monkeypatch, tmp_path):
+    """Save the recent faces, forget them as a restart does, and restore them.
+    The log of unexplained person detections is not saved, so it starts empty."""
+    rec = env.rec
+    monkeypatch.setattr(rec, "_log_path", lambda: str(tmp_path / "recent_faces.json"))
+    monkeypatch.setattr(rec, "_HASS", None)
+    rec._write_log([rec._stamp_out(e) for e in list(rec._FACE_LOG)])
+    rec._FACE_LOG.clear()
+    rec._PERSON_LOG.clear()
+
+    async def run(fn, *a):
+        return fn(*a)
+    env.hass.async_add_executor_job = run
+    await rec.restore(env.hass)
+
+
+async def test_a_resident_restored_after_a_restart_does_not_stand_monitoring_down(
+        env, monkeypatch, tmp_path):
+    """The person detections that could veto it were not saved, so nothing
+    could tell whether an unexplained person was seen just before the restart."""
+    env.rec.remember_recognition("front", "Sam", 95.0, source="frigate")
+    await _restart(env, monkeypatch, tmp_path)
+    assert [e["name"] for e in env.rec.recent_face_events(180)] == ["Sam"]   # still shown
+    decision = env.fr.evaluate_stand_down()
+    assert decision["stand_down"] is False
+    assert "no trusted resident recognition" in decision["reason"]
+
+
+async def test_a_restored_unknown_face_still_blocks_a_stand_down(env, monkeypatch, tmp_path):
+    """Restored faces can only add a reason to alert, never a reason not to."""
+    env.rec.remember_recognition("front", "unknown", 90.0, source="frigate")
+    await _restart(env, monkeypatch, tmp_path)
+    env.rec.remember_recognition("front", "Sam", 95.0, source="frigate")      # seen live
+    decision = env.fr.evaluate_stand_down()
+    assert decision["stand_down"] is False and "unknown face" in decision["reason"]
+
+
+async def test_a_resident_seen_live_after_a_restart_still_stands_down(env, monkeypatch, tmp_path):
+    await _restart(env, monkeypatch, tmp_path)
+    env.rec.remember_recognition("front", "Sam", 95.0, source="frigate")
+    assert env.fr.evaluate_stand_down()["stand_down"] is True
+
+
 # ── all three ways an investigation can start ───────────────────────────────
 
 async def test_stand_down_applies_to_a_new_sleeping_investigation(env):

@@ -93,7 +93,7 @@ class StateLogger:
                               busy_timeout_ms=None)
 
     def log_command(self, text: str, handled_by: str = "agent",
-                    entity_ids: list = None, person: str = "unknown"):
+                    entity_ids: Optional[list] = None, person: str = "unknown"):
         """Keep one spoken or typed command for pattern analysis."""
         now = datetime.now()
         row = (now.isoformat(), text, handled_by, json.dumps(entity_ids or []), person,

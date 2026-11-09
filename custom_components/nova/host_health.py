@@ -520,7 +520,7 @@ def _advance_one(config: dict, mapping: MappingResult, sample: MetricSample, now
                             sample.source_entity, sample.sample_age_seconds,
                             threshold, False, st["alerted"], sample.reason)
 
-    over = sample.value >= threshold
+    over = sample.value is not None and sample.value >= threshold
     persistence_secs = _persistence_seconds(config)
     if over:
         if st["breach_since"] is None:
@@ -675,7 +675,7 @@ def snapshot(hass, config: dict) -> dict:
         mapping = mappings[metric.key]
         st = _STATE.get(metric.key)
         sample: Optional[MetricSample] = st["last_sample"] if st else None
-        entry = {
+        entry: dict[str, Any] = {
             "key": metric.key,
             "label": metric.label,
             "mapping_status": mapping.status,
@@ -694,7 +694,7 @@ def snapshot(hass, config: dict) -> dict:
         if metric.alertable:
             threshold = _threshold_for(config, metric.key)
             entry["threshold"] = threshold
-            over = sample.value >= threshold
+            over = sample.value is not None and sample.value >= threshold
             entry["over_threshold"] = over
             if over:
                 problems.append(dict(entry))

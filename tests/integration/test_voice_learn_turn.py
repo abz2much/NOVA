@@ -208,8 +208,8 @@ async def test_a_duplicate_on_a_second_satellite_is_never_learned(
                     # its turn falls inside the dedup window. (A test turn
                     # takes longer than the 4 s window, so set it directly.)
                     key = nova_conv._dedup_key(TEXT)
-                    _ts, cached, winner = nova_conv._dedup_cache[key]
-                    nova_conv._dedup_cache[key] = (_time.time(), cached, winner)
+                    _ts, cached, winner, who = nova_conv._dedup_cache[key]
+                    nova_conv._dedup_cache[key] = (_time.time(), cached, winner, who)
                 await entity.async_process_audio_stream(_meta(), _stream())
                 await conversation_component.async_converse(
                     hass, TEXT, None, Context(), agent_id=conv, device_id=device)

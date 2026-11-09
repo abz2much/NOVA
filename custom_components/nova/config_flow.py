@@ -167,7 +167,7 @@ def _sort_credentials(user_input: dict[str, Any]) -> tuple[str | None, dict[str,
     return None, writes, clears
 
 
-class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
+class NovaConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """The setup dialog, the reinstall import and Voice ID discovery."""
 
     VERSION = 1

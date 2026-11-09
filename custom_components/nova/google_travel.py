@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,10 +38,10 @@ _MODES = {
     "transit": (SERVICE_TRANSIT, {}),
 }
 
-_USAGE = {"day": None, "count": 0}
+_USAGE: dict[str, Any] = {"day": None, "count": 0}
 
 
-def _roll(now: float = None) -> None:
+def _roll(now: Optional[float] = None) -> None:
     import time
     today = datetime.date.fromtimestamp(now or time.time()).toordinal()
     if _USAGE["day"] != today:
@@ -103,8 +103,8 @@ def _reason_for(exc: Exception) -> str:
 
 
 async def route_minutes(hass, mode: str, origin, destination: str, *,
-                        arrive_by: datetime.datetime = None,
-                        now: float = None) -> tuple:
+                        arrive_by: Optional[datetime.datetime] = None,
+                        now: Optional[float] = None) -> tuple:
     """Minutes to travel from origin to destination by mode ('walk', 'drive' or
     'transit'), and why not when it cannot be worked out: (minutes, None) or
     (None, reason). arrive_by only applies to transit: the route is chosen to

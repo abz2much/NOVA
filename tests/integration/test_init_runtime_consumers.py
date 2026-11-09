@@ -587,3 +587,26 @@ async def test_test_routing_fails_for_loaded_entry_without_runtime(hass, caplog)
     _drop_runtime(entry)
     with pytest.raises(NovaRuntimeUnavailable):
         await hass.services.async_call(DOMAIN, "test_routing", {}, blocking=True)
+
+
+# ── A Nest or Eufy person counts for stand-down, like a Frigate one ─────────
+
+@pytest.fixture
+def person_log():
+    from custom_components.nova import recognition
+    recognition._PERSON_LOG.clear()
+    yield recognition
+    recognition._PERSON_LOG.clear()
+
+
+async def test_a_nest_person_is_noted_even_with_camera_watch_off(hass, camera_calls, person_log):
+    entry = await _setup(hass)
+    entry.runtime_data.runtime_config["camera_auto_analyze"] = False
+    await _person(hass, "d1")
+    assert [p["camera_entity"] for p in person_log.recent_person_detections(60)] == ["camera.d1"]
+
+
+async def test_a_nest_doorbell_press_is_not_a_person(hass, camera_calls, person_log):
+    await _setup(hass)
+    await _chime(hass, "d1")
+    assert person_log.recent_person_detections(60) == []

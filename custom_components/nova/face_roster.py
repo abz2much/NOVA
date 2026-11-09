@@ -187,7 +187,9 @@ def evaluate_stand_down(window_s: float = STAND_DOWN_WINDOW_S) -> dict:
                     and is_resident(e.get("name"))
                     and float(e.get("confidence") or 0.0) >= threshold)
 
-        residents = [e for e in events if _trusted(e)]
+        # A face restored after a restart proves nothing: the person detections
+        # that could veto it were not saved. It can still veto (see `others`).
+        residents = [e for e in events if _trusted(e) and not e.get("restored")]
         if not residents:
             return {**no, "reason": "no trusted resident recognition in the window"}
         others = [e for e in events if not _trusted(e)]

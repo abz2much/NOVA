@@ -73,8 +73,9 @@ def _broken(*_a, **_k):
 def _registered_names():
     tree = ast.parse((COMP / "websocket.py").read_text(encoding="utf-8"))
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "async_register")
-    return [ast.unparse(c.args[1]) for c in ast.walk(fn)
-            if isinstance(c, ast.Call) and getattr(c.func, "attr", "") == "async_register_command"]
+    commands = next(a.value for a in fn.body
+                    if isinstance(a, ast.Assign) and a.targets[0].id == "commands")
+    return [ast.unparse(e) for e in commands.elts]
 
 
 def test_every_handler_is_registered_once(ws, monkeypatch):
@@ -92,11 +93,19 @@ def test_every_handler_is_registered_once(ws, monkeypatch):
         assert local in names
 
 
-def test_a_registration_failure_is_logged_at_debug_and_swallowed(ws, monkeypatch, caplog):
-    monkeypatch.setattr(ws.websocket_api, "async_register_command", _broken)
-    with caplog.at_level(logging.DEBUG, logger=ws.__name__):
+def test_one_command_failing_to_register_does_not_stop_the_rest(ws, monkeypatch, caplog):
+    seen = []
+
+    def _register(hass, handler):
+        if handler is ws.ws_documents:
+            raise RuntimeError("broken")
+        seen.append(handler)
+
+    monkeypatch.setattr(ws.websocket_api, "async_register_command", _register)
+    with caplog.at_level(logging.WARNING, logger=ws.__name__):
         ws.async_register(FakeHass())
-    assert any(r.levelno == logging.DEBUG and "WS command register note" in r.getMessage()
+    assert len(seen) == 80
+    assert any(r.levelno == logging.WARNING and "ws_documents" in r.getMessage()
                for r in caplog.records)
 
 

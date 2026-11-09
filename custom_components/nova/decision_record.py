@@ -25,7 +25,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from . import paths
 from .persistence import sqlite as _store
@@ -144,7 +144,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def _where(kind: Optional[str], only_unjudged: bool) -> tuple[list, list]:
     clauses = ["kind = ?"] if kind else []
-    params = [str(kind)] if kind else []
+    params: list = [str(kind)] if kind else []
     if only_unjudged:
         clauses.append("outcome IS NULL")
     return clauses, params
@@ -291,7 +291,7 @@ def page(limit: int = 50, kind: Optional[str] = None, only_unjudged: bool = Fals
     ``cursor_id`` (both or neither) for the next page; None means the end.
     Pages are ordered and cut on the (ts, id) pair, so two records with the
     same time are never skipped or shown twice."""
-    out = {"items": [], "next_cursor": None}
+    out: dict[str, Any] = {"items": [], "next_cursor": None}
 
     def _page(conn):
         clauses, params = _where(kind, only_unjudged)
@@ -340,7 +340,8 @@ def calibration(db_path: Optional[str] = None, kind: Optional[str] = None,
     confidence and result; 0 is perfect) and the expected calibration error
     (the gap per bin, weighted by its share of records). Never raises."""
     count = max(1, int(bins))
-    out = {"n": 0, "good_rate": None, "brier": None, "ece": None, "bins": [], "kind": kind}
+    out: dict[str, Any] = {"n": 0, "good_rate": None, "brier": None, "ece": None,
+                           "bins": [], "kind": kind}
     if not _exists(db_path):
         return out
 
@@ -459,11 +460,12 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
     counts, good_rate and unwelcome_rate ((unnecessary + wrong) / judged), so
     a proactive feature can steer by how its own output was received. Never
     raises."""
-    out = {"kind": kind, "judged": 0, "good": 0, "unnecessary": 0, "wrong": 0,
-           "good_rate": None, "unwelcome_rate": None}
+    out: dict[str, Any] = {"kind": kind, "judged": 0, "good": 0, "unnecessary": 0,
+                           "wrong": 0, "good_rate": None, "unwelcome_rate": None}
     if not _exists(db_path):
         return out
     base = "SELECT outcome, COUNT(*) FROM decision_records WHERE outcome IS NOT NULL"
+    params: list
     try:
         if prefix:
             literal = str(kind)

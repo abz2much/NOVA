@@ -1,3 +1,41 @@
+## [8.85.12] Smaller fixes from the review
+
+### Fixed
+- **One failing AI tier can no longer shut the conversation.** The cloud model that Nova uses for deciding about events and the one you talk to shared one circuit breaker, so two failures in the first switched both to local only for a minute. Each now has its own. The diagnostics list the state of every breaker.
+- **A face restored after a restart no longer stands intrusion monitoring down.** The person detections that could contradict it were not saved, so the restored face proved nothing. It can still count against standing down.
+- **A person seen by a Nest camera, or a stranger flagged by a Eufy camera, now counts when Nova decides whether to stand down.** Before, only Frigate people did. This works even when Camera Watch is off.
+- **Leave alerts see every event, not only the one a calendar is showing.** While one event is running, the next one on that calendar was invisible. Nova now asks each calendar for the next three hours.
+- **Nova's voice is asked to speak your language.** Before, no language was sent, so a French household got French text read by an English voice. Nova now sends its output language when the voice lists it, and changes nothing for English or for a voice that does not list it.
+- **Solar status counts every battery and every grid connection.** It used only the first of each. Power is added up and the battery level is the average of those that report one.
+- **A failing panel command no longer hides the rest.** Each command is registered on its own, and one that cannot be registered is named in the log as a warning.
+- **The Logs tab draws its category icons instead of using emoji.** The icons are drawn, named for screen readers, and follow the theme colours.
+- **A bad confidence score from Double Take, or a camera name in capitals from Frigate, is handled.** A score that cannot be read counts as low and never stands anything down. A camera written `Front_Door` now matches `camera.front_door`.
+- **Actions in one tick go out most urgent first.** Critical, then high, medium and low.
+- **A scheduled follow-up that cannot run now says so.** Before, it failed silently.
+- **Two different people saying the same words at the same moment are no longer merged into one request.**
+- **A spoken thermostat setting of zero is accepted.** It was treated as no setting.
+- **A single camera frame is shrunk before it goes to the vision model,** as several frames already were.
+- **The reasoning cache is saved off the event loop,** and the mode file is written by one writer at a time, atomically.
+- **Learned alias text goes into the prompt on one line and is cut short.**
+- **Safety alerts now come in Polish, Russian and Ukrainian too.** Freeze, intrusion and lockdown alerts, titles included, are written in ten languages. The wording avoids grammar that would depend on a device's name or gender.
+- **Spoken yes and no answers, and the voice-phrase guards, work in the other nine languages.** The whole answer must still be on the list ("oui mais pas maintenant" is not a yes). A "no" is read in any of these languages, but a "yes" that confirms a risky action, such as unlocking, is still English only. A negation, an opposite word ("open" and "close") or a question still stops a flexible voice phrase from matching, in French, German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian.
+- **One daily limit on the camera analyses Nova starts itself.** A fault that made every camera fire could run up an unlimited bill with a paid vision model. The default is 300 a day over all cameras; change it with `vision_daily_limit`, or set 0 for no limit. Motion clips, quiet visitor notes and the package check count. A doorbell press, a request you make and the security alarm never do.
+- **Cameras keep the road and the neighbours out of what they describe and remember.** The vision prompt now covers the household's own property and its entrances, and an empty or off-property scene is not kept in scene memory. Anyone or anything that comes onto the property, or stops at it, is still described. The security alarm's own camera check is not changed: it still sees the whole picture.
+- **The panel is fully translated in Danish, Finnish, Italian, Norwegian Bokmål, Portuguese, Romanian, Slovak, Turkish and Ukrainian.** They were about 38% done. Checks in CI now keep all 20 languages complete. The setting text about safety alerts now names all ten alert languages.
+
+### Changed
+- **Every module is now type-checked, not only the 84 in the architecture packages.** That is 268 files in all. It found a few real gaps, now closed: a safety investigation tick that started with none open, the learning log called before its logger existed, and the energy, solar and briefing code that could meet an empty value.
+- **The release is published only after the Validate checks have passed on the merge commit.** The release workflow now waits for them, up to 45 minutes, and publishes nothing if they fail or do not finish. If that happens, fix the problem and run the workflow again by hand from the Actions tab.
+
+**Good to know:**
+- The voice language is always the household's output language, not the language of each reply. A reply in another language is read by the voice for the household's language.
+- A Eufy plain "person" sensor is not counted as an unexplained person, because Nova treats it as a known face.
+- The Logs tab icons have not been looked at in a real browser, only checked by the smoke test.
+- The `main` branch has no branch protection on GitHub, so nothing forces checks to pass before a merge. That is a repository setting.
+- The nine new panel translations, and the Polish, Russian and Ukrainian safety alerts, were written without a native speaker reading them. The alert wording is plain on purpose, but a reader should check it.
+- The daily camera limit is kept in memory. It starts again at midnight and when Home Assistant restarts.
+- In the yes and no lists, the Polish casual "no" (meaning "yeah") is read as English "no", the safe reading.
+
 ## [8.85.11] A lock that misses its command is tried again
 
 ### Fixed

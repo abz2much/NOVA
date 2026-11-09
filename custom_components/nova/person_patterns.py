@@ -128,6 +128,7 @@ def read(person: Optional[str] = None, db_path: Optional[str] = None) -> list[di
     try:
         with _open(path) as conn:
             conn.row_factory = sqlite3.Row
+            params: tuple
             if not person:
                 query, params = ("SELECT * FROM person_patterns "
                                  "ORDER BY person, confidence DESC"), ()

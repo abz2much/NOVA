@@ -267,9 +267,9 @@ def process(event, threshold: float = DEFAULT_THRESHOLD) -> Decision:
         # never escalated, never learned as a change.
         from .cognitive.evaluators import is_entry_state_recovery
         before = old_state.state if old_state else "unknown"
-        if is_entry_state_recovery(entity_id, dclass or "", before, value):
+        if is_entry_state_recovery(entity_id, dclass or "", before, value or ""):
             if entity_id in _MODEL:
-                _MODEL[entity_id].last_state = value
+                _MODEL[entity_id].last_state = value or ""
             return Decision(escalate=False, salience=0.0, reason="state recovery")
         entry = observe(entity_id, old_state, value, now)
         score, reason = _salience(domain, dclass, value, entry, now, entity_id)
@@ -338,7 +338,7 @@ def _occupancy_candidates(hass):
     return found
 
 
-def sample_occupancy(hass, now: float = None) -> int:
+def sample_occupancy(hass, now: Optional[float] = None) -> int:
     """Count each candidate's current state against this hour. Run about every
     15 minutes, so over days it learns "the garage is closed at this hour 95%
     of the time". Returns how many were sampled."""
@@ -431,7 +431,7 @@ def _deviation(hass, eid: str, entry: _Entry, hour: int, now: float):
     return st
 
 
-def predict(hass, now: float = None) -> list:
+def predict(hass, now: Optional[float] = None) -> list:
     """Openings and locks left in a less secure state that is unusual for the
     hour, settled, and backed by a separate reason to speak.
 
@@ -550,7 +550,7 @@ def _local_midnight(now: float) -> float:
     return day_start.timestamp()
 
 
-def predict_overdue(hass, now: float = None) -> list:
+def predict_overdue(hass, now: Optional[float] = None) -> list:
     """Daily events that have not happened by their usual time plus grace
     ("the front door usually has activity by 07:45, none yet today"), once per
     entity per day.
@@ -559,7 +559,7 @@ def predict_overdue(hass, now: float = None) -> list:
     after a start, a reload or a gap the morning is unknown, so nothing is.
     """
     now = now or time.time()
-    flagged = []
+    flagged: list = []
     if not _OBSERVING_SINCE or _OBSERVING_SINCE > _local_midnight(now):
         return flagged
     today = _local_day(now)
@@ -711,7 +711,7 @@ def _note_arrival(entry: _Entry, secs: int, today: int) -> None:
         arrivals.append((today, secs))
 
 
-def sample_presence(hass, now: float = None) -> int:
+def sample_presence(hass, now: Optional[float] = None) -> int:
     """Record people's debounced departures and arrivals (device trackers only
     when there are no people). A state counts once it has held the tracker's
     debounce, so flaps never reach a routine. Each stable departure is kept
@@ -1012,7 +1012,7 @@ def _leave_groups(minutes: dict, start_dt, lead_default):
 
 
 def _label(modes) -> str:
-    return " or ".join(map(DEPART_MODE_LABEL.get, modes))
+    return " or ".join(str(DEPART_MODE_LABEL.get(mode, mode)) for mode in modes)
 
 
 def _minutes_until(when, now_dt) -> int:
@@ -1104,7 +1104,7 @@ _LEAD_REASONS = {"sensor": "travel sensor reading", "route": "estimated drive ti
                  "default": "default lead time"}
 
 
-async def predict_departure(hass, now: float = None) -> list:
+async def predict_departure(hass, now: Optional[float] = None) -> list:
     """Leave time anticipation: once, when it is time to head out for the
     nearest timed calendar event.
 
@@ -1119,7 +1119,7 @@ async def predict_departure(hass, now: float = None) -> list:
     alert per event per day; every lookup is cached. Never raises.
     """
     now = now or time.time()
-    found = []
+    found: list = []
     try:
         from . import nova_config
         if not bool(nova_config.get("departure_alerts_enabled", False)):
@@ -1140,7 +1140,7 @@ async def predict_departure(hass, now: float = None) -> list:
         skipped = _excluded_calendars(nova_config)
         home_names = _home_names(hass)
         from . import comms
-        upcoming = sorted((ev for ev in comms.gather_events(hass)
+        upcoming = sorted((ev for ev in await comms.gather_events_ahead(hass, DEPART_LOOKAHEAD_H)
                            if ev.get("start") and not ev.get("all_day")
                            and ev.get("calendar") not in skipped
                            and is_real_place(ev.get("location"), home_names)),
@@ -1241,7 +1241,7 @@ def _routine_details(row: dict):
     return details, details.get("hour"), str(details.get("state") or ""), entity
 
 
-def predict_routine_start(hass, now: float = None) -> list:
+def predict_routine_start(hass, now: Optional[float] = None) -> list:
     """"You usually turn the Kitchen Light on around now." From the per person
     routine store: a confident time routine that a person does
     (cognitive.routines), as its usual time arrives and while that person is
@@ -1251,7 +1251,7 @@ def predict_routine_start(hass, now: float = None) -> list:
     routine_alerts_enabled. Never raises.
     """
     now = now or time.time()
-    found = []
+    found: list = []
     try:
         from . import nova_config
         if not bool(nova_config.get("routine_alerts_enabled", True)):
@@ -1366,7 +1366,7 @@ def _arrival_action(eid, name, entry, state, today, clock):
             "pattern_key": f"presence_arrive:{eid}", "offer": False, "decision_id": decision_id}
 
 
-def predict_presence(hass, now: float = None) -> list:
+def predict_presence(hass, now: Optional[float] = None) -> list:
     """People's routines. Departures (cognitive.presence_routines): a reminder
     routine_departure_lead_minutes before the usual time for today's kind of
     day, then a "still home" check, each once a day while that person is home
@@ -1437,7 +1437,7 @@ def presence_status(hass) -> list:
     return rows
 
 
-def predict_proximity(hass, now: float = None) -> list:
+def predict_proximity(hass, now: Optional[float] = None) -> list:
     """A location aware person heading home: flagged once a trip as they close
     inside APPROACH_OUTER_KM. Needs no home network, and resets once they are
     home. People only (a person and their phone are one arrival), device
@@ -1535,7 +1535,7 @@ def _open(db_path: str):
                           busy_timeout_ms=None)
 
 
-def save_to_db(db_path: str, now: float = None) -> int:
+def save_to_db(db_path: str, now: Optional[float] = None) -> int:
     """Save the model and the once a day ledger to patterns.db. Blocking: run
     it in the executor."""
     try:
@@ -1555,7 +1555,7 @@ def save_to_db(db_path: str, now: float = None) -> int:
         return 0
 
 
-def load_from_db(db_path: str, now: float = None) -> int:
+def load_from_db(db_path: str, now: Optional[float] = None) -> int:
     """Load the model and the ledger from patterns.db. Blocking: run it in the
     executor. A missing or damaged ledger restores nothing."""
     loaded = 0

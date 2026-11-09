@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 BOOL = "bool"
 NUMBER = "number"
@@ -54,7 +54,7 @@ class Setting:
     exact_true: bool = False
 
 
-def _b(key: str, default: bool, payload: str = "plain", exact_true: bool = False) -> Setting:
+def _b(key: str, default: Optional[bool], payload: str = "plain", exact_true: bool = False) -> Setting:
     return Setting(key, BOOL, default, payload, exact_true)
 
 
@@ -281,6 +281,9 @@ _ALL = (
     _t("vision_model", None),
     _t("camera_reasoning_provider", "groq"),
     _t("camera_reasoning_model", None),
+    # Camera analyses Nova starts itself, per day, over every camera. 0 is
+    # no limit. Doorbell presses, requests and the alarm are never held back.
+    _n("vision_daily_limit", 300),
     _u("llm_base_url"),
     _u("ollama_base_url"),
     _u("custom_base_url"),

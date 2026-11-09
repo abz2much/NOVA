@@ -340,7 +340,7 @@ def start_many(
                         t.get("reason_code"), t.get("reason_text"),
                     ),
                 )
-                ids[key] = int(cur.lastrowid)
+                ids[key] = int(cur.lastrowid or 0)
             _prune(conn)
             conn.commit()
             return ids

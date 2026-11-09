@@ -329,3 +329,52 @@ def test_a_phrase_saved_on_8_33_loads_and_saves_unchanged(vp):
     m = vp.match("Nova, the house is cold.", _cfg(saved))
     assert (m.phrase_id, m.tier) == ("vp_3f9c1a2b", "exact")
     assert vp.match("the house is a bit cold", _cfg(saved)).tier == "flexible"
+
+
+# ── the guards in other languages ───────────────────────────────────────────
+
+@pytest.mark.parametrize("said,phrase", [
+    # A negation, the opposite word and a question each stop a flexible match.
+    ("das Haus ist nicht kalt", "das Haus ist kalt"),
+    ("la casa non è fredda", "la casa è fredda"),
+    ("het huis is niet koud", "het huis is koud"),
+    ("a casa não está fria", "a casa está fria"),
+    ("w domu nie jest zimno", "w domu jest zimno"),
+    ("в доме не холодно", "в доме холодно"),
+    ("у домі не холодно", "у домі холодно"),
+    ("la maison n'est jamais froide", "la maison est froide"),
+    # The opposite word also in what was said: "open the door, then close".
+    ("ouvre la porte puis ferme", "ouvre la porte"),
+    ("öffne die tür dann schließe", "öffne die tür"),
+    ("abre la puerta luego cierra", "abre la puerta"),
+    ("apri la porta poi chiudi", "apri la porta"),
+    ("open de deur dan sluit", "open de deur"),
+    ("abre a porta depois fecha", "abre a porta"),
+    ("otwórz drzwi potem zamknij", "otwórz drzwi"),
+    ("открой дверь потом закрой", "открой дверь"),
+    ("відчини двері потім зачини", "відчини двері"),
+    # A question asks, it does not tell.
+    ("est-ce que la maison est froide", "la maison est froide"),
+    ("ist das Haus kalt", "das Haus ist kalt"),
+    ("czy w domu jest zimno", "w domu jest zimno"),
+    ("чи в домі холодно", "в домі холодно"),
+])
+def test_guards_work_in_other_languages(vp, said, phrase):
+    cfg = _cfg(_entry("vp_00000001", [phrase]))
+    assert vp.match(phrase, cfg) is not None     # the phrase itself is saved
+    assert vp.match(said, cfg) is None
+
+
+@pytest.mark.parametrize("said,phrase", [
+    ("allumer les lumières s'il vous plaît", "allumer les lumières"),
+    ("schalte das Licht ein bitte", "schalte das Licht ein"),
+    ("enciende la luz por favor", "enciende la luz"),
+    ("accendi la luce per favore", "accendi la luce"),
+    ("zet het licht aan alsjeblieft", "zet het licht aan"),
+    ("liga a luz por favor", "liga a luz"),
+    ("włącz światło proszę", "włącz światło"),
+    ("включи свет пожалуйста", "включи свет"),
+    ("увімкни світло будь ласка", "увімкни світло"),
+])
+def test_a_trailing_please_is_ignored_in_other_languages(vp, said, phrase):
+    assert vp.normalise(said) == vp.normalise(phrase)

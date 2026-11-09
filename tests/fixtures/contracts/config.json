@@ -226,6 +226,7 @@
     "tts_use_ha_voice",
     "ui_language",
     "ui_theme",
+    "vision_daily_limit",
     "vision_model",
     "vision_provider",
     "visitor_learning",

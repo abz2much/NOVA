@@ -137,105 +137,110 @@ _INTEGRATION_VERSION = _manifest_version()
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    """Put every Nova panel command on the websocket API. A failure part way
-    through is only noted at debug level (a second call after a reload finds
-    the commands already there)."""
-    try:
+    """Put every Nova panel command on the websocket API. Each one is
+    registered on its own: a command that fails is logged as a warning, by
+    name, and the rest still register."""
+    commands = (
         # This module's own commands.
-        websocket_api.async_register_command(hass, ws_documents)
-        websocket_api.async_register_command(hass, ws_diagnostics)
-        websocket_api.async_register_command(hass, ws_get_activity_log)
-        websocket_api.async_register_command(hass, ws_get_area_sparklines)
-        websocket_api.async_register_command(hass, ws_get_debug_log)
-        websocket_api.async_register_command(hass, ws_get_panel_data)
-        websocket_api.async_register_command(hass, ws_get_provider_activity)
-        websocket_api.async_register_command(hass, ws_get_setup_health)
-        websocket_api.async_register_command(hass, ws_reload_appliances)
-        websocket_api.async_register_command(hass, ws_semantic_search)
-        websocket_api.async_register_command(hass, ws_update_config)
+        ws_documents,
+        ws_diagnostics,
+        ws_get_activity_log,
+        ws_get_area_sparklines,
+        ws_get_debug_log,
+        ws_get_panel_data,
+        ws_get_provider_activity,
+        ws_get_setup_health,
+        ws_reload_appliances,
+        ws_semantic_search,
+        ws_update_config,
         # AI models and credentials.
-        websocket_api.async_register_command(hass, ws_apply_ai_config)
-        websocket_api.async_register_command(hass, ws_delete_credential)
-        websocket_api.async_register_command(hass, ws_get_credential_status)
-        websocket_api.async_register_command(hass, ws_list_models)
-        websocket_api.async_register_command(hass, ws_set_credential)
-        websocket_api.async_register_command(hass, ws_test_provider_endpoint)
+        ws_apply_ai_config,
+        ws_delete_credential,
+        ws_get_credential_status,
+        ws_list_models,
+        ws_set_credential,
+        ws_test_provider_endpoint,
         # Suggestions, goals, routines and automation trials.
-        websocket_api.async_register_command(hass, ws_automation_trial_feedback)
-        websocket_api.async_register_command(hass, ws_get_person_routines)
-        websocket_api.async_register_command(hass, ws_goal_action)
-        websocket_api.async_register_command(hass, ws_list_automation_inventory)
-        websocket_api.async_register_command(hass, ws_list_automation_trials)
-        websocket_api.async_register_command(hass, ws_suggestion_action)
+        ws_automation_trial_feedback,
+        ws_get_person_routines,
+        ws_goal_action,
+        ws_list_automation_inventory,
+        ws_list_automation_trials,
+        ws_suggestion_action,
         # Cameras.
-        websocket_api.async_register_command(hass, ws_camera_diagnostics)
-        websocket_api.async_register_command(hass, ws_camera_location)
-        websocket_api.async_register_command(hass, ws_camera_snapshot)
-        websocket_api.async_register_command(hass, ws_compute_camera_coverage)
-        websocket_api.async_register_command(hass, ws_mmwave_overview)
-        websocket_api.async_register_command(hass, ws_rename_camera)
+        ws_camera_diagnostics,
+        ws_camera_location,
+        ws_camera_snapshot,
+        ws_compute_camera_coverage,
+        ws_mmwave_overview,
+        ws_rename_camera,
         # Chat and the convenience path.
-        websocket_api.async_register_command(hass, ws_chat)
-        websocket_api.async_register_command(hass, ws_chat_new)
-        websocket_api.async_register_command(hass, ws_convenience_choice)
-        websocket_api.async_register_command(hass, ws_convenience_status)
+        ws_chat,
+        ws_chat_new,
+        ws_convenience_choice,
+        ws_convenience_status,
         # Decisions and cognition.
-        websocket_api.async_register_command(hass, ws_get_calibration)
-        websocket_api.async_register_command(hass, ws_get_cognitive_status)
-        websocket_api.async_register_command(hass, ws_get_decision)
-        websocket_api.async_register_command(hass, ws_list_decisions)
-        websocket_api.async_register_command(hass, ws_root_cause)
-        websocket_api.async_register_command(hass, ws_run_analysis)
-        websocket_api.async_register_command(hass, ws_set_decision_outcome)
+        ws_get_calibration,
+        ws_get_cognitive_status,
+        ws_get_decision,
+        ws_list_decisions,
+        ws_root_cause,
+        ws_run_analysis,
+        ws_set_decision_outcome,
         # Faces.
-        websocket_api.async_register_command(hass, ws_list_faces)
-        websocket_api.async_register_command(hass, ws_add_resident)
-        websocket_api.async_register_command(hass, ws_remove_resident)
+        ws_list_faces,
+        ws_add_resident,
+        ws_remove_resident,
         # Knowledge, relations and lockdown.
-        websocket_api.async_register_command(hass, ws_add_knowledge)
-        websocket_api.async_register_command(hass, ws_clear_scene_memory)
-        websocket_api.async_register_command(hass, ws_edit_pending_fact)
-        websocket_api.async_register_command(hass, ws_forget_knowledge)
-        websocket_api.async_register_command(hass, ws_get_knowledge)
-        websocket_api.async_register_command(hass, ws_pending_fact_action)
-        websocket_api.async_register_command(hass, ws_search_memory)
-        websocket_api.async_register_command(hass, ws_set_lockdown)
-        websocket_api.async_register_command(hass, ws_list_relations)
-        websocket_api.async_register_command(hass, ws_relation_action)
-        websocket_api.async_register_command(hass, ws_edit_relation)
+        ws_add_knowledge,
+        ws_clear_scene_memory,
+        ws_edit_pending_fact,
+        ws_forget_knowledge,
+        ws_get_knowledge,
+        ws_pending_fact_action,
+        ws_search_memory,
+        ws_set_lockdown,
+        ws_list_relations,
+        ws_relation_action,
+        ws_edit_relation,
         # Modes, safety and energy.
-        websocket_api.async_register_command(hass, ws_biometrics)
-        websocket_api.async_register_command(hass, ws_energy)
-        websocket_api.async_register_command(hass, ws_energy_flow)
-        websocket_api.async_register_command(hass, ws_energy_outlook)
-        websocket_api.async_register_command(hass, ws_hazard)
-        websocket_api.async_register_command(hass, ws_intrusion)
-        websocket_api.async_register_command(hass, ws_mode)
-        websocket_api.async_register_command(hass, ws_solar)
-        websocket_api.async_register_command(hass, ws_subscribe_presentation)
-        websocket_api.async_register_command(hass, ws_get_reminders)
+        ws_biometrics,
+        ws_energy,
+        ws_energy_flow,
+        ws_energy_outlook,
+        ws_hazard,
+        ws_intrusion,
+        ws_mode,
+        ws_solar,
+        ws_subscribe_presentation,
+        ws_get_reminders,
         # Speech history and voice confirmation.
-        websocket_api.async_register_command(hass, ws_get_spoken_history)
-        websocket_api.async_register_command(hass, ws_list_actions)
-        websocket_api.async_register_command(hass, ws_repeat_spoken)
-        websocket_api.async_register_command(hass, ws_say_hello)
-        websocket_api.async_register_command(hass, ws_voice_confirm_test)
+        ws_get_spoken_history,
+        ws_list_actions,
+        ws_repeat_spoken,
+        ws_say_hello,
+        ws_voice_confirm_test,
         # Voice phrases.
-        websocket_api.async_register_command(hass, ws_voice_phrases_delete)
-        websocket_api.async_register_command(hass, ws_voice_phrases_list)
-        websocket_api.async_register_command(hass, ws_voice_phrases_save)
-        websocket_api.async_register_command(hass, ws_voice_phrases_set_enabled)
-        websocket_api.async_register_command(hass, ws_voice_phrases_test)
+        ws_voice_phrases_delete,
+        ws_voice_phrases_list,
+        ws_voice_phrases_save,
+        ws_voice_phrases_set_enabled,
+        ws_voice_phrases_test,
         # Nova Voice ID.
-        websocket_api.async_register_command(hass, ws_voice_id_delete)
-        websocket_api.async_register_command(hass, ws_voice_id_profiles)
-        websocket_api.async_register_command(hass, ws_voice_id_record)
-        websocket_api.async_register_command(hass, ws_voice_id_record_cancel)
-        websocket_api.async_register_command(hass, ws_voice_id_record_status)
-        websocket_api.async_register_command(hass, ws_voice_id_token_get)
-        websocket_api.async_register_command(hass, ws_voice_id_token_set)
-    except Exception as exc:
-        _LOGGER.debug("WS command register note: %s", exc)
+        ws_voice_id_delete,
+        ws_voice_id_profiles,
+        ws_voice_id_record,
+        ws_voice_id_record_cancel,
+        ws_voice_id_record_status,
+        ws_voice_id_token_get,
+        ws_voice_id_token_set,
+    )
+    for handler in commands:
+        try:
+            websocket_api.async_register_command(hass, handler)
+        except Exception as exc:
+            _LOGGER.warning("Nova could not register the %s panel command: %s",
+                            getattr(handler, "__name__", handler), exc)
 
 
 # ─── Config readers ──────────────────────────────────────────────────────────
@@ -579,7 +584,7 @@ def _known_notify_services(hass: HomeAssistant) -> list:
 def _area_rows(hass: HomeAssistant, bedrooms) -> list:
     """One card per area with anything in it: occupied rooms first, then
     bedrooms, then by name."""
-    rows = []
+    rows: list[dict[str, Any]] = []
     for area_id in _all_areas_with_anything(hass):
         capabilities = _area_capabilities(hass, area_id)
         occupied = audio_routing.is_area_occupied(hass, area_id)

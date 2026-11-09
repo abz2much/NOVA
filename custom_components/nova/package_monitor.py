@@ -176,11 +176,16 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
             return None
     except Exception:
         pass
+    # This check is Nova's own, so it counts against the day's vision limit.
+    from . import vision_budget
+    if not vision_budget.take(cam._vision_limit(hass)):
+        cam._over_the_limit(hass, entity_id, cam._vision_limit(hass))
+        return None
     frame = cam._downscale_jpeg(frame)
     provider = cam._cfg_opt(hass, "vision_provider", "groq") or "groq"
     model = cam._cfg_opt(hass, "vision_model", cam.VISION_MODEL) or cam.VISION_MODEL
     image_url = "data:image/jpeg;base64," + base64.b64encode(frame).decode()
-    question = [
+    question: list[dict] = [
         {"role": "system", "content": _PKG_PROMPT},
         {"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": image_url}},

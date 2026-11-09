@@ -71,22 +71,25 @@ def declared_handlers() -> dict[str, str]:
     return found
 
 
+def _commands_tuple() -> ast.Tuple:
+    """The `commands = (...)` tuple async_register loops over."""
+    fn = next(n for n in _parsed_tree().body
+              if isinstance(n, ast.FunctionDef) and n.name == "async_register")
+    return next(a.value for a in fn.body
+                if isinstance(a, ast.Assign) and a.targets[0].id == "commands")
+
+
 def registration_calls() -> list[str]:
     """Every function passed to async_register_command, in source order and
     with repeats kept, read from the syntax tree."""
-    names = []
-    for node in ast.walk(_parsed_tree()):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "async_register_command"
-                and len(node.args) >= 2 and isinstance(node.args[1], ast.Name)):
-            names.append(node.args[1].id)
-    return names
+    return [e.id for e in _commands_tuple().elts if isinstance(e, ast.Name)]
 
 
 def registration_calls_by_text() -> set[str]:
     """The same list found with a plain text search, as a cross check on the
     syntax tree walk (a call written in an unusual shape would differ)."""
-    return set(re.findall(r"async_register_command\(\s*hass\s*,\s*([A-Za-z_]\w*)", ws_text()))
+    body = ws_text().split("def async_register(", 1)[1].split("\n    )\n", 1)[0]
+    return set(re.findall(r"^\s+(ws_\w+),$", body, re.M))
 
 
 def registered_commands() -> set[str]:

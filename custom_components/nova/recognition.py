@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -191,8 +192,9 @@ def _parse_sub_label(sub) -> tuple[str, float]:
 
 def _camera_entity_from_name(camera_name: str) -> str:
     """Frigate and Double Take name cameras like ``front_door``; Home Assistant
-    calls the same camera ``camera.front_door``."""
-    return "camera." + camera_name.lower()
+    calls the same camera ``camera.front_door``. A full entity id is kept."""
+    name = camera_name.lower()
+    return name if name.startswith("camera.") else "camera." + name
 
 
 def remember_recognition(camera_name: str, name: str, confidence: float,
@@ -322,7 +324,11 @@ async def restore(hass) -> None:
     try:
         saved = await hass.async_add_executor_job(_read_log)
         if saved and not _FACE_LOG:
-            _FACE_LOG.extend(saved)
+            # Marked as restored: the Faces tab shows them, but they never
+            # stand intrusion monitoring down (face_roster), because the log
+            # of unexplained person detections is not saved and so could not
+            # veto them.
+            _FACE_LOG.extend(dict(entry, restored=True) for entry in saved)
             last: dict = {}
             for entry in saved:
                 last[entry["camera_entity"]] = entry
@@ -337,7 +343,8 @@ async def restore(hass) -> None:
 
 
 def note_person_detected(camera_name: str) -> None:
-    """Record a Frigate person detection on this camera."""
+    """Record a person detection on this camera (a name like ``front_door`` or
+    an entity id). Frigate, Nest and Eufy all report here."""
     try:
         _PERSON_LOG.append({"camera_entity": _camera_entity_from_name(camera_name),
                             "ts": _utcnow()})
@@ -602,7 +609,12 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
         if not camera or not match:
             return
         name = match.get("name", "unknown")
-        confidence = float(match.get("confidence", 0))
+        try:
+            confidence = float(match.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0.0     # unreadable: a low score, never a reason to stand down
+        if not math.isfinite(confidence):
+            confidence = 0.0
         remember_recognition(camera, name, confidence, source="doubletake")
         hass.bus.async_fire("nova_face_recognized", _face_event(
             camera, _camera_entity_from_name(camera), name, confidence,
@@ -618,7 +630,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
             score = after.get("top_score", 0)
             if body.get("type") != "new" or label != "person" or score < 0.7:
                 return
-            camera_entity = "camera." + camera
+            camera_entity = _camera_entity_from_name(camera)
             event_id = after.get("id", "")
             _LOGGER.info("Nova: Frigate saw a person on %s (%.1f%%, event %s)",
                          camera, score * 100, event_id[:8])
@@ -656,8 +668,8 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
             unknown = name.lower() in ("unknown", "unknown person")
             if camera:
                 remember_recognition(camera, name, confidence, source="frigate_tracked")
-            event = _face_event(camera, "camera." + camera if camera else "", name,
-                                confidence, unknown)
+            event = _face_event(camera, _camera_entity_from_name(camera) if camera else "",
+                                name, confidence, unknown)
             event["source"] = "frigate_tracked_object"
             hass.bus.async_fire("nova_face_recognized", event)
             if not unknown:

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ _CACHE_TTL = 300.0
 _TOL_SCALE_RANGE = (0.8, 1.45)
 _MAX_EXTRA_DAYS = 3
 
-_STATE = {"ts": 0.0, "delta": 0.0, "judged": 0, "unwelcome_rate": None}
+_STATE: dict[str, Any] = {"ts": 0.0, "delta": 0.0, "judged": 0, "unwelcome_rate": None}
 
 
 def delta_from_rate(unwelcome_rate) -> float:

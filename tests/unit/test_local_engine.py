@@ -406,6 +406,11 @@ def test_no_policy_module_defers(le, monkeypatch):
      ("media_player", "media_next_track", {"entity_id": "media_player.tv"})),
     ("set_temp", "climate.h", {"temperature": 21},
      ("climate", "set_temperature", {"entity_id": "climate.h", "temperature": 21.0})),
+    # A spoken zero is a value, not a missing number; Home Assistant checks the range.
+    ("set_temp", "climate.h", {"temperature": 0},
+     ("climate", "set_temperature", {"entity_id": "climate.h", "temperature": 0.0})),
+    ("volume_set", "media_player.tv", {"volume_level": 0},
+     ("media_player", "volume_set", {"entity_id": "media_player.tv", "volume_level": 0.0})),
     ("volume_set", "media_player.tv", {"volume_level": 40},
      ("media_player", "volume_set", {"entity_id": "media_player.tv", "volume_level": 0.4})),
     ("volume_set", "media_player.tv", {},

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any, Optional
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,7 +30,7 @@ _UNLOCKED_TEXT = "{honorific}, {friendly_name} has been unlocked for {minutes} m
 # dropped long ago (every trip to the bathroom set them off); anyone who wants
 # them adds them under sentinel_rules. A mild day (above 10 C) silences the
 # door and window rules, since an open door is no heat loss worry then.
-DEFAULT_RULES = [
+DEFAULT_RULES: list[dict[str, Any]] = [
     {"id": "door_left_open", "domain": "binary_sensor", "device_class": "door",
      "state": "on", "for_minutes": 10, "skip_if_outdoor_above_c": 10,
      "message": _OPEN_TEXT},
@@ -148,7 +149,7 @@ class NovaSentinel:
     def __init__(self, hass: HomeAssistant, groq_client, honorific: str,
                  rules: list[dict] | None = None, entry: ConfigEntry | None = None) -> None:
         self.hass, self._entry, self._groq = hass, entry, groq_client
-        self._rules = rules or DEFAULT_RULES
+        self._rules: list[dict[str, Any]] = rules or DEFAULT_RULES
         # Only a fallback: the honorific is looked up afresh for every alert.
         self._honorific = honorific
         self._active = False
@@ -283,7 +284,7 @@ class NovaSentinel:
         """
         excluded = _exclusion_check()
         clock = dt_util.utcnow().replace(tzinfo=None)
-        outdoor = []
+        outdoor: list[Optional[float]] = []
         for rule in self._rules:
             limit = rule.get("for_minutes")
             if not limit:

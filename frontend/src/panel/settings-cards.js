@@ -155,7 +155,7 @@
           ].concat(this._outputLanguageExtra(cfg.output_language)), this._outputLanguageChoice(cfg.output_language))}
         </select>
       </div>
-      <div class="toggle-desc cfg-help">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</div>
+      <div class="toggle-desc cfg-help">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian only; in any other language they stay in English, while text Nova generates follows this setting.</div>
       <div class="toggle-list">
         ${onOff("hero_card_cycle", "Cards on the Command Center", "Now and then, show a card of live figures beside Nova while the house is awake")}
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}

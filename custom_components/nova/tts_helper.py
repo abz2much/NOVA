@@ -176,6 +176,51 @@ def _history_source(context: str) -> Optional[str]:
 
 # ── announcing ──────────────────────────────────────────────────────────────
 
+def _pick_language(wanted: Optional[str], supported: Optional[Sequence[str]]) -> Optional[str]:
+    """The engine's own spelling of ``wanted`` (fr gives fr-FR), or None when
+    nothing should be sent: no language wanted, English (the engine's default
+    is kept), the engine unknown, or no language of the engine matches. The
+    exact tag wins, then another region of the same language."""
+    if not wanted or not supported:
+        return None
+    want = wanted.replace("_", "-").lower()
+    base = want.split("-")[0]
+    if base == "en":
+        return None
+    tags = [str(tag) for tag in supported]
+    for tag in tags:
+        if tag.replace("_", "-").lower() == want:
+            return tag
+    for tag in tags:
+        if tag.replace("_", "-").lower().split("-")[0] == base:
+            return tag
+    return None
+
+
+def _engine_languages(hass: HomeAssistant, entity_id: str) -> Optional[list]:
+    """The languages a TTS entity says it speaks, or None when that cannot be
+    read (an engine that is not an entity, or Home Assistant's tts internals
+    changing)."""
+    try:
+        from homeassistant.components import tts
+        entity = hass.data[tts.DATA_COMPONENT].get_entity(entity_id)
+        languages = getattr(entity, "supported_languages", None)
+        return list(languages) if languages else None
+    except Exception:
+        return None
+
+
+def _language_for(hass: HomeAssistant, tts_entity: str) -> Optional[str]:
+    """The language to ask the voice for: Nova's output language (its own
+    setting, else Home Assistant's), if this voice speaks it."""
+    try:
+        from . import output_language
+        return _pick_language(output_language.resolve(hass),
+                              _engine_languages(hass, tts_entity))
+    except Exception:
+        return None
+
+
 async def _bounded(call) -> None:
     """Await a blocking service call, giving up waiting after the timeout. A
     timeout is not an error: the speaker accepted and is still busy."""
@@ -186,7 +231,7 @@ async def _bounded(call) -> None:
 
 
 async def _speak_on(hass: HomeAssistant, speaker: str, text: str, voice: str,
-                    content_id: str, context: str) -> bool:
+                    content_id: str, context: str, language: Optional[str] = None) -> bool:
     """Play the announcement on one speaker; True when it was taken.
 
     play_media with ``announce`` plays over whatever is on, at the volume
@@ -222,10 +267,11 @@ async def _speak_on(hass: HomeAssistant, speaker: str, text: str, voice: str,
             "Nova TTS: play_media failed on %s (%s): %s — falling back to tts.speak",
             speaker, context, exc)
     try:
+        speak = {"media_player_entity_id": [speaker], "message": text, "cache": True}
+        if language:
+            speak["language"] = language
         await _bounded(hass.services.async_call(
-            "tts", "speak",
-            {"media_player_entity_id": [speaker], "message": text, "cache": True},
-            target={"entity_id": voice}, blocking=True))
+            "tts", "speak", speak, target={"entity_id": voice}, blocking=True))
         return True
     except Exception as exc:
         _LOGGER.warning("Nova TTS fallback failed on %s (%s): %s", speaker, context, exc)
@@ -264,8 +310,9 @@ async def async_announce(hass: HomeAssistant, text: str, tts_entity: str | None,
     _speak_on). Every successful delivery is recorded in Spoken History with
     the speakers that took it; this is the one place that happens for
     anything routed through here. ``repeat_of_id`` links a repeat to the
-    entry it repeats. No voice option is sent: the engine speaks with its
-    own default. ``context`` is for logging and history; the caller has
+    entry it repeats. No voice is chosen: the engine speaks with its own
+    default voice, in Nova's output language when the engine speaks it
+    (_language_for). ``context`` is for logging and history; the caller has
     already chosen the voice.
     """
     if not text or not tts_entity or not speakers:
@@ -282,16 +329,21 @@ async def async_announce(hass: HomeAssistant, text: str, tts_entity: str | None,
         return False
 
     _LOGGER.debug("Nova announce [%s]: %s → %s", context, tts_entity, speakers)
-    query = urllib.parse.urlencode({"message": text, "cache": "true"})
+    language = _language_for(hass, tts_entity)
+    options = {"message": text, "cache": "true"}
+    if language:
+        options["language"] = language
+    query = urllib.parse.urlencode(options)
     content_id = f"media-source://tts/{tts_entity}?{query}"
     outcomes = await asyncio.gather(*(
-        _speak_on(hass, spk, text, tts_entity, content_id, context) for spk in speakers))
+        _speak_on(hass, spk, text, tts_entity, content_id, context, language)
+        for spk in speakers))
     took = [spk for spk, ok in zip(speakers, outcomes) if ok]
     missed = [spk for spk, ok in zip(speakers, outcomes) if not ok]
 
     try:
         from .diagnostics.service_health import record_usage
-        record_usage("tts", bool(took), None if took else "all speakers failed")
+        record_usage("tts", bool(took), "" if took else "all speakers failed")
     except Exception:
         pass
 

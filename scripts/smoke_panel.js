@@ -3822,7 +3822,7 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["logs tab: a LEARN entry gets its own icon/color, not a bare bullet",
     (() => {
       const catEl = sRoot.querySelector(".new-log-entry .new-log-cat");
-      return !!catEl && /🧠/.test(catEl.textContent) && !/^•/.test(catEl.textContent.trim());
+      return !!catEl && !!catEl.querySelector("svg.log-ico path") && !catEl.querySelector("svg.log-ico circle:only-child") && /LEARN/.test(catEl.textContent);
     })()]);
   const learnFilterBtn = sRoot.querySelector('.new-log-filter[data-filter="LEARN"]');
   learnFilterBtn.click();
@@ -5498,8 +5498,10 @@ if (require.main === module) setTimeout(async () => {
     const logIcon = (() => { L._logView = "system"; L._render(); return null; })();
     await new Promise(r => setTimeout(r, 80));
     const cat = LR.querySelector(".new-log-cat");
-    checks.push(["a11y: log category emoji are hidden from screen readers",
-      !!cat && Array.from(cat.querySelectorAll("[aria-hidden='true']")).some(s => /\p{Extended_Pictographic}/u.test(s.textContent))]);
+    checks.push(["a11y: a log category is marked by a drawn icon hidden from screen readers, never an emoji",
+      !!cat && !!cat.querySelector("svg[aria-hidden='true']") && !/\p{Extended_Pictographic}/u.test(cat.textContent)]);
+    checks.push(["a11y: no log category icon, and no spoken note, is an emoji",
+      Object.values(window.customElements.get("nova-panel").LOG_CATEGORIES).every(c => !/\p{Extended_Pictographic}/u.test(c.icon))]);
     L.remove();
   }
 

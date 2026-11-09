@@ -194,7 +194,7 @@ def find_patterns(
         span = (max(every).date() - min(every).date()).days + 1
         observed = max(1, min(lookback_days, span))
 
-        found = []
+        found: list[dict[str, Any]] = []
         for (camera, category), times in groups.items():
             days = len({when.date() for when in times})
             if len(times) < min_occurrences or days < min_occurrences:
@@ -293,7 +293,9 @@ async def _events_for_device(dev) -> list[tuple[str, Any]]:
 
 def _looks_like_image(data: Optional[bytes]) -> bool:
     """A real still: not tiny, and not an MP4 (whose box type is "ftyp")."""
-    return bool(data) and len(data) > 2000 and not data[4:12].startswith(b"ftyp")
+    if not data:
+        return False
+    return len(data) > 2000 and not data[4:12].startswith(b"ftyp")
 
 
 async def _event_image_bytes(dev, kind: str, event_obj) -> Optional[bytes]:

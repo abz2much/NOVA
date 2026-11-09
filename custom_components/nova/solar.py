@@ -117,6 +117,17 @@ def _grid_sensors(grid: dict) -> dict:
     }
 
 
+def _merged_grid(grid_sources: list[dict]) -> dict:
+    """One grid source that holds every sensor of all of them, in the nested
+    layout _grid_sensors reads, so several grid connections count together."""
+    sensors = [_grid_sensors(g) for g in grid_sources]
+    return {
+        "power": [{"stat_rate": r} for s in sensors for r in s["rates"]],
+        "flow_from": [{"stat_energy_from": i} for s in sensors for i in s["imports"]],
+        "flow_to": [{"stat_energy_to": e} for s in sensors for e in s["exports"]],
+    }
+
+
 def _latest_state(hass, entity_ids: list):
     """The state among entity_ids that changed most recently, or None when
     none exist or their last_changed values cannot be compared."""
@@ -277,17 +288,17 @@ async def solar_status(hass) -> dict:
 
     solar_w = _sum_rate(hass, solar_sources)
 
-    battery_w = None
-    battery_pct = None
-    if battery_sources:
-        battery = battery_sources[0]
-        battery_w = _live_watts(hass, battery.get("stat_rate"))
-        battery_pct = _live_pct(hass, battery.get("stat_soc"))
+    # Every battery counts: power adds up, charge is the mean of those that
+    # report one.
+    battery_w = _sum_rate(hass, battery_sources)
+    charges = [c for c in (_live_pct(hass, b.get("stat_soc")) for b in battery_sources)
+               if c is not None]
+    battery_pct = sum(charges) / len(charges) if charges else None
 
     grid_w = None
     grid_direction = None
     if grid_sources:
-        grid = grid_sources[0]
+        grid = _merged_grid(grid_sources)
         grid_w = _sum_rate(hass, [{"stat_rate": e} for e in _grid_sensors(grid)["rates"]])
         grid_direction = _grid_direction(hass, grid, grid_w)
 
@@ -300,9 +311,9 @@ async def solar_status(hass) -> dict:
     advice = []
     if solar_w is not None:
         line = f"Generating {solar_w / 1000:.1f} kW of solar right now."
-        if grid_direction == "export":
+        if grid_direction == "export" and grid_w is not None:
             line += f" Exporting {abs(grid_w) / 1000:.1f} kW to the grid."
-        elif grid_direction == "import":
+        elif grid_direction == "import" and grid_w is not None:
             line += f" Still importing {grid_w / 1000:.1f} kW from the grid."
         if battery_pct is not None:
             line += f" Battery at {battery_pct:.0f}%."
@@ -367,7 +378,7 @@ async def _daily_sum(hass, entity_id: Optional[str]) -> Optional[float]:
     for row in rows:
         raw_state = row.get("state") if isinstance(row, dict) else getattr(row, "state", None)
         try:
-            values.append(float(raw_state))
+            values.append(float(raw_state))  # type: ignore[arg-type]  # None raises TypeError, caught below
         except (TypeError, ValueError):
             continue
     if len(values) < 2:
@@ -416,7 +427,7 @@ def _linked_forecast_entries(hass, prefs: Optional[dict]) -> list:
 def _forecast_key(entry) -> Optional[str]:
     """The output key (forecast_today_total_kwh and so on) for one forecast
     sensor's registry entry, from its platform's key scheme, or None."""
-    keys = _FORECAST_KEYS.get(getattr(entry, "platform", None)) or {}
+    keys = _FORECAST_KEYS.get(getattr(entry, "platform", None) or "") or {}
     uid = getattr(entry, "unique_id", "") or ""
     for suffix, out_key in keys.items():
         if uid.endswith(suffix):

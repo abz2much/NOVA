@@ -6,11 +6,13 @@ away, urgency). Repeated patterns can then be decided locally with no
 provider call, and the Local Mind keeps case memory while the provider is
 unreachable. The whole cache persists as one JSON file under Nova's folder
 (nova/reasoning_cache.json). Session counters of provider calls against
-local decisions feed the panel. One lock guards everything; save() never
-raises.
+local decisions feed the panel. One lock guards the entries, and another
+serialises file writes; save() never raises. A verdict learned on the event
+loop is written by the executor, never on the loop.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -36,6 +38,9 @@ _loaded = False
 _CLOUD_CALLS = 0
 _CACHE_HITS = 0
 _lock = Lock()   # not reentrant: never call a locking function while held
+# Held for a whole save, so two saves never overlap and the last one to run
+# holds the newest state. Never taken on the event loop.
+_write_lock = Lock()
 
 
 def _cache_path() -> Path:
@@ -83,17 +88,32 @@ def load() -> int:
 
 
 def save() -> None:
-    """Trim to MAX_ENTRIES (oldest refresh first) and write the file."""
+    """Trim to MAX_ENTRIES (oldest refresh first) and write the file. The
+    entries are copied under the cache lock and written outside it, so a
+    slow disk never holds up a decision that only reads the cache."""
     try:
-        with _lock:
-            excess = len(_cache) - MAX_ENTRIES
-            if excess > 0:
-                by_age = sorted(_cache, key=lambda k: (_cache[k] or {}).get("refreshed", 0))
-                for key in by_age[:excess]:
-                    del _cache[key]
-            write_json_atomic(_cache_path(), _cache)
+        with _write_lock:
+            with _lock:
+                excess = len(_cache) - MAX_ENTRIES
+                if excess > 0:
+                    by_age = sorted(_cache, key=lambda k: (_cache[k] or {}).get("refreshed", 0))
+                    for key in by_age[:excess]:
+                        del _cache[key]
+                snapshot = {key: dict(entry) if isinstance(entry, dict) else entry
+                            for key, entry in _cache.items()}
+            write_json_atomic(_cache_path(), snapshot)
     except Exception as exc:
         _LOGGER.debug("Reasoning cache save failed: %s", exc)
+
+
+def _save_off_the_loop() -> None:
+    """save(), but from the event loop it runs in the executor."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        save()
+        return
+    loop.run_in_executor(None, save)
 
 
 def get(sig: str, ignore_age: bool = False) -> Optional[dict]:
@@ -138,7 +158,7 @@ def remember(sig: str, speak: bool, urgency: str) -> None:
         else:
             _cache[sig] = {"speak": bool(speak), "urgency": urgency, "hits": 0,
                            "created": now, "refreshed": now}
-    save()
+    _save_off_the_loop()
 
 
 def note_hit(sig: str) -> None:

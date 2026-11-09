@@ -913,6 +913,19 @@ async def test_analyse_captures_clip_when_asked(cam, env, monkeypatch):
     assert res["error"] == "no_image" and asked == {"count": 4, "interval": 1.2}
 
 
+async def test_a_single_frame_is_shrunk_before_it_is_sent_to_the_vision_model(
+        cam, env, monkeypatch):
+    """A clip's frames and the doorbell's image were already shrunk; a plain
+    single frame went up at full size, costing tokens and upload time."""
+    import base64
+    monkeypatch.setattr(cam, "_downscale_jpeg", lambda b, m=1024: b"small:" + b)
+    env.chat.replies[:] = ["x", env.judge()]
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    url = env.chat.calls[0]["messages"][1]["content"][0]["image_url"]["url"]
+    assert base64.b64decode(url.split(",", 1)[1]) == b"small:" + GOOD
+    env.hass.close_pending()
+
+
 @pytest.mark.parametrize("images", [[b"A" * 10], [b"A", b"B", b"C"]], ids=["one frame", "a clip"])
 async def test_the_vision_prompt_warns_about_night_and_infrared_pictures(
         cam, env, monkeypatch, images):
@@ -1006,6 +1019,37 @@ async def test_analyse_scene_memory(cam, env, load, monkeypatch):
     env.hass.close_pending()
 
 
+async def test_an_empty_or_off_property_scene_is_kept_out_of_scene_memory(cam, env, load, monkeypatch):
+    sm = load("scene_memory")
+    monkeypatch.setattr(sm, "enabled", lambda: True)
+
+    async def remember(hass, eid, text, location):
+        env.scenes.append((eid, text, location))
+    monkeypatch.setattr(sm, "async_remember", remember)
+    monkeypatch.setattr(load("camera_semantic"), "resolve_location", lambda h, e: "front")
+    env.chat.replies[:] = ["Two people walk past on the pavement.",
+                           env.judge(notable=False, category="empty", summary="Nothing.",
+                                     speak=""),
+                           "A man at the door.", env.judge(category="person")]
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    await cam.async_analyze_camera(env.hass, env.call(), None, "", None, [])
+    assert env.scenes == [("camera.porch", "A man at the door.", "front")]
+    env.hass.close_pending()
+
+
+@pytest.mark.parametrize("clip_count", [0, 3])
+def test_the_vision_task_keeps_to_the_property(cam, clip_count):
+    task = cam._vision_task("Porch", clip_count, False, 1.2, "")
+    for fragment in ("own property", "passers-by", "neighbour"):
+        assert fragment in task
+
+
+def test_the_judge_treats_activity_off_the_property_as_an_empty_scene(cam):
+    rules = cam._REASONING_RULES
+    assert "off the property" in rules and "neighbour" in rules
+    assert "empty" in rules.split("off the property", 1)[1][:300]
+
+
 # ── doorbell and visitor flows ───────────────────────────────────────────────
 
 @pytest.fixture
@@ -1014,10 +1058,10 @@ def flows(cam, load, monkeypatch, fake_hass):
                               media=None)
 
     async def analyse(hass, call, client, honorific, tts, speakers, gate_announce=False,
-                      force_images=None):
+                      force_images=None, background=False):
         f.calls.append({"data": dict(call.data), "gate": gate_announce,
                         "force": force_images, "honorific": honorific, "tts": tts,
-                        "speakers": speakers})
+                        "speakers": speakers, "background": background})
         return dict(f.results.pop(0))
     monkeypatch.setattr(cam, "async_analyze_camera", analyse)
 
@@ -1057,6 +1101,7 @@ async def test_doorbell_live_clip_wins(cam, flows, fake_hass):
         "behind them. Focus on what the resident would want to know.")
     assert (data["announce"], data["frames"], data["interval"]) == (False, 3, 1.2)
     assert flows.calls[0]["gate"] is True and len(flows.calls) == 1
+    assert flows.calls[0]["background"] is False     # someone rang: always answered
     assert res["spoke"] is True
     req = flows.delivered[0]
     assert (req.source, req.category, req.message, req.entity_id) == \
@@ -1113,6 +1158,7 @@ async def test_auto_analyse(cam, flows, fake_hass):
         "it. Focus on what the resident would want to know."),
         "announce": True, "frames": 3, "interval": 1.2}
     assert flows.calls[1]["gate"] is True
+    assert flows.calls[1]["background"] is True      # counts against the daily limit
 
 
 async def test_auto_analyse_doorbell(cam, flows, fake_hass, monkeypatch):
@@ -1134,6 +1180,7 @@ async def test_visitor_observation(cam, flows, fake_hass, monkeypatch):
     call = flows.calls[1]
     assert call["force"] == [b"small:EV"] and call["tts"] is None and call["speakers"] == []
     assert call["data"]["announce"] is False and call["gate"] is True
+    assert call["background"] is True
     assert call["data"]["prompt"].startswith("A person was detected at the door (no doorbell")
     assert flows.logged == [("Door", "camera.door", "visitor", {"success": True})]
 
@@ -1153,3 +1200,54 @@ async def test_visitor_observation_live_and_nothing(cam, flows, fake_hass, monke
 
 def test_fake_call(cam):
     assert cam._FakeCall({"a": 1}).data == {"a": 1}
+
+
+# ── the daily limit on automatic analyses ───────────────────────────────────
+
+async def test_an_automatic_analysis_is_skipped_once_the_day_is_used_up(cam, monkeypatch, fake_hass):
+    vb = cam.vision_budget
+    vb.reset()
+    monkeypatch.setattr(cam, "_cfg_opt", lambda hass, key, default=None:
+                        2 if key == "vision_daily_limit" else default)
+    asked = []
+
+    async def frames(*args, **kwargs):
+        asked.append(1)
+        return [], 1.0
+    monkeypatch.setattr(cam, "_frames_for", frames)
+    monkeypatch.setattr(cam, "_camera_friendly_name", lambda h, e: "Yard")
+    monkeypatch.setattr(cam, "_camera_integration", lambda h, e: "x")
+    vb.take(2)
+    vb.take(2)
+    call = cam._FakeCall({"entity_id": "camera.yard", "announce": False})
+    out = await cam.async_analyze_camera(fake_hass, call, "C", "sir", None, [], background=True)
+    assert out == {"success": False, "error": "vision_budget", "camera": "Yard"}
+    assert asked == []                      # nothing was fetched or paid for
+    # A request someone made themselves is never held back.
+    out = await cam.async_analyze_camera(fake_hass, call, "C", "sir", None, [])
+    assert out["error"] == "no_image" and asked == [1]
+    vb.reset()
+
+
+# ── the alarm's own camera check keeps the full picture ─────────────────────
+
+def test_the_vision_task_can_leave_the_off_property_rule_out(cam):
+    task = cam._vision_task("Porch", 0, False, 1.2, "", property_only=False)
+    assert "passers-by" not in task and "own property" not in task
+
+
+async def test_the_judge_rule_can_leave_the_off_property_sentence_out(cam, monkeypatch, fake_hass):
+    seen = {}
+
+    async def chat(hass, client, messages, **kw):
+        seen["system"] = messages[0]["content"]
+        return types.SimpleNamespace(text="{}")
+    monkeypatch.setattr(cam, "_recent_activity", lambda: "")
+    import importlib
+    monkeypatch.setattr(importlib.import_module(_pkg(cam) + ".providers.activity"),
+                        "execute_chat", chat)
+    await cam._reason_about_scene(fake_hass, "c", "m", "Porch", "A man.", "person",
+                                  property_only=False)
+    assert "off the property" not in seen["system"]
+    await cam._reason_about_scene(fake_hass, "c", "m", "Porch", "A man.", "person")
+    assert "off the property" in seen["system"]

@@ -177,6 +177,8 @@ What to know:
 - Only the satellite you were asked on can say yes. A yes on another
   satellite, in the Chat tab or in the panel does nothing, and leaves the
   question waiting.
+- A yes that confirms a risky action, such as unlocking, is accepted in English
+  only. A no is accepted in the languages Nova writes its alerts in.
 - If two satellites hear your yes at the same moment, the one that hears it
   first can take it and nothing runs. Ask again.
 - The question waits 60 seconds and is forgotten on a restart.
@@ -365,9 +367,11 @@ person's voice again. The token is in the backup, so Nova keeps working.
 - Continued conversation (keeping the microphone open after a reply) is off
   by default.
 - "Nova speaks" changes the words Nova writes and speaks. It does not change
-  the voice, Home Assistant's language, or the panel. Safety notifications are
-  translated into English, French, German, Spanish, Italian, Dutch and
-  Portuguese. In other languages they stay English.
+  which voice is used, Home Assistant's language, or the panel. Nova asks the
+  voice to speak that language when the voice says it can. A voice that cannot
+  keeps its own default, and English always does. Safety notifications are
+  translated into English, French, German, Spanish, Italian, Dutch, Portuguese,
+  Polish, Russian and Ukrainian. In other languages they stay English.
 
 ## Troubleshooting
 
@@ -395,7 +399,7 @@ Panel, **Settings → General**:
 |---|---|
 | Announcements | Master switch for proactive speech. Your own reminders and briefings ignore it. |
 | Nova speaks | The language Nova talks and writes in. Auto follows Home Assistant, including its region, such as Brazilian Portuguese, Canadian French, Latin American Spanish, Swiss German or Traditional Chinese. |
-| Language | The panel's language. Auto follows Home Assistant. Fully translated in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional Chinese; other languages are partly translated. |
+| Language | The panel's language. Auto follows Home Assistant. Translated in all 20 panel languages. |
 
 Panel, **Settings → Room Speakers**, **Satellite → Speaker** and
 **Announcement Speakers**: see above.

@@ -124,6 +124,7 @@ def test_parse_sub_label(rec, sub, want):
 
 def test_camera_entity_from_name(rec):
     assert rec._camera_entity_from_name("Front_Door") == "camera.front_door"
+    assert rec._camera_entity_from_name("camera.front_door") == "camera.front_door"   # an id is kept
 
 
 # ── remembering ──────────────────────────────────────────────────────────────
@@ -485,12 +486,20 @@ async def test_doubletake_match(rec, mqtt, source):
     assert rec._RECOGNITION_CACHE["camera.garden"]["unknown_count"] == 1
 
 
-async def test_preserved_quirk_doubletake_bad_confidence_raises(rec, mqtt, source):
+@pytest.mark.parametrize("confidence", [None, "junk", [90], {"v": 1}, "nan", "inf"])
+async def test_doubletake_unreadable_confidence_counts_as_zero(rec, mqtt, source, confidence):
+    """An exception in the callback dropped the whole match. An unreadable
+    score now counts as 0, which is the safe side: a low score never stands
+    intrusion monitoring down."""
     source["value"] = "doubletake"
-    await rec.register_recognition_listener(_Hass())
+    hass = _Hass()
+    await rec.register_recognition_listener(hass)
     h = _handler(mqtt, "double-take/matches")
-    with pytest.raises((TypeError, ValueError)):
-        h(_Msg({"camera": "front", "match": {"name": "Sam", "confidence": None}}))
+    h(_Msg({"camera": "front", "match": {"name": "Sam", "confidence": confidence}}))
+    assert hass.fired == [("nova_face_recognized", {
+        "camera": "front", "camera_entity": "camera.front", "name": "Sam",
+        "confidence": 0.0, "is_unknown": False, "is_confident": False})]
+    assert rec._FACE_LOG[0]["confidence"] == 0.0
 
 
 def _frigate(type_="new", label="person", score=0.9, camera="front", sub=None, eid="abcdef123"):
@@ -513,6 +522,21 @@ async def test_frigate_person_detection_always_runs(rec, mqtt, source):
     assert ev["event_id"] == "abcdef123" and ev["source"] == "frigate"
     assert ev["ts"].tzinfo is None
     assert rec._RECOGNITION_CACHE == {}                     # identity is off
+
+
+async def test_frigate_camera_names_are_lower_cased_like_home_assistants_entities(
+        rec, mqtt, source):
+    """Frigate allows capitals in a camera name; Home Assistant's entity ids
+    never have them."""
+    source["value"] = "frigate"
+    hass = _Hass()
+    await rec.register_recognition_listener(hass)
+    await _handler(mqtt, "frigate/events")(_frigate(camera="Front", sub=["Sam", 0.95]))
+    await _handler(mqtt, "frigate/tracked_object_update")(
+        _Msg(json.dumps({"type": "face", "name": "Sam", "score": 0.93, "camera": "Garden"})))
+    entities = [d["camera_entity"] for _e, d in hass.fired]
+    assert entities == ["camera.front", "camera.front", "camera.garden"]
+    assert "camera.front" in rec._RECENT_EVENTS and "camera.Front" not in rec._RECENT_EVENTS
 
 
 @pytest.mark.parametrize("msg", [

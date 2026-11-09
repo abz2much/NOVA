@@ -337,6 +337,7 @@
       .new-log-entry-error{background:color-mix(in srgb,var(--bad-strong) 8%,transparent)}
       .new-log-ts{color:var(--ink-faint)}
       .new-log-cat{white-space:nowrap;font-weight:600}
+      .log-ico{width:1em;height:1em;vertical-align:-.125em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
       .new-log-msg{color:var(--ink-dim);word-break:break-word}
       @media (max-width:560px){.new-log-entry{grid-template-columns:1fr;gap:2px}}
       .new-decision-row{grid-template-columns:150px minmax(150px,230px) minmax(0,1fr) auto;align-items:start}
