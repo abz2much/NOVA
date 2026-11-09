@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -606,7 +607,12 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
         if not camera or not match:
             return
         name = match.get("name", "unknown")
-        confidence = float(match.get("confidence", 0))
+        try:
+            confidence = float(match.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0.0     # unreadable: a low score, never a reason to stand down
+        if not math.isfinite(confidence):
+            confidence = 0.0
         remember_recognition(camera, name, confidence, source="doubletake")
         hass.bus.async_fire("nova_face_recognized", _face_event(
             camera, _camera_entity_from_name(camera), name, confidence,
@@ -622,7 +628,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
             score = after.get("top_score", 0)
             if body.get("type") != "new" or label != "person" or score < 0.7:
                 return
-            camera_entity = "camera." + camera
+            camera_entity = _camera_entity_from_name(camera)
             event_id = after.get("id", "")
             _LOGGER.info("Nova: Frigate saw a person on %s (%.1f%%, event %s)",
                          camera, score * 100, event_id[:8])
@@ -660,8 +666,8 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
             unknown = name.lower() in ("unknown", "unknown person")
             if camera:
                 remember_recognition(camera, name, confidence, source="frigate_tracked")
-            event = _face_event(camera, "camera." + camera if camera else "", name,
-                                confidence, unknown)
+            event = _face_event(camera, _camera_entity_from_name(camera) if camera else "",
+                                name, confidence, unknown)
             event["source"] = "frigate_tracked_object"
             hass.bus.async_fire("nova_face_recognized", event)
             if not unknown:
