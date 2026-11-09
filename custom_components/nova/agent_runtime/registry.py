@@ -51,6 +51,7 @@ from .capabilities.home import (
     _exec_get_entity_state,
     _exec_home_summary,
     _exec_search_entities,
+    _exec_security_audit,
 )
 from .capabilities.memory import (
     _exec_ignore,
@@ -100,6 +101,7 @@ _TOOL_MAP = dict((
     ("run_scene_or_script", _exec_run_scene_script),
     ("run_voice_phrase", _exec_run_voice_phrase),
     ("get_home_summary", _exec_home_summary),
+    ("security_audit", _exec_security_audit),
     ("bulk_control", _exec_bulk_control),
     ("execute_plan", _exec_execute_plan),
     ("remember", _exec_remember),
@@ -167,6 +169,7 @@ _CLASSIFICATION = {
     "search_entities":            ("home", False, False, False, _H),
     "get_area_devices":           ("home", False, False, False, _H),
     "get_home_summary":           ("home", False, False, False, _H),
+    "security_audit":             ("home", False, False, False, _H),
     "activity_history":           ("home", False, False, False, _H),
     "remember":                   ("memory", False, True, False, _H),
     "reject_pending_fact":        ("memory", False, True, False, _H),

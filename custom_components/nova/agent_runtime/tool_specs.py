@@ -94,6 +94,12 @@ NOVA_TOOLS: list[dict[str, Any]] = [
               "The home at a glance: who is home, lights on, locks, open doors and windows,"
               " climate and any active alerts."
           )),
+    _tool("security_audit", (
+              "A read only check of the home's security: open doors, windows and garage,"
+              " unlocked locks, a disarmed alarm and offline sensors or cameras, most"
+              " serious first. Use it for 'is the house secure', 'did I leave anything"
+              " open' or 'check security'. It changes nothing."
+          )),
     _tool("bulk_control", (
               "Control many devices at once, e.g. every light in an area off, or every door"
               " locked."

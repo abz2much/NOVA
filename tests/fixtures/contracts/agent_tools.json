@@ -75,6 +75,7 @@
     "schedule_followup",
     "search_documents",
     "search_entities",
+    "security_audit",
     "set_mode",
     "solar_status",
     "system_diagnostics",
@@ -1046,6 +1047,13 @@
       "required": [
         "query"
       ]
+    },
+    "security_audit": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
     },
     "set_mode": {
       "parameters": {

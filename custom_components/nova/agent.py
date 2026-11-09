@@ -88,6 +88,7 @@ from .agent_runtime.capabilities.home import (
     _exec_get_entity_state,
     _exec_home_summary,
     _exec_search_entities,
+    _exec_security_audit,
 )
 from .agent_runtime.capabilities.memory import (
     _LEARN_FILE,
@@ -258,6 +259,7 @@ __all__ = [
     '_exec_schedule_followup',
     '_exec_search_documents',
     '_exec_search_entities',
+    '_exec_security_audit',
     '_exec_set_mode',
     '_exec_solar_status',
     '_exec_system_diagnostics',
@@ -368,6 +370,7 @@ _OWNERS = {
     '_exec_schedule_followup': _m_capabilities_planning,
     '_exec_search_documents': _m_capabilities_memory,
     '_exec_search_entities': _m_capabilities_home,
+    '_exec_security_audit': _m_capabilities_home,
     '_exec_set_mode': _m_capabilities_safety_modes,
     '_exec_solar_status': _m_capabilities_environment,
     '_exec_system_diagnostics': _m_capabilities_diagnostics,

@@ -234,6 +234,23 @@ their tap. This holds even when **Voice confirmation** is off.
 - A message can be up to 1000 characters. You can send 20 a minute, one at a
   time. Over the limit, Chat says "You're sending too fast, wait a moment".
 
+## Asking for a security check
+
+Ask "is the house secure?", "did I leave anything open?" or "check security",
+by voice or in Chat. Nova runs `security_audit`, which reads states only and
+changes nothing, and lists what needs attention, most serious first:
+
+- **High:** a door, window or garage door open, or a lock unlocked, while
+  nobody is home.
+- **Medium:** an alarm disarmed while nobody is home; an alarm, lock or door
+  sensor Nova cannot read, so it cannot tell if the door is open or locked.
+- **Low:** a camera that is offline.
+
+Open doors and unlocked locks are only flagged when nobody is home, because
+they are normal when someone is in. With no readable person entity Nova
+cannot tell whether anyone is home, so it says that and judges none of them.
+Locks you have exempted from lockdown are left out.
+
 ## Checking what Nova did
 
 Before any lock, cover, garage door or alarm command, Nova reads the device
