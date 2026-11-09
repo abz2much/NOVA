@@ -201,6 +201,80 @@ def test_battery_without_soc_degrades_gracefully(solar, monkeypatch):
     assert out["battery_pct"] is None
 
 
+# ── several batteries and several grid sources ───────────────────────────────
+
+def test_several_batteries_are_summed_and_charge_is_averaged(solar, monkeypatch):
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "battery", "stat_rate": "sensor.bat_1_power", "stat_soc": "sensor.bat_1_soc"},
+        {"type": "battery", "stat_rate": "sensor.bat_2_power", "stat_soc": "sensor.bat_2_soc"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("1000"),
+        "sensor.bat_1_power": _State("300"),
+        "sensor.bat_2_power": _State("200"),
+        "sensor.bat_1_soc": _State("80", "%"),
+        "sensor.bat_2_soc": _State("40", "%"),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["battery_w"] == 500
+    assert out["battery_pct"] == 60.0
+
+
+def test_a_battery_with_no_reading_does_not_pull_the_charge_down(solar, monkeypatch):
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "battery", "stat_rate": "sensor.bat_1_power", "stat_soc": "sensor.bat_1_soc"},
+        {"type": "battery", "stat_rate": "sensor.bat_2_power", "stat_soc": "sensor.bat_2_soc"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("1000"),
+        "sensor.bat_1_power": _State("300"),
+        "sensor.bat_1_soc": _State("80", "%"),
+        "sensor.bat_2_soc": _State("unavailable", "%"),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["battery_w"] == 300
+    assert out["battery_pct"] == 80.0
+
+
+def test_several_grid_sources_are_summed(solar, monkeypatch):
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_a_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_b_power"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("1000"),
+        "sensor.grid_a_power": _State("400"),
+        "sensor.grid_b_power": _State("600"),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["grid_w"] == 1000
+
+
+def test_grid_direction_reads_the_totals_of_every_grid_source(solar, monkeypatch):
+    """The second source is the one that ticked last, so it decides."""
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_a_power",
+         "stat_energy_from": "sensor.a_in", "stat_energy_to": "sensor.a_out"},
+        {"type": "grid", "stat_rate": "sensor.grid_b_power",
+         "stat_energy_from": "sensor.b_in", "stat_energy_to": "sensor.b_out"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("1000"),
+        "sensor.grid_a_power": _State("300"),
+        "sensor.grid_b_power": _State("300"),
+        "sensor.a_in": _State("5", "kWh", last_changed=10),
+        "sensor.a_out": _State("5", "kWh", last_changed=20),
+        "sensor.b_in": _State("5", "kWh", last_changed=30),
+        "sensor.b_out": _State("5", "kWh", last_changed=20),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["grid_direction"] == "import"
+
+
 # ── kW-unit sensors are converted, like energy.py already does ──────────────
 
 def test_kw_unit_sensor_converted_to_watts(solar, monkeypatch):

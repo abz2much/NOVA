@@ -117,6 +117,17 @@ def _grid_sensors(grid: dict) -> dict:
     }
 
 
+def _merged_grid(grid_sources: list[dict]) -> dict:
+    """One grid source that holds every sensor of all of them, in the nested
+    layout _grid_sensors reads, so several grid connections count together."""
+    sensors = [_grid_sensors(g) for g in grid_sources]
+    return {
+        "power": [{"stat_rate": r} for s in sensors for r in s["rates"]],
+        "flow_from": [{"stat_energy_from": i} for s in sensors for i in s["imports"]],
+        "flow_to": [{"stat_energy_to": e} for s in sensors for e in s["exports"]],
+    }
+
+
 def _latest_state(hass, entity_ids: list):
     """The state among entity_ids that changed most recently, or None when
     none exist or their last_changed values cannot be compared."""
@@ -277,17 +288,17 @@ async def solar_status(hass) -> dict:
 
     solar_w = _sum_rate(hass, solar_sources)
 
-    battery_w = None
-    battery_pct = None
-    if battery_sources:
-        battery = battery_sources[0]
-        battery_w = _live_watts(hass, battery.get("stat_rate"))
-        battery_pct = _live_pct(hass, battery.get("stat_soc"))
+    # Every battery counts: power adds up, charge is the mean of those that
+    # report one.
+    battery_w = _sum_rate(hass, battery_sources)
+    charges = [c for c in (_live_pct(hass, b.get("stat_soc")) for b in battery_sources)
+               if c is not None]
+    battery_pct = sum(charges) / len(charges) if charges else None
 
     grid_w = None
     grid_direction = None
     if grid_sources:
-        grid = grid_sources[0]
+        grid = _merged_grid(grid_sources)
         grid_w = _sum_rate(hass, [{"stat_rate": e} for e in _grid_sensors(grid)["rates"]])
         grid_direction = _grid_direction(hass, grid, grid_w)
 
