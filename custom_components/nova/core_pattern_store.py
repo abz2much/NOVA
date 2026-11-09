@@ -107,14 +107,18 @@ class StateLogger:
             pass
 
     def purge_older_than(self, days: int) -> int:
-        """Drop state changes and commands older than ``days``. Returns how
-        many rows went, or 0 on a failure, which is logged."""
+        """Drop state changes and commands older than ``days``, then give the
+        freed space back to the disk. Returns how many rows went, or 0 on a
+        failure, which is logged."""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         try:
             with self._open() as conn:
-                return sum(conn.execute(f"DELETE FROM {table} WHERE timestamp < ?",
-                                        (cutoff,)).rowcount
-                           for table in ("state_changes", "commands"))
+                removed = sum(conn.execute(f"DELETE FROM {table} WHERE timestamp < ?",
+                                           (cutoff,)).rowcount
+                              for table in ("state_changes", "commands"))
+                if removed:
+                    _store.compact(conn)
+                return removed
         except Exception as exc:
             _LOGGER.warning("Pattern DB purge failed: %s", exc)
             return 0

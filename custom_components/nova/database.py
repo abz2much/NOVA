@@ -165,15 +165,18 @@ def delete_conversation(conversation_id: str) -> int:
 
 
 def purge_old_records(days: int = 30) -> int:
-    """Drop turns, sentinel events and activity older than ``days``. Returns
-    how many turns went."""
+    """Drop turns, sentinel events and activity older than ``days``, then give
+    the freed space back to the disk. Returns how many turns went."""
     cutoff = (_utc_now() - timedelta(days=days)).isoformat()
     try:
         with _session() as conn:
             turns = conn.execute("DELETE FROM conversations WHERE timestamp < ?",
                                  (cutoff,)).rowcount
-            for table in ("sentinel_events", "activity_log"):
-                conn.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
+            other = sum(conn.execute(f"DELETE FROM {table} WHERE timestamp < ?",
+                                     (cutoff,)).rowcount
+                        for table in ("sentinel_events", "activity_log"))
+            if turns or other:
+                _store.compact(conn)
             return turns
     except Exception as exc:
         _LOGGER.warning("Nova DB purge error: %s", exc)

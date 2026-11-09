@@ -16,7 +16,9 @@ on its own initiative.
 
 - Learned behaviour lives in `patterns.db` (the state changes and commands
   Nova uses to suggest automations), the per person routines table, and the
-  reasoning cache. All of it is local SQLite.
+  reasoning cache. All of it is local SQLite. State changes and commands are
+  deleted after 90 days (`data_retention_days` changes that, 7 to 365), and
+  the database file is shrunk when they are.
 - State change records keep a limited note of what caused each change. That
   lets Nova leave out changes made by an automation you already have,
   instead of learning them as a household routine.
@@ -50,7 +52,7 @@ user.
 
 - Each message and reply is a row in `conversations.db` and is also kept in
   Nova's conversation memory, like any other conversation. Rows are purged
-  after 30 days.
+  after 30 days, or sooner if `data_retention_days` is set below 30.
 - **NEW CHAT** clears your thread in memory and deletes your rows for it from
   `conversations.db` at once. Other people's threads are not touched.
 - The messages shown in the panel are kept in the browser page only, and are

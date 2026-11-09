@@ -8,6 +8,7 @@ test_cognitive_core_tick.py.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -200,3 +201,18 @@ def test_a_broken_presence_check_still_logs_the_change(cc, listening, load, monk
     monkeypatch.setattr(identity, "quick_identify", _fail)
     switch_on(cc)                            # must not raise
     assert stamp(listening) == ("unknown", 0.0)
+
+
+def test_purge_gives_the_freed_space_back_to_the_disk(store):
+    """Deleting rows alone leaves patterns.db as big as it was."""
+    old = (datetime.now() - timedelta(days=100)).isoformat()
+    with sqlite3.connect(store._db_path) as conn:
+        conn.executemany("INSERT INTO commands (timestamp, text) VALUES (?, ?)",
+                         [(old, "x" * 2000) for _ in range(400)])
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # the rows are in the file
+    before = os.path.getsize(store._db_path)
+
+    assert store.purge_older_than(90) == 400
+
+    assert os.path.getsize(store._db_path) < before / 2

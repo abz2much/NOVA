@@ -284,6 +284,9 @@ _ALL = (
     # Camera analyses Nova starts itself, per day, over every camera. 0 is
     # no limit. Doorbell presses, requests and the alarm are never held back.
     _n("vision_daily_limit", 300),
+    # Days of pattern history to keep (7 to 365). The daily purge trims past
+    # it and compacts the database; chats stay at 30 days or less.
+    _n("data_retention_days", 90),
     _u("llm_base_url"),
     _u("ollama_base_url"),
     _u("custom_base_url"),
