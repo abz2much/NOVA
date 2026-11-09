@@ -125,8 +125,11 @@ def test_no_word_is_both_yes_and_no(answers):
 
 def test_every_yes_no_question_reads_the_shared_list(answers, load):
     vc = load("voice_confirm")
-    assert answers.YES <= set(vc._YES) and answers.NO <= set(vc._NO)
-    assert set(vc._YES) - answers.YES == {"unlock it", "open it"}
+    # A "no" may be said in any language, but a confirmation to unlock or
+    # open is a "yes" in English only: a stray foreign word must never confirm.
+    assert answers.NO <= set(vc._NO)
+    assert set(vc._YES) == set(answers._YES_EN) | {"unlock it", "open it"}
+    assert not {"oui", "ja", "sí", "vai", "pode", "los", "да"} & set(vc._YES)
 
 
 async def test_a_held_request_reads_the_shared_list(load):

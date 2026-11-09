@@ -32,7 +32,7 @@ from typing import Optional, Sequence
 from homeassistant.core import callback
 
 from .safe_errors import safe_error_message
-from .answers import NO as _SHARED_NO, YES as _SHARED_YES
+from .answers import NO as _SHARED_NO, _YES_EN as _ENGLISH_YES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +61,9 @@ _INDIRECTION_SAFE = {"", "reload", "turn_off", "stop"}
 # The household yes/no words from answers.py plus this channel's own. The
 # question names the action, so "unlock it" or "open it" answers it. Home
 # Assistant does the matching, hence the spoken contractions.
-_YES = sorted(_SHARED_YES | {"unlock it", "open it"})
+# A "no" is accepted in any language the household uses. A "yes" that confirms
+# a risky action is English only: a stray foreign word must never unlock a door.
+_YES = sorted(_ENGLISH_YES | {"unlock it", "open it"})
 _NO = sorted(_SHARED_NO | {"don't", "don't do it"})
 
 _ANSWER_TIMEOUT = 30.0              # seconds for a spoken answer

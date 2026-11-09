@@ -1227,3 +1227,27 @@ async def test_an_automatic_analysis_is_skipped_once_the_day_is_used_up(cam, mon
     out = await cam.async_analyze_camera(fake_hass, call, "C", "sir", None, [])
     assert out["error"] == "no_image" and asked == [1]
     vb.reset()
+
+
+# ── the alarm's own camera check keeps the full picture ─────────────────────
+
+def test_the_vision_task_can_leave_the_off_property_rule_out(cam):
+    task = cam._vision_task("Porch", 0, False, 1.2, "", property_only=False)
+    assert "passers-by" not in task and "own property" not in task
+
+
+async def test_the_judge_rule_can_leave_the_off_property_sentence_out(cam, monkeypatch, fake_hass):
+    seen = {}
+
+    async def chat(hass, client, messages, **kw):
+        seen["system"] = messages[0]["content"]
+        return types.SimpleNamespace(text="{}")
+    monkeypatch.setattr(cam, "_recent_activity", lambda: "")
+    import importlib
+    monkeypatch.setattr(importlib.import_module(_pkg(cam) + ".providers.activity"),
+                        "execute_chat", chat)
+    await cam._reason_about_scene(fake_hass, "c", "m", "Porch", "A man.", "person",
+                                  property_only=False)
+    assert "off the property" not in seen["system"]
+    await cam._reason_about_scene(fake_hass, "c", "m", "Porch", "A man.", "person")
+    assert "off the property" in seen["system"]

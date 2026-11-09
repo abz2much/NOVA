@@ -177,6 +177,8 @@ What to know:
 - Only the satellite you were asked on can say yes. A yes on another
   satellite, in the Chat tab or in the panel does nothing, and leaves the
   question waiting.
+- A yes that confirms a risky action, such as unlocking, is accepted in English
+  only. A no is accepted in the languages Nova writes its alerts in.
 - If two satellites hear your yes at the same moment, the one that hears it
   first can take it and nothing runs. Ask again.
 - The question waits 60 seconds and is forgotten on a restart.

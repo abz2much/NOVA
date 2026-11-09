@@ -248,16 +248,20 @@ def _guess_detection_type(prompt: str, analysis: str) -> str:
     return "motion"
 
 
+_OFF_PROPERTY_JUDGE = (
+    "Activity that is only off the property, such as people or cars on the public "
+    "road or pavement or anything on a neighbour's land, is an empty scene: "
+    "category \"empty\", not notable, and the summary says only that nothing is on "
+    "the property. Someone or something coming onto the property, or stopping at "
+    "it, is not off the property. ")
+
 _REASONING_RULES = (
     "You are Nova's camera-reasoning module. You are given a description of what "
     "a camera saw. Decide whether it is notable enough to mention to the resident. "
     "Routine or benign activity — a recognised resident arriving, an empty scene, "
-    "a car passing on the public street — is NOT notable. Activity that is only "
-    "off the property, such as people or cars on the public road or pavement or "
-    "anything on a neighbour's land, is an empty scene: category \"empty\", not "
-    "notable, and the summary says only that nothing is on the property. Someone "
-    "or something coming onto the property, or stopping at it, is not off the "
-    "property. Notable: an unrecognised "
+    "a car passing on the public street — is NOT notable. "
+    + _OFF_PROPERTY_JUDGE +
+    "Notable: an unrecognised "
     "person approaching or lingering, a delivery or package, mail, someone at an "
     "unusual hour, property damage, an animal where it shouldn't be, or anything "
     "that genuinely warrants attention. Be conservative about what you flag. "
@@ -278,7 +282,8 @@ def _recent_activity() -> str:
 
 
 async def _reason_about_scene(hass: HomeAssistant, reasoning_client, reasoning_model: str,
-                              camera_name: str, description: str, det_type: str) -> dict:
+                              camera_name: str, description: str, det_type: str,
+                              property_only: bool = True) -> dict:
     """Judge a vision description: {notable, category, summary, speak}.
 
     Any failure counts the scene as notable and speaks the description itself,
@@ -287,7 +292,8 @@ async def _reason_about_scene(hass: HomeAssistant, reasoning_client, reasoning_m
     recent = _recent_activity()
     from . import output_language
     # The spoken line follows Nova's language; the JSON keys stay as they are.
-    system = _REASONING_RULES + output_language.field_directive(hass, "speak")
+    rules = _REASONING_RULES if property_only else _REASONING_RULES.replace(_OFF_PROPERTY_JUDGE, "")
+    system = rules + output_language.field_directive(hass, "speak")
     from .prompt_fence import fence_home_data, one_line
     # The vision description is text from a camera frame (a sign held up to the
     # lens is text too), so it is fenced as data, like the recent activity.
@@ -862,8 +868,8 @@ _NIGHT_CAUTION = (
 
 
 def _vision_task(camera_name: str, clip_count: int, sheet: bool, interval: float,
-                 hint: str) -> str:
-    hint = _NIGHT_CAUTION + _OFF_PROPERTY_RULE + hint
+                 hint: str, property_only: bool = True) -> str:
+    hint = _NIGHT_CAUTION + (_OFF_PROPERTY_RULE if property_only else "") + hint
     if not clip_count:
         return (f"You are analysing the camera feed '{camera_name}'. Describe what you "
                 "see clearly and concisely — as Nova would. Note specific details: "
@@ -900,7 +906,8 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
                                honorific: str, tts_entity: str | None,
                                speakers: list[str], gate_announce: bool = False,
                                force_images: Optional[list] = None,
-                               background: bool = False) -> dict:
+                               background: bool = False,
+                               property_only: bool = True) -> dict:
     """The nova.analyze_camera service, also used by the automatic paths.
 
     Gets a frame (or a clip, with ``frames`` above one, or the given
@@ -942,7 +949,7 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
     if background and not vision_budget.take(limit):
         return _over_the_limit(hass, camera_name, limit)   # used up while this one waited
     task = _vision_task(camera_name, len(encoded) if clip else 0, sheet is not None,
-                        interval, _recognition_hint(hass, entity_id))
+                        interval, _recognition_hint(hass, entity_id), property_only)
     system = build_system_prompt(hass, honorific, task)
     from . import output_language
     system = output_language.with_language(hass, system)   # the description may be spoken
@@ -983,13 +990,15 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
     async with _camera_client(hass, reasoning_provider, reasoning_model, groq_client,
                               binding="camera_reasoning") as reasoning_client:
         judgment = await _reason_about_scene(
-            hass, reasoning_client, reasoning_model, camera_name, analysis, det_type)
+            hass, reasoning_client, reasoning_model, camera_name, analysis, det_type,
+            property_only)
     summary = judgment["summary"]
     category = judgment["category"]
     notable = judgment["notable"]
     _nova_log(f"{camera_name} [{category}]{' ⚠NOTABLE' if notable else ''}: {summary}")
 
-    await _record_scene(hass, call, entity_id, camera_name, analysis, judgment)
+    await _record_scene(hass, call, entity_id, camera_name, analysis, judgment,
+                        property_only)
 
     spoke = False
     if announce and notable and judgment.get("speak"):
@@ -1023,7 +1032,7 @@ async def async_analyze_camera(hass: HomeAssistant, call: ServiceCall, groq_clie
 
 
 async def _record_scene(hass: HomeAssistant, call, entity_id: str, camera_name: str,
-                        analysis: str, judgment: dict) -> None:
+                        analysis: str, judgment: dict, property_only: bool = True) -> None:
     """Spread one analysed scene across Nova: chat memory, the observer's
     awareness, scene memory (when on and asked), semantic learning and the
     briefing snapshot. Only memory may raise."""
@@ -1038,8 +1047,8 @@ async def _record_scene(hass: HomeAssistant, call, entity_id: str, camera_name: 
         pass
     # An empty scene, which includes the road and the neighbours' land, is not
     # remembered: it holds nothing the household needs and could hold passers-by.
-    if call.data.get("record_scene", True) and str(
-            judgment.get("category") or "").lower() != "empty":
+    if call.data.get("record_scene", True) and not (
+            property_only and str(judgment.get("category") or "").lower() == "empty"):
         try:
             from . import camera_semantic, scene_memory
             if scene_memory.enabled():

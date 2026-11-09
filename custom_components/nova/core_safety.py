@@ -797,7 +797,7 @@ class SafetyManager:
                               "announce": False, "record_scene": False})
             client = getattr(self, "groq_client", None) or getattr(self, "_groq", None)
             result = await async_analyze_camera(self.hass, call, client, honorific, None, [],
-                                                gate_announce=True)
+                                                gate_announce=True, property_only=False)
             text = ""
             if isinstance(result, dict):
                 text = (result.get("analysis") or result.get("description")
