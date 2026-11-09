@@ -1160,6 +1160,7 @@
  "since {date}",
  "speak less after alerts are repeatedly marked unhelpful",
  "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+ "spoken",
  "test a search — e.g. furnace filter size",
  "type a domain…",
  "type a label…",
@@ -1280,6 +1281,5 @@
  "⬆ Upload Image",
  "⬆ Upload file",
  "⬇ Export",
- "💾 Save edit",
- "🔊 spoken"
+ "💾 Save edit"
 ]

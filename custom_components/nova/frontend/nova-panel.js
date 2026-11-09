@@ -653,27 +653,33 @@ ${this._dockHtml()}`;
   static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
     "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE", "VOICE"];
   static LOG_CATEGORIES = {
-    CONV: { color: "var(--log-conv)", icon: "💬" },
-    REPLY: { color: "var(--log-reply)", icon: "💭" },
-    LOCAL: { color: "var(--log-local)", icon: "⚡" },
-    LEARN: { color: "var(--log-learn)", icon: "🧠" },
-    AGENT: { color: "var(--gold)", icon: "🤖" },
-    AUTO: { color: "var(--log-auto)", icon: "🔁" },
-    MODE: { color: "var(--log-mode)", icon: "🎚️" },
-    CONFIG: { color: "var(--log-config)", icon: "⚙️" },
-    CLASSIFY: { color: "var(--log-classify)", icon: "🏷️" },
-    CAMERA: { color: "var(--log-camera)", icon: "📷" },
-    ENERGY: { color: "var(--log-energy)", icon: "🔌" },
-    BIO: { color: "var(--log-bio)", icon: "💓" },
-    OFFER: { color: "var(--log-offer)", icon: "🙋" },
-    SAFETY: { color: "var(--log-safety)", icon: "🛡️" },
-    ERROR: { color: "var(--log-error)", icon: "❌" },
-    WARNING: { color: "var(--warn)", icon: "⚠️" },
-    GATE: { color: "var(--ink-faint)", icon: "🚧" },
-    DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
-    OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
-    VOICE: { color: "var(--log-voice)", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
+    CONV: { color: "var(--log-conv)", icon: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>' },
+    REPLY: { color: "var(--log-reply)", icon: '<path d="M4 5h16v11H9l-5 4z"/>' },
+    LOCAL: { color: "var(--log-local)", icon: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>' },
+    LEARN: { color: "var(--log-learn)", icon: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>' },
+    AGENT: { color: "var(--gold)", icon: '<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 14h.01M15 14h.01"/>' },
+    AUTO: { color: "var(--log-auto)", icon: '<path d="M4 12a8 8 0 0 1 14-5l2 2M20 4v5h-5M20 12a8 8 0 0 1-14 5l-2-2M4 20v-5h5"/>' },
+    MODE: { color: "var(--log-mode)", icon: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>' },
+    CONFIG: { color: "var(--log-config)", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>' },
+    CLASSIFY: { color: "var(--log-classify)", icon: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>' },
+    CAMERA: { color: "var(--log-camera)", icon: '<path d="M3 8h4l2-3h6l2 3h4v12H3z"/><circle cx="12" cy="13" r="4"/>' },
+    ENERGY: { color: "var(--log-energy)", icon: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>' },
+    BIO: { color: "var(--log-bio)", icon: '<path d="M3 12h4l2-5 4 10 2-5h6"/>' },
+    OFFER: { color: "var(--log-offer)", icon: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>' },
+    SAFETY: { color: "var(--log-safety)", icon: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>' },
+    ERROR: { color: "var(--log-error)", icon: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>' },
+    WARNING: { color: "var(--warn)", icon: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>' },
+    GATE: { color: "var(--ink-faint)", icon: '<rect x="3" y="8" width="18" height="6"/><path d="M6 14v6M18 14v6"/>' },
+    DEDUP: { color: "var(--ink-faint)", icon: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l4 6M21 9l-4 6"/>' },
+    OFFLINE: { color: "var(--ink-faint)", icon: '<path d="M2 9a15 15 0 0 1 20 0M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0M12 20h.01M3 3l18 18"/>' },
+    VOICE: { color: "var(--log-voice)", icon: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>' },       // Nova Voice ID result (8.36.0)
   };
+
+  // A drawn icon for a log row: the paths of a 24px outline, sized to the
+  // text and hidden from screen readers (the category name sits beside it).
+  _logIcon(paths) {
+    return `<svg class="log-ico" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+  }
 
   _htmlLogs() {
     const filterChips = NovaPanel.LOG_FILTERS.map(f =>
@@ -875,7 +881,7 @@ ${this._dockHtml()}`;
       const requester = r.requested_by_name || r.requested_by_user_id || r.request_device_id || "";
       const targets = r.targets || [];
       const spokenNote = (r.spoken_history_id !== null && r.spoken_history_id !== undefined)
-        ? `<span class="toggle-desc" title="Linked Spoken History entry">🔊 spoken</span>` : "";
+        ? `<span class="toggle-desc" title="Linked Spoken History entry">${this._logIcon('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 8a5 5 0 0 1 0 8"/>')} ${this._tx("spoken")}</span>` : "";
       const targetRows = targets.map(t => {
         const targetName = t.entity_id || [t.domain, t.service].filter(Boolean).join(".") || "—";
         return `
@@ -1200,12 +1206,12 @@ ${this._dockHtml()}`;
     const prevTop = container.scrollTop;
 
     this._setHtml(container, ordered.length ? ordered.map(e => {
-      const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
+      const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: '<circle cx="12" cy="12" r="2"/>' };
       const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
       const safeCat = this._esc(e.cat);
       return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
         <span class="new-log-ts">${this._esc(e.ts)}</span>
-        <span class="new-log-cat" style="color:${cat.color}"><span aria-hidden="true">${cat.icon}</span> ${safeCat}</span>
+        <span class="new-log-cat" style="color:${cat.color}">${this._logIcon(cat.icon)} ${safeCat}</span>
         <span class="new-log-msg">${this._esc(e.msg)}</span>
       </div>`;
     }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`);
@@ -10814,6 +10820,7 @@ ${this._dockHtml()}`;
       .new-log-entry-error{background:color-mix(in srgb,var(--bad-strong) 8%,transparent)}
       .new-log-ts{color:var(--ink-faint)}
       .new-log-cat{white-space:nowrap;font-weight:600}
+      .log-ico{width:1em;height:1em;vertical-align:-.125em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
       .new-log-msg{color:var(--ink-dim);word-break:break-word}
       @media (max-width:560px){.new-log-entry{grid-template-columns:1fr;gap:2px}}
       .new-decision-row{grid-template-columns:150px minmax(150px,230px) minmax(0,1fr) auto;align-items:start}

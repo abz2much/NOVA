@@ -709,6 +709,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -802,8 +803,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "de": [],
  "es": [],
@@ -1516,6 +1516,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -1609,8 +1610,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "fr": [],
  "it": [
@@ -2322,6 +2322,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -2415,8 +2416,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "nb": [
   "(disabled)",
@@ -3127,6 +3127,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -3220,8 +3221,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "nl": [],
  "pl": [],
@@ -3935,6 +3935,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -4028,8 +4029,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "ro": [
   "(disabled)",
@@ -4740,6 +4740,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -4833,8 +4834,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "ru": [],
  "sk": [
@@ -5546,6 +5546,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -5639,8 +5640,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "sv": [],
  "tr": [
@@ -6352,6 +6352,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -6445,8 +6446,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "uk": [
   "(disabled)",
@@ -7157,6 +7157,7 @@
   "self-host (optional)",
   "speak less after alerts are repeatedly marked unhelpful",
   "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only",
+  "spoken",
   "test a search — e.g. furnace filter size",
   "type a domain…",
   "type a label…",
@@ -7250,8 +7251,7 @@
   "⬆ UPLOADING…",
   "⬆ Upload Image",
   "⬇ Export",
-  "💾 Save edit",
-  "🔊 spoken"
+  "💾 Save edit"
  ],
  "zh": [],
  "zh-hant": []
