@@ -75,3 +75,51 @@ def test_no_working_premium_voice_falls_back_to_the_regular_one(tts, fake_hass):
     _voices(fake_hass, elevenlabs="unavailable", piper="unknown")
     assert tts.resolve_tts_for_context(
         fake_hass, "briefing", "auto", None, ["briefing"]) == "tts.piper"
+
+
+# ── the household's language reaches the voice (8.85.12) ────────────────────
+
+@pytest.mark.parametrize("wanted, supported, expected", [
+    ("fr", ["en-US", "fr-FR"], "fr-FR"),          # a region the engine has
+    ("fr-FR", ["fr-FR"], "fr-FR"),
+    ("pt-BR", ["pt-PT", "pt-BR"], "pt-BR"),       # the exact one wins
+    ("pt-BR", ["pt-PT"], "pt-PT"),                # same language, other region
+    ("fr", ["en-US"], None),                      # the engine cannot: nothing changes
+    ("fr", [], None),
+    ("en", ["en-US", "fr-FR"], None),             # English: the engine's default
+    ("en-GB", ["en-US"], None),
+    (None, ["fr-FR"], None),
+    ("fr", None, None),                           # engine unknown
+])
+def test_the_language_sent_is_one_the_engine_supports(tts, wanted, supported, expected):
+    assert tts._pick_language(wanted, supported) == expected
+
+
+async def test_a_french_household_is_spoken_to_in_french(tts, fake_hass, monkeypatch):
+    fake_hass.config.language = "fr"
+    fake_hass.states.set("media_player.kitchen", "idle")
+    monkeypatch.setattr(tts, "_engine_languages", lambda hass, entity: ["fr-FR", "en-US"])
+    await tts.async_announce(fake_hass, "bonjour", "tts.piper", ["media_player.kitchen"],
+                             context="reply")
+    play = next(c for c in fake_hass.service_calls if c[1] == "play_media")
+    assert "language=fr-FR" in play[2]["media_content_id"]
+
+
+async def test_an_english_household_sends_no_language(tts, fake_hass, monkeypatch):
+    fake_hass.config.language = "en"
+    fake_hass.states.set("media_player.kitchen", "idle")
+    monkeypatch.setattr(tts, "_engine_languages", lambda hass, entity: ["fr-FR", "en-US"])
+    await tts.async_announce(fake_hass, "hello", "tts.piper", ["media_player.kitchen"],
+                             context="reply")
+    play = next(c for c in fake_hass.service_calls if c[1] == "play_media")
+    assert "language" not in play[2]["media_content_id"]
+
+
+async def test_a_voice_that_cannot_speak_the_language_gets_none(tts, fake_hass, monkeypatch):
+    fake_hass.config.language = "fr"
+    fake_hass.states.set("media_player.kitchen", "idle")
+    monkeypatch.setattr(tts, "_engine_languages", lambda hass, entity: ["en-US"])
+    await tts.async_announce(fake_hass, "bonjour", "tts.piper", ["media_player.kitchen"],
+                             context="reply")
+    play = next(c for c in fake_hass.service_calls if c[1] == "play_media")
+    assert "language" not in play[2]["media_content_id"]
