@@ -92,6 +92,16 @@ a security control.
 - Packages are found by camera name. A camera with the word glued into a
   longer name may not be watched.
 - Nova has no face engine of its own.
+- Nova describes your own property and its entrances. People on the road or
+  the pavement and the neighbours' land are left out of what it says and what
+  it remembers. Anyone who comes onto the property, or stops at it, is
+  described.
+- Camera analyses that Nova starts itself (motion clips, quiet visitor notes
+  and the package check) stop at 300 a day over all cameras, to keep a paid
+  vision model from running up a bill. Set `vision_daily_limit` to change it,
+  or to 0 for no limit. A doorbell press, a request you make and the security
+  alarm are never held back. The count starts again at midnight and when Home
+  Assistant restarts.
 
 ## Troubleshooting
 

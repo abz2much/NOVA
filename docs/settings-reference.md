@@ -96,6 +96,7 @@ and the locks left out of lockdown, are described in
 | --- | --- | --- |
 | `visitor_learning` | Settings → Cameras | Quietly learns from people at the door. Never spoken. |
 | `package_detection` | Settings → Cameras | Watches porch cameras for packages and mail. Off until you turn it on (since 8.41.0). |
+| `vision_daily_limit` | `config.json` only | How many camera analyses Nova may start by itself in a day, over all cameras. 300 by default; 0 means no limit. A doorbell press, a request and the security alarm are never held back. |
 | `camera_event_learning` | Settings → Learning & Memory → Routine Learning | Feeds detections from Eufy, Frigate, Nest and Nova's own vision into routine learning. On by default, and off whenever Nova's learning itself is off. |
 | `camera_event_confidence_floor`, `camera_event_dedup_window` | `config.json` only | The lowest confidence a source may report for a detection to count (0 to 100; 0 turns the filter off) and how many seconds apart two sources must be to count as different detections (300 by default). |
 | `camera_historical_awareness`, `camera_awareness_min_observations` | Settings → Learning & Memory → Routine Learning | Adds repeated camera patterns from the past to conversations. It has its own off switch and needs at least 3 to 12 sightings (3 by default) across more than one day. It does nothing while learning or camera event learning is off. |

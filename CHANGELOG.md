@@ -17,8 +17,14 @@
 - **A single camera frame is shrunk before it goes to the vision model,** as several frames already were.
 - **The reasoning cache is saved off the event loop,** and the mode file is written by one writer at a time, atomically.
 - **Learned alias text goes into the prompt on one line and is cut short.**
+- **Safety alerts now come in Polish, Russian and Ukrainian too.** Freeze, intrusion and lockdown alerts, titles included, are written in ten languages. The wording avoids grammar that would depend on a device's name or gender.
+- **Spoken yes and no answers, and the voice-phrase guards, work in the other nine languages.** The whole answer must still be on the list ("oui mais pas maintenant" is not a yes). A negation, an opposite word ("open" and "close") or a question still stops a flexible voice phrase from matching, in French, German, Spanish, Italian, Dutch, Portuguese, Polish, Russian and Ukrainian.
+- **One daily limit on the camera analyses Nova starts itself.** A fault that made every camera fire could run up an unlimited bill with a paid vision model. The default is 300 a day over all cameras; change it with `vision_daily_limit`, or set 0 for no limit. Motion clips, quiet visitor notes and the package check count. A doorbell press, a request you make and the security alarm never do.
+- **Cameras keep the road and the neighbours out of what they describe and remember.** The vision prompt now covers the household's own property and its entrances, and an empty or off-property scene is not kept in scene memory. Anyone or anything that comes onto the property, or stops at it, is still described.
+- **The panel is fully translated in Danish, Finnish, Italian, Norwegian Bokmål, Portuguese, Romanian, Slovak, Turkish and Ukrainian.** They were about 38% done. Checks in CI now keep all 20 languages complete. The setting text about safety alerts now names all ten alert languages.
 
 ### Changed
+- **Every module is now type-checked, not only the 84 in the architecture packages.** That is 268 files in all. It found a few real gaps, now closed: a safety investigation tick that started with none open, the learning log called before its logger existed, and the energy, solar and briefing code that could meet an empty value.
 - **The release is published only after the Validate checks have passed on the merge commit.** The release workflow now waits for them, up to 45 minutes, and publishes nothing if they fail or do not finish. If that happens, fix the problem and run the workflow again by hand from the Actions tab.
 
 **Good to know:**
@@ -26,6 +32,9 @@
 - A Eufy plain "person" sensor is not counted as an unexplained person, because Nova treats it as a known face.
 - The Logs tab icons have not been looked at in a real browser, only checked by the smoke test.
 - The `main` branch has no branch protection on GitHub, so nothing forces checks to pass before a merge. That is a repository setting.
+- The nine new panel translations, and the Polish, Russian and Ukrainian safety alerts, were written without a native speaker reading them. The alert wording is plain on purpose, but a reader should check it.
+- The daily camera limit is kept in memory. It starts again at midnight and when Home Assistant restarts.
+- In the yes and no lists, the Polish casual "no" (meaning "yeah") is read as English "no", the safe reading.
 
 ## [8.85.11] A lock that misses its command is tried again
 
