@@ -327,7 +327,7 @@ async def run_reasoning(ctx) -> dict:
     rl, conn = ctx.load("reasoning_loop"), ctx.load("connectivity")
     _load_nova(ctx)
     for _ in range(ctx.input.get("prior_failures", 0)):
-        conn.record_failure()
+        conn.record_failure("reasoning")
     for _ in range(ctx.input.get("repeat", 1)):
         out = await rl.decide(ctx.hass, ctx.provider, **_decide_kwargs(ctx.input))
     speak = bool(out.get("speak"))
@@ -344,8 +344,8 @@ async def run_agreement(ctx) -> dict:
     cloud = await rl.decide(ctx.hass, ctx.provider, **kwargs)
     ctx.load("reasoning_cache")._cache.clear()
     conn.reset()
-    conn.record_failure()
-    conn.record_failure()   # breaker open → no provider call
+    conn.record_failure("reasoning")
+    conn.record_failure("reasoning")   # breaker open → no provider call
     before = ctx.provider.calls
     local = await rl.decide(ctx.hass, ctx.provider, **kwargs)
     agree = bool(cloud.get("speak")) == bool(local.get("speak"))

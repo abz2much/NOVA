@@ -211,11 +211,11 @@ async def test_cancellation_propagates_and_leaves_no_trace(isolated, fake_hass,
                                                            provider_factory, connectivity):
     rl, cache, holds, writes = isolated
     p = provider_factory(exc=asyncio.CancelledError())
-    before = connectivity.status()["total_successes"]
+    before = connectivity.status("reasoning")["total_successes"]
     with pytest.raises(asyncio.CancelledError):
         await _decide(rl, fake_hass, p)
     assert writes == [] and len(holds) == 0
-    st = connectivity.status()
+    st = connectivity.status("reasoning")
     assert st["consecutive_failures"] == 0 and st["total_successes"] == before
 
 
@@ -226,7 +226,7 @@ async def test_a_transport_failure_is_unchanged(isolated, fake_hass, provider_fa
     out = await _decide(rl, fake_hass, p)
     assert p.calls == 1 and out["reason"].startswith("local mind:")
     assert "provider_failure" not in out
-    assert connectivity.status()["consecutive_failures"] == 1
+    assert connectivity.status("reasoning")["consecutive_failures"] == 1
     assert len(holds) == 0 and writes == []
 
 
@@ -301,7 +301,7 @@ async def test_the_coordinator_collects_the_snapshot_from_the_summary(
         return {"speak": False, "reason": "captured"}
 
     monkeypatch.setattr(coord, "_local_mind", _capture)
-    monkeypatch.setattr(connectivity, "allow_request", lambda: False)   # breaker open
+    monkeypatch.setattr(connectivity, "allow_request", lambda *_a: False)   # breaker open
     p = provider_factory(replies=[])
     recent = ["Earlier announcement"]
     out = await _decide(rl, fake_hass, p, entity_id="", device_class="", from_state="",
@@ -332,12 +332,12 @@ async def test_unusable_replies_count_against_the_breaker(isolated, fake_hass,
     open the breaker; nothing is learned."""
     rl, cache, holds, writes = isolated
     p = provider_factory(replies=["garbage one", "garbage two", "never asked"])
-    before = connectivity.status()["total_successes"]
+    before = connectivity.status("reasoning")["total_successes"]
     await _decide(rl, fake_hass, p)
-    assert connectivity.status()["consecutive_failures"] == 1
-    assert connectivity.status()["total_successes"] == before
+    assert connectivity.status("reasoning")["consecutive_failures"] == 1
+    assert connectivity.status("reasoning")["total_successes"] == before
     await _door(rl, fake_hass, p)
-    st = connectivity.status()
+    st = connectivity.status("reasoning")
     assert st["state"] == "open" and st["consecutive_failures"] == 2
     out = await _decide(rl, fake_hass, p, device_class="window", anyone_home=True)
     assert p.calls == 2 and out["reason"].startswith("local mind:")   # breaker open
@@ -349,21 +349,21 @@ async def test_a_valid_reply_records_success_and_restores_health(isolated, fake_
                                                                  connectivity):
     rl, cache, holds, writes = isolated
     p = provider_factory(replies=["garbage", '{"speak": false, "reason": "routine"}'])
-    before = connectivity.status()["total_successes"]
+    before = connectivity.status("reasoning")["total_successes"]
     await _decide(rl, fake_hass, p)
-    assert connectivity.status()["consecutive_failures"] == 1
+    assert connectivity.status("reasoning")["consecutive_failures"] == 1
     out = await _door(rl, fake_hass, p)
-    st = connectivity.status()
+    st = connectivity.status("reasoning")
     assert out == {"speak": False, "reason": "routine"}
     assert st["state"] == "closed" and st["consecutive_failures"] == 0
     assert st["total_successes"] == before + 1 and len(writes) == 1
 
 
 def _half_open(connectivity):
-    connectivity.record_failure()
-    connectivity.record_failure()
-    connectivity._BREAKER.opened_at -= connectivity._OPEN_COOLDOWN + 1   # cooldown over
-    assert connectivity.status()["state"] == "open"
+    connectivity.record_failure("reasoning")
+    connectivity.record_failure("reasoning")
+    connectivity._BREAKERS["reasoning"].opened_at -= connectivity._OPEN_COOLDOWN + 1   # cooldown over
+    assert connectivity.status("reasoning")["state"] == "open"
 
 
 async def test_a_held_signature_consumes_no_half_open_probe(isolated, fake_hass,
@@ -377,10 +377,10 @@ async def test_a_held_signature_consumes_no_half_open_probe(isolated, fake_hass,
     _half_open(connectivity)
     out = await _decide(rl, fake_hass, p)
     assert p.calls == 0 and out["reason"].startswith("local mind:")
-    assert connectivity._BREAKER.half_open_probes == 0         # probe not consumed
+    assert connectivity._BREAKERS["reasoning"].half_open_probes == 0         # probe not consumed
     out = await _door(rl, fake_hass, p)                       # a different signature
     assert p.calls == 1 and out == {"speak": False, "reason": "routine"}
-    assert connectivity.status()["state"] == "closed"
+    assert connectivity.status("reasoning")["state"] == "closed"
 
 
 async def test_an_unusable_probe_reply_reopens_the_breaker(isolated, fake_hass,
@@ -389,7 +389,7 @@ async def test_an_unusable_probe_reply_reopens_the_breaker(isolated, fake_hass,
     p = provider_factory(replies=["still garbage"])
     _half_open(connectivity)
     await _door(rl, fake_hass, p)
-    assert p.calls == 1 and connectivity.status()["state"] == "open"
+    assert p.calls == 1 and connectivity.status("reasoning")["state"] == "open"
     assert writes == []
 
 

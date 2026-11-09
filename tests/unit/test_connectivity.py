@@ -162,6 +162,7 @@ def test_fresh_module_is_closed_and_empty(cb):
         "state": "closed", "online": True, "consecutive_failures": 0,
         "cooldown_remaining_s": 0, "total_failures": 0, "total_successes": 0,
         "last_success_ago_s": None, "last_failure_ago_s": None,
+        "tiers": {"agent": "closed"},
     }
 
 
@@ -362,7 +363,7 @@ def test_status_shape_and_types(cb, clock):
     st = cb.status()
     assert list(st) == ["state", "online", "consecutive_failures",
                         "cooldown_remaining_s", "total_failures", "total_successes",
-                        "last_success_ago_s", "last_failure_ago_s"]
+                        "last_success_ago_s", "last_failure_ago_s", "tiers"]
     assert isinstance(st["state"], str) and isinstance(st["online"], bool)
     for k in ("consecutive_failures", "cooldown_remaining_s",
               "total_failures", "total_successes", "last_failure_ago_s"):
@@ -553,3 +554,44 @@ def test_ago_values_are_never_negative(cb, monkeypatch):
     assert st["last_success_ago_s"] == 0
     assert st["last_failure_ago_s"] == 0
 
+
+
+# ── one breaker per tier (the reasoning tier must not shut the main agent) ──
+
+def test_reasoning_failures_do_not_open_the_agent_breaker(cb, clock):
+    for _ in range(2):
+        cb.record_failure("reasoning")
+    assert cb.allow_request("reasoning") is False
+    assert cb.allow_request() is True
+    assert cb.is_online() is True
+    assert cb.status()["state"] == "closed"
+
+
+def test_agent_failures_do_not_open_the_reasoning_breaker(cb, clock):
+    _open(cb)
+    assert cb.allow_request("reasoning") is True
+    assert cb.status("reasoning")["state"] == "closed"
+
+
+def test_a_success_closes_only_its_own_tier(cb, clock):
+    _open(cb)
+    for _ in range(2):
+        cb.record_failure("reasoning")
+    cb.record_success("reasoning")
+    assert cb.status("reasoning")["state"] == "closed"
+    assert cb.status()["state"] == "open"
+
+
+def test_reset_closes_every_tier(cb, clock):
+    _open(cb)
+    for _ in range(2):
+        cb.record_failure("reasoning")
+    cb.reset()
+    assert cb.status()["state"] == "closed"
+    assert cb.status("reasoning")["state"] == "closed"
+
+
+def test_status_lists_the_state_of_every_tier(cb, clock):
+    for _ in range(2):
+        cb.record_failure("reasoning")
+    assert cb.status()["tiers"] == {"agent": "closed", "reasoning": "open"}

@@ -256,7 +256,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         return await _provider_failure_fallback(hass, sig, snapshot, honorific, **_traced(trace))
 
     # No fresh cache → we'd call the provider. Respect the breaker.
-    if not connectivity.allow_request():
+    if not connectivity.allow_request("reasoning"):
         reasoning_cache.note_hit(sig)
         _LOGGER.info("Reasoning: breaker OPEN — Local Mind for [%s]", sig)
         return await _local_mind(hass, snapshot, honorific, **_traced(trace))
@@ -317,7 +317,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
             raise last_err or RuntimeError("no response after retries")
     except Exception as exc:
         _LOGGER.warning("Reasoning loop failed: %s", exc)
-        connectivity.record_failure()
+        connectivity.record_failure("reasoning")
         return await _provider_failure_fallback(hass, sig, snapshot, honorific, **_traced(trace))
 
     # Provider health follows the validated outcome, not the transport: a
@@ -326,7 +326,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
                           classifier_urgency=classifier_urgency)
     if isinstance(outcome, ProviderFailure):
         # A reply Nova can't read is a provider failure, never a decision.
-        connectivity.record_failure()
+        connectivity.record_failure("reasoning")
         _LOGGER.warning(
             "Reasoning: provider reply not usable (%s: %s, %d chars) — fallback",
             outcome.kind, outcome.detail, outcome.reply_length)
@@ -337,7 +337,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         out.setdefault("provider_failure", outcome.kind)
         return out
 
-    connectivity.record_success()
+    connectivity.record_success("reasoning")
     _note(trace, outcome.origin, outcome.reason_code)
     _learn(sig, outcome, classifier_urgency)
     return outcome.as_dict()
