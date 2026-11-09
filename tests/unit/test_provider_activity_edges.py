@@ -131,10 +131,11 @@ def test_an_entry_shows_counts_and_averages(pa, db):
         "provider": "groq", "model": "m", "role": "conversation", "location": "cloud",
         "data_category": "household", "success_count": 1, "failure_count": 1,
         "call_count": 2, "avg_input_tokens": 7.5, "avg_output_tokens": 2.5,
-        "avg_latency_ms": 150.5}
+        "avg_latency_ms": 150.5, "input_tokens": 15, "output_tokens": 5}
     assert list(entry) == ["provider", "model", "role", "location", "data_category",
                            "success_count", "failure_count", "call_count",
-                           "avg_input_tokens", "avg_output_tokens", "avg_latency_ms"]
+                           "avg_input_tokens", "avg_output_tokens", "avg_latency_ms",
+                           "input_tokens", "output_tokens"]
 
 
 def test_averages_are_none_when_no_call_reported_tokens(pa, db):

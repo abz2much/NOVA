@@ -21,6 +21,7 @@ as decision_record.py and automation_trials.py.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -191,7 +192,64 @@ def list_days(days: int = 7, db_path: Optional[str] = None) -> list:
             "avg_output_tokens": (round(tokens_out / calls, 1)
                                   if tokens_out is not None and calls else None),
             "avg_latency_ms": round(values["latency_ms_sum"] / calls, 1) if calls else None,
+            "input_tokens": tokens_in,
+            "output_tokens": tokens_out,
         })
 
     return [{"day": name, "entries": entries}
             for name, entries in sorted(grouped.items(), reverse=True)]
+
+
+# ── Estimated cost ──────────────────────────────────────────────────────────
+# Prices are the user's own (per million tokens, in their own currency):
+# provider prices change, so Nova ships none and never guesses. A model with
+# no price shows no cost.
+
+def parse_prices(raw) -> dict:
+    """The ``ai_prices`` setting as {name: {"input": x, "output": y}}, from a
+    dict or JSON text. A row that is not two non-negative numbers is left
+    out; anything unreadable gives {}."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    prices: dict = {}
+    for name, row in raw.items():
+        if not isinstance(row, dict):
+            continue
+        try:
+            per_in, per_out = float(row["input"]), float(row["output"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if per_in >= 0 and per_out >= 0:
+            prices[str(name)] = {"input": per_in, "output": per_out}
+    return prices
+
+
+def add_costs(days: list, prices: dict) -> list:
+    """Each entry gets ``cost``: tokens times the price for its
+    ``provider/model``, else its bare model name. None when the model has no
+    price or reported no usage. A side that reported nothing counts as 0."""
+    for day in days:
+        for entry in day.get("entries", []):
+            price = (prices.get(f"{entry.get('provider')}/{entry.get('model')}")
+                     or prices.get(str(entry.get("model"))))
+            tokens_in, tokens_out = entry.get("input_tokens"), entry.get("output_tokens")
+            if not price or (tokens_in is None and tokens_out is None):
+                entry["cost"] = None
+                continue
+            entry["cost"] = round(((tokens_in or 0) * price["input"]
+                                   + (tokens_out or 0) * price["output"]) / 1_000_000, 4)
+    return days
+
+
+def report(days: int, raw_prices, currency, db_path: Optional[str] = None) -> dict:
+    """What the panel shows: the last ``days`` days with each entry's
+    estimated cost, and the currency symbol the user priced in (up to 8
+    characters, "$" when none is set). Never raises."""
+    symbol = currency.strip()[:8] if isinstance(currency, str) else ""
+    return {"days": add_costs(list_days(days, db_path=db_path), parse_prices(raw_prices)),
+            "currency": symbol or "$"}

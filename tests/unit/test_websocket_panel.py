@@ -330,7 +330,19 @@ async def test_provider_activity_days_are_held_to_1_to_90(ws, load, monkeypatch,
     monkeypatch.setattr(pa, "db_path_for", lambda hass: "db")
     monkeypatch.setattr(pa, "list_days", lambda days, db_path=None: seen.append(days) or [])
     conn = await _call(ws.ws_get_provider_activity, _hass(_entry(load)), days=asked)
-    assert seen == [used] and conn.results == [(7, {"days": []})]
+    assert seen == [used] and conn.results == [(7, {"days": [], "currency": "$"})]
+
+
+async def test_provider_activity_prices_and_currency_come_from_the_settings(ws, load, monkeypatch):
+    pa = load("provider_activity")
+    monkeypatch.setattr(pa, "db_path_for", lambda hass: "db")
+    monkeypatch.setattr(pa, "list_days", lambda days, db_path=None: [{"day": "2026-01-01", "entries": [
+        {"provider": "openai", "model": "gpt-x", "input_tokens": 1_000_000, "output_tokens": 0}]}])
+    settings = {"ai_prices": {"openai/gpt-x": {"input": 3, "output": 15}}, "ai_price_currency": "£"}
+    monkeypatch.setattr(load("nova_config"), "get", lambda key, default=None: settings.get(key, default))
+    conn = await _call(ws.ws_get_provider_activity, _hass(_entry(load)), days=7)
+    (_, result), = conn.results
+    assert result["currency"] == "£" and result["days"][0]["entries"][0]["cost"] == 3.0
 
 
 async def test_provider_activity_failure_returns_no_raw_text(ws, load, monkeypatch):

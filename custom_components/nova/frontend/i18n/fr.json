@@ -1369,5 +1369,7 @@
   "In use: {meter} (picked in Settings)": "Utilisé : {meter} (choisi dans les Paramètres)",
   "In use: {meter} (guessed from its name)": "Utilisé : {meter} (deviné d’après son nom)",
   "Use Nova's estimate": "Utiliser l’estimation de Nova",
-  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova ne peut pas utiliser ce capteur comme coût, il utilise donc sa propre estimation."
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova ne peut pas utiliser ce capteur comme coût, il utilise donc sa propre estimation.",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

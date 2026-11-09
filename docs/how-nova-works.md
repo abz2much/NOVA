@@ -391,8 +391,9 @@ each message goes to the activity log. A few of the rules:
 - **Setup Doctor** (Diagnostics tab): a read only health check with a plain
   fix for each problem, never applied for you.
 - **Provider Activity** (Diagnostics tab): daily totals of AI calls by
-  provider, model and role, with token counts and timings. Never the
-  questions, answers, tool details, images or keys.
+  provider, model and role, with token counts and timings, and an estimated
+  cost for models you have priced. Never the questions, answers, tool
+  details, images or keys.
 - **Spoken History** (Logs tab): the last 100 announcements Nova actually
   delivered. Press REPEAT on one in the panel, or ask "what did you just
   say?".

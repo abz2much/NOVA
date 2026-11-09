@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.85.15
+ * v8.85.16
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -78,7 +78,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.85.15 ",
+      console.log("%c Nova Panel %c v8.85.16 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",   // colour-ok: the browser console banner, not the panel
         "color: #e2542f; background: #050403; padding: 2px 6px;");   // colour-ok: the browser console banner, not the panel
     }
@@ -4586,6 +4586,7 @@ ${this._dockHtml()}`;
     try {
       const activity = await this._hass.callWS({ type: "nova/get_provider_activity", days: 7 });
       this._providerActivity = activity.days || [];
+      this._providerCurrency = activity.currency || "$";
     } catch (_) { this._providerActivity = null; }
     if (this._currentTab === "diagnostics") this._render();
   }
@@ -4643,11 +4644,20 @@ ${this._dockHtml()}`;
           ? " · " + this._tHtml("avg tokens in/out {input}/{output}", {
             input: e.avg_input_tokens ?? "—", output: e.avg_output_tokens ?? "—" })
           : "";
+        // Totals and the estimated cost (only for a model the person priced).
+        const total = (e.input_tokens != null || e.output_tokens != null)
+          ? " · " + this._tHtml("total tokens in/out {input}/{output}", {
+            input: (e.input_tokens ?? 0).toLocaleString(), output: (e.output_tokens ?? 0).toLocaleString() })
+          : "";
+        const cost = e.cost != null
+          ? " · " + this._tHtml("cost {cost}", {
+            cost: `${this._providerCurrency || "$"}${e.cost.toFixed(e.cost >= 1 ? 2 : 3)}` })
+          : "";
         return `<div class="stub-body" style="margin:2px 0">
             ${this._esc(e.provider)}/${this._esc(e.model)} (${this._esc(e.role)}, ${this._esc(e.location)}) —
             ${this._tHtml(e.call_count === 1 ? "{count} call," : "{count} calls,", { count: e.call_count })}
             ${this._tHtml("{ok} ok / {failed} failed,", { ok: e.success_count, failed: e.failure_count })}
-            ${this._tHtml("avg {latency}ms", { latency: e.avg_latency_ms ?? "—" })}${tokens}
+            ${this._tHtml("avg {latency}ms", { latency: e.avg_latency_ms ?? "—" })}${tokens}${total}${cost}
           </div>`;
       }).join("");
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;

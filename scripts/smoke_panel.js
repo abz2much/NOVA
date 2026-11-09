@@ -2197,6 +2197,26 @@ if (require.main === module) setTimeout(async () => {
       return !!diagCard && /Provider Activity/.test(diagCard.textContent) && /Couldn't load provider activity\./.test(diagCard.textContent);
     })()]);
   hass.callWS = providerActivityCallWS;
+  // Totals and cost on the Provider Activity card: a priced model shows both,
+  // an unpriced one shows its totals only, and an unpriced one with no usage
+  // shows neither. Drawn straight from the card's body, no second element.
+  const activityEntry = (extra) => ({ provider: "openai", model: "gpt-x", role: "llm",
+    location: "cloud", call_count: 2, success_count: 2, failure_count: 0,
+    avg_latency_ms: 100, avg_input_tokens: 1, avg_output_tokens: 1, ...extra });
+  const savedActivity = elNew._providerActivity, savedCurrency = elNew._providerCurrency;
+  elNew._providerCurrency = "£";
+  elNew._providerActivity = [{ day: "2026-01-01", entries: [
+    activityEntry({ input_tokens: 2000000, output_tokens: 500000, cost: 13.5 }),
+    activityEntry({ model: "free-model", input_tokens: 10, output_tokens: 5, cost: null }),
+    activityEntry({ model: "silent", input_tokens: null, output_tokens: null, cost: null })] }];
+  const activityHtml = elNew._providerActivityCardBody();
+  checks.push(["settings tab: Provider Activity shows total tokens and an estimated cost",
+    /total tokens in\/out 2,000,000\/500,000/.test(activityHtml) && /cost £13\.50/.test(activityHtml)],
+  ["settings tab: Provider Activity shows no cost for an unpriced model, and no totals without usage",
+    (activityHtml.match(/cost /g) || []).length === 1
+      && (activityHtml.match(/total tokens in\/out/g) || []).length === 2]);
+  elNew._providerActivity = savedActivity;
+  elNew._providerCurrency = savedCurrency;
   await elNew._fetchDiagnosticsData();
   sRoot = elNew.shadowRoot;
   // Back to Settings for the checks that follow.

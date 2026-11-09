@@ -217,7 +217,9 @@ Start with the **Diagnostics** tab.
   services. It only reads. It never changes anything for you, and it needs a
   Home Assistant admin account.
 - **Provider Activity** shows how many AI calls each role made, with the
-  model and timings. It never shows what was asked or answered.
+  model, timings and token totals, and an estimated cost for any model you
+  have priced (see `ai_prices` in the settings reference). It never shows
+  what was asked or answered.
 - **HOMER** is a read only helper. Ask Nova "why is this device
   unavailable?" or "why is Nova slow?" and it looks into it, then tells you
   the likely cause, how sure it is, and what to try next.

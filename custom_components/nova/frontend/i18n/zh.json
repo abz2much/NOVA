@@ -1364,5 +1364,7 @@
   "In use: {meter} (picked in Settings)": "使用中：{meter}（在设置中选择）",
   "In use: {meter} (guessed from its name)": "使用中：{meter}（按名称猜测）",
   "Use Nova's estimate": "使用 Nova 的估算",
-  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova 无法将此传感器用作费用，因此会使用自己的估算。"
+  "Nova can't use this sensor as a cost, so it uses its own estimate.": "Nova 无法将此传感器用作费用，因此会使用自己的估算。",
+  "total tokens in/out {input}/{output}": "total tokens in/out {input}/{output}",
+  "cost {cost}": "cost {cost}"
 }

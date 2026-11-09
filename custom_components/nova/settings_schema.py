@@ -284,6 +284,10 @@ _ALL = (
     # Camera analyses Nova starts itself, per day, over every camera. 0 is
     # no limit. Doorbell presses, requests and the alarm are never held back.
     _n("vision_daily_limit", 300),
+    # What the AI calls cost, in the user's own prices: {"provider/model":
+    # {"input": x, "output": y}} per million tokens. Nova ships no prices.
+    _j("ai_prices", {}),
+    _t("ai_price_currency", "$"),
     # A spoken alert that ends in "?" opens the satellite mic in that room
     # for the answer. Off unless switched on; never for high or critical.
     _b("proactive_question_listen", False),
